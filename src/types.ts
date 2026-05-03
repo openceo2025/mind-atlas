@@ -84,6 +84,8 @@ export interface ResonanceLink {
 
 export type AtlasNodeKind = "root" | "workArea" | "artifact" | "event" | "concept" | "thread";
 
+export type PlanetTexture = "speckled" | "bands" | "freckles" | "craters" | "mist" | "cell";
+
 export interface AtlasNode {
   id: string;
   kind: AtlasNodeKind;
@@ -94,6 +96,7 @@ export interface AtlasNode {
   author: "human" | "ai" | "tool" | "system";
   status: WorkStatus;
   color: string;
+  texture: PlanetTexture;
   radius: number;
   summary: string;
   nextDecision: string;

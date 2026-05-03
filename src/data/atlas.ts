@@ -1,6 +1,7 @@
 import type { Artifact, AtlasEvent, AtlasNode, NotebookNodeType, ResonanceLink, WorkArea } from "../types";
 
 const SEED_CREATED_AT = "2026-04-26T00:00:00.000Z";
+const NOTEBOOK_NODE_RADIUS = 28;
 
 export const initialWorkAreas: WorkArea[] = [
   {
@@ -278,7 +279,8 @@ function artifactToNode(area: WorkArea, artifact: Artifact): AtlasNode {
     subtitle: artifact.type,
     status: artifact.status,
     color: "#8df5cf",
-    radius: 5.6,
+    texture: textureForId(artifact.id),
+    radius: NOTEBOOK_NODE_RADIUS,
     summary: artifact.summary,
     nextDecision: artifact.preview[0] ?? "Inspect the next useful breakdown from this artifact.",
     sourceParentId: area.id,
@@ -308,7 +310,8 @@ function eventToNode(area: WorkArea, event: AtlasEvent): AtlasNode {
     subtitle: event.actor,
     status: area.status,
     color: "#d7ead9",
-    radius: 3.8,
+    texture: textureForId(event.id),
+    radius: NOTEBOOK_NODE_RADIUS,
     summary: event.content,
     nextDecision: event.labels?.[0] ?? event.modelId ?? "Use this event as a local thread anchor.",
     sourceParentId: area.id,
@@ -336,7 +339,8 @@ function conceptToNode(parentId: string, line: string, index: number, status: Wo
     subtitle: "concept",
     status,
     color: "#f5df80",
-    radius: 2.1,
+    texture: textureForId(`${parentId}-concept-${index}`),
+    radius: NOTEBOOK_NODE_RADIUS,
     summary: `A smaller concept extracted from ${parentId}.`,
     nextDecision: "Zoom further to split this concept into local terms.",
     sourceParentId: parentId,
@@ -352,7 +356,8 @@ function conceptToNode(parentId: string, line: string, index: number, status: Wo
       subtitle: "thread",
       status,
       color: "#b9c8ff",
-      radius: 1.15,
+      texture: textureForId(`${parentId}-concept-${index}-term-${wordIndex}`),
+      radius: NOTEBOOK_NODE_RADIUS,
       summary: `Thread-level handle for "${word}".`,
       nextDecision: "Attach notes or outputs here when this thread becomes active.",
       sourceParentId: `${parentId}-concept-${index}`,
@@ -375,12 +380,38 @@ function eventChildren(event: AtlasEvent, status: WorkArea["status"]): AtlasNode
     subtitle: "event thread",
     status,
     color: "#b9c8ff",
-    radius: 1.5,
+    texture: textureForId(`${event.id}-thread-${index}`),
+    radius: NOTEBOOK_NODE_RADIUS,
     summary: `A thread marker derived from the ${event.type} event.`,
     nextDecision: "Use this thread as a local follow-up target.",
     sourceParentId: event.id,
     children: [],
   }));
+}
+
+function createDeepChainNode(depth: number, maxDepth: number, parentId = "atlas-root"): AtlasNode {
+  const id = `deep-chain-${String(depth).padStart(3, "0")}`;
+  const body = `Deep chain test node ${depth} of ${maxDepth}.\n\nThis node has exactly one child until the terminal layer. #deep-chain`;
+  return {
+    id,
+    kind: depth === 1 ? "workArea" : "thread",
+    ...baseNodeFields({
+      nodeType: "note",
+      body,
+      tags: ["deep-chain", `layer-${depth}`],
+    }),
+    title: `Deep Chain ${String(depth).padStart(3, "0")}`,
+    subtitle: depth === 1 ? "200-layer test root" : "single-child test layer",
+    status: depth === maxDepth ? "done" : "waiting",
+    color: depth % 2 === 0 ? "#69d6a4" : "#f5df80",
+    texture: textureForId(id),
+    radius: NOTEBOOK_NODE_RADIUS,
+    summary: `Layer ${depth} in a 200-node single-child celestial chain.`,
+    nextDecision: depth === maxDepth ? "Terminal node." : "Follow the only child to continue the depth test.",
+    sourceParentId: parentId,
+    sourceId: id,
+    children: depth < maxDepth ? [createDeepChainNode(depth + 1, maxDepth, id)] : [],
+  };
 }
 
 export const atlasRoot: AtlasNode = {
@@ -391,34 +422,23 @@ export const atlasRoot: AtlasNode = {
     body: "The root of this local notebook.",
     tags: ["root"],
   }),
-  title: "AI Work Space",
+  title: "Mind Atlas",
   subtitle: "Mind Atlas",
-  status: "running",
+  status: "waiting",
   color: "#8df5cf",
+  texture: "speckled",
   radius: 80,
-  summary: "The complete spatial workspace.",
-  nextDecision: "Choose a work area and zoom into its local structure.",
+  summary: "A local spatial notebook for thoughts, files, and branches.",
+  nextDecision: "Create a first planet in the universe view.",
   position: [0, 0, 0],
-  children: initialWorkAreas.map((area) => ({
-    id: area.id,
-    kind: "workArea",
-    ...baseNodeFields({
-      nodeType: "human_prompt",
-      body: `${area.summary}\n\nNext decision: ${area.nextDecision}`,
-      tags: [area.status, area.id],
-    }),
-    title: area.title,
-    subtitle: area.subtitle,
-    status: area.status,
-    color: area.color,
-    radius: area.radius,
-    summary: area.summary,
-    nextDecision: area.nextDecision,
-    position: area.position,
-    sourceId: area.id,
-    children: [
-      ...area.artifacts.map((artifact) => artifactToNode(area, artifact)),
-      ...area.events.slice(-4).map((event) => eventToNode(area, event)),
-    ],
-  })),
+  children: [],
 };
+
+function textureForId(id: string): AtlasNode["texture"] {
+  const textures: AtlasNode["texture"][] = ["speckled", "bands", "freckles", "craters"];
+  let hash = 0;
+  for (let index = 0; index < id.length; index += 1) {
+    hash = (hash * 31 + id.charCodeAt(index)) >>> 0;
+  }
+  return textures[hash % textures.length];
+}

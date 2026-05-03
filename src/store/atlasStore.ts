@@ -1,15 +1,21 @@
 import { create } from "zustand";
-import { INITIAL_ATLAS_ZOOM } from "../config/view";
+import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme";
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
 import type { AtlasEvent, AtlasNode, NodeAttachment, Selection, ViewportState, WorkArea } from "../types";
 
-const NOTEBOOK_STORAGE_KEY = "mind-atlas-notebook-v1";
+const NOTEBOOK_STORAGE_KEY = "mind-atlas-notebook-v2";
+export const NOTEBOOK_NODE_RADIUS = 28;
+export const NOTEBOOK_FIRST_SHELL_RADIUS = 360;
+export const NOTEBOOK_SHELL_GAP = 380;
+export const NOTEBOOK_HEMISPHERE_RADIUS = 940;
+export const TOP_LEVEL_PLANAR_LIMIT = 0.5;
+export const DESCENDANT_PLANAR_LIMIT = 0.92;
 
 interface FocusRequest {
   x: number;
   y: number;
+  z: number;
   diameter: number;
-  zoom?: number;
   nonce: number;
 }
 
@@ -21,13 +27,24 @@ interface AtlasStore {
   viewport: ViewportState;
   focusRequest: FocusRequest | null;
   attachmentPreviewUrls: Record<string, string>;
+  birthMarks: Record<string, number>;
+  titleEditRequestId: string | null;
   selectNode: (id: string) => void;
   focusNode: (id: string) => void;
   focusParentNode: () => void;
   updateNode: (id: string, patch: Partial<Pick<AtlasNode, "title" | "body" | "tags" | "summary" | "nextDecision">>) => void;
-  addChildNode: (parentId: string, initialBody?: string) => void;
+  addRootNodeAt: (position: [number, number, number], title?: string) => void;
+  addChildNode: (
+    parentId: string,
+    initialBody?: string,
+    options?: { title?: string; position?: [number, number, number]; insertIndex?: number; focus?: boolean },
+  ) => string | undefined;
   addSiblingNode: (id: string) => void;
+  moveNode: (id: string, worldPosition: [number, number, number]) => void;
   addAttachment: (nodeId: string, attachment: NodeAttachment, previewUrl?: string) => void;
+  removeAttachment: (nodeId: string, attachmentId: string) => void;
+  updateNodeAppearance: (id: string, patch: Pick<Partial<AtlasNode>, "color" | "texture">) => void;
+  consumeTitleEditRequest: () => void;
   exportNotebook: () => string;
   importNotebook: (root: AtlasNode) => void;
   saveNotebook: () => void;
@@ -44,11 +61,13 @@ interface AtlasStore {
 export const useAtlasStore = create<AtlasStore>((set, get) => ({
   atlasRoot: loadStoredNotebook() ?? atlasRoot,
   workAreas: initialWorkAreas,
-  selected: { kind: "workArea", id: "python-ui" },
-  selectedNodeId: "python-ui",
-  viewport: { x: 0, y: 0, zoom: 0.82 },
+  selected: { kind: "node", id: "atlas-root" },
+  selectedNodeId: "atlas-root",
+  viewport: { x: 0, y: 0, zoom: 0.92 },
   focusRequest: null,
   attachmentPreviewUrls: {},
+  birthMarks: {},
+  titleEditRequestId: null,
 
   selectNode: (id) => {
     const located = findNodeWithWorldPosition(get().atlasRoot, id);
@@ -60,7 +79,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       focusRequest: {
         x: position[0],
         y: position[1],
-        diameter: node.radius * 2,
+        z: position[2],
+        diameter: getNodeVisualRadius(node) * 2,
         nonce: (state.focusRequest?.nonce ?? 0) + 1,
       },
     }));
@@ -76,7 +96,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       focusRequest: {
         x: position[0],
         y: position[1],
-        diameter: node.radius * 2,
+        z: position[2],
+        diameter: getNodeVisualRadius(node) * 2,
         nonce: (state.focusRequest?.nonce ?? 0) + 1,
       },
     }));
@@ -88,12 +109,13 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!path || path.length <= 2) {
       const atlasDiameter = 420;
       set((current) => ({
+        selected: { kind: "node", id: "atlas-root" },
         selectedNodeId: "atlas-root",
         focusRequest: {
           x: 0,
           y: 0,
+          z: 0,
           diameter: atlasDiameter,
-          zoom: INITIAL_ATLAS_ZOOM,
           nonce: (current.focusRequest?.nonce ?? 0) + 1,
         },
       }));
@@ -118,20 +140,61 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
   },
 
-  addChildNode: (parentId, initialBody = "") => {
+  addRootNodeAt: (position, title = "Untitled planet") => {
+    const child = createNotebookNode("atlas-root", get().atlasRoot.children.length, title, "", {
+      position: clampDirection(position, TOP_LEVEL_PLANAR_LIMIT),
+    });
+    set((state) => {
+      const atlasRoot = {
+        ...state.atlasRoot,
+        children: [...state.atlasRoot.children, child],
+        updatedAt: new Date().toISOString(),
+      };
+      persistNotebook(atlasRoot);
+      return {
+        atlasRoot,
+        birthMarks: { ...state.birthMarks, [child.id]: performance.now() },
+        titleEditRequestId: child.id,
+      };
+    });
+    get().focusNode(child.id);
+  },
+
+  addChildNode: (parentId, initialBody = "", options = {}) => {
     const parent = findNode(get().atlasRoot, parentId);
     if (!parent) return;
-    const child = createNotebookNode(parentId, parent.children.length, initialBody ? "New prompt" : "Child note", initialBody);
+    const parentPath = findNodePath(get().atlasRoot, parentId);
+    const childDepth = parentPath?.length ?? 1;
+    const childPosition = options.position
+      ? getStoredPositionForWorldDirection(parentPath ?? [get().atlasRoot], options.position, childDepth, parent.children.length + 1)
+      : undefined;
+    const child = createNotebookNode(
+      parentId,
+      parent.children.length,
+      options.title ?? (initialBody ? "New prompt" : "Untitled moon"),
+      initialBody,
+      { position: childPosition },
+    );
     set((state) => {
       const atlasRoot = updateNodeById(state.atlasRoot, parentId, (node) => ({
         ...node,
-        children: [...node.children, child],
+        children:
+          typeof options.insertIndex === "number"
+            ? insertAt(node.children, options.insertIndex, child)
+            : [...node.children, child],
         updatedAt: new Date().toISOString(),
       }));
       persistNotebook(atlasRoot);
-      return { atlasRoot };
+      return {
+        atlasRoot,
+        birthMarks: { ...state.birthMarks, [child.id]: performance.now() },
+        titleEditRequestId: options.focus === false ? state.titleEditRequestId : child.id,
+      };
     });
-    get().focusNode(child.id);
+    if (options.focus !== false) {
+      get().focusNode(child.id);
+    }
+    return child.id;
   },
 
   addSiblingNode: (id) => {
@@ -139,7 +202,20 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const path = findNodePath(state.atlasRoot, id);
     if (!path || path.length < 2) return;
     const parent = path[path.length - 2];
-    const sibling = createNotebookNode(parent.id, parent.children.length, "Branch note");
+    const source = path[path.length - 1];
+    const siblingDepth = path.length - 1;
+    const siblingPosition =
+      source.position && siblingDepth > 1
+        ? clampLocalOffset(
+            [source.position[0] + 0.08, source.position[1] + 0.02, 0],
+            getManualChildSpreadLimit(siblingDepth, parent.children.length + 1),
+          )
+        : source.position
+          ? clampDirection([source.position[0] + 0.08, source.position[1] + 0.02, source.position[2]], TOP_LEVEL_PLANAR_LIMIT)
+          : undefined;
+    const sibling = createNotebookNode(parent.id, parent.children.length, "Untitled branch", "", {
+      position: siblingPosition,
+    });
     set((current) => {
       const atlasRoot = updateNodeById(current.atlasRoot, parent.id, (node) => ({
         ...node,
@@ -147,9 +223,33 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         updatedAt: new Date().toISOString(),
       }));
       persistNotebook(atlasRoot);
-      return { atlasRoot };
+      return {
+        atlasRoot,
+        birthMarks: { ...current.birthMarks, [sibling.id]: performance.now() },
+        titleEditRequestId: sibling.id,
+      };
     });
     get().focusNode(sibling.id);
+  },
+
+  moveNode: (id, worldPosition) => {
+    if (id === "atlas-root") return;
+    const state = get();
+    const path = findNodePath(state.atlasRoot, id);
+    if (!path || path.length < 2) return;
+    const depth = path.length - 1;
+    const parentPath = path.slice(0, -1);
+    const parent = parentPath[parentPath.length - 1];
+    const layerDirection = getStoredPositionForWorldDirection(parentPath, worldPosition, depth, parent.children.length);
+    set((current) => {
+      const atlasRoot = updateNodeById(current.atlasRoot, id, (node) => ({
+        ...node,
+        position: layerDirection,
+        updatedAt: new Date().toISOString(),
+      }));
+      persistNotebook(atlasRoot);
+      return { atlasRoot };
+    });
   },
 
   addAttachment: (nodeId, attachment, previewUrl) => {
@@ -169,6 +269,36 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
   },
 
+  removeAttachment: (nodeId, attachmentId) => {
+    set((state) => {
+      const atlasRoot = updateNodeById(state.atlasRoot, nodeId, (node) => ({
+        ...node,
+        attachments: node.attachments.filter((attachment) => attachment.id !== attachmentId),
+        updatedAt: new Date().toISOString(),
+      }));
+      const attachmentPreviewUrls = { ...state.attachmentPreviewUrls };
+      const previewUrl = attachmentPreviewUrls[attachmentId];
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      delete attachmentPreviewUrls[attachmentId];
+      persistNotebook(atlasRoot);
+      return { atlasRoot, attachmentPreviewUrls };
+    });
+  },
+
+  updateNodeAppearance: (id, patch) => {
+    set((state) => {
+      const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => ({
+        ...node,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      }));
+      persistNotebook(atlasRoot);
+      return { atlasRoot };
+    });
+  },
+
+  consumeTitleEditRequest: () => set({ titleEditRequestId: null }),
+
   exportNotebook: () => JSON.stringify(get().atlasRoot, null, 2),
 
   importNotebook: (root) => {
@@ -179,28 +309,15 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       selected: selectionFromNode(atlasRoot.children[0] ?? atlasRoot),
       selectedNodeId: atlasRoot.children[0]?.id ?? atlasRoot.id,
       attachmentPreviewUrls: {},
+      birthMarks: {},
+      titleEditRequestId: atlasRoot.children[0]?.id ?? null,
     });
   },
 
   saveNotebook: () => persistNotebook(get().atlasRoot),
 
   selectWorkArea: (id) => {
-    const target = get().workAreas.find((area) => area.id === id);
-    if (!target) {
-      set({ selected: { kind: "workArea", id } });
-      return;
-    }
-    const [x, y] = target.position;
-    set((state) => ({
-      selected: { kind: "workArea", id },
-      selectedNodeId: id,
-      focusRequest: {
-        x,
-        y,
-        diameter: target.radius * 2,
-        nonce: (state.focusRequest?.nonce ?? 0) + 1,
-      },
-    }));
+    get().focusNode(id);
   },
   selectEvent: (parentId, id) => get().focusNode(id),
   selectArtifact: (parentId, id) => get().focusNode(id),
@@ -211,6 +328,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       focusRequest: {
         x,
         y,
+        z: 0,
         diameter,
         nonce: (state.focusRequest?.nonce ?? 0) + 1,
       },
@@ -218,19 +336,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   },
 
   focusWorkArea: (id) => {
-    const target = get().workAreas.find((area) => area.id === id);
-    if (!target) return;
-    const [x, y] = target.position;
-    set((state) => ({
-      selected: { kind: "workArea", id },
-      selectedNodeId: id,
-      focusRequest: {
-        x,
-        y,
-        diameter: target.radius * 2,
-        nonce: (state.focusRequest?.nonce ?? 0) + 1,
-      },
-    }));
+    get().focusNode(id);
   },
 
   focusParentLayer: () => {
@@ -246,8 +352,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       focusRequest: {
         x: 0,
         y: 0,
+        z: 0,
         diameter: atlasDiameter,
-        zoom: INITIAL_ATLAS_ZOOM,
         nonce: (current.focusRequest?.nonce ?? 0) + 1,
       },
     }));
@@ -304,30 +410,57 @@ export function findNode(root: AtlasNode, id: string): AtlasNode | undefined {
 }
 
 export function getNodeWorldPosition(path: AtlasNode[]): [number, number, number] {
-  let x = 0;
-  let y = 0;
-  let z = 0;
+  if (path.length <= 1) return [0, 0, 0];
 
+  let world: Vec3 = [0, 0, 0];
+  let direction: Vec3 = [0, 0, 1];
   for (let depth = 1; depth < path.length; depth += 1) {
     const node = path[depth];
     const parent = path[depth - 1];
+    const siblings = parent.children;
+    const index = Math.max(0, siblings.findIndex((item) => item.id === node.id));
+
     if (node.position) {
-      x += node.position[0];
-      y += node.position[1];
-      z += node.position[2];
+      direction =
+        depth === 1
+          ? clampDirection(node.position, TOP_LEVEL_PLANAR_LIMIT)
+          : directionFromStoredChildPosition(direction, node.position, depth, siblings.length);
+      world = scale(direction, getShellRadius(depth));
       continue;
     }
 
-    const siblings = parent.children;
-    const index = Math.max(0, siblings.findIndex((item) => item.id === node.id));
-    const angle = (Math.PI * 2 * index) / Math.max(siblings.length, 1) - Math.PI / 4 + depth * 0.23;
-    const orbit = parent.radius * (depth <= 2 ? 2.08 : 2.32);
-    x += Math.cos(angle) * orbit;
-    y += Math.sin(angle) * orbit;
-    z += 5;
+    if (depth === 1) {
+      direction = topLevelDirection(index, siblings.length);
+      world = scale(direction, getShellRadius(depth));
+      continue;
+    }
+
+    const angle = (Math.PI * 2 * index) / Math.max(siblings.length, 1) + depth * 0.37;
+    const spread = getChildSpread(depth, siblings.length);
+    direction = childDirection(direction, angle, spread);
+    world = scale(direction, getShellRadius(depth));
   }
 
-  return [x, y, z];
+  return world;
+}
+
+export function getNodeVisualRadius(node: Pick<AtlasNode, "kind" | "radius">) {
+  return node.kind === "root" ? node.radius : NOTEBOOK_NODE_RADIUS;
+}
+
+export function getShellRadius(depth: number) {
+  if (depth <= 1) return NOTEBOOK_FIRST_SHELL_RADIUS;
+  const progress = 1 - Math.pow(0.58, depth - 1);
+  return NOTEBOOK_FIRST_SHELL_RADIUS + (NOTEBOOK_HEMISPHERE_RADIUS - NOTEBOOK_FIRST_SHELL_RADIUS) * progress;
+}
+
+export function getPlanarLimitForDepth(depth: number) {
+  return depth <= 1 ? TOP_LEVEL_PLANAR_LIMIT : DESCENDANT_PLANAR_LIMIT;
+}
+
+export function getManualChildSpreadLimit(depth: number, siblingCount: number) {
+  if (depth <= 1) return Math.asin(TOP_LEVEL_PLANAR_LIMIT);
+  return getChildSpread(depth, siblingCount);
 }
 
 export function findNodeWithWorldPosition(root: AtlasNode, id: string) {
@@ -367,10 +500,17 @@ function updateNodeById(root: AtlasNode, id: string, updater: (node: AtlasNode) 
   };
 }
 
-function createNotebookNode(parentId: string, index: number, title: string, body = ""): AtlasNode {
+function createNotebookNode(
+  parentId: string,
+  index: number,
+  title: string,
+  body = "",
+  options: { position?: [number, number, number] } = {},
+): AtlasNode {
   const now = new Date().toISOString();
+  const seed = `${parentId}-${index}-${now}`;
   return {
-    id: `${parentId}-node-${Date.now()}-${index}`,
+    id: `${parentId}-node-${Date.now()}-${crypto.randomUUID?.() ?? index}`,
     kind: "thread",
     nodeType: "human_prompt",
     title,
@@ -378,8 +518,9 @@ function createNotebookNode(parentId: string, index: number, title: string, body
     body,
     author: "human",
     status: "waiting",
-    color: "#f5df80",
-    radius: 3.8,
+    color: planetColorForSeed(seed),
+    texture: randomTexture(seed),
+    radius: NOTEBOOK_NODE_RADIUS,
     summary: body.split("\n").find(Boolean) ?? "A human-authored notebook node.",
     nextDecision: "Edit this node or branch from it.",
     tags: normalizeTags([], title, body),
@@ -387,8 +528,14 @@ function createNotebookNode(parentId: string, index: number, title: string, body
     createdAt: now,
     updatedAt: now,
     sourceParentId: parentId,
+    position: options.position,
     children: [],
   };
+}
+
+function insertAt<T>(items: T[], index: number, item: T) {
+  const target = Math.min(items.length, Math.max(0, index));
+  return [...items.slice(0, target), item, ...items.slice(target)];
 }
 
 function normalizeTags(tags: string[], ...textParts: string[]) {
@@ -409,16 +556,155 @@ function withoutUndefined<T extends Record<string, unknown>>(value: T) {
 }
 
 function ensureNotebookNode(node: AtlasNode): AtlasNode {
+  return ensureNotebookTree(node, [], 1);
+}
+
+function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCount: number): AtlasNode {
   const now = new Date().toISOString();
-  return {
+  const depth = parentPath.length;
+  const base: AtlasNode = {
     ...node,
     nodeType: node.nodeType ?? "note",
     body: node.body ?? node.summary ?? "",
     author: node.author ?? "human",
     tags: node.tags ?? [],
     attachments: node.attachments ?? [],
+    texture: node.texture ?? randomTexture(node.id),
+    radius: getNodeVisualRadius(node),
     createdAt: node.createdAt ?? now,
     updatedAt: node.updatedAt ?? now,
-    children: (node.children ?? []).map(ensureNotebookNode),
+    position:
+      node.position && depth > 1 && looksLikeLegacyWorldDirection(node.position)
+        ? getStoredPositionForWorldDirection(parentPath, node.position, depth, siblingCount)
+        : node.position,
+    children: [],
   };
+  return {
+    ...base,
+    children: (node.children ?? []).map((child) => ensureNotebookTree(child, [...parentPath, base], node.children.length)),
+  };
+}
+
+type Vec3 = [number, number, number];
+
+function topLevelDirection(index: number, count: number): Vec3 {
+  if (count <= 1) return [0, 0, -1];
+  const ringRadius = count <= 4 ? 0.42 : 0.5;
+  const angle = (Math.PI * 2 * index) / count - Math.PI / 2;
+  return normalize([Math.cos(angle) * ringRadius, Math.sin(angle) * ringRadius, -1]);
+}
+
+function childDirection(parentDirection: Vec3, angle: number, spread: number): Vec3 {
+  const forward = normalize(parentDirection);
+  const reference: Vec3 = Math.abs(forward[1]) > 0.86 ? [1, 0, 0] : [0, 1, 0];
+  const tangentA = normalize(cross(reference, forward));
+  const tangentB = normalize(cross(forward, tangentA));
+  const tangent = normalize(add(scale(tangentA, Math.cos(angle)), scale(tangentB, Math.sin(angle))));
+  return normalize(add(scale(forward, Math.cos(spread)), scale(tangent, Math.sin(spread))));
+}
+
+function getChildSpread(depth: number, siblingCount: number) {
+  const siblingSpread = siblingCount <= 1 ? 0.18 : Math.min(0.26, 0.2 + siblingCount * 0.012);
+  return siblingSpread * Math.pow(0.58, Math.max(0, depth - 2));
+}
+
+function getStoredPositionForWorldDirection(
+  parentPath: AtlasNode[],
+  worldPosition: Vec3,
+  depth: number,
+  siblingCount: number,
+): Vec3 {
+  if (depth <= 1) {
+    return clampDirection(worldPosition, TOP_LEVEL_PLANAR_LIMIT);
+  }
+
+  const parentDirection = normalize(getNodeWorldPosition(parentPath));
+  const desiredDirection = clampDirection(worldPosition, DESCENDANT_PLANAR_LIMIT);
+  return localOffsetFromDirections(parentDirection, desiredDirection, getManualChildSpreadLimit(depth, siblingCount));
+}
+
+function directionFromStoredChildPosition(parentDirection: Vec3, storedPosition: Vec3, depth: number, siblingCount: number) {
+  const limit = getManualChildSpreadLimit(depth, siblingCount);
+  const local = looksLikeLegacyWorldDirection(storedPosition)
+    ? localOffsetFromDirections(parentDirection, storedPosition, limit)
+    : clampLocalOffset(storedPosition, limit);
+  const { tangentA, tangentB } = tangentBasis(parentDirection);
+  const amount = Math.hypot(local[0], local[1]);
+  if (amount <= 0.0001) return normalize(parentDirection);
+
+  const tangent = normalize(add(scale(tangentA, local[0] / amount), scale(tangentB, local[1] / amount)));
+  return normalize(add(scale(normalize(parentDirection), Math.cos(amount)), scale(tangent, Math.sin(amount))));
+}
+
+function localOffsetFromDirections(parentDirection: Vec3, desiredDirection: Vec3, limit: number): Vec3 {
+  const forward = normalize(parentDirection);
+  const desired = normalize(desiredDirection);
+  const { tangentA, tangentB } = tangentBasis(forward);
+  const dot = Math.min(1, Math.max(-1, forward[0] * desired[0] + forward[1] * desired[1] + forward[2] * desired[2]));
+  const angle = Math.min(limit, Math.acos(dot));
+  const tangentProjection = normalize(add(scale(tangentA, desired[0] * tangentA[0] + desired[1] * tangentA[1] + desired[2] * tangentA[2]), scale(tangentB, desired[0] * tangentB[0] + desired[1] * tangentB[1] + desired[2] * tangentB[2])));
+  if (Math.hypot(tangentProjection[0], tangentProjection[1], tangentProjection[2]) <= 0.0001 || angle <= 0.0001) return [0, 0, 0];
+  return [
+    (tangentProjection[0] * tangentA[0] + tangentProjection[1] * tangentA[1] + tangentProjection[2] * tangentA[2]) * angle,
+    (tangentProjection[0] * tangentB[0] + tangentProjection[1] * tangentB[1] + tangentProjection[2] * tangentB[2]) * angle,
+    0,
+  ];
+}
+
+function clampLocalOffset(position: Vec3, limit: number): Vec3 {
+  const amount = Math.hypot(position[0], position[1]);
+  if (amount <= limit) return [position[0], position[1], 0];
+  const scaleToLimit = amount > 0 ? limit / amount : 0;
+  return [position[0] * scaleToLimit, position[1] * scaleToLimit, 0];
+}
+
+function tangentBasis(parentDirection: Vec3) {
+  const forward = normalize(parentDirection);
+  const reference: Vec3 = Math.abs(forward[1]) > 0.86 ? [1, 0, 0] : [0, 1, 0];
+  const tangentA = normalize(cross(reference, forward));
+  const tangentB = normalize(cross(forward, tangentA));
+  return { tangentA, tangentB };
+}
+
+function looksLikeLegacyWorldDirection(position: Vec3) {
+  return position[2] < -0.2 || Math.hypot(position[0], position[1], position[2]) > 0.7;
+}
+
+function clampDirection(vector: Vec3, planarLimit: number): Vec3 {
+  const normalized = normalize(vector);
+  const x = normalized[0];
+  const y = normalized[1];
+  const planar = Math.hypot(x, y);
+  const limitedPlanar = Math.min(planar, planarLimit);
+  const scaleToLimit = planar > 0 ? limitedPlanar / planar : 0;
+  return normalize([
+    x * scaleToLimit,
+    y * scaleToLimit,
+    -Math.sqrt(Math.max(0.0001, 1 - limitedPlanar * limitedPlanar)),
+  ]);
+}
+
+function normalize(vector: Vec3): Vec3 {
+  const length = Math.hypot(vector[0], vector[1], vector[2]) || 1;
+  return [vector[0] / length, vector[1] / length, vector[2] / length];
+}
+
+function add(a: Vec3, b: Vec3): Vec3 {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+
+function scale(vector: Vec3, amount: number): Vec3 {
+  return [vector[0] * amount, vector[1] * amount, vector[2] * amount];
+}
+
+function cross(a: Vec3, b: Vec3): Vec3 {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+function randomTexture(seedText: string): AtlasNode["texture"] {
+  return planetTextureForSeed(seedText);
 }

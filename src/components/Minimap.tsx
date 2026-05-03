@@ -1,28 +1,24 @@
 import { useMemo } from "react";
-import { useAtlasStore } from "../store/atlasStore";
+import { getNodeWorldPosition, useAtlasStore } from "../store/atlasStore";
 import { getStatusColor } from "../utils/status";
 
-const BOUNDS = {
-  minX: -320,
-  maxX: 320,
-  minY: -230,
-  maxY: 190,
-};
-
 export function Minimap() {
-  const workAreas = useAtlasStore((state) => state.workAreas);
+  const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const viewport = useAtlasStore((state) => state.viewport);
-  const focusWorkArea = useAtlasStore((state) => state.focusWorkArea);
+  const focusNode = useAtlasStore((state) => state.focusNode);
+  const positions = useMemo(
+    () => atlasRoot.children.map((node) => ({ node, position: getNodeWorldPosition([atlasRoot, node]) })),
+    [atlasRoot],
+  );
 
   const viewportStyle = useMemo(() => {
-    const x = normalize(viewport.x, BOUNDS.minX, BOUNDS.maxX);
-    const y = normalize(viewport.y, BOUNDS.minY, BOUNDS.maxY);
-    const size = Math.max(18, 55 / viewport.zoom);
+    const projected = projectHemisphere(directionFromYawPitch(viewport.x, viewport.y));
+    const size = Math.max(14, 34 / Math.max(viewport.zoom, 0.1));
     return {
-      left: `${x * 100}%`,
-      top: `${(1 - y) * 100}%`,
+      left: `${projected.x}%`,
+      top: `${projected.y}%`,
       width: `${size}px`,
-      height: `${size * 0.68}px`,
+      height: `${size}px`,
     };
   }, [viewport]);
 
@@ -30,18 +26,16 @@ export function Minimap() {
     <aside className="minimap" aria-label="Universe minimap">
       <div className="minimap-title">Atlas</div>
       <div className="minimap-space">
-        {workAreas.map((area) => {
-          const [x, y] = area.position;
-          const px = normalize(x, BOUNDS.minX, BOUNDS.maxX) * 100;
-          const py = (1 - normalize(y, BOUNDS.minY, BOUNDS.maxY)) * 100;
+        {positions.map(({ node, position }) => {
+          const projected = projectHemisphere(position);
           return (
             <button
-              key={area.id}
+              key={node.id}
               className="minimap-dot"
               type="button"
-              style={{ left: `${px}%`, top: `${py}%`, background: getStatusColor(area.status) }}
-              onClick={() => focusWorkArea(area.id)}
-              aria-label={`Focus ${area.title}`}
+              style={{ left: `${projected.x}%`, top: `${projected.y}%`, background: getStatusColor(node.status) }}
+              onClick={() => focusNode(node.id)}
+              aria-label={`Focus ${node.title}`}
             />
           );
         })}
@@ -51,6 +45,28 @@ export function Minimap() {
   );
 }
 
-function normalize(value: number, min: number, max: number) {
-  return Math.min(1, Math.max(0, (value - min) / (max - min)));
+function projectHemisphere(position: [number, number, number]) {
+  const [x, y, z] = normalize3(position);
+  const theta = Math.min(Math.PI / 2, Math.acos(clamp(-z, -1, 1)));
+  const radius = (theta / (Math.PI / 2)) * 44;
+  const angle = Math.atan2(y, x);
+
+  return {
+    x: 50 + Math.cos(angle) * radius,
+    y: 50 - Math.sin(angle) * radius,
+  };
+}
+
+function directionFromYawPitch(yaw: number, pitch: number): [number, number, number] {
+  const cosPitch = Math.cos(pitch);
+  return [Math.sin(yaw) * cosPitch, Math.sin(pitch), -Math.cos(yaw) * cosPitch];
+}
+
+function normalize3(position: [number, number, number]) {
+  const length = Math.hypot(position[0], position[1], position[2]) || 1;
+  return [position[0] / length, position[1] / length, position[2] / length] as [number, number, number];
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }

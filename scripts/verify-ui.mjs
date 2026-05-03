@@ -36,10 +36,10 @@ async function verifyViewport(browser, name, viewport) {
     const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
     if (!gl) return { ok: false, reason: "missing webgl context" };
 
-    const width = Math.min(180, canvas.width);
-    const height = Math.min(120, canvas.height);
-    const x = Math.max(0, Math.floor((canvas.width - width) / 2));
-    const y = Math.max(0, Math.floor((canvas.height - height) / 2));
+    const width = canvas.width;
+    const height = canvas.height;
+    const x = 0;
+    const y = 0;
     const pixels = new Uint8Array(width * height * 4);
     gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 

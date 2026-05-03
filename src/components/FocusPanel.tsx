@@ -1,52 +1,63 @@
 import {
-  AppWindow,
   CircleDot,
   Crosshair,
   Download,
+  FileArchive,
   FileCode,
+  FileJson,
+  FileSpreadsheet,
   FileText,
-  Image,
+  FileType,
+  Image as ImageIcon,
+  Mic,
   Plus,
   Presentation,
-  Sheet,
   Upload,
+  X,
 } from "lucide-react";
-import { ChangeEvent } from "react";
-import { resonanceLinks } from "../data/atlas";
-import { findNode, findNodePath, getSelectionWorkArea, useAtlasStore } from "../store/atlasStore";
-import type { Artifact, ArtifactType, AtlasEvent, AttachmentKind, NodeAttachment } from "../types";
-import { getStatusColor, getStatusLabel } from "../utils/status";
+import { ChangeEvent, useEffect, useMemo, useRef } from "react";
+import { findNode, findNodePath, useAtlasStore } from "../store/atlasStore";
+import type { AtlasNode, AttachmentKind, NodeAttachment } from "../types";
 
 export function FocusPanel() {
-  const workAreas = useAtlasStore((state) => state.workAreas);
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
-  const selected = useAtlasStore((state) => state.selected);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
-  const focusWorkArea = useAtlasStore((state) => state.focusWorkArea);
   const focusNode = useAtlasStore((state) => state.focusNode);
   const updateNode = useAtlasStore((state) => state.updateNode);
   const addChildNode = useAtlasStore((state) => state.addChildNode);
   const addSiblingNode = useAtlasStore((state) => state.addSiblingNode);
   const addAttachment = useAtlasStore((state) => state.addAttachment);
+  const removeAttachment = useAtlasStore((state) => state.removeAttachment);
+  const updateNodeAppearance = useAtlasStore((state) => state.updateNodeAppearance);
   const exportNotebook = useAtlasStore((state) => state.exportNotebook);
   const importNotebook = useAtlasStore((state) => state.importNotebook);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
-  const area = getSelectionWorkArea(workAreas, selected);
-  const selectedNode = findNode(atlasRoot, selectedNodeId);
-  const nodePath = findNodePath(atlasRoot, selectedNodeId);
-  const display = selectedNode ?? area;
-  const statusColor = getStatusColor(display.status);
-  const selectedArtifact =
-    selected.kind === "artifact" ? area.artifacts.find((artifact) => artifact.id === selected.id) : undefined;
-  const selectedEvent = selected.kind === "event" ? area.events.find((event) => event.id === selected.id) : undefined;
-  const resonances = resonanceLinks.filter((link) => link.sourceId === area.id || link.targetId === area.id);
-  const tagResonances = selectedNode?.tags ?? [];
+  const titleEditRequestId = useAtlasStore((state) => state.titleEditRequestId);
+  const consumeTitleEditRequest = useAtlasStore((state) => state.consumeTitleEditRequest);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const selectedNode = findNode(atlasRoot, selectedNodeId) ?? atlasRoot;
+  const nodePath = findNodePath(atlasRoot, selectedNode.id) ?? [atlasRoot];
+  const isRoot = selectedNode.id === atlasRoot.id;
+  const childrenLabel = isRoot ? "Planets" : "Moons";
+
+  useEffect(() => {
+    if (titleEditRequestId !== selectedNode.id) return;
+    const input = titleInputRef.current;
+    if (!input) return;
+    requestAnimationFrame(() => {
+      input.focus();
+      input.select();
+      consumeTitleEditRequest();
+    });
+  }, [consumeTitleEditRequest, selectedNode.id, titleEditRequestId]);
+
+  const tagValue = useMemo(() => selectedNode.tags.map((tag) => `#${tag}`).join(" "), [selectedNode.tags]);
 
   const handleAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
-    if (!selectedNode || !event.target.files?.length) return;
+    if (!event.target.files?.length) return;
     for (const file of Array.from(event.target.files)) {
       const attachment: NodeAttachment = {
-        id: `${selectedNode.id}-attachment-${Date.now()}-${file.name}`,
+        id: `${selectedNode.id}-attachment-${Date.now()}-${crypto.randomUUID()}`,
         name: file.name,
         kind: getAttachmentKind(file.type),
         mimeType: file.type || "application/octet-stream",
@@ -64,7 +75,7 @@ export function FocusPanel() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `mind-atlas-notebook-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.download = `mind-atlas-${new Date().toISOString().slice(0, 10)}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
   };
@@ -87,31 +98,22 @@ export function FocusPanel() {
   return (
     <aside className="focus-panel" aria-label="Focused context">
       <div className="panel-header">
-        <div>
-          <p className="eyebrow">Focus</p>
-          {selectedNode ? (
-            <input
-              className="node-title-input"
-              value={selectedNode.title}
-              onChange={(event) => updateNode(selectedNode.id, { title: event.target.value })}
-              aria-label="Node title"
-            />
-          ) : (
-            <h2>{display.title}</h2>
-          )}
+        <div className="panel-title-stack">
+          <p className="eyebrow">{isRoot ? "Atlas" : selectedNode.nodeType.replace("_", " ")}</p>
+          <input
+            ref={titleInputRef}
+            className="node-title-input"
+            value={selectedNode.title}
+            onChange={(event) => updateNode(selectedNode.id, { title: event.target.value })}
+            aria-label="Node title"
+          />
         </div>
-        <button className="icon-button" type="button" onClick={() => focusNode(display.id)} aria-label="Center focus">
+        <button className="icon-button" type="button" onClick={() => focusNode(selectedNode.id)} aria-label="Center focus">
           <Crosshair size={18} />
         </button>
       </div>
 
-      <div className="status-row">
-        <span className="status-dot" style={{ background: statusColor }} />
-        <span>{getStatusLabel(display.status)}</span>
-        <span className="muted">{display.subtitle}</span>
-      </div>
-
-      {nodePath && nodePath.length > 2 ? (
+      {nodePath.length > 1 ? (
         <div className="breadcrumb-row">
           {nodePath.slice(1).map((node) => (
             <button key={node.id} type="button" onClick={() => focusNode(node.id)}>
@@ -121,157 +123,163 @@ export function FocusPanel() {
         </div>
       ) : null}
 
-      <section className="panel-section">
-        <h3>Body</h3>
-        {selectedNode ? (
-          <textarea
-            className="node-body-input"
-            value={selectedNode.body}
-            onChange={(event) =>
-              updateNode(selectedNode.id, {
-                body: event.target.value,
-                summary: event.target.value.split("\n").find(Boolean) ?? "Empty notebook node.",
-              })
-            }
-            placeholder="Write a prompt-like note here. #tags are detected automatically."
-            aria-label="Node body"
-          />
-        ) : (
-          <p>{display.summary}</p>
-        )}
-      </section>
+      <textarea
+        className="node-body-input"
+        value={selectedNode.body}
+        onChange={(event) =>
+          updateNode(selectedNode.id, {
+            body: event.target.value,
+            summary: event.target.value.split("\n").find(Boolean) ?? "Empty notebook node.",
+          })
+        }
+        placeholder={isRoot ? "Your atlas home note." : "Write the thought, prompt, or context here. #tags connect related planets."}
+        aria-label="Node body"
+      />
 
-      <section className="panel-section decision-section">
-        <h3>Tags</h3>
-        {selectedNode ? (
-          <input
-            className="node-tags-input"
-            value={selectedNode.tags.map((tag) => `#${tag}`).join(" ")}
-            onChange={(event) => updateNode(selectedNode.id, { tags: event.target.value.split(/\s+/) })}
-            placeholder="#project #idea"
-            aria-label="Node tags"
-          />
-        ) : (
-          <p>{display.nextDecision}</p>
-        )}
-      </section>
+      <div className="node-tags-line">
+        <input
+          className="node-tags-input"
+          value={tagValue}
+          onChange={(event) => updateNode(selectedNode.id, { tags: event.target.value.split(/\s+/) })}
+          placeholder="#project #idea"
+          aria-label="Node tags"
+        />
+      </div>
 
-      {selectedNode ? (
-        <section className="panel-section node-actions">
-          <h3>Notebook actions</h3>
-          <div className="node-action-grid">
-            <button className="secondary-button" type="button" onClick={() => addChildNode(selectedNode.id)}>
-              <Plus size={15} /> Child
-            </button>
-            <button className="secondary-button" type="button" onClick={() => addSiblingNode(selectedNode.id)}>
-              <CircleDot size={15} /> Branch
-            </button>
-            <label className="secondary-button file-button">
-              <Upload size={15} /> Attach
-              <input type="file" accept="image/*,audio/*,video/*" multiple onChange={handleAttachmentChange} />
+      <div className="node-action-grid primary-actions">
+        <button className="secondary-button" type="button" onClick={() => addChildNode(selectedNode.id)}>
+          <Plus size={15} /> {isRoot ? "Planet" : "Moon"}
+        </button>
+        <button className="secondary-button" type="button" onClick={() => addSiblingNode(selectedNode.id)} disabled={isRoot}>
+          <CircleDot size={15} /> Branch
+        </button>
+        <label className="secondary-button file-button">
+          <Upload size={15} /> Attach
+          <input type="file" multiple onChange={handleAttachmentChange} />
+        </label>
+        <button className="secondary-button voice-button" type="button" disabled aria-label="Voice input placeholder">
+          <Mic size={15} /> Voice
+        </button>
+      </div>
+
+      <div className="save-row">
+        <button className="ghost-button" type="button" onClick={handleExport}>
+          <Download size={14} /> Export
+        </button>
+        <label className="ghost-button file-button">
+          <Upload size={14} /> Import
+          <input type="file" accept="application/json,.json" onChange={handleImport} />
+        </label>
+      </div>
+
+      {!isRoot ? (
+        <details className="surface-details">
+          <summary>Surface</summary>
+          <div className="appearance-controls">
+            <label>
+              <span>Color</span>
+              <input
+                type="color"
+                value={selectedNode.color}
+                onChange={(event) => updateNodeAppearance(selectedNode.id, { color: event.target.value })}
+                aria-label="Planet color"
+              />
             </label>
-            <button className="secondary-button" type="button" onClick={handleExport}>
-              <Download size={15} /> JSON
-            </button>
-            <label className="secondary-button file-button">
-              <Upload size={15} /> Import
-              <input type="file" accept="application/json,.json" onChange={handleImport} />
+            <label>
+              <span>Texture</span>
+              <select
+                value={selectedNode.texture}
+                onChange={(event) =>
+                  updateNodeAppearance(selectedNode.id, { texture: event.target.value as AtlasNode["texture"] })
+                }
+                aria-label="Planet texture"
+              >
+                <option value="speckled">Speckled</option>
+                <option value="bands">Bands</option>
+                <option value="freckles">Freckles</option>
+                <option value="craters">Craters</option>
+                <option value="mist">Mist</option>
+                <option value="cell">Cell</option>
+              </select>
             </label>
           </div>
-        </section>
+        </details>
       ) : null}
 
-      {selectedNode?.attachments.length ? (
+      {selectedNode.attachments.length ? (
         <section className="panel-section">
           <h3>Attachments</h3>
           <div className="attachment-list">
             {selectedNode.attachments.map((attachment) => (
-              <AttachmentPreview
+              <AttachmentPreviewCard
                 key={attachment.id}
                 attachment={attachment}
                 previewUrl={attachmentPreviewUrls[attachment.id]}
+                onRemove={() => removeAttachment(selectedNode.id, attachment.id)}
               />
             ))}
           </div>
         </section>
       ) : null}
 
-      {selectedArtifact ? (
-        <section className="panel-section">
-          <h3>Artifact preview</h3>
-          <ArtifactPreview artifact={selectedArtifact} />
-        </section>
-      ) : null}
-
-      {selectedEvent ? (
-        <section className="panel-section">
-          <h3>Selected event</h3>
-          <EventPreview event={selectedEvent} />
-        </section>
-      ) : null}
-
-      {selectedNode?.children.length || !selectedArtifact ? (
-        <section className="panel-section">
-          <h3>{selectedNode?.children.length ? "Children" : "Artifacts"}</h3>
+      {selectedNode.children.length ? (
+        <section className="panel-section compact-children">
+          <h3>{childrenLabel}</h3>
           <div className="artifact-list">
-            {selectedNode?.children.length
-              ? selectedNode.children.map((child) => (
-                  <button key={child.id} className="artifact-button" type="button" onClick={() => focusNode(child.id)}>
-                    <CircleDot size={16} />
-                    <span>{child.title}</span>
-                    <small>{child.kind}</small>
-                  </button>
-                ))
-              : area.artifacts.map((artifact) => (
-                  <ArtifactButton key={artifact.id} parentId={area.id} artifact={artifact} />
-                ))}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="panel-section">
-        <h3>Resonance</h3>
-        {tagResonances.length ? (
-          <div className="tag-row">
-            {tagResonances.map((tag) => (
-              <span key={tag}>#{tag}</span>
+            {selectedNode.children.map((child) => (
+              <button key={child.id} className="artifact-button" type="button" onClick={() => focusNode(child.id)}>
+                <CircleDot size={16} />
+                <span>{child.title}</span>
+                <small>{child.children.length}</small>
+              </button>
             ))}
           </div>
-        ) : null}
-        <div className="resonance-list">
-          {resonances.map((link) => {
-            const otherId = link.sourceId === area.id ? link.targetId : link.sourceId;
-            const other = workAreas.find((item) => item.id === otherId);
-            return (
-              <button
-                key={link.id}
-                className="resonance-button"
-                type="button"
-                onClick={() => other && focusWorkArea(other.id)}
-              >
-                <CircleDot size={14} />
-                <span>{link.label}</span>
-                <strong>{other?.title}</strong>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+        </section>
+      ) : null}
     </aside>
   );
 }
 
-function AttachmentPreview({ attachment, previewUrl }: { attachment: NodeAttachment; previewUrl?: string }) {
+function AttachmentPreviewCard({
+  attachment,
+  previewUrl,
+  onRemove,
+}: {
+  attachment: NodeAttachment;
+  previewUrl?: string;
+  onRemove: () => void;
+}) {
+  const extension = getFileExtension(attachment.name);
+  const FileIcon = getFileIcon(extension, attachment.mimeType);
+
   return (
     <div className="attachment-preview">
-      <div>
-        <strong>{attachment.name}</strong>
-        <span>{attachment.kind} · {formatBytes(attachment.size)}</span>
+      <button className="attachment-remove" type="button" onClick={onRemove} aria-label={`Remove ${attachment.name}`}>
+        <X size={14} />
+      </button>
+      <div className="attachment-meta">
+        {attachment.kind === "file" ? (
+          <span className={`file-type-icon file-type-${extension || "file"}`}>
+            <FileIcon size={24} />
+            <b>{extension || "FILE"}</b>
+          </span>
+        ) : (
+          <span className="file-type-icon file-type-media">
+            <FileIcon size={24} />
+            <b>{attachment.kind.toUpperCase()}</b>
+          </span>
+        )}
+        <div>
+          <strong>{attachment.name}</strong>
+          <span>
+            {attachment.kind} / {formatBytes(attachment.size)}
+          </span>
+        </div>
       </div>
       {previewUrl && attachment.kind === "image" ? <img src={previewUrl} alt={attachment.name} /> : null}
       {previewUrl && attachment.kind === "audio" ? <audio src={previewUrl} controls /> : null}
       {previewUrl && attachment.kind === "video" ? <video src={previewUrl} controls /> : null}
-      {!previewUrl ? <p>Stored as path metadata: {attachment.path}</p> : null}
+      {!previewUrl ? <p>Stored as metadata: {attachment.path}</p> : null}
     </div>
   );
 }
@@ -289,66 +297,19 @@ function formatBytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function ArtifactButton({ parentId, artifact }: { parentId: string; artifact: Artifact }) {
-  const selectArtifact = useAtlasStore((state) => state.selectArtifact);
-  const Icon = getArtifactIcon(artifact.type);
-  return (
-    <button className="artifact-button" type="button" onClick={() => selectArtifact(parentId, artifact.id)}>
-      <Icon size={16} />
-      <span>{artifact.title}</span>
-      <small>{artifact.type}</small>
-    </button>
-  );
+function getFileExtension(name: string) {
+  const value = name.split(".").pop()?.trim().toUpperCase() ?? "";
+  return value.length > 1 && value.length <= 6 ? value : "";
 }
 
-function ArtifactPreview({ artifact }: { artifact: Artifact }) {
-  const Icon = getArtifactIcon(artifact.type);
-  return (
-    <div className={`artifact-preview artifact-preview-${artifact.type}`}>
-      <div className="artifact-preview-title">
-        <Icon size={17} />
-        <span>{artifact.title}</span>
-      </div>
-      <p>{artifact.summary}</p>
-      <div className="artifact-preview-body">
-        {artifact.preview.map((line) => (
-          <span key={line}>{line}</span>
-        ))}
-      </div>
-      <button className="secondary-button" type="button">
-        Open mock artifact
-      </button>
-    </div>
-  );
-}
-
-function EventPreview({ event }: { event: AtlasEvent }) {
-  return (
-    <div className="event-preview">
-      <div className="event-preview-meta">
-        <span>{event.actor}</span>
-        <span>{event.type}</span>
-        <span>{event.createdAt}</span>
-      </div>
-      <p>{event.content}</p>
-    </div>
-  );
-}
-
-function getArtifactIcon(type: ArtifactType) {
-  switch (type) {
-    case "pptx":
-      return Presentation;
-    case "xlsx":
-      return Sheet;
-    case "pdf":
-    case "text":
-      return FileText;
-    case "app":
-      return AppWindow;
-    case "image":
-      return Image;
-    case "code":
-      return FileCode;
-  }
+function getFileIcon(extension: string, mimeType: string) {
+  if (mimeType.startsWith("image/")) return ImageIcon;
+  if (mimeType.startsWith("audio/")) return Mic;
+  if (["XLS", "XLSX", "CSV", "TSV"].includes(extension)) return FileSpreadsheet;
+  if (["PPT", "PPTX", "KEY"].includes(extension)) return Presentation;
+  if (["ZIP", "RAR", "7Z", "TAR", "GZ"].includes(extension)) return FileArchive;
+  if (["JSON", "YAML", "YML"].includes(extension)) return FileJson;
+  if (["TXT", "MD", "PDF", "DOC", "DOCX", "RTF"].includes(extension) || mimeType.startsWith("text/")) return FileText;
+  if (["JS", "TS", "TSX", "JSX", "HTML", "CSS", "PY", "RB", "GO", "RS"].includes(extension)) return FileCode;
+  return FileType;
 }
