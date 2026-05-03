@@ -1,6 +1,6 @@
 import { Html, Line } from "@react-three/drei";
 import { Canvas, ThreeEvent, createPortal, useFrame, useThree } from "@react-three/fiber";
-import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   AdditiveBlending,
   BackSide,
@@ -16,9 +16,8 @@ import {
 } from "three";
 import {
   NOTEBOOK_FIRST_SHELL_RADIUS,
-  NOTEBOOK_HEMISPHERE_RADIUS,
-  NOTEBOOK_NODE_RADIUS,
   findNodePath,
+  getNodeHitRadius,
   getNodeVisualRadius,
   getManualChildSpreadLimit,
   getPlanarLimitForDepth,
@@ -48,10 +47,14 @@ const ZOOM_OUT_AMOUNT_THRESHOLD = 130;
 const ZOOM_OUT_MIN_DURATION_MS = 60;
 const FOCUS_WAVE_STEP_MS = 500;
 const FOCUS_WAVE_DURATION_MS = 1000;
+const DRAG_BOUNDARY_TUBE_RADIUS = 0.55;
+const DRAG_BOUNDARY_INNER_TUBE_RADIUS = 0.24;
+
+type Vec3Tuple = [number, number, number];
 
 type BirthEffect = {
   id: string;
-  direction: [number, number, number];
+  direction: Vec3Tuple;
   startedAt: number;
   mode: "charging" | "burst";
 };
@@ -61,11 +64,47 @@ type SpaceDragState = {
   startScreen: { x: number; y: number };
   lastScreen: { x: number; y: number };
   startedAt: number;
-  direction: [number, number, number];
+  direction: Vec3Tuple;
   mode: "hold" | "rotate";
   created: boolean;
   canBirth: boolean;
 };
+
+type VisualNodeHandle = {
+  setWorldPosition: (worldPosition: Vec3Tuple, parentWorldOverride?: Vec3Tuple) => void;
+  getWorldPosition: () => Vec3Tuple;
+};
+
+const visualNodeHandles = new Map<string, VisualNodeHandle>();
+let hiddenDragEdgeNodeId: string | null = null;
+const hiddenDragEdgeListeners = new Set<() => void>();
+
+function setHiddenDragEdgeNodeId(id: string | null) {
+  if (hiddenDragEdgeNodeId === id) return;
+  hiddenDragEdgeNodeId = id;
+  hiddenDragEdgeListeners.forEach((listener) => listener());
+}
+
+function useHiddenDragEdgeNodeId() {
+  return useSyncExternalStore(
+    (listener) => {
+      hiddenDragEdgeListeners.add(listener);
+      return () => hiddenDragEdgeListeners.delete(listener);
+    },
+    () => hiddenDragEdgeNodeId,
+    () => null,
+  );
+}
+
+function syncVisualNodePosition(id: string, worldPosition: Vec3Tuple, parentWorldOverride?: Vec3Tuple, attempts = 4) {
+  const handle = visualNodeHandles.get(id);
+  if (handle) {
+    handle.setWorldPosition(worldPosition, parentWorldOverride);
+    return;
+  }
+  if (attempts <= 0) return;
+  requestAnimationFrame(() => syncVisualNodePosition(id, worldPosition, parentWorldOverride, attempts - 1));
+}
 
 export function UniverseCanvas() {
   const focusParentLayer = useAtlasStore((state) => state.focusParentLayer);
@@ -117,6 +156,7 @@ function NavigationController() {
   const yawPitchRef = useRef({ yaw: 0, pitch: 0, offset: INITIAL_CAMERA_OFFSET });
   const dragRef = useRef<SpaceDragState | null>(null);
   const wheelZoomOutRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
+  const wheelZoomInRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelSuppressUntilRef = useRef(0);
   const transitionRef = useRef<{
     startYaw: number;
@@ -290,24 +330,55 @@ function NavigationController() {
     setViewport({ x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) });
 
     const zoomOutState = wheelZoomOutRef.current;
+    const zoomInState = wheelZoomInRef.current;
     if (event.deltaY <= 0) {
       zoomOutState.amount = 0;
       zoomOutState.startedAt = 0;
+    } else {
+      zoomInState.amount = 0;
+      zoomInState.startedAt = 0;
+    }
+
+    if (event.deltaY > 0) {
+      if (now - zoomOutState.lastFiredAt < ZOOM_OUT_PARENT_COOLDOWN_MS) return;
+      if (!zoomOutState.startedAt || now - zoomOutState.startedAt > ZOOM_OUT_DETECTION_WINDOW_MS) {
+        zoomOutState.amount = 0;
+        zoomOutState.startedAt = now;
+      }
+      zoomOutState.amount += Math.abs(event.deltaY);
+      if (zoomOutState.amount >= ZOOM_OUT_AMOUNT_THRESHOLD && now - zoomOutState.startedAt >= ZOOM_OUT_MIN_DURATION_MS) {
+        zoomOutState.amount = 0;
+        zoomOutState.startedAt = 0;
+        zoomOutState.lastFiredAt = now;
+        wheelSuppressUntilRef.current = now + 900;
+        useAtlasStore.getState().focusParentLayer();
+      }
       return;
     }
 
-    if (now - zoomOutState.lastFiredAt < ZOOM_OUT_PARENT_COOLDOWN_MS) return;
-    if (!zoomOutState.startedAt || now - zoomOutState.startedAt > ZOOM_OUT_DETECTION_WINDOW_MS) {
-      zoomOutState.amount = 0;
-      zoomOutState.startedAt = now;
-    }
-    zoomOutState.amount += Math.abs(event.deltaY);
-    if (zoomOutState.amount >= ZOOM_OUT_AMOUNT_THRESHOLD && now - zoomOutState.startedAt >= ZOOM_OUT_MIN_DURATION_MS) {
-      zoomOutState.amount = 0;
-      zoomOutState.startedAt = 0;
-      zoomOutState.lastFiredAt = now;
-      wheelSuppressUntilRef.current = now + 900;
-      useAtlasStore.getState().focusParentLayer();
+    if (event.deltaY < 0) {
+      const atlasState = useAtlasStore.getState();
+      const selectedPath = findNodePath(atlasState.atlasRoot, atlasState.selectedNodeId);
+      const selectedNode = selectedPath?.at(-1);
+      if (selectedNode?.children.length !== 1) {
+        zoomInState.amount = 0;
+        zoomInState.startedAt = 0;
+        return;
+      }
+
+      if (now - zoomInState.lastFiredAt < ZOOM_OUT_PARENT_COOLDOWN_MS) return;
+      if (!zoomInState.startedAt || now - zoomInState.startedAt > ZOOM_OUT_DETECTION_WINDOW_MS) {
+        zoomInState.amount = 0;
+        zoomInState.startedAt = now;
+      }
+      zoomInState.amount += Math.abs(event.deltaY);
+      if (zoomInState.amount >= ZOOM_OUT_AMOUNT_THRESHOLD && now - zoomInState.startedAt >= ZOOM_OUT_MIN_DURATION_MS) {
+        zoomInState.amount = 0;
+        zoomInState.startedAt = 0;
+        zoomInState.lastFiredAt = now;
+        wheelSuppressUntilRef.current = now + 900;
+        atlasState.focusNode(selectedNode.children[0].id);
+      }
     }
   };
 
@@ -428,7 +499,8 @@ function HierarchyNode({
   const addChildNode = useAtlasStore((state) => state.addChildNode);
   const birthMarks = useAtlasStore((state) => state.birthMarks);
   const zoom = useAtlasStore((state) => state.viewport.zoom);
-  const { camera } = useThree();
+  const hiddenDragEdgeNodeId = useHiddenDragEdgeNodeId();
+  const { camera, scene } = useThree();
   const perspective = camera as PerspectiveCamera;
   const isSelected = highlightSelectedNodeId === node.id;
   const parentId = path.length > 1 ? path[path.length - 2].id : null;
@@ -439,7 +511,8 @@ function HierarchyNode({
   const isActiveSibling = selectedParentId !== null && parentId === selectedParentId && !isSelected;
   const isFocusedBranch = activeDescendantDistance !== null || isDirectParentOfSelected;
   const statusColor = getStatusColor(node.status);
-  const radius = getNodeVisualRadius(node);
+  const radius = getNodeVisualRadius(node, depth);
+  const hitRadius = getNodeHitRadius(node, depth);
   const visualDepthIndex =
     activeDescendantDistance !== null
       ? activeDescendantDistance
@@ -455,32 +528,78 @@ function HierarchyNode({
     (isDirectParentOfSelected ||
       (activeDescendantDistance !== null && activeDescendantDistance < VISIBLE_DESCENDANT_DEPTH));
   const labelVisible = isSelected || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
+  const parentEdgeVisible = path.length > 2 && hiddenDragEdgeNodeId !== node.id;
   const focusWaveDepth =
     activeDescendantDistance === 1
       ? activeDescendantDistance
       : null;
   const [dragVisual, setDragVisual] = useState<{ x: number; y: number; z: number; tension: number } | null>(null);
-  const [dragBoundaryDepth, setDragBoundaryDepth] = useState<number | null>(null);
+  const [dragBoundary, setDragBoundary] = useState<{
+    depth: number;
+    parentWorldPosition?: [number, number, number];
+    siblingCount?: number;
+  } | null>(null);
   const dragRef = useRef<{
     pointerId: number;
     startScreen: { x: number; y: number };
     lastScreen: { x: number; y: number };
     lastAt: number;
-    startWorld: [number, number, number];
+    startWorld: Vec3Tuple;
+    currentWorld: Vec3Tuple;
     layerRadius: number;
     stage: "moving" | "armed" | "birthing" | "handoff";
     canCreateChild: boolean;
     samples: Array<{ t: number; x: number; y: number }>;
-    freezeWorld?: [number, number, number];
-    armedPointerWorld?: [number, number, number];
+    freezeWorld?: Vec3Tuple;
+    armedPointerWorld?: Vec3Tuple;
     birthingStartedAt?: number;
-    birthingPointerWorld?: [number, number, number];
-    tearVector?: [number, number, number];
+    birthingPointerWorld?: Vec3Tuple;
+    tearVector?: Vec3Tuple;
     handoffChildId?: string;
     handoffLayerRadius?: number;
+    handoffChildWorld?: Vec3Tuple;
+    hasMoved: boolean;
     torn: boolean;
   } | null>(null);
+  const groupRef = useRef<Group>(null);
+  const parentWorldRef = useRef<Vec3Tuple>(subtractPosition(worldPosition, localPosition));
+  const visualWorldRef = useRef<Vec3Tuple>(worldPosition);
+  const applyVisualWorldPositionRef = useRef<(nextWorld: Vec3Tuple, parentWorldOverride?: Vec3Tuple) => void>(() => undefined);
   const birthStartedAt = birthMarks[node.id];
+
+  applyVisualWorldPositionRef.current = (nextWorld, parentWorldOverride) => {
+    const parentWorld = parentWorldOverride ?? parentWorldRef.current;
+    const nextLocal = subtractPosition(nextWorld, parentWorld);
+    groupRef.current?.position.set(nextLocal[0], nextLocal[1], nextLocal[2]);
+    visualWorldRef.current = nextWorld;
+  };
+
+  const applyVisualWorldPosition = (nextWorld: Vec3Tuple, parentWorldOverride?: Vec3Tuple) => {
+    applyVisualWorldPositionRef.current(nextWorld, parentWorldOverride);
+  };
+
+  useLayoutEffect(() => {
+    const parentWorld = subtractPosition(worldPosition, localPosition);
+    parentWorldRef.current = parentWorld;
+    if (!dragRef.current) {
+      applyVisualWorldPosition(worldPosition, parentWorld);
+    }
+  }, [localPosition, worldPosition]);
+
+  useEffect(() => {
+    const handle: VisualNodeHandle = {
+      setWorldPosition: (nextWorld, parentWorldOverride) => {
+        applyVisualWorldPositionRef.current(nextWorld, parentWorldOverride);
+      },
+      getWorldPosition: () => visualWorldRef.current,
+    };
+    visualNodeHandles.set(node.id, handle);
+    return () => {
+      if (visualNodeHandles.get(node.id) === handle) {
+        visualNodeHandles.delete(node.id);
+      }
+    };
+  }, [node.id]);
 
   const completeBirthingDrag = (
     drag: NonNullable<typeof dragRef.current>,
@@ -499,13 +618,21 @@ function HierarchyNode({
       position: childDirection,
       insertIndex: angleToInsertIndex(angle, node.children.length + 1),
       focus: false,
+      persist: false,
     });
 
     if (childId) {
+      const childWorld = clampWorldForDepth(pointerWorld, depth + 1);
       drag.handoffChildId = childId;
       drag.handoffLayerRadius = getShellRadius(depth + 1);
-      setDragBoundaryDepth(depth + 1);
-      moveNode(childId, clampWorldForDepth(pointerWorld, depth + 1));
+      drag.handoffChildWorld = childWorld;
+      setDragBoundary({
+        depth: depth + 1,
+        parentWorldPosition: drag.currentWorld,
+        siblingCount: node.children.length + 1,
+      });
+      syncVisualNodePosition(childId, childWorld, drag.currentWorld);
+      setHiddenDragEdgeNodeId(childId);
     }
     setDragVisual(null);
   };
@@ -528,13 +655,20 @@ function HierarchyNode({
       lastScreen: { x: event.clientX, y: event.clientY },
       lastAt: performance.now(),
       startWorld: worldPosition,
+      currentWorld: worldPosition,
       layerRadius: vectorLength(worldPosition),
       stage: "moving",
       canCreateChild: true,
       samples: [{ t: performance.now(), x: event.clientX, y: event.clientY }],
+      hasMoved: false,
       torn: false,
     };
-    setDragBoundaryDepth(depth);
+    setHiddenDragEdgeNodeId(node.id);
+    setDragBoundary({
+      depth,
+      parentWorldPosition: path.length > 2 ? getNodeWorldPosition(path.slice(0, -1)) : undefined,
+      siblingCount: path.length > 2 ? path[path.length - 2].children.length : undefined,
+    });
   };
 
   const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
@@ -543,8 +677,9 @@ function HierarchyNode({
     event.stopPropagation();
 
     if (drag.handoffChildId && drag.handoffLayerRadius) {
-      const childWorld = intersectRaySphere(event.ray, drag.handoffLayerRadius);
-      moveNode(drag.handoffChildId, childWorld);
+      const childWorld = clampWorldForDepth(intersectRaySphere(event.ray, drag.handoffLayerRadius), depth + 1);
+      drag.handoffChildWorld = childWorld;
+      syncVisualNodePosition(drag.handoffChildId, childWorld, drag.currentWorld);
       drag.lastScreen = { x: event.clientX, y: event.clientY };
       drag.lastAt = performance.now();
       return;
@@ -621,7 +756,9 @@ function HierarchyNode({
 
     if (screenDistance > 3 && drag.stage === "moving") {
       const clampedPointerWorld = clampWorldForDepth(pointerWorld, depth);
-      moveNode(node.id, clampedPointerWorld);
+      drag.currentWorld = clampedPointerWorld;
+      drag.hasMoved = true;
+      applyVisualWorldPosition(clampedPointerWorld);
       if (drag.canCreateChild && movedEnoughInRecentWindow(drag, event.clientX, event.clientY, now)) {
         drag.stage = "armed";
         drag.torn = true;
@@ -646,16 +783,23 @@ function HierarchyNode({
       focusNode(node.id);
     }
     dragRef.current = null;
+    if (drag.hasMoved || drag.torn) {
+      moveNode(node.id, drag.currentWorld);
+    }
+    if (drag.handoffChildId && drag.handoffChildWorld) {
+      moveNode(drag.handoffChildId, drag.handoffChildWorld);
+    }
+    setHiddenDragEdgeNodeId(null);
     setDragVisual(null);
-    setDragBoundaryDepth(null);
+    setDragBoundary(null);
   };
 
   const stretch = dragVisual ? Math.min(0.7, dragVisual.tension * 0.44) : 0;
   const stretchAngle = dragVisual ? Math.atan2(dragVisual.y, dragVisual.x) : 0;
 
   return (
-    <group position={localPosition}>
-      {path.length > 2 ? (
+    <group ref={groupRef}>
+      {parentEdgeVisible ? (
         <Line
           points={[[0, 0, -1], [-localPosition[0], -localPosition[1], -localPosition[2] - 1]]}
           color={node.color}
@@ -675,15 +819,17 @@ function HierarchyNode({
           showTearThreshold={dragRef.current?.stage === "armed" || dragRef.current?.stage === "birthing"}
         />
       ) : null}
-      {dragBoundaryDepth ? (
+      {dragBoundary
+        ? createPortal(
         <DragBoundaryGuide
-          depth={dragBoundaryDepth}
+          depth={dragBoundary.depth}
           color={node.color}
-          worldPosition={worldPosition}
-          parentWorldPosition={path.length > 2 ? getNodeWorldPosition(path.slice(0, -1)) : undefined}
-          siblingCount={path.length > 2 ? path[path.length - 2].children.length : undefined}
-        />
-      ) : null}
+          parentWorldPosition={dragBoundary.parentWorldPosition}
+          siblingCount={dragBoundary.siblingCount}
+        />,
+          scene,
+        )
+        : null}
 
       <CameraFacingGroup>
         <NodeFocusRing
@@ -697,17 +843,23 @@ function HierarchyNode({
         {birthStartedAt ? <BirthRing startedAt={birthStartedAt} radius={radius} color={node.color} /> : null}
       </CameraFacingGroup>
 
+      <mesh
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          focusNode(node.id);
+        }}
+      >
+        <sphereGeometry args={[hitRadius, 20, 12]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+
       <group rotation={[0, 0, stretchAngle]}>
         <mesh
           scale={[1 + stretch, 1 - stretch * 0.34, 1 + stretch * 0.08]}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onDoubleClick={(event) => {
-            event.stopPropagation();
-            focusNode(node.id);
-          }}
         >
           <sphereGeometry args={[radius, depth <= 1 ? 38 : 28, depth <= 1 ? 20 : 16]} />
           <PlanetMaterial node={node} depthFade={depthFade} />
@@ -785,8 +937,6 @@ function PlanetMaterial({
       emissiveIntensity={0.12 * depthFade.brightness}
       roughness={0.66}
       metalness={0.04}
-      transparent
-      opacity={depthFade.opacity}
     />
   );
 }
@@ -941,13 +1091,11 @@ function WhiteHoleChargeMarker({
 function DragBoundaryGuide({
   depth,
   color,
-  worldPosition,
   parentWorldPosition,
   siblingCount = 1,
 }: {
   depth: number;
   color: string;
-  worldPosition: [number, number, number];
   parentWorldPosition?: [number, number, number];
   siblingCount?: number;
 }) {
@@ -959,7 +1107,6 @@ function DragBoundaryGuide({
         siblingCount={siblingCount}
         color={color}
         shellRadius={shellRadius}
-        worldPosition={worldPosition}
         parentWorldPosition={parentWorldPosition}
       />
     );
@@ -968,16 +1115,15 @@ function DragBoundaryGuide({
   const planarLimit = getPlanarLimitForDepth(depth);
   const ringRadius = shellRadius * planarLimit;
   const z = -Math.sqrt(Math.max(0.0001, 1 - planarLimit * planarLimit)) * shellRadius;
-  const localCenter = subtractPosition([0, 0, z], worldPosition);
 
   return (
-    <group position={localCenter}>
+    <group position={[0, 0, z]}>
       <mesh>
-        <torusGeometry args={[ringRadius, Math.max(0.5, shellRadius * 0.003), 14, 192]} />
+        <torusGeometry args={[ringRadius, DRAG_BOUNDARY_TUBE_RADIUS, 14, 192]} />
         <meshBasicMaterial color={color} transparent opacity={0.34} depthWrite={false} />
       </mesh>
       <mesh>
-        <torusGeometry args={[ringRadius * 0.985, Math.max(0.24, shellRadius * 0.0012), 10, 192]} />
+        <torusGeometry args={[ringRadius * 0.985, DRAG_BOUNDARY_INNER_TUBE_RADIUS, 10, 192]} />
         <meshBasicMaterial color="#fff4c5" transparent opacity={0.18} depthWrite={false} />
       </mesh>
     </group>
@@ -989,20 +1135,17 @@ function ChildDragBoundaryGuide({
   siblingCount,
   color,
   shellRadius,
-  worldPosition,
   parentWorldPosition,
 }: {
   depth: number;
   siblingCount: number;
   color: string;
   shellRadius: number;
-  worldPosition: [number, number, number];
   parentWorldPosition: [number, number, number];
 }) {
   const parentDirection = normalizeVector(parentWorldPosition);
   const spreadLimit = getManualChildSpreadLimit(depth, siblingCount);
   const centerWorld = scaleTuple(parentDirection, shellRadius * Math.cos(spreadLimit));
-  const localCenter = subtractPosition(centerWorld, worldPosition);
   const ringRadius = shellRadius * Math.sin(spreadLimit);
   const groupRef = useRef<Group>(null);
   useEffect(() => {
@@ -1011,13 +1154,13 @@ function ChildDragBoundaryGuide({
   }, [parentDirection]);
 
   return (
-    <group ref={groupRef} position={localCenter}>
+    <group ref={groupRef} position={centerWorld}>
       <mesh>
-        <torusGeometry args={[ringRadius, Math.max(0.32, shellRadius * 0.0016), 14, 160]} />
+        <torusGeometry args={[ringRadius, DRAG_BOUNDARY_TUBE_RADIUS, 14, 160]} />
         <meshBasicMaterial color={color} transparent opacity={0.34} depthWrite={false} />
       </mesh>
       <mesh>
-        <torusGeometry args={[ringRadius * 0.985, Math.max(0.16, shellRadius * 0.0008), 10, 160]} />
+        <torusGeometry args={[ringRadius * 0.985, DRAG_BOUNDARY_INNER_TUBE_RADIUS, 10, 160]} />
         <meshBasicMaterial color="#fff4c5" transparent opacity={0.18} depthWrite={false} />
       </mesh>
     </group>
@@ -1401,7 +1544,7 @@ function getViewportScale(distance: number) {
 
 function getRotationGain(offset: number) {
   const distance = Math.max(0, offset - MIN_CAMERA_OFFSET);
-  return 0.0046 / (1 + distance / 900);
+  return 0.0023 / (1 + distance / 900);
 }
 
 function getDepthFade(index: number) {
@@ -1452,7 +1595,7 @@ function childDirectionFromDrag(parentDirection: [number, number, number], dragV
   const fallbackAngle = (Math.PI * 2 * childCount) / Math.max(childCount + 1, 1) + depth * 0.37;
   const angle = Math.abs(projectedA) + Math.abs(projectedB) > 0.001 ? Math.atan2(projectedB, projectedA) : fallbackAngle;
   const tangent = normalizeVector(addTuple(scaleTuple(tangentA, Math.cos(angle)), scaleTuple(tangentB, Math.sin(angle))));
-  const spread = 0.24 * Math.pow(0.58, Math.max(0, depth - 2));
+  const spread = getManualChildSpreadLimit(depth, childCount + 1);
   return normalizeVector(addTuple(scaleTuple(forward, Math.cos(spread)), scaleTuple(tangent, Math.sin(spread))));
 }
 
@@ -1479,6 +1622,10 @@ function movedEnoughInRecentWindow(
 }
 
 function clampWorldForDepth(worldPosition: [number, number, number], depth: number) {
+  if (depth > 1) {
+    return scaleTuple(normalizeVector(worldPosition), getShellRadius(depth));
+  }
+
   const direction = normalizeVector(worldPosition);
   const planarLimit = getPlanarLimitForDepth(depth);
   const planar = Math.hypot(direction[0], direction[1]);

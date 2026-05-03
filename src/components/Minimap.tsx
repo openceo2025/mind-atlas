@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import { getNodeWorldPosition, useAtlasStore } from "../store/atlasStore";
-import { getStatusColor } from "../utils/status";
 
 export function Minimap() {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -24,7 +23,6 @@ export function Minimap() {
 
   return (
     <aside className="minimap" aria-label="Universe minimap">
-      <div className="minimap-title">Atlas</div>
       <div className="minimap-space">
         {positions.map(({ node, position }) => {
           const projected = projectHemisphere(position);
@@ -33,7 +31,7 @@ export function Minimap() {
               key={node.id}
               className="minimap-dot"
               type="button"
-              style={{ left: `${projected.x}%`, top: `${projected.y}%`, background: getStatusColor(node.status) }}
+              style={{ left: `${projected.x}%`, top: `${projected.y}%`, background: node.color }}
               onClick={() => focusNode(node.id)}
               aria-label={`Focus ${node.title}`}
             />

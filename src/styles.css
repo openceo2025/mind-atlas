@@ -661,14 +661,6 @@ button:disabled,
   backdrop-filter: blur(18px);
 }
 
-.minimap-title {
-  margin-bottom: 7px;
-  color: #dfeade;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
 .minimap-space {
   position: relative;
   width: 128px;
@@ -689,7 +681,6 @@ button:disabled,
   height: 10px;
   border: 0;
   border-radius: 999px;
-  box-shadow: 0 0 12px currentColor;
   cursor: pointer;
   transform: translate(-50%, -50%);
 }

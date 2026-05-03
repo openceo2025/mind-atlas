@@ -6,10 +6,11 @@ import type { AtlasEvent, AtlasNode, NodeAttachment, Selection, ViewportState, W
 const NOTEBOOK_STORAGE_KEY = "mind-atlas-notebook-v2";
 export const NOTEBOOK_NODE_RADIUS = 28;
 export const NOTEBOOK_FIRST_SHELL_RADIUS = 360;
-export const NOTEBOOK_SHELL_GAP = 380;
-export const NOTEBOOK_HEMISPHERE_RADIUS = 940;
+export const NOTEBOOK_SHELL_GAP = 340;
 export const TOP_LEVEL_PLANAR_LIMIT = 0.5;
-export const DESCENDANT_PLANAR_LIMIT = 0.92;
+export const TOP_LEVEL_DRAG_PLANAR_LIMIT = Math.min(1, TOP_LEVEL_PLANAR_LIMIT * 2);
+const FOCUSED_NODE_CAMERA_DISTANCE = 300;
+const MIN_CHILD_SCREEN_SEPARATION_RADII = 3.4;
 
 interface FocusRequest {
   x: number;
@@ -37,7 +38,7 @@ interface AtlasStore {
   addChildNode: (
     parentId: string,
     initialBody?: string,
-    options?: { title?: string; position?: [number, number, number]; insertIndex?: number; focus?: boolean },
+    options?: { title?: string; position?: [number, number, number]; insertIndex?: number; focus?: boolean; persist?: boolean },
   ) => string | undefined;
   addSiblingNode: (id: string) => void;
   moveNode: (id: string, worldPosition: [number, number, number]) => void;
@@ -72,7 +73,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   selectNode: (id) => {
     const located = findNodeWithWorldPosition(get().atlasRoot, id);
     if (!located) return;
-    const { node, position } = located;
+    const { node, path, position } = located;
+    const visualRadius = getNodeVisualRadius(node, path.length - 1);
     set((state) => ({
       selected: selectionFromNode(node),
       selectedNodeId: id,
@@ -80,7 +82,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         x: position[0],
         y: position[1],
         z: position[2],
-        diameter: getNodeVisualRadius(node) * 2,
+        diameter: visualRadius * 2,
         nonce: (state.focusRequest?.nonce ?? 0) + 1,
       },
     }));
@@ -89,7 +91,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   focusNode: (id) => {
     const located = findNodeWithWorldPosition(get().atlasRoot, id);
     if (!located) return;
-    const { node, position } = located;
+    const { node, path, position } = located;
+    const visualRadius = getNodeVisualRadius(node, path.length - 1);
     set((state) => ({
       selected: selectionFromNode(node),
       selectedNodeId: id,
@@ -97,7 +100,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         x: position[0],
         y: position[1],
         z: position[2],
-        diameter: getNodeVisualRadius(node) * 2,
+        diameter: visualRadius * 2,
         nonce: (state.focusRequest?.nonce ?? 0) + 1,
       },
     }));
@@ -184,7 +187,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             : [...node.children, child],
         updatedAt: new Date().toISOString(),
       }));
-      persistNotebook(atlasRoot);
+      if (options.persist !== false) {
+        persistNotebook(atlasRoot);
+      }
       return {
         atlasRoot,
         birthMarks: { ...state.birthMarks, [child.id]: performance.now() },
@@ -423,7 +428,7 @@ export function getNodeWorldPosition(path: AtlasNode[]): [number, number, number
     if (node.position) {
       direction =
         depth === 1
-          ? clampDirection(node.position, TOP_LEVEL_PLANAR_LIMIT)
+          ? clampDirection(node.position, TOP_LEVEL_DRAG_PLANAR_LIMIT)
           : directionFromStoredChildPosition(direction, node.position, depth, siblings.length);
       world = scale(direction, getShellRadius(depth));
       continue;
@@ -444,18 +449,23 @@ export function getNodeWorldPosition(path: AtlasNode[]): [number, number, number
   return world;
 }
 
-export function getNodeVisualRadius(node: Pick<AtlasNode, "kind" | "radius">) {
-  return node.kind === "root" ? node.radius : NOTEBOOK_NODE_RADIUS;
+export function getNodeVisualRadius(node: Pick<AtlasNode, "kind" | "radius">, depth = 1) {
+  if (node.kind === "root") return node.radius;
+  return NOTEBOOK_NODE_RADIUS;
+}
+
+export function getNodeHitRadius(node: Pick<AtlasNode, "kind" | "radius">, depth = 1) {
+  if (node.kind === "root") return node.radius;
+  return getNodeVisualRadius(node, depth);
 }
 
 export function getShellRadius(depth: number) {
   if (depth <= 1) return NOTEBOOK_FIRST_SHELL_RADIUS;
-  const progress = 1 - Math.pow(0.58, depth - 1);
-  return NOTEBOOK_FIRST_SHELL_RADIUS + (NOTEBOOK_HEMISPHERE_RADIUS - NOTEBOOK_FIRST_SHELL_RADIUS) * progress;
+  return NOTEBOOK_FIRST_SHELL_RADIUS + NOTEBOOK_SHELL_GAP * (depth - 1);
 }
 
 export function getPlanarLimitForDepth(depth: number) {
-  return depth <= 1 ? TOP_LEVEL_PLANAR_LIMIT : DESCENDANT_PLANAR_LIMIT;
+  return depth <= 1 ? TOP_LEVEL_DRAG_PLANAR_LIMIT : TOP_LEVEL_PLANAR_LIMIT;
 }
 
 export function getManualChildSpreadLimit(depth: number, siblingCount: number) {
@@ -604,8 +614,14 @@ function childDirection(parentDirection: Vec3, angle: number, spread: number): V
 }
 
 function getChildSpread(depth: number, siblingCount: number) {
-  const siblingSpread = siblingCount <= 1 ? 0.18 : Math.min(0.26, 0.2 + siblingCount * 0.012);
-  return siblingSpread * Math.pow(0.58, Math.max(0, depth - 2));
+  const parentRadius = getShellRadius(Math.max(1, depth - 1));
+  const childRadius = getShellRadius(depth);
+  const siblingSpread = siblingCount <= 1 ? 0 : Math.min(2.2, siblingCount * 0.22);
+  const targetRadii = MIN_CHILD_SCREEN_SEPARATION_RADII + siblingSpread;
+  const focusedDistance = FOCUSED_NODE_CAMERA_DISTANCE;
+  const visibleDepth = Math.max(focusedDistance * 0.65, childRadius - parentRadius + focusedDistance);
+  const requiredScreenRatio = (NOTEBOOK_NODE_RADIUS * targetRadii) / FOCUSED_NODE_CAMERA_DISTANCE;
+  return Math.atan((requiredScreenRatio * visibleDepth) / childRadius);
 }
 
 function getStoredPositionForWorldDirection(
@@ -615,11 +631,11 @@ function getStoredPositionForWorldDirection(
   siblingCount: number,
 ): Vec3 {
   if (depth <= 1) {
-    return clampDirection(worldPosition, TOP_LEVEL_PLANAR_LIMIT);
+    return clampDirection(worldPosition, TOP_LEVEL_DRAG_PLANAR_LIMIT);
   }
 
   const parentDirection = normalize(getNodeWorldPosition(parentPath));
-  const desiredDirection = clampDirection(worldPosition, DESCENDANT_PLANAR_LIMIT);
+  const desiredDirection = normalize(worldPosition);
   return localOffsetFromDirections(parentDirection, desiredDirection, getManualChildSpreadLimit(depth, siblingCount));
 }
 
