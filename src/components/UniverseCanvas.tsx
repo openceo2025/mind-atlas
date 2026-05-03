@@ -456,7 +456,7 @@ function HierarchyNode({
       (activeDescendantDistance !== null && activeDescendantDistance < VISIBLE_DESCENDANT_DEPTH));
   const labelVisible = isSelected || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
   const focusWaveDepth =
-    activeDescendantDistance === 1 && Boolean(highlightSelectedNodeId)
+    activeDescendantDistance === 1
       ? activeDescendantDistance
       : null;
   const [dragVisual, setDragVisual] = useState<{ x: number; y: number; z: number; tension: number } | null>(null);
