@@ -342,7 +342,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   focusParentLayer: () => {
     const state = get();
 
-    if (state.selected.kind === "artifact" || state.selected.kind === "event" || state.selected.kind === "node") {
+    if (findNodePath(state.atlasRoot, state.selectedNodeId)) {
       state.focusParentNode();
       return;
     }
