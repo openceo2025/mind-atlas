@@ -546,6 +546,8 @@ function HierarchyNode({
     lastAt: number;
     startWorld: Vec3Tuple;
     currentWorld: Vec3Tuple;
+    parentWorld?: Vec3Tuple;
+    siblingCount: number;
     layerRadius: number;
     stage: "moving" | "armed" | "birthing" | "handoff";
     canCreateChild: boolean;
@@ -622,7 +624,7 @@ function HierarchyNode({
     });
 
     if (childId) {
-      const childWorld = clampWorldForDepth(pointerWorld, depth + 1);
+      const childWorld = clampWorldForDepth(pointerWorld, depth + 1, drag.currentWorld, node.children.length + 1);
       drag.handoffChildId = childId;
       drag.handoffLayerRadius = getShellRadius(depth + 1);
       drag.handoffChildWorld = childWorld;
@@ -656,6 +658,8 @@ function HierarchyNode({
       lastAt: performance.now(),
       startWorld: worldPosition,
       currentWorld: worldPosition,
+      parentWorld: path.length > 2 ? getNodeWorldPosition(path.slice(0, -1)) : undefined,
+      siblingCount: path.length > 2 ? path[path.length - 2].children.length : 1,
       layerRadius: vectorLength(worldPosition),
       stage: "moving",
       canCreateChild: true,
@@ -677,7 +681,12 @@ function HierarchyNode({
     event.stopPropagation();
 
     if (drag.handoffChildId && drag.handoffLayerRadius) {
-      const childWorld = clampWorldForDepth(intersectRaySphere(event.ray, drag.handoffLayerRadius), depth + 1);
+      const childWorld = clampWorldForDepth(
+        intersectRaySphere(event.ray, drag.handoffLayerRadius),
+        depth + 1,
+        drag.currentWorld,
+        node.children.length + 1,
+      );
       drag.handoffChildWorld = childWorld;
       syncVisualNodePosition(drag.handoffChildId, childWorld, drag.currentWorld);
       drag.lastScreen = { x: event.clientX, y: event.clientY };
@@ -755,7 +764,7 @@ function HierarchyNode({
     }
 
     if (screenDistance > 3 && drag.stage === "moving") {
-      const clampedPointerWorld = clampWorldForDepth(pointerWorld, depth);
+      const clampedPointerWorld = clampWorldForDepth(pointerWorld, depth, drag.parentWorld, drag.siblingCount);
       drag.currentWorld = clampedPointerWorld;
       drag.hasMoved = true;
       applyVisualWorldPosition(clampedPointerWorld);
@@ -1621,9 +1630,31 @@ function movedEnoughInRecentWindow(
   return Math.hypot(x - closest.x, y - closest.y) >= TEAR_STAGE_ONE_SCREEN_DELTA;
 }
 
-function clampWorldForDepth(worldPosition: [number, number, number], depth: number) {
+function clampWorldForDepth(
+  worldPosition: Vec3Tuple,
+  depth: number,
+  parentWorldPosition?: Vec3Tuple,
+  siblingCount = 1,
+): Vec3Tuple {
+  const shellRadius = getShellRadius(depth);
   if (depth > 1) {
-    return scaleTuple(normalizeVector(worldPosition), getShellRadius(depth));
+    if (!parentWorldPosition) return scaleTuple(normalizeVector(worldPosition), shellRadius);
+    const parentDirection = normalizeVector(parentWorldPosition);
+    const desiredDirection = normalizeVector(worldPosition);
+    const spreadLimit = getManualChildSpreadLimit(depth, siblingCount);
+    const dot = clamp(dotTuple(parentDirection, desiredDirection), -1, 1);
+    const angle = Math.acos(dot);
+    if (angle <= spreadLimit) return scaleTuple(desiredDirection, shellRadius);
+
+    const tangentProjection = subtractPosition(desiredDirection, scaleTuple(parentDirection, dot));
+    const tangent =
+      vectorLength(tangentProjection) > 0.0001
+        ? normalizeVector(tangentProjection)
+        : getFallbackTangent(parentDirection);
+    return scaleTuple(
+      normalizeVector(addTuple(scaleTuple(parentDirection, Math.cos(spreadLimit)), scaleTuple(tangent, Math.sin(spreadLimit)))),
+      shellRadius,
+    );
   }
 
   const direction = normalizeVector(worldPosition);
@@ -1637,8 +1668,13 @@ function clampWorldForDepth(worldPosition: [number, number, number], depth: numb
       direction[1] * planarScale,
       -Math.sqrt(Math.max(0.0001, 1 - limitedPlanar * limitedPlanar)),
     ]),
-    getShellRadius(depth),
+    shellRadius,
   );
+}
+
+function getFallbackTangent(direction: Vec3Tuple): Vec3Tuple {
+  const reference: Vec3Tuple = Math.abs(direction[1]) > 0.86 ? [1, 0, 0] : [0, 1, 0];
+  return normalizeVector(crossTuple(reference, direction));
 }
 
 function subtractPosition(a: [number, number, number], b: [number, number, number]): [number, number, number] {
