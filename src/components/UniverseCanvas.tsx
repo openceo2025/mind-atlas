@@ -25,6 +25,7 @@ import {
   getShellRadius,
   useAtlasStore,
 } from "../store/atlasStore";
+import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import type { AtlasNode } from "../types";
 import { getStatusColor } from "../utils/status";
 
@@ -49,6 +50,7 @@ const FOCUS_WAVE_STEP_MS = 500;
 const FOCUS_WAVE_DURATION_MS = 1000;
 const DRAG_BOUNDARY_TUBE_RADIUS = 0.55;
 const DRAG_BOUNDARY_INNER_TUBE_RADIUS = 0.24;
+const PINCH_WHEEL_SCALE = 3.4;
 
 type Vec3Tuple = [number, number, number];
 
@@ -139,7 +141,6 @@ export function UniverseCanvas() {
         <pointLight position={[-180, -120, 80]} intensity={0.8} color="#78e6c5" />
         <BackgroundStarLayer />
         <NavigationController />
-        <ResonanceLinks />
         <NotebookNodes />
       </Canvas>
     </section>
@@ -158,6 +159,7 @@ function NavigationController() {
   const wheelZoomOutRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelZoomInRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelSuppressUntilRef = useRef(0);
+  const pinchRef = useRef<{ distance: number } | null>(null);
   const transitionRef = useRef<{
     startYaw: number;
     startPitch: number;
@@ -178,10 +180,54 @@ function NavigationController() {
   }, [gl.domElement]);
 
   useEffect(() => {
+    const element = gl.domElement;
+    const handleDomWheel = (event: WheelEvent) => {
+      if (event.target instanceof HTMLElement && event.target.closest("textarea, input, select")) return;
+      event.preventDefault();
+      handleWheelDelta(event.deltaY);
+    };
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 2) {
+        pinchRef.current = null;
+        return;
+      }
+      event.preventDefault();
+      dragRef.current = null;
+      setBirthEffect(null);
+      pinchRef.current = { distance: touchDistance(event.touches[0], event.touches[1]) };
+    };
+    const handleTouchMove = (event: TouchEvent) => {
+      if (event.touches.length !== 2 || !pinchRef.current) return;
+      event.preventDefault();
+      const nextDistance = touchDistance(event.touches[0], event.touches[1]);
+      const deltaDistance = nextDistance - pinchRef.current.distance;
+      pinchRef.current.distance = nextDistance;
+      handleWheelDelta(-deltaDistance * PINCH_WHEEL_SCALE);
+    };
+    const handleTouchEnd = (event: TouchEvent) => {
+      if (event.touches.length < 2) pinchRef.current = null;
+    };
+
+    element.addEventListener("wheel", handleDomWheel, { passive: false });
+    element.addEventListener("touchstart", handleTouchStart, { passive: false });
+    element.addEventListener("touchmove", handleTouchMove, { passive: false });
+    element.addEventListener("touchend", handleTouchEnd);
+    element.addEventListener("touchcancel", handleTouchEnd);
+    return () => {
+      element.removeEventListener("wheel", handleDomWheel);
+      element.removeEventListener("touchstart", handleTouchStart);
+      element.removeEventListener("touchmove", handleTouchMove);
+      element.removeEventListener("touchend", handleTouchEnd);
+      element.removeEventListener("touchcancel", handleTouchEnd);
+    };
+  });
+
+  useEffect(() => {
     if (!focusRequest) return;
     const targetVector = new Vector3(focusRequest.x, focusRequest.y, focusRequest.z);
     const targetDirection = targetVector.lengthSq() > 0.001 ? targetVector.clone().normalize() : new Vector3(0, 0, -1);
     const targetAngles = directionToYawPitch(targetDirection);
+    const portraitPitchOffset = getPortraitPanelPitchOffset(size.width, size.height, perspective.fov);
     const targetDistance = getCameraDistanceForDiameter(focusRequest.diameter, size.height, perspective.fov);
     const targetOffset = clamp(targetVector.length() - targetDistance, MIN_CAMERA_OFFSET, MAX_CAMERA_OFFSET);
     const current = yawPitchRef.current;
@@ -191,7 +237,7 @@ function NavigationController() {
       startPitch: current.pitch,
       startOffset: current.offset,
       targetYaw: closestAngle(current.yaw, targetAngles.yaw),
-      targetPitch: targetAngles.pitch,
+      targetPitch: clamp(targetAngles.pitch - portraitPitchOffset, -1.22, 1.22),
       targetOffset,
       elapsed: 0,
       nonce: focusRequest.nonce,
@@ -250,6 +296,7 @@ function NavigationController() {
   const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
     if (event.button !== 0 && event.button !== 2) return;
     event.stopPropagation();
+    window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_INTERACTION_EVENT));
     (event.target as Element | null)?.setPointerCapture?.(event.pointerId);
     const viewportZoom = getViewportScale(yawPitchRef.current.offset);
     const canBirth = viewportZoom <= WHITE_HOLE_MAX_ZOOM;
@@ -317,21 +364,19 @@ function NavigationController() {
     }
   };
 
-  const handleWheel = (event: ThreeEvent<WheelEvent>) => {
-    event.stopPropagation();
-    event.nativeEvent.preventDefault();
+  const handleWheelDelta = (deltaY: number) => {
     const now = performance.now();
     if (now < wheelSuppressUntilRef.current) return;
 
     const state = yawPitchRef.current;
-    state.offset = clamp(state.offset - event.deltaY * 0.35, MIN_CAMERA_OFFSET, MAX_CAMERA_OFFSET);
+    state.offset = clamp(state.offset - deltaY * 0.35, MIN_CAMERA_OFFSET, MAX_CAMERA_OFFSET);
     transitionRef.current = null;
     applyCameraPose(perspective, state);
     setViewport({ x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) });
 
     const zoomOutState = wheelZoomOutRef.current;
     const zoomInState = wheelZoomInRef.current;
-    if (event.deltaY <= 0) {
+    if (deltaY <= 0) {
       zoomOutState.amount = 0;
       zoomOutState.startedAt = 0;
     } else {
@@ -339,13 +384,13 @@ function NavigationController() {
       zoomInState.startedAt = 0;
     }
 
-    if (event.deltaY > 0) {
+    if (deltaY > 0) {
       if (now - zoomOutState.lastFiredAt < ZOOM_OUT_PARENT_COOLDOWN_MS) return;
       if (!zoomOutState.startedAt || now - zoomOutState.startedAt > ZOOM_OUT_DETECTION_WINDOW_MS) {
         zoomOutState.amount = 0;
         zoomOutState.startedAt = now;
       }
-      zoomOutState.amount += Math.abs(event.deltaY);
+      zoomOutState.amount += Math.abs(deltaY);
       if (zoomOutState.amount >= ZOOM_OUT_AMOUNT_THRESHOLD && now - zoomOutState.startedAt >= ZOOM_OUT_MIN_DURATION_MS) {
         zoomOutState.amount = 0;
         zoomOutState.startedAt = 0;
@@ -356,7 +401,7 @@ function NavigationController() {
       return;
     }
 
-    if (event.deltaY < 0) {
+    if (deltaY < 0) {
       const atlasState = useAtlasStore.getState();
       const selectedPath = findNodePath(atlasState.atlasRoot, atlasState.selectedNodeId);
       const selectedNode = selectedPath?.at(-1);
@@ -371,7 +416,7 @@ function NavigationController() {
         zoomInState.amount = 0;
         zoomInState.startedAt = now;
       }
-      zoomInState.amount += Math.abs(event.deltaY);
+      zoomInState.amount += Math.abs(deltaY);
       if (zoomInState.amount >= ZOOM_OUT_AMOUNT_THRESHOLD && now - zoomInState.startedAt >= ZOOM_OUT_MIN_DURATION_MS) {
         zoomInState.amount = 0;
         zoomInState.startedAt = 0;
@@ -389,7 +434,6 @@ function NavigationController() {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onWheel={handleWheel}
       >
         <sphereGeometry args={[INPUT_EVENT_SPHERE_RADIUS, 64, 32]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} side={BackSide} />
@@ -493,10 +537,11 @@ function HierarchyNode({
   selectedParentId: string | null;
   focusWaveStartedAt: number;
 }) {
-  const selectNode = useAtlasStore((state) => state.selectNode);
+  const selectNodeInPlace = useAtlasStore((state) => state.selectNodeInPlace);
   const focusNode = useAtlasStore((state) => state.focusNode);
   const moveNode = useAtlasStore((state) => state.moveNode);
   const addChildNode = useAtlasStore((state) => state.addChildNode);
+  const updateNode = useAtlasStore((state) => state.updateNode);
   const birthMarks = useAtlasStore((state) => state.birthMarks);
   const zoom = useAtlasStore((state) => state.viewport.zoom);
   const hiddenDragEdgeNodeId = useHiddenDragEdgeNodeId();
@@ -769,12 +814,15 @@ function HierarchyNode({
       drag.hasMoved = true;
       applyVisualWorldPosition(clampedPointerWorld);
       if (drag.canCreateChild && movedEnoughInRecentWindow(drag, event.clientX, event.clientY, now)) {
+        const initialWorld = drag.startWorld;
         drag.stage = "armed";
         drag.torn = true;
-        drag.freezeWorld = clampedPointerWorld;
-        drag.armedPointerWorld = pointerWorld;
-        drag.startWorld = clampedPointerWorld;
+        drag.freezeWorld = initialWorld;
+        drag.armedPointerWorld = initialWorld;
+        drag.currentWorld = initialWorld;
+        drag.hasMoved = false;
         drag.samples = [];
+        applyVisualWorldPosition(initialWorld);
         setDragVisual({ x: 0, y: 0, z: 0, tension: 0 });
       }
     }
@@ -905,26 +953,83 @@ function HierarchyNode({
 
       {labelVisible ? (
         <Html center position={[0, -radius - 14, 16]} transform={false} zIndexRange={[2, 0]}>
-          <button
-            className={`space-label ${isSelected ? "is-selected" : ""}`}
-            type="button"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              selectNode(node.id);
-            }}
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-              focusNode(node.id);
-            }}
-          >
-            <span className="space-label-title">{node.title}</span>
-            {node.tags[0] ? <span className="space-label-status">#{node.tags[0]}</span> : null}
-          </button>
+          <SpaceNodeEditor
+            node={node}
+            isSelected={isSelected}
+            onSelect={() => selectNodeInPlace(node.id)}
+            onChange={(body) =>
+              updateNode(node.id, {
+                body,
+                summary: body.split("\n").find(Boolean) ?? "Empty notebook node.",
+              })
+            }
+          />
         </Html>
       ) : null}
     </group>
   );
+}
+
+function SpaceNodeEditor({
+  node,
+  isSelected,
+  onSelect,
+  onChange,
+}: {
+  node: AtlasNode;
+  isSelected: boolean;
+  onSelect: () => void;
+  onChange: (body: string) => void;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const displayBody = node.body || "";
+
+  useLayoutEffect(() => {
+    resizeTextarea(textareaRef.current);
+  }, [displayBody]);
+
+  return (
+    <textarea
+      ref={textareaRef}
+      className={`node-text-card node-text-editor space-body-editor ${isSelected ? "is-selected" : ""}`}
+      value={displayBody}
+      rows={1}
+      placeholder="..."
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        onSelect();
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelect();
+      }}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onWheel={(event) => {
+        event.stopPropagation();
+      }}
+      onChange={(event) => {
+        onChange(event.target.value);
+        resizeTextarea(event.currentTarget);
+      }}
+      aria-label={`${node.title} body`}
+    />
+  );
+}
+
+function resizeTextarea(textarea: HTMLTextAreaElement | null) {
+  if (!textarea) return;
+  textarea.style.height = "auto";
+  textarea.style.height = `${Math.min(textarea.scrollHeight, getTextareaMaxHeight(textarea))}px`;
+  textarea.style.overflowY = textarea.scrollHeight > getTextareaMaxHeight(textarea) ? "auto" : "hidden";
+}
+
+function getTextareaMaxHeight(textarea: HTMLTextAreaElement) {
+  const styles = window.getComputedStyle(textarea);
+  const lineHeight = Number.parseFloat(styles.lineHeight) || 18;
+  const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+  const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
+  const maxLines = Number.parseInt(styles.getPropertyValue("--space-label-max-lines"), 10) || 4;
+  return lineHeight * maxLines + paddingTop + paddingBottom;
 }
 
 function PlanetMaterial({
@@ -1258,63 +1363,6 @@ function EmptyAtlasPulse() {
   );
 }
 
-function ResonanceLinks() {
-  const atlasRoot = useAtlasStore((state) => state.atlasRoot);
-  const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
-  const tagLinks = useMemo(() => buildTagResonanceLinks(atlasRoot, selectedNodeId), [atlasRoot, selectedNodeId]);
-
-  return (
-    <group>
-      {tagLinks.map((link) => {
-        const midX = (link.source[0] + link.target[0]) / 2;
-        const midY = (link.source[1] + link.target[1]) / 2;
-        const midZ = (link.source[2] + link.target[2]) / 2;
-        const dx = link.target[0] - link.source[0];
-        const dy = link.target[1] - link.source[1];
-        const length = Math.max(Math.hypot(dx, dy), 1);
-        const bend = 26;
-        const ctrl: [number, number, number] = [midX - (dy / length) * bend, midY + (dx / length) * bend, midZ];
-        return (
-          <Line
-            key={link.id}
-            points={[link.source, ctrl, link.target]}
-            color="#8df5cf"
-            transparent
-            opacity={0.14}
-            lineWidth={0.8}
-          />
-        );
-      })}
-    </group>
-  );
-}
-
-function buildTagResonanceLinks(root: AtlasNode, selectedNodeId: string) {
-  const tagged: Array<{ id: string; tags: string[]; position: [number, number, number] }> = [];
-
-  const walk = (node: AtlasNode, path: AtlasNode[]) => {
-    const nextPath = [...path, node];
-    if (node.id !== root.id && node.tags.length) {
-      tagged.push({ id: node.id, tags: node.tags, position: getNodeWorldPosition(nextPath) });
-    }
-    node.children.forEach((child) => walk(child, nextPath));
-  };
-
-  root.children.forEach((child) => walk(child, [root]));
-  const selected = tagged.find((node) => node.id === selectedNodeId);
-  if (!selected) return [];
-
-  const links: Array<{ id: string; source: [number, number, number]; target: [number, number, number] }> = [];
-  for (const target of tagged) {
-    if (target.id === selected.id) continue;
-    const shared = selected.tags.find((tag) => target.tags.includes(tag));
-    if (!shared) continue;
-    links.push({ id: `${selected.id}-${target.id}-${shared}`, source: selected.position, target: target.position });
-    if (links.length >= 10) return links;
-  }
-  return links;
-}
-
 function BackgroundStarLayer() {
   const backgroundScene = useMemo(() => new Scene(), []);
   const backgroundCamera = useMemo(() => new OrthographicCamera(), []);
@@ -1554,6 +1602,15 @@ function getViewportScale(distance: number) {
 function getRotationGain(offset: number) {
   const distance = Math.max(0, offset - MIN_CAMERA_OFFSET);
   return 0.0023 / (1 + distance / 900);
+}
+
+function getPortraitPanelPitchOffset(width: number, height: number, fov: number) {
+  if (width > 620 || height <= width) return 0;
+  return (fov * Math.PI) / 180 * 0.18;
+}
+
+function touchDistance(a: Touch, b: Touch) {
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 }
 
 function getDepthFade(index: number) {

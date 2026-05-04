@@ -31,6 +31,7 @@ interface AtlasStore {
   birthMarks: Record<string, number>;
   titleEditRequestId: string | null;
   selectNode: (id: string) => void;
+  selectNodeInPlace: (id: string) => void;
   focusNode: (id: string) => void;
   focusParentNode: () => void;
   updateNode: (id: string, patch: Partial<Pick<AtlasNode, "title" | "body" | "tags" | "summary" | "nextDecision">>) => void;
@@ -47,7 +48,7 @@ interface AtlasStore {
   updateNodeAppearance: (id: string, patch: Pick<Partial<AtlasNode>, "color" | "texture">) => void;
   consumeTitleEditRequest: () => void;
   exportNotebook: () => string;
-  importNotebook: (root: AtlasNode) => void;
+  importNotebook: (root: AtlasNode, datasetName?: string) => void;
   saveNotebook: () => void;
   selectWorkArea: (id: string) => void;
   selectEvent: (parentId: string, id: string) => void;
@@ -86,6 +87,15 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         nonce: (state.focusRequest?.nonce ?? 0) + 1,
       },
     }));
+  },
+
+  selectNodeInPlace: (id) => {
+    const node = findNode(get().atlasRoot, id);
+    if (!node) return;
+    set({
+      selected: selectionFromNode(node),
+      selectedNodeId: id,
+    });
   },
 
   focusNode: (id) => {
@@ -134,7 +144,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       const nextBody = patch.body ?? current?.body ?? "";
       const nextPatch = {
         ...patch,
-        tags: normalizeTags(patch.tags ?? current?.tags ?? [], nextTitle, nextBody),
+        tags: [],
         updatedAt: new Date().toISOString(),
       };
       const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => ({ ...node, ...withoutUndefined(nextPatch) }));
@@ -306,8 +316,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   exportNotebook: () => JSON.stringify(get().atlasRoot, null, 2),
 
-  importNotebook: (root) => {
-    const atlasRoot = ensureNotebookNode(root);
+  importNotebook: (root, datasetName) => {
+    const atlasRoot = {
+      ...ensureNotebookNode(root),
+      ...(datasetName ? { title: datasetName, subtitle: datasetName, updatedAt: new Date().toISOString() } : {}),
+    };
     persistNotebook(atlasRoot);
     set({
       atlasRoot,
@@ -533,7 +546,7 @@ function createNotebookNode(
     radius: NOTEBOOK_NODE_RADIUS,
     summary: body.split("\n").find(Boolean) ?? "A human-authored notebook node.",
     nextDecision: "Edit this node or branch from it.",
-    tags: normalizeTags([], title, body),
+    tags: [],
     attachments: [],
     createdAt: now,
     updatedAt: now,
@@ -577,7 +590,7 @@ function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCou
     nodeType: node.nodeType ?? "note",
     body: node.body ?? node.summary ?? "",
     author: node.author ?? "human",
-    tags: node.tags ?? [],
+    tags: [],
     attachments: node.attachments ?? [],
     texture: node.texture ?? randomTexture(node.id),
     radius: getNodeVisualRadius(node),

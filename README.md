@@ -1,48 +1,66 @@
 # Mind Atlas
 
-Mind Atlas is a local 2.5D spatial notebook.
+Mind Atlas is a 2.5D spatial notebook for navigating parallel AI-assisted work.
 
-Each celestial object is one editable notebook node. Hold on empty space to birth a planet, drag a planet to move it, and pull it far or fast enough to tear off a child moon. The focus panel edits the selected node text, tags, attachments, and surface style.
+Instead of treating prompts, artifacts, and project states as a flat list of chats or files, Mind Atlas places them in a fixed-orientation semantic space. Each celestial object is an editable notebook node. The user can pan, zoom, focus, inspect attachments, and re-enter a work stream from the same spatial context.
 
-Planet color and texture presets live in `src/config/planetTheme.ts`.
+Public site: https://mind-atlas.org
 
-## Requirements
+Current version: `0.1.0`
 
-- Node.js
-- npm
+## What This Prototype Does
 
-This project is built with Vite, React, and Three.js.
+- Renders a fixed-orientation 2.5D universe view with pan, zoom, focus, and semantic drill-down.
+- Treats one celestial object as one local notebook/chat-bubble node.
+- Lets the user edit the focused node body in the Focus panel and directly on visible node labels.
+- Supports mouse-first creation of child nodes and sibling branch nodes.
+- Stores notebook data in browser local storage.
+- Exports and imports a single `.mindatlas` JSON file.
+- Attaches image, audio, video, or file metadata to a node.
+- Previews selected image/audio/video files during the current browser session.
+- Extracts shared `#tags` from notebook text for later resonance behavior.
+- Provides appearance controls for planet color and texture.
 
-## Install
+AI execution, vendor adapters, embeddings, summarization, sync, and remote storage are intentionally out of scope for `0.1.0`.
+
+## Technology
+
+- Vite
+- React
+- Three.js / React Three Fiber
+- Zustand
+- TypeScript
+
+## Local Development
+
+Install dependencies:
 
 ```powershell
 npm install
 ```
 
-## Start Development Server
+Start the development server:
 
 ```powershell
 npm run dev
 ```
 
-Then open the local URL shown in the terminal.
-
-Usually:
+Open:
 
 ```text
 http://localhost:5173/
 ```
 
-If you want to bind explicitly to localhost:
+To test from another device on the same LAN:
 
 ```powershell
-npm run dev -- --host 127.0.0.1
+npm run dev -- --host 0.0.0.0
 ```
 
-Then open:
+Then open the LAN URL shown by Vite, for example:
 
 ```text
-http://127.0.0.1:5173/
+http://192.168.0.14:5173/
 ```
 
 ## Build
@@ -51,39 +69,76 @@ http://127.0.0.1:5173/
 npm run build
 ```
 
-The production files are generated in `dist/`.
+The production app is generated in `dist/`.
 
-## Preview Production Build
+Preview the production build:
 
 ```powershell
 npm run preview
 ```
 
-## Type Check
+## Verification
+
+Type check:
 
 ```powershell
 npm run typecheck
 ```
 
-## UI Smoke Test
-
-Start the dev server first:
+UI smoke test:
 
 ```powershell
 npm run dev -- --host 127.0.0.1
-```
-
-In another terminal, run:
-
-```powershell
 npm run verify:ui
 ```
 
-The script checks desktop, mobile portrait, and mobile landscape rendering. Screenshots are saved under `artifacts/screenshots/`.
+The UI smoke test checks desktop, mobile portrait, and mobile landscape rendering. Generated screenshots are local artifacts and are not part of the public repository.
 
-## Notes
+## GitHub Pages Deployment
+
+This repository includes `.github/workflows/deploy-pages.yml`.
+
+To publish with GitHub Pages:
+
+1. Create the GitHub repository and push the source files.
+2. In the repository settings, open `Settings > Pages`.
+3. Set `Build and deployment` to `GitHub Actions`.
+4. Push to the `main` branch, or run the workflow manually.
+5. Configure DNS for `mind-atlas.org` at your domain provider.
+6. In GitHub Pages custom domain settings, use:
+
+```text
+mind-atlas.org
+```
+
+The file `public/CNAME` is included so the built site keeps the custom domain when deployed.
+
+Recommended DNS:
+
+```text
+A     @     185.199.108.153
+A     @     185.199.109.153
+A     @     185.199.110.153
+A     @     185.199.111.153
+CNAME www   <your-github-username>.github.io
+```
+
+Replace `<your-github-username>` with the GitHub account or organization that owns the repository.
+
+## Data Notes
 
 - Notebook data is saved in browser local storage.
-- Export and import use a single JSON file.
-- Attached file blobs are not exported. Only attachment metadata such as file name, MIME type, size, and path-like name is saved.
-- Image, audio, and video previews work for files selected in the current browser session.
+- Export and import use a single `.mindatlas` JSON file.
+- Attached file blobs are not exported.
+- Attachment metadata such as file name, MIME type, size, and path-like name is saved.
+- Image, audio, and video previews work only for files selected in the current browser session.
+
+## Repository Contents
+
+The public repository should include source, configuration, documentation, and the GitHub Pages workflow. It should not include dependency folders, generated builds, logs, or verification screenshots.
+
+See the upload list at the end of this preparation pass for the exact file set.
+
+## License
+
+MIT License. See [LICENSE](./LICENSE).
