@@ -1,5 +1,7 @@
 # Mind Atlas
 
+![Mind Atlas spatial interface concept](docs/images/mindatlas1.png)
+
 Mind Atlas is a 2.5D spatial notebook for navigating parallel AI-assisted work.
 
 Instead of treating prompts, artifacts, and project states as a flat list of chats or files, Mind Atlas places them in a fixed-orientation semantic space. Each celestial object is an editable notebook node. The user can pan, zoom, focus, inspect attachments, and re-enter a work stream from the same spatial context.
@@ -22,7 +24,9 @@ Current version: `0.1.1`
 - Extracts shared `#tags` from notebook text for later resonance behavior.
 - Provides appearance controls for planet color and texture.
 
-AI execution, vendor adapters, embeddings, summarization, sync, and remote storage are intentionally out of scope for `0.1.0`.
+AI execution, vendor adapters, embeddings, summarization, sync, and remote storage are intentionally out of scope for `0.1.x`.
+
+![Mind Atlas turns scattered AI work into a navigable semantic space](docs/images/mindatlas2.png)
 
 ## Technology
 
