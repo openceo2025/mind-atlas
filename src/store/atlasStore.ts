@@ -49,6 +49,7 @@ interface AtlasStore {
   consumeTitleEditRequest: () => void;
   exportNotebook: () => string;
   importNotebook: (root: AtlasNode, datasetName?: string) => void;
+  resetNotebook: () => void;
   saveNotebook: () => void;
   selectWorkArea: (id: string) => void;
   selectEvent: (parentId: string, id: string) => void;
@@ -332,6 +333,28 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
   },
 
+  resetNotebook: () => {
+    const atlasRoot = createInitialNotebook();
+    const previewUrls = get().attachmentPreviewUrls;
+    Object.values(previewUrls).forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
+    clearStoredNotebook();
+    set((state) => ({
+      atlasRoot,
+      selected: { kind: "node", id: atlasRoot.id },
+      selectedNodeId: atlasRoot.id,
+      focusRequest: {
+        x: 0,
+        y: 0,
+        z: 0,
+        diameter: 420,
+        nonce: (state.focusRequest?.nonce ?? 0) + 1,
+      },
+      attachmentPreviewUrls: {},
+      birthMarks: {},
+      titleEditRequestId: null,
+    }));
+  },
+
   saveNotebook: () => persistNotebook(get().atlasRoot),
 
   selectWorkArea: (id) => {
@@ -510,9 +533,18 @@ function loadStoredNotebook() {
   }
 }
 
+function createInitialNotebook() {
+  return ensureNotebookNode(JSON.parse(JSON.stringify(atlasRoot)) as AtlasNode);
+}
+
 function persistNotebook(root: AtlasNode) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(NOTEBOOK_STORAGE_KEY, JSON.stringify(root));
+}
+
+function clearStoredNotebook() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(NOTEBOOK_STORAGE_KEY);
 }
 
 function updateNodeById(root: AtlasNode, id: string, updater: (node: AtlasNode) => AtlasNode): AtlasNode {

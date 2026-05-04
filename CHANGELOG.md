@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 - 2026-05-04
+
+### Added
+
+- Added an `Initialize` action to the atlas menu.
+- The initialize action clears local notebook changes and returns the atlas to the seeded starting state.
+
 ## 0.1.0 - 2026-05-04
 
 Initial public prototype release.

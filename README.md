@@ -6,7 +6,7 @@ Instead of treating prompts, artifacts, and project states as a flat list of cha
 
 Public site: https://mind-atlas.org
 
-Current version: `0.1.0`
+Current version: `0.1.1`
 
 ## What This Prototype Does
 
@@ -16,6 +16,7 @@ Current version: `0.1.0`
 - Supports mouse-first creation of child nodes and sibling branch nodes.
 - Stores notebook data in browser local storage.
 - Exports and imports a single `.mindatlas` JSON file.
+- Initializes the local notebook back to the seeded starting state.
 - Attaches image, audio, video, or file metadata to a node.
 - Previews selected image/audio/video files during the current browser session.
 - Extracts shared `#tags` from notebook text for later resonance behavior.

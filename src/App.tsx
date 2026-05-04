@@ -1,5 +1,5 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { Download, MoreHorizontal, Upload } from "lucide-react";
+import { Download, MoreHorizontal, RotateCcw, Upload } from "lucide-react";
 import { ChangeEvent, useEffect, useState } from "react";
 import { Minimap } from "./components/Minimap";
 import { UniverseCanvas } from "./components/UniverseCanvas";
@@ -14,6 +14,7 @@ export default function App() {
   const updateNode = useAtlasStore((state) => state.updateNode);
   const exportNotebook = useAtlasStore((state) => state.exportNotebook);
   const importNotebook = useAtlasStore((state) => state.importNotebook);
+  const resetNotebook = useAtlasStore((state) => state.resetNotebook);
   const [menuOpen, setMenuOpen] = useState(false);
   const datasetName = atlasRoot.title && atlasRoot.title !== "Mind Atlas" ? atlasRoot.title : "Spatial Notebook";
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
@@ -51,6 +52,13 @@ export default function App() {
     event.target.value = "";
   };
 
+  const handleInitialize = () => {
+    const confirmed = window.confirm("Initialize this atlas and remove all local notebook changes?");
+    if (!confirmed) return;
+    resetNotebook();
+    setMenuOpen(false);
+  };
+
   return (
     <main className="app-shell">
       <UniverseCanvas />
@@ -80,6 +88,9 @@ export default function App() {
               <Upload size={15} /> Import
               <input type="file" accept=".mindatlas" onChange={handleImport} />
             </label>
+            <button type="button" onClick={handleInitialize}>
+              <RotateCcw size={15} /> Initialize
+            </button>
           </div>
         ) : null}
       </div>
