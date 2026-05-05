@@ -552,6 +552,7 @@ function HierarchyNode({
   const selectedIndexInPath = path.findIndex((item) => item.id === selectedNodeId);
   const activeDescendantDistance =
     selectedIndexInPath >= 0 ? path.length - 1 - selectedIndexInPath : null;
+  const isDirectChildOfSelected = parentId === selectedNodeId;
   const isDirectParentOfSelected = selectedParentId === node.id;
   const isActiveSibling = selectedParentId !== null && parentId === selectedParentId && !isSelected;
   const isFocusedBranch = activeDescendantDistance !== null || isDirectParentOfSelected;
@@ -572,7 +573,8 @@ function HierarchyNode({
     node.children.length > 0 &&
     (isDirectParentOfSelected ||
       (activeDescendantDistance !== null && activeDescendantDistance < VISIBLE_DESCENDANT_DEPTH));
-  const labelVisible = isSelected || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
+  const isLocalContextNode = isSelected || isDirectParentOfSelected || isActiveSibling || isDirectChildOfSelected;
+  const labelVisible = isLocalContextNode || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
   const parentEdgeVisible = path.length > 2 && hiddenDragEdgeNodeId !== node.id;
   const focusWaveDepth =
     activeDescendantDistance === 1
@@ -982,17 +984,24 @@ function SpaceNodeEditor({
   onChange: (body: string) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composingRef = useRef(false);
   const displayBody = node.body || "";
+  const [draftBody, setDraftBody] = useState(displayBody);
 
   useLayoutEffect(() => {
     resizeTextarea(textareaRef.current);
-  }, [displayBody]);
+  }, [draftBody]);
+
+  useEffect(() => {
+    if (composingRef.current) return;
+    setDraftBody(displayBody);
+  }, [displayBody, node.id]);
 
   return (
     <textarea
       ref={textareaRef}
       className={`node-text-card node-text-editor space-body-editor ${isSelected ? "is-selected" : ""}`}
-      value={displayBody}
+      value={draftBody}
       rows={1}
       placeholder="..."
       onPointerDown={(event) => {
@@ -1007,13 +1016,31 @@ function SpaceNodeEditor({
       onWheel={(event) => {
         event.stopPropagation();
       }}
+      onCompositionStart={() => {
+        composingRef.current = true;
+      }}
+      onCompositionEnd={(event) => {
+        composingRef.current = false;
+        const nextBody = event.currentTarget.value;
+        setDraftBody(nextBody);
+        onChange(nextBody);
+        resizeTextarea(event.currentTarget);
+      }}
       onChange={(event) => {
-        onChange(event.target.value);
+        const nextBody = event.target.value;
+        setDraftBody(nextBody);
+        if (!composingRef.current && !isInputComposing(event.nativeEvent)) {
+          onChange(nextBody);
+        }
         resizeTextarea(event.currentTarget);
       }}
       aria-label={`${node.title} body`}
     />
   );
+}
+
+function isInputComposing(event: Event) {
+  return event instanceof InputEvent && event.isComposing;
 }
 
 function resizeTextarea(textarea: HTMLTextAreaElement | null) {
