@@ -221,6 +221,11 @@ h1 {
   right: 0;
 }
 
+.node-context-menu {
+  position: fixed;
+  width: 156px;
+}
+
 .context-menu button,
 .context-menu label {
   position: relative;
@@ -239,6 +244,14 @@ h1 {
 .context-menu button:hover,
 .context-menu label:hover {
   background: rgba(141, 245, 207, 0.09);
+}
+
+.context-menu .destructive-menu-button {
+  color: #ffd9ce;
+}
+
+.context-menu .destructive-menu-button:hover {
+  background: rgba(255, 135, 104, 0.14);
 }
 
 .context-menu input[type="file"] {

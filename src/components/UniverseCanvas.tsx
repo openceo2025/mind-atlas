@@ -1,5 +1,6 @@
 import { Html, Line } from "@react-three/drei";
 import { Canvas, ThreeEvent, createPortal, useFrame, useThree } from "@react-three/fiber";
+import { Trash2 } from "lucide-react";
 import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   AdditiveBlending,
@@ -77,6 +78,12 @@ type VisualNodeHandle = {
   getWorldPosition: () => Vec3Tuple;
 };
 
+type NodeContextMenuState = {
+  nodeId: string;
+  x: number;
+  y: number;
+};
+
 const visualNodeHandles = new Map<string, VisualNodeHandle>();
 let hiddenDragEdgeNodeId: string | null = null;
 const hiddenDragEdgeListeners = new Set<() => void>();
@@ -110,10 +117,15 @@ function syncVisualNodePosition(id: string, worldPosition: Vec3Tuple, parentWorl
 
 export function UniverseCanvas() {
   const focusParentLayer = useAtlasStore((state) => state.focusParentLayer);
+  const [nodeContextMenu, setNodeContextMenu] = useState<NodeContextMenuState | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (nodeContextMenu) {
+        setNodeContextMenu(null);
+        return;
+      }
       focusParentLayer();
     };
     const preventBrowserZoom = (event: WheelEvent) => {
@@ -127,7 +139,13 @@ export function UniverseCanvas() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("wheel", preventBrowserZoom, { capture: true });
     };
-  }, [focusParentLayer]);
+  }, [focusParentLayer, nodeContextMenu]);
+
+  useEffect(() => {
+    const closeMenu = () => setNodeContextMenu(null);
+    window.addEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenu);
+    return () => window.removeEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenu);
+  }, []);
 
   return (
     <section className="universe-shell" aria-label="Mind Atlas universe view">
@@ -141,8 +159,9 @@ export function UniverseCanvas() {
         <pointLight position={[-180, -120, 80]} intensity={0.8} color="#78e6c5" />
         <BackgroundStarLayer />
         <NavigationController />
-        <NotebookNodes />
+        <NotebookNodes onOpenNodeContextMenu={setNodeContextMenu} />
       </Canvas>
+      <NodeContextMenu menu={nodeContextMenu} onClose={() => setNodeContextMenu(null)} />
     </section>
   );
 }
@@ -443,7 +462,38 @@ function NavigationController() {
   );
 }
 
-function NotebookNodes() {
+function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null; onClose: () => void }) {
+  const atlasRoot = useAtlasStore((state) => state.atlasRoot);
+  const deleteNode = useAtlasStore((state) => state.deleteNode);
+  const node = menu ? findNodePath(atlasRoot, menu.nodeId)?.at(-1) : undefined;
+
+  if (!menu || !node || node.id === atlasRoot.id) return null;
+
+  const handleDelete = () => {
+    if (node.children.length > 0) {
+      const confirmed = window.confirm("子どもも全て削除されます。よろしいですか？");
+      if (!confirmed) return;
+    }
+    deleteNode(node.id);
+    onClose();
+  };
+
+  return (
+    <div
+      className="context-menu node-context-menu"
+      style={{ left: menu.x, top: menu.y }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+      aria-label="Node actions"
+    >
+      <button className="destructive-menu-button" type="button" onClick={handleDelete}>
+        <Trash2 size={15} /> 削除
+      </button>
+    </div>
+  );
+}
+
+function NotebookNodes({ onOpenNodeContextMenu }: { onOpenNodeContextMenu: (menu: NodeContextMenuState) => void }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const focusNonce = useAtlasStore((state) => state.focusRequest?.nonce ?? 0);
@@ -481,6 +531,7 @@ function NotebookNodes() {
           highlightSelectedNodeId={highlightSelectedNodeId}
           selectedParentId={rootIsSelected ? null : selectedParentId}
           focusWaveStartedAt={focusWaveStartedAt}
+          onOpenNodeContextMenu={onOpenNodeContextMenu}
         />
       </group>
     );
@@ -505,6 +556,7 @@ function NotebookNodes() {
             highlightSelectedNodeId={highlightSelectedNodeId}
             selectedParentId={rootIsSelected ? null : selectedParentId}
             focusWaveStartedAt={focusWaveStartedAt}
+            onOpenNodeContextMenu={onOpenNodeContextMenu}
           />
         );
       })}
@@ -524,6 +576,7 @@ function HierarchyNode({
   highlightSelectedNodeId,
   selectedParentId,
   focusWaveStartedAt,
+  onOpenNodeContextMenu,
 }: {
   node: AtlasNode;
   path: AtlasNode[];
@@ -536,6 +589,7 @@ function HierarchyNode({
   highlightSelectedNodeId: string;
   selectedParentId: string | null;
   focusWaveStartedAt: number;
+  onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
   const selectNodeInPlace = useAtlasStore((state) => state.selectNodeInPlace);
   const focusNode = useAtlasStore((state) => state.focusNode);
@@ -907,6 +961,12 @@ function HierarchyNode({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onContextMenu={(event) => {
+          event.stopPropagation();
+          event.nativeEvent.preventDefault();
+          if (!isSelected || node.id === "atlas-root") return;
+          onOpenNodeContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
+        }}
         onDoubleClick={(event) => {
           event.stopPropagation();
           focusNode(node.id);
@@ -948,6 +1008,7 @@ function HierarchyNode({
                 highlightSelectedNodeId={highlightSelectedNodeId}
                 selectedParentId={selectedParentId}
                 focusWaveStartedAt={focusWaveStartedAt}
+                onOpenNodeContextMenu={onOpenNodeContextMenu}
               />
             );
           })

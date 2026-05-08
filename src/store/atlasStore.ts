@@ -42,6 +42,7 @@ interface AtlasStore {
     options?: { title?: string; position?: [number, number, number]; insertIndex?: number; focus?: boolean; persist?: boolean },
   ) => string | undefined;
   addSiblingNode: (id: string) => void;
+  deleteNode: (id: string) => void;
   moveNode: (id: string, worldPosition: [number, number, number]) => void;
   addAttachment: (nodeId: string, attachment: NodeAttachment, previewUrl?: string) => void;
   removeAttachment: (nodeId: string, attachmentId: string) => void;
@@ -246,6 +247,51 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       };
     });
     get().focusNode(sibling.id);
+  },
+
+  deleteNode: (id) => {
+    const state = get();
+    const path = findNodePath(state.atlasRoot, id);
+    if (!path || path.length <= 1) return;
+
+    const deletedNode = path[path.length - 1];
+    const parentNode = path[path.length - 2];
+    const deletedNodeIds = collectNodeIds(deletedNode);
+    const deletedAttachmentIds = collectAttachmentIds(deletedNode);
+    const nextRoot = removeNodeById(state.atlasRoot, id);
+    const parentLocation = findNodeWithWorldPosition(nextRoot, parentNode.id);
+    const nextSelectedNode = parentLocation?.node ?? nextRoot;
+    const nextPosition = parentLocation?.position ?? [0, 0, 0];
+    const nextDepth = Math.max(0, (parentLocation?.path.length ?? 1) - 1);
+    const nextDiameter = getNodeVisualRadius(nextSelectedNode, nextDepth) * 2;
+    const attachmentPreviewUrls = { ...state.attachmentPreviewUrls };
+    const birthMarks = { ...state.birthMarks };
+
+    for (const attachmentId of deletedAttachmentIds) {
+      const previewUrl = attachmentPreviewUrls[attachmentId];
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      delete attachmentPreviewUrls[attachmentId];
+    }
+    for (const nodeId of deletedNodeIds) {
+      delete birthMarks[nodeId];
+    }
+
+    persistNotebook(nextRoot);
+    set((current) => ({
+      atlasRoot: nextRoot,
+      selected: selectionFromNode(nextSelectedNode),
+      selectedNodeId: nextSelectedNode.id,
+      attachmentPreviewUrls,
+      birthMarks,
+      titleEditRequestId: current.titleEditRequestId && deletedNodeIds.includes(current.titleEditRequestId) ? null : current.titleEditRequestId,
+      focusRequest: {
+        x: nextPosition[0],
+        y: nextPosition[1],
+        z: nextPosition[2],
+        diameter: Math.max(nextDiameter, 120),
+        nonce: (current.focusRequest?.nonce ?? 0) + 1,
+      },
+    }));
   },
 
   moveNode: (id, worldPosition) => {
@@ -553,6 +599,29 @@ function updateNodeById(root: AtlasNode, id: string, updater: (node: AtlasNode) 
     ...root,
     children: root.children.map((child) => updateNodeById(child, id, updater)),
   };
+}
+
+function removeNodeById(root: AtlasNode, id: string, updatedAt = new Date().toISOString()): AtlasNode {
+  let changed = false;
+  const children = root.children.flatMap((child) => {
+    if (child.id === id) {
+      changed = true;
+      return [];
+    }
+    const nextChild = removeNodeById(child, id, updatedAt);
+    if (nextChild !== child) changed = true;
+    return [nextChild];
+  });
+
+  return changed ? { ...root, updatedAt, children } : root;
+}
+
+function collectNodeIds(node: AtlasNode): string[] {
+  return [node.id, ...node.children.flatMap((child) => collectNodeIds(child))];
+}
+
+function collectAttachmentIds(node: AtlasNode): string[] {
+  return [...node.attachments.map((attachment) => attachment.id), ...node.children.flatMap((child) => collectAttachmentIds(child))];
 }
 
 function createNotebookNode(
