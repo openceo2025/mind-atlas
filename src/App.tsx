@@ -12,13 +12,13 @@ export default function App() {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const focusNode = useAtlasStore((state) => state.focusNode);
+  const focusParentLayer = useAtlasStore((state) => state.focusParentLayer);
   const updateNode = useAtlasStore((state) => state.updateNode);
   const exportNotebook = useAtlasStore((state) => state.exportNotebook);
   const importNotebook = useAtlasStore((state) => state.importNotebook);
   const resetNotebook = useAtlasStore((state) => state.resetNotebook);
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, setTheme] = useState<AtlasTheme>(() => loadStoredTheme());
-  const datasetName = atlasRoot.title && atlasRoot.title !== "Mind Atlas" ? atlasRoot.title : "Spatial Notebook";
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
 
   useEffect(() => {
@@ -30,6 +30,18 @@ export default function App() {
   useEffect(() => {
     persistTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    const marker = { mindAtlasBackTrap: true };
+    window.history.pushState(marker, "");
+    const handlePopState = (event: PopStateEvent) => {
+      event.preventDefault();
+      focusParentLayer();
+      window.history.pushState(marker, "");
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [focusParentLayer]);
 
   const handleExport = () => {
     const blob = new Blob([exportNotebook()], { type: "application/mindatlas+json" });
@@ -72,12 +84,7 @@ export default function App() {
       <header className="top-bar" aria-label="Mind Atlas status">
         <div>
           <AtlasBreadcrumb path={selectedPath} onFocus={focusNode} />
-          <input
-            className="dataset-title-input"
-            value={datasetName}
-            onChange={(event) => updateNode(atlasRoot.id, { title: event.target.value || "Untitled Atlas" })}
-            aria-label="Dataset name"
-          />
+          <DatasetTitleInput title={atlasRoot.title} onChange={(title) => updateNode(atlasRoot.id, { title })} />
         </div>
       </header>
 
@@ -125,6 +132,33 @@ export default function App() {
       <Minimap />
       <FocusPanel />
     </main>
+  );
+}
+
+function DatasetTitleInput({ title, onChange }: { title: string; onChange: (title: string) => void }) {
+  const storedTitle = title && title !== "Mind Atlas" ? title : "";
+  const [draftTitle, setDraftTitle] = useState(storedTitle);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (editing) return;
+    setDraftTitle(storedTitle);
+  }, [editing, storedTitle]);
+
+  return (
+    <input
+      className="dataset-title-input"
+      value={draftTitle}
+      placeholder="Spatial Notebook"
+      onFocus={() => setEditing(true)}
+      onBlur={() => setEditing(false)}
+      onChange={(event) => {
+        const nextTitle = event.target.value;
+        setDraftTitle(nextTitle);
+        onChange(nextTitle);
+      }}
+      aria-label="Dataset name"
+    />
   );
 }
 

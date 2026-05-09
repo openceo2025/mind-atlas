@@ -225,7 +225,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
   const wheelZoomOutRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelZoomInRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelSuppressUntilRef = useRef(0);
-  const pinchRef = useRef<{ distance: number } | null>(null);
+  const pinchRef = useRef<{ distance: number; center: { x: number; y: number } } | null>(null);
   const transitionRef = useRef<{
     startYaw: number;
     startPitch: number;
@@ -260,15 +260,23 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
       event.preventDefault();
       dragRef.current = null;
       setBirthEffect(null);
-      pinchRef.current = { distance: touchDistance(event.touches[0], event.touches[1]) };
+      pinchRef.current = {
+        distance: touchDistance(event.touches[0], event.touches[1]),
+        center: touchCenter(event.touches[0], event.touches[1]),
+      };
     };
     const handleTouchMove = (event: TouchEvent) => {
       if (event.touches.length !== 2 || !pinchRef.current) return;
       event.preventDefault();
       const nextDistance = touchDistance(event.touches[0], event.touches[1]);
+      const nextCenter = touchCenter(event.touches[0], event.touches[1]);
       const deltaDistance = nextDistance - pinchRef.current.distance;
+      const deltaX = nextCenter.x - pinchRef.current.center.x;
+      const deltaY = nextCenter.y - pinchRef.current.center.y;
       pinchRef.current.distance = nextDistance;
+      pinchRef.current.center = nextCenter;
       handleWheelDelta(-deltaDistance * PINCH_WHEEL_SCALE);
+      applyPanDelta(deltaX, deltaY);
     };
     const handleTouchEnd = (event: TouchEvent) => {
       if (event.touches.length < 2) pinchRef.current = null;
@@ -407,16 +415,21 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     if (drag.mode === "rotate") {
       const deltaX = event.clientX - drag.lastScreen.x;
       const deltaY = event.clientY - drag.lastScreen.y;
-      const state = yawPitchRef.current;
-      const rotationGain = getRotationGain(state.offset);
-      state.yaw -= deltaX * rotationGain;
-      state.pitch = clamp(state.pitch + deltaY * rotationGain, -1.22, 1.22);
-      transitionRef.current = null;
-      applyCameraPose(perspective, state);
-      setViewport({ x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) });
+      applyPanDelta(deltaX, deltaY);
     }
 
     drag.lastScreen = { x: event.clientX, y: event.clientY };
+  };
+
+  const applyPanDelta = (deltaX: number, deltaY: number) => {
+    if (Math.abs(deltaX) < 0.01 && Math.abs(deltaY) < 0.01) return;
+    const state = yawPitchRef.current;
+    const rotationGain = getRotationGain(state.offset);
+    state.yaw -= deltaX * rotationGain;
+    state.pitch = clamp(state.pitch + deltaY * rotationGain, -1.22, 1.22);
+    transitionRef.current = null;
+    applyCameraPose(perspective, state);
+    setViewport({ x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) });
   };
 
   const handlePointerUp = (event: ThreeEvent<PointerEvent>) => {
@@ -1798,6 +1811,13 @@ function getPortraitPanelPitchOffset(width: number, height: number, fov: number)
 
 function touchDistance(a: Touch, b: Touch) {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+function touchCenter(a: Touch, b: Touch) {
+  return {
+    x: (a.clientX + b.clientX) / 2,
+    y: (a.clientY + b.clientY) / 2,
+  };
 }
 
 function getDepthFade(index: number) {
