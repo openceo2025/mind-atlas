@@ -37,6 +37,7 @@ export interface NodeAttachment {
   mimeType: string;
   size: number;
   path: string;
+  assetPath?: string;
   createdAt: string;
 }
 

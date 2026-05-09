@@ -4,6 +4,7 @@ import { ChangeEvent, useEffect, useState } from "react";
 import { Minimap } from "./components/Minimap";
 import { UniverseCanvas } from "./components/UniverseCanvas";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
+import { createNotebookPackage, importNotebookPackage } from "./notebookPackage";
 import { findNodePath, useAtlasStore } from "./store/atlasStore";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import type { AtlasNode } from "./types";
@@ -17,6 +18,7 @@ export default function App() {
   const exportNotebook = useAtlasStore((state) => state.exportNotebook);
   const importNotebook = useAtlasStore((state) => state.importNotebook);
   const resetNotebook = useAtlasStore((state) => state.resetNotebook);
+  const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, setTheme] = useState<AtlasTheme>(() => loadStoredTheme());
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
@@ -43,30 +45,45 @@ export default function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, [focusParentLayer]);
 
-  const handleExport = () => {
+  const handleExportLight = () => {
     const blob = new Blob([exportNotebook()], { type: "application/mindatlas+json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${datasetFileName(atlasRoot.title)}.mindatlas`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${datasetFileName(atlasRoot.title)}.mindatlas`);
     setMenuOpen(false);
   };
 
-  const handleImport = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleExportPackage = async () => {
+    const result = await createNotebookPackage(atlasRoot, attachmentPreviewUrls);
+    downloadBlob(result.blob, `${datasetFileName(atlasRoot.title)}.mindatlaspkg`);
+    if (result.missingCount > 0) {
+      window.alert(
+        `${result.missingCount} attachment(s) could not be included because this browser session only has metadata for them.`,
+      );
+    }
+    setMenuOpen(false);
+  };
+
+  const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
+    const lowerName = file.name.toLowerCase();
+    if (lowerName.endsWith(".mindatlaspkg")) {
       try {
-        importNotebook(JSON.parse(String(reader.result)), datasetNameFromFile(file.name));
+        const { root, attachmentPreviewUrls } = await importNotebookPackage(file);
+        importNotebook(root, datasetNameFromFile(file.name), attachmentPreviewUrls);
         setMenuOpen(false);
       } catch (error) {
-        console.error("Notebook import failed", error);
+        console.error("Notebook package import failed", error);
       }
-    };
-    reader.readAsText(file);
+      event.target.value = "";
+      return;
+    }
+
+    try {
+      importNotebook(JSON.parse(await file.text()), datasetNameFromFile(file.name));
+      setMenuOpen(false);
+    } catch (error) {
+      console.error("Notebook import failed", error);
+    }
     event.target.value = "";
   };
 
@@ -115,12 +132,23 @@ export default function App() {
                 </button>
               </div>
             </div>
-            <button type="button" onClick={handleExport}>
-              <Download size={15} /> Export
+            <button type="button" onClick={handleExportLight}>
+              <Download size={15} />
+              <span>
+                Export light
+                <small>.mindatlas / metadata only</small>
+              </span>
+            </button>
+            <button type="button" onClick={handleExportPackage}>
+              <Download size={15} />
+              <span>
+                Export with files
+                <small>.mindatlaspkg / includes images and video</small>
+              </span>
             </button>
             <label>
               <Upload size={15} /> Import
-              <input type="file" accept=".mindatlas" onChange={handleImport} />
+              <input type="file" accept=".mindatlas,.mindatlaspkg,application/mindatlas+json,application/x-mindatlas-package" onChange={handleImport} />
             </label>
             <button type="button" onClick={handleInitialize}>
               <RotateCcw size={15} /> Initialize
@@ -211,5 +239,14 @@ function datasetFileName(name: string) {
 }
 
 function datasetNameFromFile(fileName: string) {
-  return fileName.replace(/\.mindatlas$/i, "").trim() || "Untitled Atlas";
+  return fileName.replace(/\.(mindatlaspkg|mindatlas)$/i, "").trim() || "Untitled Atlas";
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }

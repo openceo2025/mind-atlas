@@ -49,7 +49,7 @@ interface AtlasStore {
   updateNodeAppearance: (id: string, patch: Pick<Partial<AtlasNode>, "color" | "texture">) => void;
   consumeTitleEditRequest: () => void;
   exportNotebook: () => string;
-  importNotebook: (root: AtlasNode, datasetName?: string) => void;
+  importNotebook: (root: AtlasNode, datasetName?: string, attachmentPreviewUrls?: Record<string, string>) => void;
   resetNotebook: () => void;
   saveNotebook: () => void;
   selectWorkArea: (id: string) => void;
@@ -363,7 +363,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   exportNotebook: () => JSON.stringify(get().atlasRoot, null, 2),
 
-  importNotebook: (root, datasetName) => {
+  importNotebook: (root, datasetName, nextAttachmentPreviewUrls = {}) => {
+    Object.values(get().attachmentPreviewUrls).forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
     const atlasRoot = {
       ...ensureNotebookNode(root),
       ...(datasetName ? { title: datasetName, subtitle: datasetName, updatedAt: new Date().toISOString() } : {}),
@@ -373,7 +374,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       atlasRoot,
       selected: selectionFromNode(atlasRoot.children[0] ?? atlasRoot),
       selectedNodeId: atlasRoot.children[0]?.id ?? atlasRoot.id,
-      attachmentPreviewUrls: {},
+      attachmentPreviewUrls: nextAttachmentPreviewUrls,
       birthMarks: {},
       titleEditRequestId: atlasRoot.children[0]?.id ?? null,
     });

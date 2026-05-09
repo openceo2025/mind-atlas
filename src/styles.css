@@ -219,6 +219,7 @@ h1 {
 .global-context-menu {
   top: 42px;
   right: 0;
+  min-width: 268px;
 }
 
 .node-context-menu {
@@ -244,6 +245,18 @@ h1 {
 .context-menu button:hover,
 .context-menu label:hover {
   background: rgba(141, 245, 207, 0.09);
+}
+
+.context-menu button span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.context-menu button small {
+  color: #9fb5a9;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .context-menu .destructive-menu-button {
@@ -1276,6 +1289,7 @@ button:disabled,
 }
 
 .app-shell[data-theme="light"] .context-menu-section-title,
+.app-shell[data-theme="light"] .context-menu button small,
 .app-shell[data-theme="light"] .surface-context-menu span,
 .app-shell[data-theme="light"] .appearance-controls label,
 .app-shell[data-theme="light"] .muted,
