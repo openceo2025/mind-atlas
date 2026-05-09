@@ -17,6 +17,7 @@ import {
 } from "three";
 import {
   NOTEBOOK_FIRST_SHELL_RADIUS,
+  NOTEBOOK_NODE_RADIUS,
   findNodePath,
   getNodeHitRadius,
   getNodeVisualRadius,
@@ -27,6 +28,7 @@ import {
   useAtlasStore,
 } from "../store/atlasStore";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
+import type { AtlasTheme } from "../theme";
 import type { AtlasNode } from "../types";
 import { getStatusColor } from "../utils/status";
 
@@ -38,7 +40,8 @@ const MAX_CAMERA_OFFSET = 90000;
 const VISIBLE_DESCENDANT_DEPTH = 5;
 const HOLD_TO_BIRTH_MS = 1520;
 const WHITE_HOLE_CANCEL_PX = 12;
-const WHITE_HOLE_MAX_ZOOM = 1.9;
+const ROOT_BIRTH_FOCUS_MIDPOINT = 0.5;
+const BIRTH_EFFECT_VISUAL_SCALE = 0.8;
 const TEAR_SAMPLE_WINDOW_MS = 100;
 const TEAR_STAGE_ONE_SCREEN_DELTA = 118;
 const TEAR_STAGE_TWO_WORLD_DISTANCE = 84;
@@ -84,6 +87,50 @@ type NodeContextMenuState = {
   y: number;
 };
 
+type UniverseThemeColors = {
+  background: string;
+  edge: string;
+  ring: string;
+  ringHighlight: string;
+  secondaryRing: string;
+  specular: string;
+  birthCore: string;
+  birthRing: string;
+  birthAccent: string;
+  boundaryInner: string;
+};
+
+const UNIVERSE_THEME_COLORS: Record<AtlasTheme, UniverseThemeColors> = {
+  dark: {
+    background: "#050706",
+    edge: "",
+    ring: "",
+    ringHighlight: "#f4d96f",
+    secondaryRing: "#fff4c5",
+    specular: "#fff7cf",
+    birthCore: "#fffdf2",
+    birthRing: "#fff2ac",
+    birthAccent: "#8df5cf",
+    boundaryInner: "#fff4c5",
+  },
+  light: {
+    background: "#f7fbff",
+    edge: "#1e6fcb",
+    ring: "#2f7ed8",
+    ringHighlight: "#0b63ce",
+    secondaryRing: "#72a9e7",
+    specular: "#4a96df",
+    birthCore: "#eaf5ff",
+    birthRing: "#1f73d1",
+    birthAccent: "#24a6d8",
+    boundaryInner: "#76afea",
+  },
+};
+
+function getUniverseThemeColors(theme: AtlasTheme) {
+  return UNIVERSE_THEME_COLORS[theme];
+}
+
 const visualNodeHandles = new Map<string, VisualNodeHandle>();
 let hiddenDragEdgeNodeId: string | null = null;
 const hiddenDragEdgeListeners = new Set<() => void>();
@@ -115,7 +162,7 @@ function syncVisualNodePosition(id: string, worldPosition: Vec3Tuple, parentWorl
   requestAnimationFrame(() => syncVisualNodePosition(id, worldPosition, parentWorldOverride, attempts - 1));
 }
 
-export function UniverseCanvas() {
+export function UniverseCanvas({ theme }: { theme: AtlasTheme }) {
   const focusParentLayer = useAtlasStore((state) => state.focusParentLayer);
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeContextMenuState | null>(null);
 
@@ -154,19 +201,19 @@ export function UniverseCanvas() {
         dpr={[1, 1.75]}
         gl={{ antialias: true, alpha: false, preserveDrawingBuffer: true }}
       >
-        <ambientLight intensity={0.7} />
-        <pointLight position={[120, 160, 110]} intensity={1.35} color="#f3d08a" />
-        <pointLight position={[-180, -120, 80]} intensity={0.8} color="#78e6c5" />
-        <BackgroundStarLayer />
-        <NavigationController />
-        <NotebookNodes onOpenNodeContextMenu={setNodeContextMenu} />
+        <ambientLight intensity={theme === "light" ? 1.05 : 0.7} />
+        <pointLight position={[120, 160, 110]} intensity={theme === "light" ? 1.1 : 1.35} color={theme === "light" ? "#d8ecff" : "#f3d08a"} />
+        <pointLight position={[-180, -120, 80]} intensity={theme === "light" ? 0.95 : 0.8} color={theme === "light" ? "#8fc5ff" : "#78e6c5"} />
+        <BackgroundStarLayer theme={theme} />
+        <NavigationController theme={theme} />
+        <NotebookNodes theme={theme} onOpenNodeContextMenu={setNodeContextMenu} />
       </Canvas>
       <NodeContextMenu menu={nodeContextMenu} onClose={() => setNodeContextMenu(null)} />
     </section>
   );
 }
 
-function NavigationController() {
+function NavigationController({ theme }: { theme: AtlasTheme }) {
   const focusRequest = useAtlasStore((state) => state.focusRequest);
   const setViewport = useAtlasStore((state) => state.setViewport);
   const addRootNodeAt = useAtlasStore((state) => state.addRootNodeAt);
@@ -317,8 +364,7 @@ function NavigationController() {
     event.stopPropagation();
     window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_INTERACTION_EVENT));
     (event.target as Element | null)?.setPointerCapture?.(event.pointerId);
-    const viewportZoom = getViewportScale(yawPitchRef.current.offset);
-    const canBirth = viewportZoom <= WHITE_HOLE_MAX_ZOOM;
+    const canBirth = canStartRootBirth(yawPitchRef.current.offset, size.height, perspective.fov);
     const direction = directionFromRay(event.ray, NOTEBOOK_FIRST_SHELL_RADIUS);
 
     dragRef.current = {
@@ -457,7 +503,7 @@ function NavigationController() {
         <sphereGeometry args={[INPUT_EVENT_SPHERE_RADIUS, 64, 32]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} side={BackSide} />
       </mesh>
-      {birthEffect ? <WhiteHoleEffect key={birthEffect.id} effect={birthEffect} /> : null}
+      {birthEffect ? <WhiteHoleEffect key={birthEffect.id} effect={birthEffect} theme={theme} /> : null}
     </>
   );
 }
@@ -493,7 +539,13 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
   );
 }
 
-function NotebookNodes({ onOpenNodeContextMenu }: { onOpenNodeContextMenu: (menu: NodeContextMenuState) => void }) {
+function NotebookNodes({
+  theme,
+  onOpenNodeContextMenu,
+}: {
+  theme: AtlasTheme;
+  onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
+}) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const focusNonce = useAtlasStore((state) => state.focusRequest?.nonce ?? 0);
@@ -511,7 +563,7 @@ function NotebookNodes({ onOpenNodeContextMenu }: { onOpenNodeContextMenu: (menu
   }, [focusNonce, selectedNodeId]);
 
   if (!atlasRoot.children.length) {
-    return <EmptyAtlasPulse />;
+    return <EmptyAtlasPulse theme={theme} />;
   }
 
   if (focusBaseIndex > 0) {
@@ -531,6 +583,7 @@ function NotebookNodes({ onOpenNodeContextMenu }: { onOpenNodeContextMenu: (menu
           highlightSelectedNodeId={highlightSelectedNodeId}
           selectedParentId={rootIsSelected ? null : selectedParentId}
           focusWaveStartedAt={focusWaveStartedAt}
+          theme={theme}
           onOpenNodeContextMenu={onOpenNodeContextMenu}
         />
       </group>
@@ -556,6 +609,7 @@ function NotebookNodes({ onOpenNodeContextMenu }: { onOpenNodeContextMenu: (menu
             highlightSelectedNodeId={highlightSelectedNodeId}
             selectedParentId={rootIsSelected ? null : selectedParentId}
             focusWaveStartedAt={focusWaveStartedAt}
+            theme={theme}
             onOpenNodeContextMenu={onOpenNodeContextMenu}
           />
         );
@@ -576,6 +630,7 @@ function HierarchyNode({
   highlightSelectedNodeId,
   selectedParentId,
   focusWaveStartedAt,
+  theme,
   onOpenNodeContextMenu,
 }: {
   node: AtlasNode;
@@ -589,6 +644,7 @@ function HierarchyNode({
   highlightSelectedNodeId: string;
   selectedParentId: string | null;
   focusWaveStartedAt: number;
+  theme: AtlasTheme;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
   const selectNodeInPlace = useAtlasStore((state) => state.selectNodeInPlace);
@@ -610,7 +666,10 @@ function HierarchyNode({
   const isDirectParentOfSelected = selectedParentId === node.id;
   const isActiveSibling = selectedParentId !== null && parentId === selectedParentId && !isSelected;
   const isFocusedBranch = activeDescendantDistance !== null || isDirectParentOfSelected;
+  const themeColors = getUniverseThemeColors(theme);
+  const structuralColor = theme === "light" ? themeColors.edge : node.color;
   const statusColor = getStatusColor(node.status);
+  const ringColor = theme === "light" ? themeColors.ring : statusColor;
   const radius = getNodeVisualRadius(node, depth);
   const hitRadius = getNodeHitRadius(node, depth);
   const visualDepthIndex =
@@ -713,26 +772,25 @@ function HierarchyNode({
     drag.torn = true;
     const freezeWorld = drag.freezeWorld ?? drag.startWorld;
     const tearVector = drag.tearVector ?? subtractPosition(pointerWorld, freezeWorld);
-    const parentDirection = normalizeVector(freezeWorld);
-    const childDirection = childDirectionFromDrag(parentDirection, tearVector, depth + 1, node.children.length);
+    const childCount = node.children.length + 1;
+    const childWorld = clampWorldForDepth(pointerWorld, depth + 1, drag.currentWorld, childCount);
     const angle = Math.atan2(tearVector[1], tearVector[0]);
     const childId = addChildNode(node.id, "", {
       title: "Untitled moon",
-      position: childDirection,
-      insertIndex: angleToInsertIndex(angle, node.children.length + 1),
+      position: childWorld,
+      insertIndex: angleToInsertIndex(angle, childCount),
       focus: false,
       persist: false,
     });
 
     if (childId) {
-      const childWorld = clampWorldForDepth(pointerWorld, depth + 1, drag.currentWorld, node.children.length + 1);
       drag.handoffChildId = childId;
       drag.handoffLayerRadius = getShellRadius(depth + 1);
       drag.handoffChildWorld = childWorld;
       setDragBoundary({
         depth: depth + 1,
         parentWorldPosition: drag.currentWorld,
-        siblingCount: node.children.length + 1,
+        siblingCount: childCount,
       });
       syncVisualNodePosition(childId, childWorld, drag.currentWorld);
       setHiddenDragEdgeNodeId(childId);
@@ -915,9 +973,9 @@ function HierarchyNode({
       {parentEdgeVisible ? (
         <Line
           points={[[0, 0, -1], [-localPosition[0], -localPosition[1], -localPosition[2] - 1]]}
-          color={node.color}
+          color={structuralColor}
           transparent
-          opacity={(isFocusedBranch ? 0.28 : 0.12) * depthFade.opacity}
+          opacity={(isFocusedBranch ? (theme === "light" ? 0.46 : 0.28) : theme === "light" ? 0.22 : 0.12) * depthFade.opacity}
           lineWidth={0.6}
         />
       ) : null}
@@ -925,7 +983,8 @@ function HierarchyNode({
       {dragVisual ? (
         <ElasticTether
           vector={[dragVisual.x, dragVisual.y, dragVisual.z]}
-          color={node.color}
+          color={structuralColor}
+          theme={theme}
           radius={radius}
           tension={dragVisual.tension}
           birthingStartedAt={dragRef.current?.stage === "birthing" ? dragRef.current.birthingStartedAt : undefined}
@@ -936,7 +995,8 @@ function HierarchyNode({
         ? createPortal(
         <DragBoundaryGuide
           depth={dragBoundary.depth}
-          color={node.color}
+          color={structuralColor}
+          theme={theme}
           parentWorldPosition={dragBoundary.parentWorldPosition}
           siblingCount={dragBoundary.siblingCount}
         />,
@@ -947,13 +1007,14 @@ function HierarchyNode({
       <CameraFacingGroup>
         <NodeFocusRing
           radius={radius}
-          baseColor={statusColor}
+          baseColor={ringColor}
           isSelected={isSelected}
           depthFade={depthFade}
           waveDepth={focusWaveDepth}
           waveStartedAt={focusWaveStartedAt}
+          theme={theme}
         />
-        {birthStartedAt ? <BirthRing startedAt={birthStartedAt} radius={radius} color={node.color} /> : null}
+        {birthStartedAt ? <BirthRing startedAt={birthStartedAt} radius={radius} color={structuralColor} /> : null}
       </CameraFacingGroup>
 
       <mesh
@@ -986,7 +1047,7 @@ function HierarchyNode({
       </group>
       <mesh position={[-radius * 0.28, radius * 0.32, radius * 0.72]}>
         <sphereGeometry args={[Math.max(1.8, radius * 0.18), 16, 10]} />
-        <meshBasicMaterial color="#fff7cf" transparent opacity={0.7 * depthFade.opacity} />
+        <meshBasicMaterial color={themeColors.specular} transparent opacity={(theme === "light" ? 0.56 : 0.7) * depthFade.opacity} />
       </mesh>
 
       {childrenVisible
@@ -1008,6 +1069,7 @@ function HierarchyNode({
                 highlightSelectedNodeId={highlightSelectedNodeId}
                 selectedParentId={selectedParentId}
                 focusWaveStartedAt={focusWaveStartedAt}
+                theme={theme}
                 onOpenNodeContextMenu={onOpenNodeContextMenu}
               />
             );
@@ -1150,6 +1212,7 @@ function NodeFocusRing({
   depthFade,
   waveDepth,
   waveStartedAt,
+  theme,
 }: {
   radius: number;
   baseColor: string;
@@ -1157,7 +1220,9 @@ function NodeFocusRing({
   depthFade: ReturnType<typeof getDepthFade>;
   waveDepth: number | null;
   waveStartedAt: number;
+  theme: AtlasTheme;
 }) {
+  const themeColors = getUniverseThemeColors(theme);
   const [waveGlow, setWaveGlow] = useState(0);
 
   useFrame(() => {
@@ -1174,19 +1239,19 @@ function NodeFocusRing({
     setWaveGlow((current) => (Math.abs(current - nextGlow) > 0.025 ? nextGlow : current));
   });
 
-  const highlightOpacity = (isSelected ? 0.46 : waveGlow * 0.42) * depthFade.opacity;
+  const highlightOpacity = (isSelected ? (theme === "light" ? 0.62 : 0.46) : waveGlow * (theme === "light" ? 0.5 : 0.42)) * depthFade.opacity;
   const highlightRadius = radius * (isSelected ? 1.58 : 1.48 + waveGlow * 0.08);
 
   return (
     <>
       <mesh>
         <torusGeometry args={[radius * 1.34, Math.max(0.18, radius * 0.025), 16, 96]} />
-        <meshBasicMaterial color={baseColor} transparent opacity={0.12 * depthFade.opacity} depthWrite={false} />
+        <meshBasicMaterial color={baseColor} transparent opacity={(theme === "light" ? 0.22 : 0.12) * depthFade.opacity} depthWrite={false} />
       </mesh>
       {highlightOpacity > 0.01 ? (
         <mesh>
           <torusGeometry args={[highlightRadius, Math.max(0.22, radius * 0.028), 16, 116]} />
-          <meshBasicMaterial color="#f4d96f" transparent opacity={highlightOpacity} depthWrite={false} />
+          <meshBasicMaterial color={themeColors.ringHighlight} transparent opacity={highlightOpacity} depthWrite={false} />
         </mesh>
       ) : null}
     </>
@@ -1196,6 +1261,7 @@ function NodeFocusRing({
 function ElasticTether({
   vector,
   color,
+  theme,
   radius,
   tension,
   birthingStartedAt,
@@ -1203,11 +1269,13 @@ function ElasticTether({
 }: {
   vector: [number, number, number];
   color: string;
+  theme: AtlasTheme;
   radius: number;
   tension: number;
   birthingStartedAt?: number;
   showTearThreshold?: boolean;
 }) {
+  const themeColors = getUniverseThemeColors(theme);
   const length = Math.hypot(vector[0], vector[1], vector[2]);
   if (length < 2 && !showTearThreshold) return null;
   const neck = Math.max(1.2, radius * (0.22 - tension * 0.11));
@@ -1225,7 +1293,7 @@ function ElasticTether({
           </mesh>
           <mesh>
             <torusGeometry args={[thresholdRadius * 0.985, Math.max(0.18, radius * 0.008), 10, 160]} />
-            <meshBasicMaterial color="#fff4c5" transparent opacity={0.18} depthWrite={false} />
+            <meshBasicMaterial color={themeColors.boundaryInner} transparent opacity={theme === "light" ? 0.28 : 0.18} depthWrite={false} />
           </mesh>
         </CameraFacingGroup>
       ) : null}
@@ -1241,10 +1309,10 @@ function ElasticTether({
       />
       <mesh position={[pointVector[0], pointVector[1], pointVector[2] + 5]}>
         <sphereGeometry args={[Math.max(1.4, radius * (0.18 - tension * 0.08)), 14, 10]} />
-        <meshBasicMaterial color="#fff2b9" transparent opacity={0.62 + tension * 0.28} />
+        <meshBasicMaterial color={themeColors.birthRing} transparent opacity={0.62 + tension * 0.28} />
       </mesh>
       {birthingStartedAt ? (
-        <WhiteHoleChargeMarker startedAt={birthingStartedAt} position={[pointVector[0], pointVector[1], pointVector[2] + 5]} />
+        <WhiteHoleChargeMarker startedAt={birthingStartedAt} position={[pointVector[0], pointVector[1], pointVector[2] + 5]} theme={theme} />
       ) : null}
     </group>
   );
@@ -1253,19 +1321,22 @@ function ElasticTether({
 function WhiteHoleChargeMarker({
   startedAt,
   position,
+  theme,
 }: {
   startedAt: number;
   position: [number, number, number];
+  theme: AtlasTheme;
 }) {
   const groupRef = useRef<Group>(null);
   const [age, setAge] = useState(0);
+  const themeColors = getUniverseThemeColors(theme);
 
   useFrame(() => {
     const nextAge = performance.now() - startedAt;
     setAge(nextAge);
     if (!groupRef.current) return;
     const charge = Math.min(1, nextAge / HOLD_TO_BIRTH_MS);
-    groupRef.current.scale.setScalar((0.36 + charge * 1.08) * (1 + Math.sin(nextAge * 0.018) * 0.035));
+    groupRef.current.scale.setScalar((0.36 + charge * 1.08) * (1 + Math.sin(nextAge * 0.018) * 0.035) * BIRTH_EFFECT_VISUAL_SCALE);
   });
 
   const charge = Math.min(1, age / HOLD_TO_BIRTH_MS);
@@ -1275,15 +1346,15 @@ function WhiteHoleChargeMarker({
       <CameraFacingGroup>
         <mesh>
           <sphereGeometry args={[5 + charge * 9, 32, 18]} />
-          <meshBasicMaterial color="#fffdf2" transparent opacity={0.52 + charge * 0.22} blending={AdditiveBlending} depthWrite={false} />
+          <meshBasicMaterial color={themeColors.birthCore} transparent opacity={0.52 + charge * 0.22} blending={AdditiveBlending} depthWrite={false} />
         </mesh>
         <mesh>
           <torusGeometry args={[13 + charge * 24, 1.4 + charge * 1.8, 18, 112]} />
-          <meshBasicMaterial color="#fff2ac" transparent opacity={0.72} blending={AdditiveBlending} depthWrite={false} />
+          <meshBasicMaterial color={themeColors.birthRing} transparent opacity={0.72} blending={AdditiveBlending} depthWrite={false} />
         </mesh>
         <mesh>
           <torusGeometry args={[(13 + charge * 24) * 1.5, 0.7 + charge, 18, 112]} />
-          <meshBasicMaterial color="#8df5cf" transparent opacity={0.34 + charge * 0.18} blending={AdditiveBlending} depthWrite={false} />
+          <meshBasicMaterial color={themeColors.birthAccent} transparent opacity={0.34 + charge * 0.18} blending={AdditiveBlending} depthWrite={false} />
         </mesh>
       </CameraFacingGroup>
     </group>
@@ -1293,14 +1364,17 @@ function WhiteHoleChargeMarker({
 function DragBoundaryGuide({
   depth,
   color,
+  theme,
   parentWorldPosition,
   siblingCount = 1,
 }: {
   depth: number;
   color: string;
+  theme: AtlasTheme;
   parentWorldPosition?: [number, number, number];
   siblingCount?: number;
 }) {
+  const themeColors = getUniverseThemeColors(theme);
   const shellRadius = getShellRadius(depth);
   if (depth > 1 && parentWorldPosition) {
     return (
@@ -1308,6 +1382,7 @@ function DragBoundaryGuide({
         depth={depth}
         siblingCount={siblingCount}
         color={color}
+        theme={theme}
         shellRadius={shellRadius}
         parentWorldPosition={parentWorldPosition}
       />
@@ -1326,7 +1401,7 @@ function DragBoundaryGuide({
       </mesh>
       <mesh>
         <torusGeometry args={[ringRadius * 0.985, DRAG_BOUNDARY_INNER_TUBE_RADIUS, 10, 192]} />
-        <meshBasicMaterial color="#fff4c5" transparent opacity={0.18} depthWrite={false} />
+        <meshBasicMaterial color={themeColors.boundaryInner} transparent opacity={theme === "light" ? 0.28 : 0.18} depthWrite={false} />
       </mesh>
     </group>
   );
@@ -1336,15 +1411,18 @@ function ChildDragBoundaryGuide({
   depth,
   siblingCount,
   color,
+  theme,
   shellRadius,
   parentWorldPosition,
 }: {
   depth: number;
   siblingCount: number;
   color: string;
+  theme: AtlasTheme;
   shellRadius: number;
   parentWorldPosition: [number, number, number];
 }) {
+  const themeColors = getUniverseThemeColors(theme);
   const parentDirection = normalizeVector(parentWorldPosition);
   const spreadLimit = getManualChildSpreadLimit(depth, siblingCount);
   const centerWorld = scaleTuple(parentDirection, shellRadius * Math.cos(spreadLimit));
@@ -1363,15 +1441,16 @@ function ChildDragBoundaryGuide({
       </mesh>
       <mesh>
         <torusGeometry args={[ringRadius * 0.985, DRAG_BOUNDARY_INNER_TUBE_RADIUS, 10, 160]} />
-        <meshBasicMaterial color="#fff4c5" transparent opacity={0.18} depthWrite={false} />
+        <meshBasicMaterial color={themeColors.boundaryInner} transparent opacity={theme === "light" ? 0.28 : 0.18} depthWrite={false} />
       </mesh>
     </group>
   );
 }
 
-function WhiteHoleEffect({ effect }: { effect: BirthEffect }) {
+function WhiteHoleEffect({ effect, theme }: { effect: BirthEffect; theme: AtlasTheme }) {
   const groupRef = useRef<Group>(null);
   const [age, setAge] = useState(0);
+  const themeColors = getUniverseThemeColors(theme);
   const position = scaleTuple(effect.direction, NOTEBOOK_FIRST_SHELL_RADIUS);
 
   useFrame(() => {
@@ -1380,7 +1459,7 @@ function WhiteHoleEffect({ effect }: { effect: BirthEffect }) {
     if (!groupRef.current) return;
     const charge = effect.mode === "charging" ? Math.min(1, nextAge / HOLD_TO_BIRTH_MS) : 1;
     const breathe = 1 + Math.sin(nextAge * 0.018) * 0.035;
-    groupRef.current.scale.setScalar((0.35 + charge * 1.1) * breathe);
+    groupRef.current.scale.setScalar((0.35 + charge * 1.1) * breathe * BIRTH_EFFECT_VISUAL_SCALE);
   });
 
   const charge = effect.mode === "charging" ? Math.min(1, age / HOLD_TO_BIRTH_MS) : 1;
@@ -1394,15 +1473,15 @@ function WhiteHoleEffect({ effect }: { effect: BirthEffect }) {
       <group ref={groupRef}>
         <mesh>
           <sphereGeometry args={[6 + charge * 10, 32, 18]} />
-          <meshBasicMaterial color="#fffdf2" transparent opacity={opacity * 0.72} blending={AdditiveBlending} />
+          <meshBasicMaterial color={themeColors.birthCore} transparent opacity={opacity * 0.72} blending={AdditiveBlending} />
         </mesh>
         <mesh>
           <torusGeometry args={[ringRadius, 1.6 + charge * 1.8, 18, 112]} />
-          <meshBasicMaterial color="#fff2ac" transparent opacity={opacity} blending={AdditiveBlending} />
+          <meshBasicMaterial color={themeColors.birthRing} transparent opacity={opacity} blending={AdditiveBlending} />
         </mesh>
         <mesh>
           <torusGeometry args={[ringRadius * 1.54, 0.8 + charge, 18, 112]} />
-          <meshBasicMaterial color="#8df5cf" transparent opacity={opacity * 0.42} blending={AdditiveBlending} />
+          <meshBasicMaterial color={themeColors.birthAccent} transparent opacity={opacity * 0.42} blending={AdditiveBlending} />
         </mesh>
       </group>
       </CameraFacingGroup>
@@ -1428,8 +1507,9 @@ function BirthRing({ startedAt, radius, color }: { startedAt: number; radius: nu
   );
 }
 
-function EmptyAtlasPulse() {
+function EmptyAtlasPulse({ theme }: { theme: AtlasTheme }) {
   const meshRef = useRef<Mesh>(null);
+  const themeColors = getUniverseThemeColors(theme);
   useFrame(({ clock }) => {
     if (!meshRef.current) return;
     meshRef.current.scale.setScalar(1 + Math.sin(clock.elapsedTime * 1.7) * 0.04);
@@ -1440,21 +1520,21 @@ function EmptyAtlasPulse() {
       <CameraFacingGroup>
         <mesh ref={meshRef}>
           <torusGeometry args={[42, 0.7, 16, 120]} />
-          <meshBasicMaterial color="#fff4c5" transparent opacity={0.18} />
+          <meshBasicMaterial color={themeColors.ringHighlight} transparent opacity={theme === "light" ? 0.34 : 0.18} />
         </mesh>
         <mesh>
           <sphereGeometry args={[3.4, 18, 10]} />
-          <meshBasicMaterial color="#fffdf2" transparent opacity={0.42} blending={AdditiveBlending} />
+          <meshBasicMaterial color={themeColors.birthCore} transparent opacity={0.42} blending={AdditiveBlending} />
         </mesh>
       </CameraFacingGroup>
     </group>
   );
 }
 
-function BackgroundStarLayer() {
+function BackgroundStarLayer({ theme }: { theme: AtlasTheme }) {
   const backgroundScene = useMemo(() => new Scene(), []);
   const backgroundCamera = useMemo(() => new OrthographicCamera(), []);
-  const backgroundColor = useMemo(() => new Color("#050706"), []);
+  const backgroundColor = useMemo(() => new Color(getUniverseThemeColors(theme).background), [theme]);
   const { gl, scene, camera, size } = useThree();
 
   useEffect(() => {
@@ -1479,10 +1559,10 @@ function BackgroundStarLayer() {
     gl.autoClear = true;
   }, 1);
 
-  return createPortal(<StarField />, backgroundScene);
+  return createPortal(<StarField theme={theme} />, backgroundScene);
 }
 
-function StarField() {
+function StarField({ theme }: { theme: AtlasTheme }) {
   const layers = useMemo(() => {
     let seed = 97;
     const rand = () => {
@@ -1490,13 +1570,22 @@ function StarField() {
       return (seed - 1) / 2147483646;
     };
 
-    const configs = [
-      { count: 2200, opacity: 0.3, size: 0.95, parallax: 0.012, z: -5, color: "#9fb2a8" },
-      { count: 1420, opacity: 0.4, size: 1.2, parallax: 0.024, z: -4, color: "#bbcbbf" },
-      { count: 860, opacity: 0.5, size: 1.48, parallax: 0.04, z: -3, color: "#d4dfd6" },
-      { count: 460, opacity: 0.62, size: 1.78, parallax: 0.06, z: -2, color: "#eef5e8" },
-      { count: 180, opacity: 0.76, size: 2.14, parallax: 0.086, z: -1, color: "#fff0b6" },
-    ];
+    const configs =
+      theme === "light"
+        ? [
+            { count: 1700, opacity: 0.13, size: 0.8, parallax: 0.012, z: -5, color: "#5f8ec6" },
+            { count: 1040, opacity: 0.15, size: 1.05, parallax: 0.024, z: -4, color: "#4e82c0" },
+            { count: 620, opacity: 0.18, size: 1.32, parallax: 0.04, z: -3, color: "#2f73bd" },
+            { count: 300, opacity: 0.2, size: 1.62, parallax: 0.06, z: -2, color: "#1f63ac" },
+            { count: 120, opacity: 0.22, size: 1.98, parallax: 0.086, z: -1, color: "#0b5cad" },
+          ]
+        : [
+            { count: 2200, opacity: 0.3, size: 0.95, parallax: 0.012, z: -5, color: "#9fb2a8" },
+            { count: 1420, opacity: 0.4, size: 1.2, parallax: 0.024, z: -4, color: "#bbcbbf" },
+            { count: 860, opacity: 0.5, size: 1.48, parallax: 0.04, z: -3, color: "#d4dfd6" },
+            { count: 460, opacity: 0.62, size: 1.78, parallax: 0.06, z: -2, color: "#eef5e8" },
+            { count: 180, opacity: 0.76, size: 2.14, parallax: 0.086, z: -1, color: "#fff0b6" },
+          ];
 
     return configs.map((config) => {
       const values = new Float32Array(config.count * 3);
@@ -1507,7 +1596,7 @@ function StarField() {
       }
       return { ...config, positions: values };
     });
-  }, []);
+  }, [theme]);
 
   const refs = useRef<Array<Group | null>>([]);
 
@@ -1687,6 +1776,16 @@ function getViewportScale(distance: number) {
   return Math.min(32, Math.max(0.3, 1 + distance / 360));
 }
 
+function canStartRootBirth(offset: number, viewportHeight: number, fov: number) {
+  const firstLayerFocusOffset = clamp(
+    NOTEBOOK_FIRST_SHELL_RADIUS - getCameraDistanceForDiameter(NOTEBOOK_NODE_RADIUS * 2, viewportHeight, fov),
+    MIN_CAMERA_OFFSET,
+    MAX_CAMERA_OFFSET,
+  );
+  const thresholdOffset = lerp(INITIAL_CAMERA_OFFSET, firstLayerFocusOffset, ROOT_BIRTH_FOCUS_MIDPOINT);
+  return firstLayerFocusOffset >= INITIAL_CAMERA_OFFSET ? offset <= thresholdOffset : offset >= thresholdOffset;
+}
+
 function getRotationGain(offset: number) {
   const distance = Math.max(0, offset - MIN_CAMERA_OFFSET);
   return 0.0023 / (1 + distance / 900);
@@ -1735,22 +1834,13 @@ function intersectRaySphere(ray: Ray, radius: number): [number, number, number] 
     return [point.x, point.y, point.z];
   }
 
-  const fallback = direction.multiplyScalar(radius);
+  const closestT = Math.max(0, -origin.dot(direction));
+  const closestPoint = origin.clone().add(direction.clone().multiplyScalar(closestT));
+  const fallback =
+    closestPoint.lengthSq() > 0.0001
+      ? closestPoint.normalize().multiplyScalar(radius)
+      : direction.multiplyScalar(radius);
   return [fallback.x, fallback.y, fallback.z];
-}
-
-function childDirectionFromDrag(parentDirection: [number, number, number], dragVector: [number, number, number], depth: number, childCount: number) {
-  const forward = normalizeVector(parentDirection);
-  const reference: [number, number, number] = Math.abs(forward[1]) > 0.86 ? [1, 0, 0] : [0, 1, 0];
-  const tangentA = normalizeVector(crossTuple(reference, forward));
-  const tangentB = normalizeVector(crossTuple(forward, tangentA));
-  const projectedA = dotTuple(dragVector, tangentA);
-  const projectedB = dotTuple(dragVector, tangentB);
-  const fallbackAngle = (Math.PI * 2 * childCount) / Math.max(childCount + 1, 1) + depth * 0.37;
-  const angle = Math.abs(projectedA) + Math.abs(projectedB) > 0.001 ? Math.atan2(projectedB, projectedA) : fallbackAngle;
-  const tangent = normalizeVector(addTuple(scaleTuple(tangentA, Math.cos(angle)), scaleTuple(tangentB, Math.sin(angle))));
-  const spread = getManualChildSpreadLimit(depth, childCount + 1);
-  return normalizeVector(addTuple(scaleTuple(forward, Math.cos(spread)), scaleTuple(tangent, Math.sin(spread))));
 }
 
 function movedEnoughInRecentWindow(

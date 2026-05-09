@@ -1,10 +1,11 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { Download, MoreHorizontal, RotateCcw, Upload } from "lucide-react";
+import { Download, Moon, MoreHorizontal, RotateCcw, Sun, Upload } from "lucide-react";
 import { ChangeEvent, useEffect, useState } from "react";
 import { Minimap } from "./components/Minimap";
 import { UniverseCanvas } from "./components/UniverseCanvas";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
 import { findNodePath, useAtlasStore } from "./store/atlasStore";
+import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import type { AtlasNode } from "./types";
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
   const importNotebook = useAtlasStore((state) => state.importNotebook);
   const resetNotebook = useAtlasStore((state) => state.resetNotebook);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [theme, setTheme] = useState<AtlasTheme>(() => loadStoredTheme());
   const datasetName = atlasRoot.title && atlasRoot.title !== "Mind Atlas" ? atlasRoot.title : "Spatial Notebook";
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
 
@@ -24,6 +26,10 @@ export default function App() {
     window.addEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenu);
     return () => window.removeEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenu);
   }, []);
+
+  useEffect(() => {
+    persistTheme(theme);
+  }, [theme]);
 
   const handleExport = () => {
     const blob = new Blob([exportNotebook()], { type: "application/mindatlas+json" });
@@ -60,8 +66,8 @@ export default function App() {
   };
 
   return (
-    <main className="app-shell">
-      <UniverseCanvas />
+    <main className="app-shell" data-theme={theme}>
+      <UniverseCanvas theme={theme} />
 
       <header className="top-bar" aria-label="Mind Atlas status">
         <div>
@@ -81,6 +87,27 @@ export default function App() {
         </button>
         {menuOpen ? (
           <div className="context-menu global-context-menu">
+            <div className="context-menu-section" aria-label="Background mode">
+              <span className="context-menu-section-title">Background</span>
+              <div className="theme-choice-row">
+                <button
+                  className={theme === "dark" ? "is-active" : ""}
+                  type="button"
+                  onClick={() => setTheme("dark")}
+                  aria-pressed={theme === "dark"}
+                >
+                  <Moon size={15} /> Black
+                </button>
+                <button
+                  className={theme === "light" ? "is-active" : ""}
+                  type="button"
+                  onClick={() => setTheme("light")}
+                  aria-pressed={theme === "light"}
+                >
+                  <Sun size={15} /> White
+                </button>
+              </div>
+            </div>
             <button type="button" onClick={handleExport}>
               <Download size={15} /> Export
             </button>
