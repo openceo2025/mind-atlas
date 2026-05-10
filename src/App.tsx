@@ -1,6 +1,7 @@
 import { FocusPanel } from "./components/FocusPanel";
 import { Download, Moon, MoreHorizontal, RotateCcw, Sun, Upload } from "lucide-react";
 import { ChangeEvent, useEffect, useState } from "react";
+import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
 import { Minimap } from "./components/Minimap";
 import { UniverseCanvas } from "./components/UniverseCanvas";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
@@ -18,6 +19,7 @@ export default function App() {
   const exportNotebook = useAtlasStore((state) => state.exportNotebook);
   const importNotebook = useAtlasStore((state) => state.importNotebook);
   const resetNotebook = useAtlasStore((state) => state.resetNotebook);
+  const restoreAttachmentPreviews = useAtlasStore((state) => state.restoreAttachmentPreviews);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, setTheme] = useState<AtlasTheme>(() => loadStoredTheme());
@@ -32,6 +34,12 @@ export default function App() {
   useEffect(() => {
     persistTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    void restoreAttachmentPreviews().catch((error) => {
+      console.error("Attachment preview restore failed", error);
+    });
+  }, [restoreAttachmentPreviews]);
 
   useEffect(() => {
     const marker = { mindAtlasBackTrap: true };
@@ -68,7 +76,8 @@ export default function App() {
     const lowerName = file.name.toLowerCase();
     if (lowerName.endsWith(".mindatlaspkg")) {
       try {
-        const { root, attachmentPreviewUrls } = await importNotebookPackage(file);
+        const { root, attachmentPreviewUrls, attachmentBlobs } = await importNotebookPackage(file);
+        await replaceStoredAttachmentBlobs(root, attachmentBlobs);
         importNotebook(root, datasetNameFromFile(file.name), attachmentPreviewUrls);
         setMenuOpen(false);
       } catch (error) {
@@ -79,7 +88,9 @@ export default function App() {
     }
 
     try {
-      importNotebook(JSON.parse(await file.text()), datasetNameFromFile(file.name));
+      const root = JSON.parse(await file.text()) as AtlasNode;
+      await replaceStoredAttachmentBlobs(root, {});
+      importNotebook(root, datasetNameFromFile(file.name));
       setMenuOpen(false);
     } catch (error) {
       console.error("Notebook import failed", error);

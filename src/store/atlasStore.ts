@@ -1,4 +1,10 @@
 import { create } from "zustand";
+import {
+  clearStoredAttachmentBlobs,
+  createStoredAttachmentPreviewUrls,
+  deleteStoredAttachmentBlob,
+  deleteStoredAttachmentBlobs,
+} from "../attachmentStorage";
 import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme";
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
 import type { AtlasEvent, AtlasNode, NodeAttachment, Selection, ViewportState, WorkArea } from "../types";
@@ -48,6 +54,7 @@ interface AtlasStore {
   removeAttachment: (nodeId: string, attachmentId: string) => void;
   updateNodeAppearance: (id: string, patch: Pick<Partial<AtlasNode>, "color" | "texture">) => void;
   consumeTitleEditRequest: () => void;
+  restoreAttachmentPreviews: () => Promise<void>;
   exportNotebook: () => string;
   importNotebook: (root: AtlasNode, datasetName?: string, attachmentPreviewUrls?: Record<string, string>) => void;
   resetNotebook: () => void;
@@ -272,6 +279,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       delete attachmentPreviewUrls[attachmentId];
     }
+    void deleteStoredAttachmentBlobs(deletedAttachmentIds).catch((error) => {
+      console.error("Failed to remove stored attachment blobs", error);
+    });
     for (const nodeId of deletedNodeIds) {
       delete birthMarks[nodeId];
     }
@@ -342,6 +352,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       const previewUrl = attachmentPreviewUrls[attachmentId];
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       delete attachmentPreviewUrls[attachmentId];
+      void deleteStoredAttachmentBlob(attachmentId).catch((error) => {
+        console.error("Failed to remove stored attachment blob", error);
+      });
       persistNotebook(atlasRoot);
       return { atlasRoot, attachmentPreviewUrls };
     });
@@ -360,6 +373,24 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   },
 
   consumeTitleEditRequest: () => set({ titleEditRequestId: null }),
+
+  restoreAttachmentPreviews: async () => {
+    const previewUrls = await createStoredAttachmentPreviewUrls(get().atlasRoot);
+    set((state) => {
+      const currentAttachmentIds = new Set(collectAttachmentIds(state.atlasRoot));
+      const nextPreviewUrls = { ...state.attachmentPreviewUrls };
+
+      for (const [attachmentId, previewUrl] of Object.entries(previewUrls)) {
+        if (!currentAttachmentIds.has(attachmentId) || nextPreviewUrls[attachmentId]) {
+          URL.revokeObjectURL(previewUrl);
+          continue;
+        }
+        nextPreviewUrls[attachmentId] = previewUrl;
+      }
+
+      return { attachmentPreviewUrls: nextPreviewUrls };
+    });
+  },
 
   exportNotebook: () => JSON.stringify(get().atlasRoot, null, 2),
 
@@ -384,6 +415,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const atlasRoot = createInitialNotebook();
     const previewUrls = get().attachmentPreviewUrls;
     Object.values(previewUrls).forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
+    void clearStoredAttachmentBlobs().catch((error) => {
+      console.error("Failed to clear stored attachment blobs", error);
+    });
     clearStoredNotebook();
     set((state) => ({
       atlasRoot,

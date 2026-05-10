@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { ChangeEvent, useEffect, useState } from "react";
+import { saveStoredAttachmentBlob } from "../attachmentStorage";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { findNode, useAtlasStore } from "../store/atlasStore";
 import type { AtlasNode, AttachmentKind, NodeAttachment } from "../types";
@@ -49,6 +50,9 @@ export function FocusPanel() {
         createdAt: new Date().toISOString(),
       };
       addAttachment(selectedNode.id, attachment, URL.createObjectURL(file));
+      void saveStoredAttachmentBlob(attachment, file).catch((error) => {
+        console.error("Failed to store attachment blob", error);
+      });
     }
     event.target.value = "";
   };

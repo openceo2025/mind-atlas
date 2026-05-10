@@ -1,4 +1,5 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { getStoredAttachmentBlob } from "./attachmentStorage";
 import type { AtlasNode, NodeAttachment } from "./types";
 
 const PACKAGE_FORMAT = "mindatlaspkg";
@@ -63,16 +64,19 @@ export async function importNotebookPackage(file: File) {
   }
 
   const attachmentPreviewUrls: Record<string, string> = {};
+  const attachmentBlobs: Record<string, Blob> = {};
   for (const asset of manifest.assets) {
     const bytes = entries[asset.path];
     if (!bytes) continue;
     const blob = new Blob([toArrayBuffer(bytes)], { type: asset.mimeType || "application/octet-stream" });
+    attachmentBlobs[asset.attachmentId] = blob;
     attachmentPreviewUrls[asset.attachmentId] = URL.createObjectURL(blob);
   }
 
   return {
     root: manifest.notebook,
     attachmentPreviewUrls,
+    attachmentBlobs,
   };
 }
 
@@ -86,15 +90,22 @@ async function cloneNodeWithAssets(
   const attachments: NodeAttachment[] = [];
   for (const attachment of node.attachments) {
     const previewUrl = attachmentPreviewUrls[attachment.id];
-    if (!previewUrl) {
+    const storedBlob = previewUrl ? undefined : await getStoredAttachmentBlob(attachment.id);
+    if (!previewUrl && !storedBlob) {
       addMissing(1);
       attachments.push(attachment);
       continue;
     }
 
     try {
-      const response = await fetch(previewUrl);
-      const blob = await response.blob();
+      let blob: Blob;
+      if (storedBlob) {
+        blob = storedBlob;
+      } else if (previewUrl) {
+        blob = await fetch(previewUrl).then((response) => response.blob());
+      } else {
+        throw new Error(`Attachment ${attachment.id} has no available blob.`);
+      }
       const path = `assets/${safeZipSegment(attachment.id)}/${safeZipSegment(attachment.name) || "attachment"}`;
       entries[path] = new Uint8Array(await blob.arrayBuffer());
       const packagedAttachment = {

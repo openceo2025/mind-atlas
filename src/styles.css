@@ -232,7 +232,9 @@ h1 {
   position: relative;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
+  width: 100%;
   min-height: 32px;
   border: 0;
   border-radius: 6px;
@@ -240,6 +242,7 @@ h1 {
   background: transparent;
   color: #dfeade;
   cursor: pointer;
+  text-align: left;
 }
 
 .context-menu button:hover,
