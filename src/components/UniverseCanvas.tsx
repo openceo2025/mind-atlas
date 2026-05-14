@@ -1,6 +1,6 @@
 import { Html, Line } from "@react-three/drei";
 import { Canvas, ThreeEvent, createPortal, useFrame, useThree } from "@react-three/fiber";
-import { Trash2 } from "lucide-react";
+import { Copy, Trash2 } from "lucide-react";
 import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   AdditiveBlending,
@@ -18,6 +18,7 @@ import {
 import {
   NOTEBOOK_FIRST_SHELL_RADIUS,
   NOTEBOOK_NODE_RADIUS,
+  findNodeWithWorldPosition,
   findNodePath,
   getNodeHitRadius,
   getNodeVisualRadius,
@@ -29,7 +30,7 @@ import {
 } from "../store/atlasStore";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import type { AtlasTheme } from "../theme";
-import type { AtlasNode } from "../types";
+import type { AtlasNode, NotificationPulseKind } from "../types";
 import { getStatusColor } from "../utils/status";
 
 const FOCUS_DURATION_SECONDS = 1.05;
@@ -55,6 +56,7 @@ const FOCUS_WAVE_DURATION_MS = 1000;
 const DRAG_BOUNDARY_TUBE_RADIUS = 0.55;
 const DRAG_BOUNDARY_INNER_TUBE_RADIUS = 0.24;
 const PINCH_WHEEL_SCALE = 3.4;
+const NOTIFICATION_PULSE_DURATION_MS = 8200;
 
 type Vec3Tuple = [number, number, number];
 
@@ -207,10 +209,147 @@ export function UniverseCanvas({ theme }: { theme: AtlasTheme }) {
         <BackgroundStarLayer theme={theme} />
         <NavigationController theme={theme} />
         <NotebookNodes theme={theme} onOpenNodeContextMenu={setNodeContextMenu} />
+        <NotificationPulseLayer theme={theme} />
       </Canvas>
       <NodeContextMenu menu={nodeContextMenu} onClose={() => setNodeContextMenu(null)} />
     </section>
   );
+}
+
+function NotificationPulseLayer({ theme }: { theme: AtlasTheme }) {
+  const atlasRoot = useAtlasStore((state) => state.atlasRoot);
+  const pulses = useAtlasStore((state) => state.notificationPulses);
+  const tickNotificationPulses = useAtlasStore((state) => state.tickNotificationPulses);
+  const lastPruneRef = useRef(0);
+
+  useFrame(() => {
+    const now = performance.now();
+    if (now - lastPruneRef.current < 900) return;
+    lastPruneRef.current = now;
+    tickNotificationPulses();
+  });
+
+  return (
+    <>
+      {pulses.map((pulse) => {
+        const located = findNodeWithWorldPosition(atlasRoot, pulse.nodeId);
+        if (!located) return null;
+        return (
+          <GlobalNotificationPulse
+            key={pulse.id}
+            position={located.position}
+            kind={pulse.kind}
+            createdAt={pulse.createdAt}
+            theme={theme}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function GlobalNotificationPulse({
+  position,
+  kind,
+  createdAt,
+  theme,
+}: {
+  position: [number, number, number];
+  kind: NotificationPulseKind;
+  createdAt: number;
+  theme: AtlasTheme;
+}) {
+  const [age, setAge] = useState(0);
+  const color = getNotificationPulseColor(kind, theme);
+
+  useFrame(() => {
+    setAge(performance.now() - createdAt);
+  });
+
+  if (age > NOTIFICATION_PULSE_DURATION_MS) return null;
+
+  const progress = Math.min(1, age / NOTIFICATION_PULSE_DURATION_MS);
+  const wave = Math.sin(progress * Math.PI);
+  const radius = 48 + progress * 1560;
+  const opacity = (theme === "light" ? 0.62 : 0.72) * Math.pow(1 - progress, 0.78) * (0.52 + wave * 0.48);
+
+  return (
+    <group position={position}>
+      <CameraFacingGroup>
+        <mesh>
+          <torusGeometry args={[radius, 1.4 + wave * 2.4, 18, 220]} />
+          <meshBasicMaterial color={color} transparent opacity={opacity} blending={AdditiveBlending} depthWrite={false} depthTest={false} />
+        </mesh>
+        <mesh>
+          <torusGeometry args={[radius * 0.58, 0.9 + wave * 1.4, 14, 180]} />
+          <meshBasicMaterial color={color} transparent opacity={opacity * 0.58} blending={AdditiveBlending} depthWrite={false} depthTest={false} />
+        </mesh>
+        <mesh>
+          <sphereGeometry args={[4.5 + wave * 3.5, 18, 10]} />
+          <meshBasicMaterial color={color} transparent opacity={0.36 + wave * 0.36} blending={AdditiveBlending} depthWrite={false} depthTest={false} />
+        </mesh>
+      </CameraFacingGroup>
+    </group>
+  );
+}
+
+function getNotificationPulseColor(kind: NotificationPulseKind, theme: AtlasTheme) {
+  if (kind === "error") return "#ff6b6b";
+  if (kind === "codex") return theme === "light" ? "#0b63ce" : "#86b7ff";
+  if (kind === "cost") return "#f59f48";
+  if (kind === "done") return "#8bd8d2";
+  return "#f7d765";
+}
+
+function buildNotificationPathKinds(
+  root: AtlasNode,
+  unreadNotifications: Record<string, { nodeId: string; kind: NotificationPulseKind }>,
+) {
+  const kinds = new Map<string, NotificationPulseKind>();
+  for (const unread of Object.values(unreadNotifications)) {
+    const path = findNodePath(root, unread.nodeId);
+    if (!path) continue;
+    markNotificationPath(kinds, path, unread.kind);
+  }
+  markStatusNotificationPaths(root, [root], kinds);
+  return kinds;
+}
+
+function markStatusNotificationPaths(
+  node: AtlasNode,
+  path: AtlasNode[],
+  kinds: Map<string, NotificationPulseKind>,
+) {
+  if (isNotificationErrorSource(node)) {
+    markNotificationPath(kinds, path, "error");
+  }
+  for (const child of node.children) {
+    markStatusNotificationPaths(child, [...path, child], kinds);
+  }
+}
+
+function isNotificationErrorSource(node: AtlasNode) {
+  return (
+    node.status === "error" &&
+    (node.nodeType === "tool_result" || node.kind === "event" || node.author === "system" || node.tags.includes("error"))
+  );
+}
+
+function markNotificationPath(kinds: Map<string, NotificationPulseKind>, path: AtlasNode[], kind: NotificationPulseKind) {
+  for (const node of path.slice(1)) {
+    const current = kinds.get(node.id);
+    if (!current || notificationPriority(kind) > notificationPriority(current)) {
+      kinds.set(node.id, kind);
+    }
+  }
+}
+
+function notificationPriority(kind: NotificationPulseKind) {
+  if (kind === "error") return 5;
+  if (kind === "codex") return 4;
+  if (kind === "needs_review") return 3;
+  if (kind === "cost") return 2;
+  return 1;
 }
 
 function NavigationController({ theme }: { theme: AtlasTheme }) {
@@ -537,6 +676,15 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
     onClose();
   };
 
+  const handleCopyAsText = async () => {
+    try {
+      await navigator.clipboard.writeText(serializeNodeTreeForLlm(node));
+      onClose();
+    } catch (error) {
+      console.error("Failed to copy node tree text", error);
+    }
+  };
+
   return (
     <div
       className="context-menu node-context-menu"
@@ -545,11 +693,163 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
       onContextMenu={(event) => event.preventDefault()}
       aria-label="Node actions"
     >
+      <button type="button" onClick={handleCopyAsText}>
+        <Copy size={15} /> テキストにコピー
+      </button>
       <button className="destructive-menu-button" type="button" onClick={handleDelete}>
         <Trash2 size={15} /> 削除
       </button>
     </div>
   );
+}
+
+type LlmExportEntry = {
+  node: AtlasNode;
+  ref: string;
+  parentRef: string;
+  titlePath: string[];
+  depth: number;
+  childIndex: number;
+  siblingCount: number;
+};
+
+function serializeNodeTreeForLlm(root: AtlasNode) {
+  const entries = buildLlmExportEntries(root);
+  const lines = [
+    "# Mind Atlas Structured Tree Export",
+    "",
+    "The following text is a tree-shaped Mind Atlas context export.",
+    "Read it as a hierarchy, not as one flat chat transcript.",
+    "`ref` is the compact tree address. For example, [0.2.1] is child 1 of child 2 of the copied root [0].",
+    "`parentRef`, `childIndex`, `childRefs`, `depth`, and `titlePath` preserve parent-child structure even when many node bodies are listed in sequence.",
+    "Use TREE_OUTLINE first for orientation, then read NODE blocks for full text and metadata.",
+    "",
+    "Notation:",
+    "- NODE_BEGIN / NODE_END delimit one node.",
+    "- body is the user or AI text stored in that node.",
+    "- attachments are metadata only unless content is explicitly present in body.",
+    "- AI/tool metadata such as provider, model, mode, and usage describes how that node was produced.",
+    "- Long platform ids are included as `id` for exact lookup, but `ref` is easier to reason about.",
+    "",
+    "Subtree summary:",
+    `- rootRef: [0]`,
+    `- rootTitle: ${cleanNodeTitle(root)}`,
+    `- totalNodes: ${entries.length}`,
+    "",
+    "TREE_OUTLINE_BEGIN",
+    ...entries.map(formatOutlineEntry),
+    "TREE_OUTLINE_END",
+    "",
+    ...entries.flatMap(formatNodeBlock),
+  ];
+  return lines.join("\n");
+}
+
+function buildLlmExportEntries(
+  node: AtlasNode,
+  ref = "0",
+  parentRef = "none",
+  ancestorTitles: string[] = [],
+  depth = 0,
+  childIndex = 0,
+  siblingCount = 1,
+): LlmExportEntry[] {
+  const titlePath = [...ancestorTitles, cleanNodeTitle(node)];
+  const entry: LlmExportEntry = {
+    node,
+    ref,
+    parentRef,
+    titlePath,
+    depth,
+    childIndex,
+    siblingCount,
+  };
+  return [
+    entry,
+    ...node.children.flatMap((child, index) =>
+      buildLlmExportEntries(child, `${ref}.${index + 1}`, ref, titlePath, depth + 1, index + 1, node.children.length),
+    ),
+  ];
+}
+
+function formatOutlineEntry(entry: LlmExportEntry) {
+  const indent = "  ".repeat(entry.depth);
+  const childCount = entry.node.children.length;
+  const meta = `${entry.node.author}/${entry.node.nodeType}/${entry.node.status}`;
+  return `${indent}- [${entry.ref}] ${cleanNodeTitle(entry.node)} (${meta}; children=${childCount})`;
+}
+
+function formatNodeBlock(entry: LlmExportEntry): string[] {
+  const { node } = entry;
+  const childRefs = node.children.length
+    ? node.children.map((child, index) => `[${entry.ref}.${index + 1}] ${cleanNodeTitle(child)}`).join("; ")
+    : "none";
+  const metadata = [
+    `ref: [${entry.ref}]`,
+    `parentRef: ${entry.parentRef === "none" ? "none" : `[${entry.parentRef}]`}`,
+    `childIndex: ${entry.depth === 0 ? "root" : `${entry.childIndex} of ${entry.siblingCount}`}`,
+    `id: ${node.id}`,
+    `title: ${cleanNodeTitle(node)}`,
+    `titlePath: ${entry.titlePath.join(" > ")}`,
+    `depth: ${entry.depth}`,
+    `kind: ${node.kind}`,
+    `nodeType: ${node.nodeType}`,
+    `author: ${node.author}`,
+    `status: ${node.status}`,
+    node.provider ? `provider: ${node.provider}` : "",
+    node.runMode ? `runMode: ${node.runMode}` : "",
+    node.modelId ? `model: ${node.modelId}` : "",
+    node.aiRunId ? `aiRunId: ${node.aiRunId}` : "",
+    node.tags.length ? `tags: ${node.tags.map((tag) => `#${tag}`).join(" ")}` : "tags: none",
+    node.attachments.length ? `attachments: ${node.attachments.map(formatAttachmentForExport).join("; ")}` : "attachments: none",
+    node.usage ? `usage: ${formatUsageForExport(node.usage)}` : "",
+    `childRefs: ${childRefs}`,
+  ].filter(Boolean);
+
+  return [
+    "",
+    "NODE_BEGIN",
+    ...metadata,
+    "summary:",
+    indentBlock(node.summary || "(empty)"),
+    "nextDecision:",
+    indentBlock(node.nextDecision || "(empty)"),
+    "body:",
+    indentBlock(node.body || "(empty)"),
+    "NODE_END",
+  ];
+}
+
+function cleanNodeTitle(node: AtlasNode) {
+  return node.title.trim() || "Untitled";
+}
+
+function indentBlock(value: string) {
+  return value
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => `  ${line}`)
+    .join("\n");
+}
+
+function formatAttachmentForExport(attachment: AtlasNode["attachments"][number]) {
+  return `${attachment.name} (${attachment.kind}, ${attachment.mimeType}, ${formatBytesForExport(attachment.size)})`;
+}
+
+function formatBytesForExport(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatUsageForExport(usage: NonNullable<AtlasNode["usage"]>) {
+  return [
+    typeof usage.inputTokens === "number" ? `inputTokens=${usage.inputTokens}` : "",
+    typeof usage.outputTokens === "number" ? `outputTokens=${usage.outputTokens}` : "",
+    typeof usage.totalTokens === "number" ? `totalTokens=${usage.totalTokens}` : "",
+    typeof usage.estimatedCostUsd === "number" ? `estimatedCostUsd=${usage.estimatedCostUsd}` : "",
+    typeof usage.durationMs === "number" ? `durationMs=${usage.durationMs}` : "",
+  ].filter(Boolean).join(", ");
 }
 
 function NotebookNodes({
@@ -561,6 +861,7 @@ function NotebookNodes({
 }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
+  const unreadNotifications = useAtlasStore((state) => state.unreadNotifications);
   const focusNonce = useAtlasStore((state) => state.focusRequest?.nonce ?? 0);
   const [focusWaveStartedAt, setFocusWaveStartedAt] = useState(() => performance.now());
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
@@ -570,6 +871,7 @@ function NotebookNodes({
   const selectedParentId = selectedPath.length > 1 ? selectedPath[selectedPath.length - 2].id : null;
   const focusBaseIndex = selectedPath.length > 2 ? selectedPath.length - 2 : 0;
   const focusParent = selectedPath[focusBaseIndex];
+  const notificationKindsByNodeId = useMemo(() => buildNotificationPathKinds(atlasRoot, unreadNotifications), [atlasRoot, unreadNotifications]);
 
   useEffect(() => {
     setFocusWaveStartedAt(performance.now());
@@ -596,6 +898,8 @@ function NotebookNodes({
           highlightSelectedNodeId={highlightSelectedNodeId}
           selectedParentId={rootIsSelected ? null : selectedParentId}
           focusWaveStartedAt={focusWaveStartedAt}
+          notificationKind={notificationKindsByNodeId.get(focusParent.id) ?? null}
+          notificationKindsByNodeId={notificationKindsByNodeId}
           theme={theme}
           onOpenNodeContextMenu={onOpenNodeContextMenu}
         />
@@ -622,6 +926,8 @@ function NotebookNodes({
             highlightSelectedNodeId={highlightSelectedNodeId}
             selectedParentId={rootIsSelected ? null : selectedParentId}
             focusWaveStartedAt={focusWaveStartedAt}
+            notificationKind={notificationKindsByNodeId.get(node.id) ?? null}
+            notificationKindsByNodeId={notificationKindsByNodeId}
             theme={theme}
             onOpenNodeContextMenu={onOpenNodeContextMenu}
           />
@@ -643,6 +949,8 @@ function HierarchyNode({
   highlightSelectedNodeId,
   selectedParentId,
   focusWaveStartedAt,
+  notificationKind,
+  notificationKindsByNodeId,
   theme,
   onOpenNodeContextMenu,
 }: {
@@ -657,6 +965,8 @@ function HierarchyNode({
   highlightSelectedNodeId: string;
   selectedParentId: string | null;
   focusWaveStartedAt: number;
+  notificationKind: NotificationPulseKind | null;
+  notificationKindsByNodeId: Map<string, NotificationPulseKind>;
   theme: AtlasTheme;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
@@ -1022,9 +1332,11 @@ function HierarchyNode({
           radius={radius}
           baseColor={ringColor}
           isSelected={isSelected}
+          status={node.status}
           depthFade={depthFade}
           waveDepth={focusWaveDepth}
           waveStartedAt={focusWaveStartedAt}
+          notificationKind={notificationKind}
           theme={theme}
         />
         {birthStartedAt ? <BirthRing startedAt={birthStartedAt} radius={radius} color={structuralColor} /> : null}
@@ -1055,7 +1367,7 @@ function HierarchyNode({
           scale={[1 + stretch, 1 - stretch * 0.34, 1 + stretch * 0.08]}
         >
           <sphereGeometry args={[radius, depth <= 1 ? 38 : 28, depth <= 1 ? 20 : 16]} />
-          <PlanetMaterial node={node} depthFade={depthFade} />
+          <PlanetMaterial node={node} depthFade={depthFade} theme={theme} />
         </mesh>
       </group>
       <mesh position={[-radius * 0.28, radius * 0.32, radius * 0.72]}>
@@ -1082,6 +1394,8 @@ function HierarchyNode({
                 highlightSelectedNodeId={highlightSelectedNodeId}
                 selectedParentId={selectedParentId}
                 focusWaveStartedAt={focusWaveStartedAt}
+                notificationKind={notificationKindsByNodeId.get(child.id) ?? null}
+                notificationKindsByNodeId={notificationKindsByNodeId}
                 theme={theme}
                 onOpenNodeContextMenu={onOpenNodeContextMenu}
               />
@@ -1198,12 +1512,20 @@ function getTextareaMaxHeight(textarea: HTMLTextAreaElement) {
 function PlanetMaterial({
   node,
   depthFade,
+  theme,
 }: {
   node: AtlasNode;
   depthFade: ReturnType<typeof getDepthFade>;
+  theme: AtlasTheme;
 }) {
   const texture = useMemo(() => createPlanetTexture(node.color, node.texture, node.id), [node.color, node.id, node.texture]);
-  const materialColor = useMemo(() => new Color(node.color).multiplyScalar(depthFade.brightness), [depthFade.brightness, node.color]);
+  const materialColor = useMemo(() => {
+    const color = new Color(node.color);
+    if (theme === "light") {
+      return color.lerp(new Color("#f7fbff"), depthFade.backgroundBlend * 0.9);
+    }
+    return color.multiplyScalar(depthFade.brightness);
+  }, [depthFade.backgroundBlend, depthFade.brightness, node.color, theme]);
   const emissive = useMemo(() => new Color(node.color), [node.color]);
 
   return (
@@ -1211,7 +1533,7 @@ function PlanetMaterial({
       color={materialColor}
       map={texture}
       emissive={emissive}
-      emissiveIntensity={0.12 * depthFade.brightness}
+      emissiveIntensity={(theme === "light" ? 0.03 : 0.12) * depthFade.brightness}
       roughness={0.66}
       metalness={0.04}
     />
@@ -1222,45 +1544,83 @@ function NodeFocusRing({
   radius,
   baseColor,
   isSelected,
+  status,
   depthFade,
   waveDepth,
   waveStartedAt,
+  notificationKind,
   theme,
 }: {
   radius: number;
   baseColor: string;
   isSelected: boolean;
+  status: AtlasNode["status"];
   depthFade: ReturnType<typeof getDepthFade>;
   waveDepth: number | null;
   waveStartedAt: number;
+  notificationKind: NotificationPulseKind | null;
   theme: AtlasTheme;
 }) {
   const themeColors = getUniverseThemeColors(theme);
   const [waveGlow, setWaveGlow] = useState(0);
+  const [statusPulse, setStatusPulse] = useState(0);
 
-  useFrame(() => {
+  useFrame(({ clock }) => {
     if (!waveDepth) {
       setWaveGlow((current) => (current > 0 ? 0 : current));
-      return;
+    } else {
+      const age = performance.now() - waveStartedAt - waveDepth * FOCUS_WAVE_STEP_MS;
+      const nextGlow =
+        age >= 0 && age <= FOCUS_WAVE_DURATION_MS
+          ? Math.sin((age / FOCUS_WAVE_DURATION_MS) * Math.PI)
+          : 0;
+      setWaveGlow((current) => (Math.abs(current - nextGlow) > 0.025 ? nextGlow : current));
     }
 
-    const age = performance.now() - waveStartedAt - waveDepth * FOCUS_WAVE_STEP_MS;
-    const nextGlow =
-      age >= 0 && age <= FOCUS_WAVE_DURATION_MS
-        ? Math.sin((age / FOCUS_WAVE_DURATION_MS) * Math.PI)
-        : 0;
-    setWaveGlow((current) => (Math.abs(current - nextGlow) > 0.025 ? nextGlow : current));
+    const speed = notificationKind ? (notificationKind === "error" ? 7.8 : 3.4) : status === "running" ? 4.6 : status === "needs_review" ? 2.2 : status === "error" ? 7.5 : 0;
+    const nextPulse = speed > 0 ? (Math.sin(clock.elapsedTime * speed) + 1) / 2 : 0;
+    setStatusPulse((current) => (Math.abs(current - nextPulse) > 0.035 ? nextPulse : current));
   });
 
+  const notificationColor = notificationKind ? getNotificationPulseColor(notificationKind, theme) : null;
+  const activeColor = notificationColor ?? baseColor;
+  const normalFade = depthFade.opacity;
+  const notificationFade = notificationKind ? 1 : normalFade;
   const highlightOpacity = (isSelected ? (theme === "light" ? 0.62 : 0.46) : waveGlow * (theme === "light" ? 0.5 : 0.42)) * depthFade.opacity;
   const highlightRadius = radius * (isSelected ? 1.58 : 1.48 + waveGlow * 0.08);
+  const basePulseOpacity = notificationKind
+    ? notificationKind === "error"
+      ? 0.82
+      : 0.68
+    : status === "running"
+      ? 0.38
+      : status === "needs_review"
+        ? 0.24
+        : status === "error"
+          ? 0.34
+          : 0;
+  const pulseOpacity = basePulseOpacity * (0.34 + statusPulse * 0.66) * notificationFade;
+  const pulseRadius = radius * (1.58 + statusPulse * (notificationKind ? 0.32 : status === "running" ? 0.36 : 0.18));
+  const pulseTube = Math.max(0.26, radius * (notificationKind ? 0.036 : 0.024));
 
   return (
     <>
       <mesh>
         <torusGeometry args={[radius * 1.34, Math.max(0.18, radius * 0.025), 16, 96]} />
-        <meshBasicMaterial color={baseColor} transparent opacity={(theme === "light" ? 0.22 : 0.12) * depthFade.opacity} depthWrite={false} />
+        <meshBasicMaterial color={baseColor} transparent opacity={(theme === "light" ? 0.22 : 0.12) * normalFade} depthWrite={false} />
       </mesh>
+      {pulseOpacity > 0.01 ? (
+        <mesh>
+          <torusGeometry args={[pulseRadius, pulseTube, 16, 132]} />
+          <meshBasicMaterial color={activeColor} transparent opacity={pulseOpacity} depthWrite={false} depthTest={!notificationKind} />
+        </mesh>
+      ) : null}
+      {notificationKind ? (
+        <mesh>
+          <torusGeometry args={[radius * (1.92 + statusPulse * 0.18), Math.max(0.18, radius * 0.018), 14, 132]} />
+          <meshBasicMaterial color={activeColor} transparent opacity={(0.34 + statusPulse * 0.32) * notificationFade} depthWrite={false} depthTest={false} />
+        </mesh>
+      ) : null}
       {highlightOpacity > 0.01 ? (
         <mesh>
           <torusGeometry args={[highlightRadius, Math.max(0.22, radius * 0.028), 16, 116]} />
@@ -1822,9 +2182,11 @@ function touchCenter(a: Touch, b: Touch) {
 
 function getDepthFade(index: number) {
   const normalized = Math.min(1, Math.max(0, index / VISIBLE_DESCENDANT_DEPTH));
+  const brightness = Math.max(0.045, Math.pow(0.52, index));
   return {
     opacity: Math.max(0.05, 1 - Math.pow(normalized, 0.72) * 0.95),
-    brightness: Math.max(0.045, Math.pow(0.52, index)),
+    brightness,
+    backgroundBlend: 1 - brightness,
   };
 }
 

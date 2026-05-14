@@ -7,7 +7,27 @@ import {
 } from "../attachmentStorage";
 import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme";
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
-import type { AtlasEvent, AtlasNode, NodeAttachment, Selection, ViewportState, WorkArea } from "../types";
+import { requestAiResponse } from "../ai/bridgeClient";
+import type {
+  AiContextScope,
+  AiContextStats,
+  AiExecutionMode,
+  AiGeneratedOutput,
+  AiNodeContext,
+  AiNodeSnapshot,
+  AiProvider,
+  AiRun,
+  AiUsage,
+  AtlasEvent,
+  AtlasNode,
+  NotificationPulse,
+  NotificationPulseKind,
+  NodeAttachment,
+  Selection,
+  ViewportState,
+  WorkArea,
+  WorkStatus,
+} from "../types";
 
 const NOTEBOOK_STORAGE_KEY = "mind-atlas-notebook-v2";
 export const NOTEBOOK_NODE_RADIUS = 28;
@@ -17,6 +37,16 @@ export const TOP_LEVEL_PLANAR_LIMIT = 0.5;
 export const TOP_LEVEL_DRAG_PLANAR_LIMIT = Math.min(1, TOP_LEVEL_PLANAR_LIMIT * 2);
 const FOCUSED_NODE_CAMERA_DISTANCE = 300;
 const MIN_CHILD_SCREEN_SEPARATION_RADII = 3.4;
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+const NOTIFICATION_PULSE_DURATION_MS = 8200;
+const NOTIFICATION_REPEAT_INTERVAL_MS = 3600;
+
+interface UnreadNotification {
+  nodeId: string;
+  kind: NotificationPulseKind;
+  title: string;
+  lastPulseAt: number;
+}
 
 interface FocusRequest {
   x: number;
@@ -29,6 +59,9 @@ interface FocusRequest {
 interface AtlasStore {
   atlasRoot: AtlasNode;
   workAreas: WorkArea[];
+  aiRuns: Record<string, AiRun>;
+  notificationPulses: NotificationPulse[];
+  unreadNotifications: Record<string, UnreadNotification>;
   selected: Selection;
   selectedNodeId: string;
   viewport: ViewportState;
@@ -41,6 +74,7 @@ interface AtlasStore {
   focusNode: (id: string) => void;
   focusParentNode: () => void;
   updateNode: (id: string, patch: Partial<Pick<AtlasNode, "title" | "body" | "tags" | "summary" | "nextDecision">>) => void;
+  setNodeStatus: (id: string, status: WorkStatus, nextDecision?: string) => void;
   addRootNodeAt: (position: [number, number, number], title?: string) => void;
   addChildNode: (
     parentId: string,
@@ -67,11 +101,17 @@ interface AtlasStore {
   focusPoint: (x: number, y: number, diameter: number) => void;
   focusParentLayer: () => void;
   appendInstruction: (workAreaId: string, content: string) => void;
+  addQuickChildFromInput: (prompt: string) => string | undefined;
+  runAiOnSelectedNode: (prompt: string, mode: AiExecutionMode, scope?: AiContextScope) => Promise<void>;
+  tickNotificationPulses: () => void;
 }
 
 export const useAtlasStore = create<AtlasStore>((set, get) => ({
   atlasRoot: loadStoredNotebook() ?? atlasRoot,
   workAreas: initialWorkAreas,
+  aiRuns: {},
+  notificationPulses: [],
+  unreadNotifications: {},
   selected: { kind: "node", id: "atlas-root" },
   selectedNodeId: "atlas-root",
   viewport: { x: 0, y: 0, zoom: 0.92 },
@@ -85,25 +125,35 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!located) return;
     const { node, path, position } = located;
     const visualRadius = getNodeVisualRadius(node, path.length - 1);
-    set((state) => ({
-      selected: selectionFromNode(node),
-      selectedNodeId: id,
-      focusRequest: {
-        x: position[0],
-        y: position[1],
-        z: position[2],
-        diameter: visualRadius * 2,
-        nonce: (state.focusRequest?.nonce ?? 0) + 1,
-      },
-    }));
+    set((state) => {
+      const unreadNotifications = { ...state.unreadNotifications };
+      delete unreadNotifications[id];
+      return {
+        selected: selectionFromNode(node),
+        selectedNodeId: id,
+        unreadNotifications,
+        focusRequest: {
+          x: position[0],
+          y: position[1],
+          z: position[2],
+          diameter: visualRadius * 2,
+          nonce: (state.focusRequest?.nonce ?? 0) + 1,
+        },
+      };
+    });
   },
 
   selectNodeInPlace: (id) => {
     const node = findNode(get().atlasRoot, id);
     if (!node) return;
-    set({
-      selected: selectionFromNode(node),
-      selectedNodeId: id,
+    set((state) => {
+      const unreadNotifications = { ...state.unreadNotifications };
+      delete unreadNotifications[id];
+      return {
+        selected: selectionFromNode(node),
+        selectedNodeId: id,
+        unreadNotifications,
+      };
     });
   },
 
@@ -112,17 +162,22 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!located) return;
     const { node, path, position } = located;
     const visualRadius = getNodeVisualRadius(node, path.length - 1);
-    set((state) => ({
-      selected: selectionFromNode(node),
-      selectedNodeId: id,
-      focusRequest: {
-        x: position[0],
-        y: position[1],
-        z: position[2],
-        diameter: visualRadius * 2,
-        nonce: (state.focusRequest?.nonce ?? 0) + 1,
-      },
-    }));
+    set((state) => {
+      const unreadNotifications = { ...state.unreadNotifications };
+      delete unreadNotifications[id];
+      return {
+        selected: selectionFromNode(node),
+        selectedNodeId: id,
+        unreadNotifications,
+        focusRequest: {
+          x: position[0],
+          y: position[1],
+          z: position[2],
+          diameter: visualRadius * 2,
+          nonce: (state.focusRequest?.nonce ?? 0) + 1,
+        },
+      };
+    });
   },
 
   focusParentNode: () => {
@@ -153,7 +208,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       const nextBody = patch.body ?? current?.body ?? "";
       const nextPatch = {
         ...patch,
-        tags: [],
+        tags: normalizeTags(patch.tags ?? current?.tags ?? [], nextTitle, nextBody, patch.summary ?? current?.summary ?? ""),
         updatedAt: new Date().toISOString(),
       };
       const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => ({ ...node, ...withoutUndefined(nextPatch) }));
@@ -162,9 +217,22 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
   },
 
+  setNodeStatus: (id, status, nextDecision) => {
+    set((state) => {
+      const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => ({
+        ...node,
+        status,
+        ...(nextDecision ? { nextDecision } : {}),
+        updatedAt: new Date().toISOString(),
+      }));
+      persistNotebook(atlasRoot);
+      return { atlasRoot };
+    });
+  },
+
   addRootNodeAt: (position, title = "Untitled planet") => {
     const child = createNotebookNode("atlas-root", get().atlasRoot.children.length, title, "", {
-      position: clampDirection(position, TOP_LEVEL_PLANAR_LIMIT),
+      position: clampDirection(position, TOP_LEVEL_DRAG_PLANAR_LIMIT),
     });
     set((state) => {
       const atlasRoot = {
@@ -187,13 +255,14 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!parent) return;
     const parentPath = findNodePath(get().atlasRoot, parentId);
     const childDepth = parentPath?.length ?? 1;
+    const insertIndex = typeof options.insertIndex === "number" ? options.insertIndex : parent.children.length;
     const childPosition = options.position
       ? getStoredPositionForWorldDirection(parentPath ?? [get().atlasRoot], options.position, childDepth, parent.children.length + 1)
-      : undefined;
+      : getPhyllotaxisStoredChildPosition(childDepth, parent.children.length + 1, insertIndex, parent.id);
     const child = createNotebookNode(
       parentId,
       parent.children.length,
-      options.title ?? (initialBody ? "New prompt" : "Untitled moon"),
+      options.title ?? (initialBody ? titleFromBody(initialBody) : "Untitled moon"),
       initialBody,
       { position: childPosition },
     );
@@ -265,7 +334,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const parentNode = path[path.length - 2];
     const deletedNodeIds = collectNodeIds(deletedNode);
     const deletedAttachmentIds = collectAttachmentIds(deletedNode);
-    const nextRoot = removeNodeById(state.atlasRoot, id);
+    const nextRoot = clearResolvedPropagatedErrors(removeNodeById(state.atlasRoot, id));
     const parentLocation = findNodeWithWorldPosition(nextRoot, parentNode.id);
     const nextSelectedNode = parentLocation?.node ?? nextRoot;
     const nextPosition = parentLocation?.position ?? [0, 0, 0];
@@ -273,6 +342,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const nextDiameter = getNodeVisualRadius(nextSelectedNode, nextDepth) * 2;
     const attachmentPreviewUrls = { ...state.attachmentPreviewUrls };
     const birthMarks = { ...state.birthMarks };
+    const unreadNotifications = { ...state.unreadNotifications };
 
     for (const attachmentId of deletedAttachmentIds) {
       const previewUrl = attachmentPreviewUrls[attachmentId];
@@ -284,6 +354,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
     for (const nodeId of deletedNodeIds) {
       delete birthMarks[nodeId];
+      delete unreadNotifications[nodeId];
     }
 
     persistNotebook(nextRoot);
@@ -293,6 +364,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       selectedNodeId: nextSelectedNode.id,
       attachmentPreviewUrls,
       birthMarks,
+      unreadNotifications,
+      notificationPulses: current.notificationPulses.filter((pulse) => !deletedNodeIds.includes(pulse.nodeId)),
       titleEditRequestId: current.titleEditRequestId && deletedNodeIds.includes(current.titleEditRequestId) ? null : current.titleEditRequestId,
       focusRequest: {
         x: nextPosition[0],
@@ -511,6 +584,203 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     }));
     get().addChildNode(get().selectedNodeId, content);
   },
+
+  addQuickChildFromInput: (prompt) => {
+    const trimmed = prompt.trim();
+    if (!trimmed) return undefined;
+    return get().addChildNode(get().selectedNodeId, trimmed, {
+      title: titleFromBody(trimmed),
+      focus: false,
+    });
+  },
+
+  runAiOnSelectedNode: async (prompt, mode, scope = "focused") => {
+    const trimmed = prompt.trim();
+    if (!trimmed) return;
+
+    const startedAt = new Date().toISOString();
+    const runId = `ai-run-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+    const state = get();
+    const sourceNodeId = state.selectedNodeId;
+    const context = buildAiNodeContext(state.atlasRoot, sourceNodeId, scope);
+    if (!context) return;
+    const sourcePath = findNodePath(state.atlasRoot, sourceNodeId);
+    if (!sourcePath) return;
+    const sourceParent = sourcePath?.at(-1);
+    if (!sourceParent) return;
+    const requestPosition = getPhyllotaxisStoredChildPosition(
+      sourcePath.length,
+      sourceParent.children.length + 1,
+      sourceParent.children.length,
+      sourceParent.id,
+    );
+    const requestNode = createAiRequestNode(sourceNodeId, sourceParent.children.length, runId, mode, trimmed, {
+      position: requestPosition,
+    });
+
+    const initialRun: AiRun = {
+      id: runId,
+      nodeId: sourceNodeId,
+      requestNodeId: requestNode.id,
+      provider: providerForMode(mode),
+      mode,
+      modelId: "",
+      status: "running",
+      prompt: trimmed,
+      startedAt,
+      contextStats: context.stats,
+    };
+
+    set((current) => {
+      const atlasRoot = updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
+        ...node,
+        status: "running",
+        nextDecision: `${modeLabel(mode)} is reading this node and preparing a child result.`,
+        updatedAt: new Date().toISOString(),
+        children: [...node.children, requestNode],
+      }));
+      persistNotebook(atlasRoot);
+      return {
+        atlasRoot,
+        birthMarks: { ...current.birthMarks, [requestNode.id]: performance.now() },
+        aiRuns: { ...current.aiRuns, [runId]: initialRun },
+      };
+    });
+
+    try {
+      const result = await requestAiResponse({ prompt: trimmed, context, provider: mode });
+      let responseNodeId = "";
+      set((current) => {
+        const parent = findNode(current.atlasRoot, requestNode.id);
+        if (!parent) return current;
+        const completedAt = new Date().toISOString();
+        const child = createAiResponseNode(
+          requestNode.id,
+          parent.children.length,
+          runId,
+          result.provider,
+          mode,
+          result.model,
+          result.output,
+          result.usage,
+          {
+            position: getPhyllotaxisStoredChildPosition(sourcePath.length + 1, parent.children.length + 1, parent.children.length, parent.id),
+          },
+        );
+        responseNodeId = child.id;
+        const atlasRoot = updateNodeById(
+          updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
+            ...node,
+            status: result.output.suggestedStatus === "done" ? "needs_review" : result.output.suggestedStatus,
+            nextDecision: "Review the child AI request branch.",
+            updatedAt: completedAt,
+          })),
+          requestNode.id,
+          (node) => ({
+          ...node,
+          status: result.output.suggestedStatus === "done" ? "needs_review" : result.output.suggestedStatus,
+          nextDecision: "Review the AI result, then keep, edit, or branch from it.",
+          updatedAt: completedAt,
+          children: [...node.children, child],
+          }),
+        );
+        persistNotebook(atlasRoot);
+        return {
+          atlasRoot,
+          birthMarks: { ...current.birthMarks, [child.id]: performance.now() },
+          notificationPulses: [
+            ...current.notificationPulses,
+            createNotificationPulse(child.id, mode === "codex" ? "codex" : "needs_review", `${modeLabel(mode)} result ready`),
+          ],
+          unreadNotifications: markUnreadNotification(
+            current.unreadNotifications,
+            child.id,
+            mode === "codex" ? "codex" : "needs_review",
+            `${modeLabel(mode)} result ready`,
+          ),
+          aiRuns: {
+            ...current.aiRuns,
+            [runId]: {
+              ...initialRun,
+              provider: result.provider,
+              modelId: result.model,
+              status: "needs_review",
+              completedAt,
+              responseNodeId,
+              usage: result.usage,
+            },
+          },
+        };
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI request failed.";
+      set((current) => {
+        const completedAt = new Date().toISOString();
+        const parent = findNode(current.atlasRoot, requestNode.id);
+        const errorNode = createAiErrorNode(requestNode.id, runId, mode, message, {
+          position: getPhyllotaxisStoredChildPosition(
+            sourcePath.length + 1,
+            (parent?.children.length ?? 0) + 1,
+            parent?.children.length ?? 0,
+            requestNode.id,
+          ),
+        });
+        const atlasRoot = updateNodeById(
+          updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
+            ...node,
+            status: "error",
+            nextDecision: message,
+            updatedAt: completedAt,
+          })),
+          requestNode.id,
+          (node) => ({
+          ...node,
+          status: "error",
+          nextDecision: message,
+          updatedAt: completedAt,
+          children: [...node.children, errorNode],
+          }),
+        );
+        persistNotebook(atlasRoot);
+        return {
+          atlasRoot,
+          birthMarks: { ...current.birthMarks, [errorNode.id]: performance.now() },
+          notificationPulses: [...current.notificationPulses, createNotificationPulse(errorNode.id, "error", `${modeLabel(mode)} failed`)],
+          unreadNotifications: markUnreadNotification(
+            current.unreadNotifications,
+            errorNode.id,
+            "error",
+            `${modeLabel(mode)} failed`,
+          ),
+          aiRuns: {
+            ...current.aiRuns,
+            [runId]: {
+              ...initialRun,
+              status: "error",
+              completedAt,
+              error: message,
+              responseNodeId: errorNode.id,
+            },
+          },
+        };
+      });
+    }
+  },
+
+  tickNotificationPulses: () => {
+    const now = performance.now();
+    const cutoff = now - NOTIFICATION_PULSE_DURATION_MS - 420;
+    set((state) => {
+      const notificationPulses = state.notificationPulses.filter((pulse) => pulse.createdAt >= cutoff);
+      const unreadNotifications = { ...state.unreadNotifications };
+      for (const unread of Object.values(unreadNotifications)) {
+        if (now - unread.lastPulseAt < NOTIFICATION_REPEAT_INTERVAL_MS) continue;
+        notificationPulses.push(createNotificationPulse(unread.nodeId, unread.kind, unread.title));
+        unreadNotifications[unread.nodeId] = { ...unread, lastPulseAt: now };
+      }
+      return { notificationPulses, unreadNotifications };
+    });
+  },
 }));
 
 export function getSelectionWorkArea(workAreas: WorkArea[], selected: Selection): WorkArea {
@@ -529,6 +799,34 @@ export function findNodePath(root: AtlasNode, id: string): AtlasNode[] | null {
 
 export function findNode(root: AtlasNode, id: string): AtlasNode | undefined {
   return findNodePath(root, id)?.at(-1);
+}
+
+export function buildAiNodeContext(root: AtlasNode, selectedNodeId: string, scope: AiContextScope = "focused"): AiNodeContext | null {
+  const path = findNodePath(root, selectedNodeId);
+  if (!path) return null;
+  const selectedNode = path[path.length - 1];
+  const parent = path.length > 1 ? path[path.length - 2] : null;
+  const selectedDepth = getSelectedSnapshotDepth(scope);
+  const siblingDepth = scope === "neighborhood" ? 1 : 0;
+  const includeSiblings = scope === "neighborhood";
+  const selectedSnapshot = nodeToAiSnapshot(selectedNode, selectedDepth);
+  const pathSnapshots = scope === "minimal" ? path.slice(-1).map((node) => nodeToAiSnapshot(node, 0)) : path.map((node) => nodeToAiSnapshot(node, 0));
+  const siblingSnapshots =
+    parent && includeSiblings ? parent.children.filter((node) => node.id !== selectedNode.id).map((node) => nodeToAiSnapshot(node, siblingDepth)) : [];
+  const stats = buildAiContextStats(scope, selectedSnapshot, pathSnapshots, siblingSnapshots);
+  return {
+    selectedNode: selectedSnapshot,
+    path: pathSnapshots,
+    siblingNodes: siblingSnapshots,
+    descendantCount: countDescendants(selectedNode),
+    scope,
+    stats,
+    exportedAt: new Date().toISOString(),
+  };
+}
+
+export function estimateAiNodeContext(root: AtlasNode, selectedNodeId: string, scope: AiContextScope = "focused"): AiContextStats | null {
+  return buildAiNodeContext(root, selectedNodeId, scope)?.stats ?? null;
 }
 
 export function getNodeWorldPosition(path: AtlasNode[]): [number, number, number] {
@@ -651,6 +949,31 @@ function removeNodeById(root: AtlasNode, id: string, updatedAt = new Date().toIS
   return changed ? { ...root, updatedAt, children } : root;
 }
 
+function clearResolvedPropagatedErrors(node: AtlasNode): AtlasNode {
+  const children = node.children.map((child) => clearResolvedPropagatedErrors(child));
+  const nextNode = children === node.children ? node : { ...node, children };
+  if (nextNode.status !== "error" || isIntrinsicErrorNode(nextNode) || hasIntrinsicErrorDescendant(nextNode)) {
+    return nextNode;
+  }
+  return {
+    ...nextNode,
+    status: "needs_review",
+    nextDecision: "Review the remaining branch.",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function hasIntrinsicErrorDescendant(node: AtlasNode): boolean {
+  return node.children.some((child) => isIntrinsicErrorNode(child) || hasIntrinsicErrorDescendant(child));
+}
+
+function isIntrinsicErrorNode(node: AtlasNode) {
+  return (
+    node.status === "error" &&
+    (node.nodeType === "tool_result" || node.kind === "event" || node.author === "system" || node.tags.includes("error"))
+  );
+}
+
 function collectNodeIds(node: AtlasNode): string[] {
   return [node.id, ...node.children.flatMap((child) => collectNodeIds(child))];
 }
@@ -692,6 +1015,160 @@ function createNotebookNode(
   };
 }
 
+function createAiRequestNode(
+  parentId: string,
+  index: number,
+  runId: string,
+  mode: AiExecutionMode,
+  prompt: string,
+  options: { position?: [number, number, number] } = {},
+): AtlasNode {
+  const now = new Date().toISOString();
+  const seed = `${parentId}-${runId}-${mode}-${index}`;
+  return {
+    id: `${parentId}-request-${Date.now()}-${crypto.randomUUID?.() ?? index}`,
+    kind: "thread",
+    nodeType: "human_prompt",
+    title: `${modeLabel(mode)} request`,
+    subtitle: "human request",
+    body: prompt,
+    author: "human",
+    status: "running",
+    color: planetColorForSeed(seed),
+    texture: randomTexture(seed),
+    radius: NOTEBOOK_NODE_RADIUS,
+    summary: prompt.split("\n").find(Boolean) ?? `${modeLabel(mode)} request.`,
+    nextDecision: `${modeLabel(mode)} is working on this request.`,
+    tags: normalizeTags([mode], prompt),
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    sourceParentId: parentId,
+    sourceId: runId,
+    aiRunId: runId,
+    provider: providerForMode(mode),
+    runMode: mode,
+    position: options.position,
+    children: [],
+  };
+}
+
+function createAiResponseNode(
+  parentId: string,
+  index: number,
+  runId: string,
+  provider: AiProvider,
+  mode: AiExecutionMode,
+  modelId: string,
+  output: AiGeneratedOutput,
+  usage?: AiUsage,
+  options: { position?: [number, number, number] } = {},
+): AtlasNode {
+  const now = new Date().toISOString();
+  const seed = `${parentId}-${runId}-${index}`;
+  const childSuggestions = output.childSuggestions.map((suggestion, suggestionIndex) =>
+    createAiSuggestionNode(`${parentId}-${runId}`, suggestionIndex, suggestion.title, suggestion.body, output.suggestedStatus),
+  );
+
+  return {
+    id: `${parentId}-ai-${Date.now()}-${crypto.randomUUID?.() ?? index}`,
+    kind: "thread",
+    nodeType: provider === "codex" ? "tool_result" : "ai_reply",
+    title: output.title,
+    subtitle: `${provider} / ${modelId}`,
+    body: output.body,
+    author: provider === "codex" ? "tool" : "ai",
+    status: output.suggestedStatus,
+    color: planetColorForSeed(seed),
+    texture: randomTexture(seed),
+    radius: NOTEBOOK_NODE_RADIUS,
+    summary: output.summary,
+    nextDecision: "Review this generated branch before treating it as accepted knowledge.",
+    tags: normalizeTags(output.tags, output.title, output.body, output.summary),
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    sourceParentId: parentId,
+    sourceId: runId,
+    aiRunId: runId,
+    modelId,
+    provider,
+    runMode: mode,
+    usage,
+    position: options.position,
+    children: childSuggestions,
+  };
+}
+
+function createAiErrorNode(
+  parentId: string,
+  runId: string,
+  mode: AiExecutionMode,
+  message: string,
+  options: { position?: [number, number, number] } = {},
+): AtlasNode {
+  const now = new Date().toISOString();
+  const seed = `${parentId}-${runId}-error`;
+  return {
+    id: `${parentId}-error-${Date.now()}-${crypto.randomUUID?.() ?? "error"}`,
+    kind: "event",
+    nodeType: "tool_result",
+    title: `${modeLabel(mode)} error`,
+    subtitle: "execution error",
+    body: message,
+    author: "system",
+    status: "error",
+    color: planetColorForSeed(seed),
+    texture: randomTexture(seed),
+    radius: NOTEBOOK_NODE_RADIUS,
+    summary: message,
+    nextDecision: "Inspect bridge configuration, provider status, or retry with a different mode.",
+    tags: normalizeTags([mode, "error"], message),
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    sourceParentId: parentId,
+    sourceId: runId,
+    aiRunId: runId,
+    provider: providerForMode(mode),
+    runMode: mode,
+    position: options.position,
+    children: [],
+  };
+}
+
+function createAiSuggestionNode(
+  parentId: string,
+  index: number,
+  title: string,
+  body: string,
+  status: WorkStatus,
+): AtlasNode {
+  const now = new Date().toISOString();
+  const seed = `${parentId}-suggestion-${index}-${title}`;
+  return {
+    id: `${parentId}-suggestion-${Date.now()}-${index}-${crypto.randomUUID?.() ?? index}`,
+    kind: "concept",
+    nodeType: "note",
+    title: title || "Suggested branch",
+    subtitle: "AI suggested branch",
+    body,
+    author: "ai",
+    status,
+    color: planetColorForSeed(seed),
+    texture: randomTexture(seed),
+    radius: NOTEBOOK_NODE_RADIUS,
+    summary: body.split("\n").find(Boolean) ?? "AI suggested branch.",
+    nextDecision: "Promote, edit, or delete this suggested branch.",
+    tags: normalizeTags([], title, body),
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    sourceParentId: parentId,
+    children: [],
+  };
+}
+
 function insertAt<T>(items: T[], index: number, item: T) {
   const target = Math.min(items.length, Math.max(0, index));
   return [...items.slice(0, target), item, ...items.slice(target)];
@@ -710,6 +1187,50 @@ function normalizeTags(tags: string[], ...textParts: string[]) {
   return Array.from(values);
 }
 
+function providerForMode(mode: AiExecutionMode): AiProvider {
+  if (mode === "local") return "local";
+  if (mode === "codex") return "codex";
+  return "openai";
+}
+
+function modeLabel(mode: AiExecutionMode) {
+  switch (mode) {
+    case "openai":
+      return "OpenAI";
+    case "local":
+      return "Local";
+    case "codex":
+      return "Codex";
+  }
+}
+
+function createNotificationPulse(nodeId: string, kind: NotificationPulseKind, title: string): NotificationPulse {
+  return {
+    id: `pulse-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`,
+    nodeId,
+    kind,
+    title,
+    createdAt: performance.now(),
+  };
+}
+
+function markUnreadNotification(
+  current: Record<string, UnreadNotification>,
+  nodeId: string,
+  kind: NotificationPulseKind,
+  title: string,
+) {
+  return {
+    ...current,
+    [nodeId]: {
+      nodeId,
+      kind,
+      title,
+      lastPulseAt: performance.now(),
+    },
+  };
+}
+
 function withoutUndefined<T extends Record<string, unknown>>(value: T) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as Partial<T>;
 }
@@ -726,7 +1247,7 @@ function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCou
     nodeType: node.nodeType ?? "note",
     body: node.body ?? node.summary ?? "",
     author: node.author ?? "human",
-    tags: [],
+    tags: normalizeTags(node.tags ?? [], node.title, node.body ?? "", node.summary ?? ""),
     attachments: node.attachments ?? [],
     texture: node.texture ?? randomTexture(node.id),
     radius: getNodeVisualRadius(node),
@@ -744,6 +1265,79 @@ function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCou
   };
 }
 
+function nodeToAiSnapshot(node: AtlasNode, depthRemaining: number): AiNodeSnapshot {
+  return {
+    id: node.id,
+    title: node.title,
+    body: truncateText(node.body, 4000),
+    summary: truncateText(node.summary, 600),
+    status: node.status,
+    author: node.author,
+    nodeType: node.nodeType,
+    tags: node.tags,
+    attachments: node.attachments.map((attachment) => ({
+      id: attachment.id,
+      name: attachment.name,
+      kind: attachment.kind,
+      mimeType: attachment.mimeType,
+      size: attachment.size,
+    })),
+    children: depthRemaining > 0 ? node.children.slice(0, 8).map((child) => nodeToAiSnapshot(child, depthRemaining - 1)) : [],
+  };
+}
+
+function getSelectedSnapshotDepth(scope: AiContextScope) {
+  switch (scope) {
+    case "minimal":
+      return 0;
+    case "focused":
+      return 1;
+    case "subtree":
+      return 4;
+    case "neighborhood":
+      return 2;
+  }
+}
+
+function buildAiContextStats(
+  scope: AiContextScope,
+  selectedNode: AiNodeSnapshot,
+  path: AiNodeSnapshot[],
+  siblingNodes: AiNodeSnapshot[],
+): AiContextStats {
+  const selectedCount = countSnapshotNodes(selectedNode);
+  const pathCount = path.reduce((sum, node) => sum + countSnapshotNodes(node), 0);
+  const siblingCount = siblingNodes.reduce((sum, node) => sum + countSnapshotNodes(node), 0);
+  const text = JSON.stringify({ selectedNode, path, siblingNodes });
+  return {
+    scope,
+    includedNodeCount: selectedCount + pathCount + siblingCount,
+    estimatedInputTokens: Math.ceil(text.length / 3.8),
+    sections: {
+      selected: selectedCount,
+      path: pathCount,
+      siblings: siblingCount,
+    },
+  };
+}
+
+function countSnapshotNodes(node: AiNodeSnapshot): number {
+  return 1 + node.children.reduce((sum, child) => sum + countSnapshotNodes(child), 0);
+}
+
+function countDescendants(node: AtlasNode): number {
+  return node.children.length + node.children.reduce((count, child) => count + countDescendants(child), 0);
+}
+
+function titleFromBody(body: string) {
+  const firstLine = body.split("\n").find((line) => line.trim())?.trim() ?? "";
+  return truncateText(firstLine || "Untitled moon", 48).replace(/\n\[truncated\]$/, "...");
+}
+
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}\n[truncated]` : value;
+}
+
 type Vec3 = [number, number, number];
 
 function topLevelDirection(index: number, count: number): Vec3 {
@@ -751,6 +1345,33 @@ function topLevelDirection(index: number, count: number): Vec3 {
   const ringRadius = count <= 4 ? 0.42 : 0.5;
   const angle = (Math.PI * 2 * index) / count - Math.PI / 2;
   return normalize([Math.cos(angle) * ringRadius, Math.sin(angle) * ringRadius, -1]);
+}
+
+function getPhyllotaxisStoredChildPosition(
+  depth: number,
+  siblingCount: number,
+  childIndex: number,
+  parentId: string,
+): Vec3 {
+  const i = childIndex + 1;
+  const angle = seededAngle(parentId) + i * GOLDEN_ANGLE;
+  if (depth <= 1) {
+    const planarRadius = Math.min(TOP_LEVEL_DRAG_PLANAR_LIMIT * 0.92, 0.22 + 0.12 * Math.sqrt(i));
+    return clampDirection([Math.cos(angle) * planarRadius, Math.sin(angle) * planarRadius, -1], TOP_LEVEL_DRAG_PLANAR_LIMIT);
+  }
+
+  const limit = getManualChildSpreadLimit(depth, siblingCount);
+  const amount = Math.min(limit * 0.94, limit * (0.38 + 0.12 * Math.sqrt(i)));
+  return clampLocalOffset([Math.cos(angle) * amount, Math.sin(angle) * amount, 0], limit);
+}
+
+function seededAngle(seed: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ((hash >>> 0) / 4294967295) * Math.PI * 2;
 }
 
 function childDirection(parentDirection: Vec3, angle: number, spread: number): Vec3 {

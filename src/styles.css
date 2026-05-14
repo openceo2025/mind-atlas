@@ -314,7 +314,44 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   min-width: 0;
+}
+
+.ai-node-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  height: 32px;
+  border: 1px solid rgba(141, 245, 207, 0.16);
+  border-radius: 8px;
+  padding: 0 9px;
+  background: rgba(141, 245, 207, 0.08);
+  color: #d8f3e5;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.ai-node-status span,
+.ai-node-status b,
+.ai-node-status small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-node-status b {
+  max-width: 96px;
+  color: #fff4c5;
+  font-weight: 700;
+}
+
+.ai-node-status small {
+  color: #9eb9aa;
+  font-size: 10px;
 }
 
 .panel-tool-button {
@@ -547,6 +584,13 @@ button:disabled,
 
 .icon-button.ghost {
   background: rgba(128, 176, 154, 0.1);
+}
+
+.icon-button.is-live {
+  border-color: rgba(255, 107, 107, 0.58);
+  background: rgba(255, 107, 107, 0.14);
+  color: #ffd9d9;
+  box-shadow: 0 0 18px rgba(255, 107, 107, 0.22);
 }
 
 .status-row {
@@ -1053,10 +1097,10 @@ button:disabled,
   bottom: 100px;
   z-index: 5;
   display: grid;
-  grid-template-columns: auto minmax(260px, 560px) auto;
+  grid-template-columns: auto auto auto minmax(260px, 560px) auto;
   align-items: center;
   gap: 9px;
-  width: min(680px, calc(100vw - 430px));
+  width: min(980px, calc(100vw - 430px));
   border: 1px solid rgba(247, 215, 101, 0.18);
   border-radius: 8px;
   padding: 9px;
@@ -1064,6 +1108,67 @@ button:disabled,
   box-shadow: 0 16px 56px rgba(0, 0, 0, 0.36);
   backdrop-filter: blur(20px);
   transform: translateX(-50%);
+}
+
+.mode-switch {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 248px;
+  border: 1px solid rgba(219, 234, 211, 0.12);
+  border-radius: 8px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #aabdad;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.mode-switch button.is-active {
+  background: rgba(141, 245, 207, 0.14);
+  color: #fff4c5;
+}
+
+.mode-switch span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scope-select {
+  height: 38px;
+  min-width: 126px;
+  border: 1px solid rgba(219, 234, 211, 0.12);
+  border-radius: 8px;
+  padding: 0 9px;
+  outline: 0;
+  background: rgba(6, 10, 8, 0.78);
+  color: #d9eadb;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.scope-select option {
+  background: #061008;
+  color: #d9eadb;
+}
+
+.scope-select:disabled {
+  color: #72867c;
+  opacity: 0.72;
 }
 
 .command-field {
@@ -1327,6 +1432,31 @@ button:disabled,
   color: #17446f;
 }
 
+.app-shell[data-theme="light"] .mode-switch {
+  border-color: rgba(53, 104, 164, 0.16);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.app-shell[data-theme="light"] .scope-select {
+  border-color: rgba(53, 104, 164, 0.16);
+  background: rgba(255, 255, 255, 0.58);
+  color: #1b334d;
+}
+
+.app-shell[data-theme="light"] .scope-select option {
+  background: #ffffff;
+  color: #1b334d;
+}
+
+.app-shell[data-theme="light"] .mode-switch button {
+  color: #48617d;
+}
+
+.app-shell[data-theme="light"] .mode-switch button.is-active {
+  background: rgba(24, 100, 190, 0.12);
+  color: #0b58a8;
+}
+
 .app-shell[data-theme="light"] .icon-button:hover,
 .app-shell[data-theme="light"] .send-button:hover,
 .app-shell[data-theme="light"] .ghost-button:hover,
@@ -1423,6 +1553,16 @@ button:disabled,
 .app-shell[data-theme="light"] .event-preview-meta span,
 .app-shell[data-theme="light"] .event-strip-header {
   color: #5c728d;
+}
+
+.app-shell[data-theme="light"] .ai-node-status {
+  border-color: rgba(24, 100, 190, 0.18);
+  background: rgba(24, 100, 190, 0.08);
+  color: #1f4164;
+}
+
+.app-shell[data-theme="light"] .ai-node-status b {
+  color: #0b58a8;
 }
 
 .app-shell[data-theme="light"] .attachment-remove {
@@ -1565,6 +1705,16 @@ button:disabled,
     padding: 8px;
     transform: none;
   }
+
+  .mode-switch {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  .scope-select {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
 }
 
 @media (max-width: 620px) and (orientation: portrait) {
@@ -1679,5 +1829,10 @@ button:disabled,
     grid-template-columns: auto minmax(0, 1fr) auto;
     padding: 8px;
     transform: none;
+  }
+
+  .mode-switch {
+    grid-column: 1 / -1;
+    min-width: 0;
   }
 }

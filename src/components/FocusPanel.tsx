@@ -1,4 +1,5 @@
 import {
+  Bot,
   CornerDownLeft,
   FileArchive,
   FileCode,
@@ -27,9 +28,11 @@ export function FocusPanel() {
   const removeAttachment = useAtlasStore((state) => state.removeAttachment);
   const updateNodeAppearance = useAtlasStore((state) => state.updateNodeAppearance);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
+  const aiRuns = useAtlasStore((state) => state.aiRuns);
   const selectedNode = findNode(atlasRoot, selectedNodeId) ?? atlasRoot;
   const isRoot = selectedNode.id === atlasRoot.id;
   const [surfaceMenuOpen, setSurfaceMenuOpen] = useState(false);
+  const aiRun = selectedNode.aiRunId ? aiRuns[selectedNode.aiRunId] : undefined;
 
   useEffect(() => {
     const closeSurfaceMenu = () => setSurfaceMenuOpen(false);
@@ -64,6 +67,11 @@ export function FocusPanel() {
           <Plus size={18} />
           <input type="file" multiple onChange={handleAttachmentChange} />
         </label>
+        <div className="ai-node-status" title={aiRun?.error ?? selectedNode.nextDecision}>
+          <Bot size={14} />
+          <span>{selectedNode.author === "ai" ? selectedNode.provider ?? "ai" : selectedNode.status}</span>
+          {selectedNode.modelId ? <b>{selectedNode.modelId}</b> : null}
+        </div>
         <div className="panel-menu-anchor">
           <button
             className="icon-button panel-tool-button"

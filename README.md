@@ -23,8 +23,12 @@ Current version: `0.1.1`
 - Previews selected image/audio/video files during the current browser session.
 - Extracts shared `#tags` from notebook text for later resonance behavior.
 - Provides appearance controls for planet color and texture.
+- Sends the focused node context to a local AI bridge and saves each user request plus provider result as child celestial nodes.
+- Supports OpenAI, LM Studio/OpenAI-compatible local models, and Codex CLI execution through the local bridge.
+- Emits wider notification pulses when AI work completes or fails away from the user's current focus.
+- Starts a Realtime voice session from the focused node without exposing the standard provider API key to the browser.
 
-AI execution, vendor adapters, embeddings, summarization, sync, and remote storage are intentionally out of scope for `0.1.x`.
+Embeddings, summarization automation, sync, and remote storage are intentionally out of scope for `0.1.x`.
 
 ![Mind Atlas turns scattered AI work into a navigable semantic space](docs/images/mindatlas2.png)
 
@@ -55,6 +59,15 @@ Open:
 ```text
 http://localhost:5173/
 ```
+
+Start the optional local AI bridge in a second terminal:
+
+```powershell
+$env:MIND_ATLAS_OPENAI_API_KEY="sk-..."
+npm run dev:bridge
+```
+
+Without an API key, the bridge returns mock AI responses so the UI flow remains testable.
 
 To test from another device on the same LAN:
 
@@ -137,6 +150,9 @@ Replace `<your-github-username>` with the GitHub account or organization that ow
 - Attached file blobs are not exported.
 - Attachment metadata such as file name, MIME type, size, and path-like name is saved.
 - Image, audio, and video previews work only for files selected in the current browser session.
+- Provider API keys belong in the local bridge process, not in browser local storage.
+
+See [docs/ai-bridge.md](docs/ai-bridge.md) for AI bridge setup and Realtime notes.
 
 ## Repository Contents
 

@@ -2,6 +2,7 @@ import { FocusPanel } from "./components/FocusPanel";
 import { Download, Moon, MoreHorizontal, RotateCcw, Sun, Upload } from "lucide-react";
 import { ChangeEvent, useEffect, useState } from "react";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
+import { CommandDock } from "./components/CommandDock";
 import { Minimap } from "./components/Minimap";
 import { UniverseCanvas } from "./components/UniverseCanvas";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
@@ -169,6 +170,7 @@ export default function App() {
       </div>
 
       <Minimap />
+      <CommandDock />
       <FocusPanel />
     </main>
   );

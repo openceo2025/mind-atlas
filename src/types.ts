@@ -87,6 +87,141 @@ export type AtlasNodeKind = "root" | "workArea" | "artifact" | "event" | "concep
 
 export type PlanetTexture = "speckled" | "bands" | "freckles" | "craters" | "mist" | "cell";
 
+export type AiExecutionMode = "openai" | "local" | "codex";
+
+export type AiContextScope = "minimal" | "focused" | "subtree" | "neighborhood";
+
+export type AiProvider = "openai" | "openai-compatible" | "local" | "codex" | "mock";
+
+export type AiRunStatus = "running" | "needs_review" | "error" | "done";
+
+export interface AiUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  estimatedCostUsd?: number;
+  durationMs?: number;
+}
+
+export interface AiRun {
+  id: string;
+  nodeId: string;
+  requestNodeId?: string;
+  provider: AiProvider;
+  mode: AiExecutionMode;
+  modelId: string;
+  status: AiRunStatus;
+  prompt: string;
+  startedAt: string;
+  completedAt?: string;
+  responseNodeId?: string;
+  error?: string;
+  usage?: AiUsage;
+  contextStats?: AiContextStats;
+}
+
+export interface AiNodeSnapshot {
+  id: string;
+  title: string;
+  body: string;
+  summary: string;
+  status: WorkStatus;
+  author: AtlasNode["author"];
+  nodeType: NotebookNodeType;
+  tags: string[];
+  attachments: Array<Pick<NodeAttachment, "id" | "name" | "kind" | "mimeType" | "size">>;
+  children: AiNodeSnapshot[];
+}
+
+export interface AiNodeContext {
+  selectedNode: AiNodeSnapshot;
+  path: AiNodeSnapshot[];
+  siblingNodes: AiNodeSnapshot[];
+  descendantCount: number;
+  scope: AiContextScope;
+  stats: AiContextStats;
+  exportedAt: string;
+}
+
+export interface AiContextStats {
+  scope: AiContextScope;
+  includedNodeCount: number;
+  estimatedInputTokens: number;
+  sections: {
+    selected: number;
+    path: number;
+    siblings: number;
+  };
+}
+
+export interface AiResponsePayload {
+  prompt: string;
+  context: AiNodeContext;
+  provider: AiExecutionMode;
+  model?: string;
+}
+
+export interface AiGeneratedChild {
+  title: string;
+  body: string;
+}
+
+export interface AiGeneratedOutput {
+  title: string;
+  body: string;
+  summary: string;
+  suggestedStatus: "needs_review" | "done" | "waiting";
+  tags: string[];
+  childSuggestions: AiGeneratedChild[];
+}
+
+export interface AiResponseResult {
+  id: string;
+  provider: AiProvider;
+  model: string;
+  output: AiGeneratedOutput;
+  rawText: string;
+  usage?: AiUsage;
+}
+
+export interface AiBridgeHealth {
+  ok: boolean;
+  bridge: string;
+  openaiConfigured: boolean;
+  openAiBaseUrl: string;
+  openAiMode: string;
+  defaultModel: string;
+  realtimeModel: string;
+  mockFallback: boolean;
+  providers: AiBridgeProvider[];
+}
+
+export interface AiBridgeProvider {
+  id: AiExecutionMode;
+  label: string;
+  configured: boolean;
+  model?: string;
+  baseUrl?: string;
+  detail?: string;
+}
+
+export type NotificationPulseKind = "done" | "needs_review" | "error" | "codex" | "cost";
+
+export interface NotificationPulse {
+  id: string;
+  nodeId: string;
+  kind: NotificationPulseKind;
+  title: string;
+  createdAt: number;
+}
+
+export interface RealtimeSessionConfig {
+  context: AiNodeContext;
+  instructions?: string;
+  model?: string;
+  voice?: string;
+}
+
 export interface AtlasNode {
   id: string;
   kind: AtlasNodeKind;
@@ -108,6 +243,11 @@ export interface AtlasNode {
   position?: [number, number, number];
   sourceParentId?: string;
   sourceId?: string;
+  aiRunId?: string;
+  modelId?: string;
+  provider?: AiProvider;
+  runMode?: AiExecutionMode;
+  usage?: AiUsage;
   children: AtlasNode[];
 }
 
