@@ -4,6 +4,16 @@ Mind Atlas keeps provider API keys out of the browser. The React app talks to a 
 
 ## Start
 
+Start the app and bridge together:
+
+```powershell
+npm run dev:all
+```
+
+Open `http://127.0.0.1:5173/`.
+
+Or start them separately:
+
 ```powershell
 $env:MIND_ATLAS_OPENAI_API_KEY="sk-..."
 npm run dev:bridge
@@ -14,8 +24,6 @@ In another terminal:
 ```powershell
 npm run dev
 ```
-
-Open `http://127.0.0.1:5173/`.
 
 If no API key is configured, text prompts still work through a mock response so the UI flow can be tested.
 

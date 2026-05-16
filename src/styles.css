@@ -224,7 +224,7 @@ h1 {
 
 .node-context-menu {
   position: fixed;
-  width: 156px;
+  width: 190px;
 }
 
 .context-menu button,
@@ -248,6 +248,13 @@ h1 {
 .context-menu button:hover,
 .context-menu label:hover {
   background: rgba(141, 245, 207, 0.09);
+}
+
+.context-menu button:disabled,
+.context-menu button:disabled:hover {
+  background: transparent;
+  opacity: 0.42;
+  cursor: not-allowed;
 }
 
 .context-menu button span {
@@ -1390,6 +1397,11 @@ button:disabled,
 .app-shell[data-theme="light"] .context-menu button:hover,
 .app-shell[data-theme="light"] .context-menu label:hover {
   background: rgba(28, 112, 207, 0.1);
+}
+
+.app-shell[data-theme="light"] .context-menu button:disabled,
+.app-shell[data-theme="light"] .context-menu button:disabled:hover {
+  background: transparent;
 }
 
 .app-shell[data-theme="light"] .context-menu-section {

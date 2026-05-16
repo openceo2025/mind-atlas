@@ -48,7 +48,19 @@ Install dependencies:
 npm install
 ```
 
-Start the development server:
+Start the app and local AI bridge together:
+
+```powershell
+npm run dev:all
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173/
+```
+
+Start only the development server:
 
 ```powershell
 npm run dev
@@ -60,7 +72,7 @@ Open:
 http://localhost:5173/
 ```
 
-Start the optional local AI bridge in a second terminal:
+Or start the optional local AI bridge in a second terminal:
 
 ```powershell
 $env:MIND_ATLAS_OPENAI_API_KEY="sk-..."

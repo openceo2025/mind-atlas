@@ -81,6 +81,7 @@ interface AtlasStore {
     initialBody?: string,
     options?: { title?: string; position?: [number, number, number]; insertIndex?: number; focus?: boolean; persist?: boolean },
   ) => string | undefined;
+  pasteNodeSubtree: (parentId: string, copiedRoot: AtlasNode) => string | undefined;
   addSiblingNode: (id: string) => void;
   deleteNode: (id: string) => void;
   moveNode: (id: string, worldPosition: [number, number, number]) => void;
@@ -288,6 +289,40 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       get().focusNode(child.id);
     }
     return child.id;
+  },
+
+  pasteNodeSubtree: (parentId, copiedRoot) => {
+    const state = get();
+    const parentPath = findNodePath(state.atlasRoot, parentId);
+    const parent = parentPath?.at(-1);
+    if (!parentPath || !parent) return undefined;
+
+    const childDepth = parentPath.length;
+    const insertIndex = parent.children.length;
+    const rootPosition = getPhyllotaxisStoredChildPosition(childDepth, parent.children.length + 1, insertIndex, parent.id);
+    const now = new Date().toISOString();
+    const pastedRoot = cloneNodeSubtreeForPaste(copiedRoot, parent.id, now, rootPosition, true);
+    const pastedNodeIds = collectNodeIds(pastedRoot);
+    const birthStartedAt = performance.now();
+
+    set((current) => {
+      const atlasRoot = updateNodeById(current.atlasRoot, parent.id, (node) => ({
+        ...node,
+        children: [...node.children, pastedRoot],
+        updatedAt: now,
+      }));
+      persistNotebook(atlasRoot);
+      return {
+        atlasRoot,
+        birthMarks: {
+          ...current.birthMarks,
+          ...Object.fromEntries(pastedNodeIds.map((id) => [id, birthStartedAt])),
+        },
+      };
+    });
+
+    get().focusNode(pastedRoot.id);
+    return pastedRoot.id;
   },
 
   addSiblingNode: (id) => {
@@ -982,6 +1017,45 @@ function collectAttachmentIds(node: AtlasNode): string[] {
   return [...node.attachments.map((attachment) => attachment.id), ...node.children.flatMap((child) => collectAttachmentIds(child))];
 }
 
+function cloneNodeSubtreeForPaste(
+  source: AtlasNode,
+  parentId: string,
+  now: string,
+  position: [number, number, number] | undefined,
+  isRoot = false,
+): AtlasNode {
+  const id = createPastedNodeId(parentId);
+  const { id: _id, sourceId: _sourceId, aiRunId: _aiRunId, attachments, children, position: _position, ...rest } = source;
+  return {
+    ...rest,
+    id,
+    kind: source.kind === "root" ? "thread" : source.kind,
+    createdAt: now,
+    updatedAt: now,
+    sourceParentId: parentId,
+    position: isRoot ? position : source.position,
+    attachments: attachments.map((attachment, index) => cloneAttachmentMetadataForPaste(attachment, id, index, now)),
+    children: children.map((child) => cloneNodeSubtreeForPaste(child, id, now, child.position, false)),
+  };
+}
+
+function cloneAttachmentMetadataForPaste(attachment: NodeAttachment, nodeId: string, index: number, now: string): NodeAttachment {
+  const { id: _id, assetPath: _assetPath, ...metadata } = attachment;
+  return {
+    ...metadata,
+    id: createPastedAttachmentId(nodeId, index),
+    createdAt: now,
+  };
+}
+
+function createPastedNodeId(parentId: string) {
+  return `${parentId}-copy-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+}
+
+function createPastedAttachmentId(nodeId: string, index: number) {
+  return `${nodeId}-attachment-${Date.now()}-${crypto.randomUUID?.() ?? index}`;
+}
+
 function createNotebookNode(
   parentId: string,
   index: number,
@@ -1066,9 +1140,6 @@ function createAiResponseNode(
 ): AtlasNode {
   const now = new Date().toISOString();
   const seed = `${parentId}-${runId}-${index}`;
-  const childSuggestions = output.childSuggestions.map((suggestion, suggestionIndex) =>
-    createAiSuggestionNode(`${parentId}-${runId}`, suggestionIndex, suggestion.title, suggestion.body, output.suggestedStatus),
-  );
 
   return {
     id: `${parentId}-ai-${Date.now()}-${crypto.randomUUID?.() ?? index}`,
@@ -1096,7 +1167,7 @@ function createAiResponseNode(
     runMode: mode,
     usage,
     position: options.position,
-    children: childSuggestions,
+    children: [],
   };
 }
 
@@ -1133,38 +1204,6 @@ function createAiErrorNode(
     provider: providerForMode(mode),
     runMode: mode,
     position: options.position,
-    children: [],
-  };
-}
-
-function createAiSuggestionNode(
-  parentId: string,
-  index: number,
-  title: string,
-  body: string,
-  status: WorkStatus,
-): AtlasNode {
-  const now = new Date().toISOString();
-  const seed = `${parentId}-suggestion-${index}-${title}`;
-  return {
-    id: `${parentId}-suggestion-${Date.now()}-${index}-${crypto.randomUUID?.() ?? index}`,
-    kind: "concept",
-    nodeType: "note",
-    title: title || "Suggested branch",
-    subtitle: "AI suggested branch",
-    body,
-    author: "ai",
-    status,
-    color: planetColorForSeed(seed),
-    texture: randomTexture(seed),
-    radius: NOTEBOOK_NODE_RADIUS,
-    summary: body.split("\n").find(Boolean) ?? "AI suggested branch.",
-    nextDecision: "Promote, edit, or delete this suggested branch.",
-    tags: normalizeTags([], title, body),
-    attachments: [],
-    createdAt: now,
-    updatedAt: now,
-    sourceParentId: parentId,
     children: [],
   };
 }

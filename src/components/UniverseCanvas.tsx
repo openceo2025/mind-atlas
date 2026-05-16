@@ -1,6 +1,6 @@
 import { Html, Line } from "@react-three/drei";
 import { Canvas, ThreeEvent, createPortal, useFrame, useThree } from "@react-three/fiber";
-import { Copy, Trash2 } from "lucide-react";
+import { ClipboardCopy, ClipboardPaste, Copy, Trash2 } from "lucide-react";
 import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   AdditiveBlending,
@@ -29,6 +29,7 @@ import {
   useAtlasStore,
 } from "../store/atlasStore";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
+import { createNodeClipboardText, nodeTreeHasAttachments, parseNodeClipboardText } from "../nodeClipboard";
 import type { AtlasTheme } from "../theme";
 import type { AtlasNode, NotificationPulseKind } from "../types";
 import { getStatusColor } from "../utils/status";
@@ -663,7 +664,48 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
 function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null; onClose: () => void }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const deleteNode = useAtlasStore((state) => state.deleteNode);
+  const pasteNodeSubtree = useAtlasStore((state) => state.pasteNodeSubtree);
+  const [clipboardNode, setClipboardNode] = useState<AtlasNode | null>(null);
+  const [clipboardState, setClipboardState] = useState<"checking" | "available" | "unavailable">("unavailable");
   const node = menu ? findNodePath(atlasRoot, menu.nodeId)?.at(-1) : undefined;
+
+  useEffect(() => {
+    let cancelled = false;
+    setClipboardNode(null);
+
+    if (!menu || !node || node.id === atlasRoot.id) {
+      setClipboardState("unavailable");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (typeof navigator === "undefined" || !navigator.clipboard?.readText) {
+      setClipboardState("unavailable");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setClipboardState("checking");
+    navigator.clipboard
+      .readText()
+      .then((text) => {
+        if (cancelled) return;
+        const parsedNode = parseNodeClipboardText(text);
+        setClipboardNode(parsedNode);
+        setClipboardState(parsedNode ? "available" : "unavailable");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn("Failed to inspect clipboard for Mind Atlas data", error);
+        setClipboardState("unavailable");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [atlasRoot.id, menu, node]);
 
   if (!menu || !node || node.id === atlasRoot.id) return null;
 
@@ -685,6 +727,43 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
     }
   };
 
+  const handleCopyObject = async () => {
+    try {
+      const hasAttachments = nodeTreeHasAttachments(node);
+      await writeClipboardText(createNodeClipboardText(node));
+      if (hasAttachments) {
+        window.alert("画像・動画などの添付ファイルが含まれています。クリップボードにはファイル本体ではなくメタデータのみコピーされます。");
+      }
+      onClose();
+    } catch (error) {
+      console.error("Failed to copy Mind Atlas node object", error);
+    }
+  };
+
+  const handlePasteObject = async () => {
+    let copiedNode = clipboardNode;
+    try {
+      const clipboardText = await navigator.clipboard.readText();
+      const latestNode = parseNodeClipboardText(clipboardText);
+      if (!latestNode) {
+        setClipboardNode(null);
+        setClipboardState("unavailable");
+        return;
+      }
+      copiedNode = latestNode;
+    } catch (error) {
+      if (!copiedNode) {
+        console.error("Failed to read Mind Atlas node object from clipboard", error);
+        return;
+      }
+    }
+
+    const pastedId = pasteNodeSubtree(node.id, copiedNode);
+    if (pastedId) onClose();
+  };
+
+  const canPaste = clipboardState === "available" && clipboardNode !== null;
+
   return (
     <div
       className="context-menu node-context-menu"
@@ -693,6 +772,17 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
       onContextMenu={(event) => event.preventDefault()}
       aria-label="Node actions"
     >
+      <button type="button" onClick={handleCopyObject}>
+        <ClipboardCopy size={15} /> オブジェクトコピー
+      </button>
+      <button
+        type="button"
+        onClick={handlePasteObject}
+        disabled={!canPaste}
+        title={canPaste ? "Mind Atlas object paste" : "Mind Atlasで読み込めるオブジェクトデータがクリップボードにありません"}
+      >
+        <ClipboardPaste size={15} /> 貼り付け
+      </button>
       <button type="button" onClick={handleCopyAsText}>
         <Copy size={15} /> テキストにコピー
       </button>
@@ -701,6 +791,26 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
       </button>
     </div>
   );
+}
+
+async function writeClipboardText(text: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  if (!copied) {
+    throw new Error("Clipboard write is not available.");
+  }
 }
 
 type LlmExportEntry = {

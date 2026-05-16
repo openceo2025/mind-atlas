@@ -161,18 +161,12 @@ export interface AiResponsePayload {
   model?: string;
 }
 
-export interface AiGeneratedChild {
-  title: string;
-  body: string;
-}
-
 export interface AiGeneratedOutput {
   title: string;
   body: string;
   summary: string;
   suggestedStatus: "needs_review" | "done" | "waiting";
   tags: string[];
-  childSuggestions: AiGeneratedChild[];
 }
 
 export interface AiResponseResult {

@@ -204,7 +204,7 @@ async function createCodexResponse({ prompt, context, model, startedAt }) {
   const result = await runCodex(codexPrompt, model);
   const body = [
     result.lastMessage || result.stdout || "Codex did not produce a final message.",
-    result.stderr.trim() ? `\n\nstderr:\n${result.stderr.trim()}` : "",
+    result.exitCode !== 0 && result.stderr.trim() ? `\n\nstderr:\n${result.stderr.trim()}` : "",
   ].join("").trim();
   return {
     id: randomUUID(),
@@ -216,7 +216,6 @@ async function createCodexResponse({ prompt, context, model, startedAt }) {
       summary: body.split("\n").find(Boolean) ?? "Codex run completed.",
       suggestedStatus: result.exitCode === 0 ? "needs_review" : "needs_review",
       tags: ["codex", "code"],
-      childSuggestions: [],
     }, prompt),
     rawText: result.stdout,
     usage: { durationMs: Date.now() - startedAt },
@@ -227,11 +226,11 @@ async function runCodex(prompt, model) {
   const outputFile = join(tmpdir(), `mind-atlas-codex-${Date.now()}-${randomUUID()}.txt`);
   const workspace = codexUseWsl ? toWslPath(codexWorkspace) : codexWorkspace;
   const codexArgs = [
+    "--ask-for-approval",
+    "never",
     "exec",
     "--sandbox",
     "read-only",
-    "--ask-for-approval",
-    "never",
     "--cd",
     workspace,
     "--color",
@@ -365,11 +364,13 @@ async function callChatCompletions(baseUrl, apiKey, model, system, user) {
 
 function buildSystemInstruction() {
   return [
-    "You are Mind Atlas, an AI collaborator embedded in a spatial tree notebook.",
-    "The selected celestial node is the active context. The user's request is preserved as a separate child node, and your response will become a child of that request.",
-    "You may propose child nodes, summaries, critiques, or next actions, but do not claim you changed files or remote systems.",
+    "You are an AI collaborator working inside Mind Atlas, a spatial tree notebook co-edited by the human and AI.",
+    "Mind Atlas is the surrounding thought tool and document structure. Do not speak as if you are Mind Atlas itself.",
+    "The selected celestial node is the active context. The user's request is preserved as a separate child node, and your single response will become one child of that request.",
+    "Return one direct answer to the user's message. Do not propose extra child nodes, hidden branches, follow-up nodes, or multiple alternative outputs.",
+    "You may summarize, critique, or suggest next actions inside the body of the single answer, but do not claim you changed files or remote systems.",
     "Return JSON only. Do not wrap it in Markdown.",
-    "Shape: {\"title\":\"short node title\",\"body\":\"full response\",\"summary\":\"one sentence\",\"suggestedStatus\":\"needs_review|done|waiting\",\"tags\":[\"tag\"],\"childSuggestions\":[{\"title\":\"short\",\"body\":\"text\"}]}",
+    "Shape: {\"title\":\"short node title\",\"body\":\"full response\",\"summary\":\"one sentence\",\"suggestedStatus\":\"needs_review|done|waiting\",\"tags\":[\"tag\"]}",
     "Write in the user's language unless the prompt asks otherwise.",
   ].join("\n");
 }
@@ -438,12 +439,6 @@ function createMockOutput(prompt, context) {
     summary: "Bridge is reachable; this is a mock response because no provider key is configured.",
     suggestedStatus: "needs_review",
     tags: ["ai", "mock"],
-    childSuggestions: [
-      {
-        title: "Next AI step",
-        body: "Configure the bridge with a provider key and rerun this prompt.",
-      },
-    ],
   }, prompt);
 }
 
@@ -455,17 +450,8 @@ function normalizeAiOutput(value, prompt) {
   const tags = Array.isArray(value?.tags)
     ? value.tags.map((item) => String(item).replace(/^#/, "").trim().toLowerCase()).filter(Boolean).slice(0, 8)
     : [];
-  const childSuggestions = Array.isArray(value?.childSuggestions)
-    ? value.childSuggestions
-      .map((item) => ({
-        title: stringOr(item?.title, "Suggested branch").slice(0, 80),
-        body: stringOr(item?.body, "").slice(0, 4000),
-      }))
-      .filter((item) => item.body.trim())
-      .slice(0, 4)
-    : [];
 
-  return { title, body, summary, suggestedStatus, tags, childSuggestions };
+  return { title, body, summary, suggestedStatus, tags };
 }
 
 function parseJsonText(rawText) {
