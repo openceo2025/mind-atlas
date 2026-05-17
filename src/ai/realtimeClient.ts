@@ -21,12 +21,15 @@ export interface RealtimeVoiceSession {
   beginPushToTalk: () => void;
   endPushToTalk: () => void;
   requestSessionSummaryAndClose: () => Promise<string>;
+  cancelAssistantResponse: () => void;
   stop: () => void;
 }
 
 interface StartVoicePartnerSessionOptions {
   context: AiNodeContext;
   instructions?: string;
+  model?: string;
+  voice?: string;
   summary?: VoiceSessionSummary | null;
   onStateChange?: (state: RealtimeSessionState) => void;
   onEvent?: (event: RealtimeClientEvent) => void;
@@ -39,6 +42,8 @@ export async function startRealtimeVoiceSession(options: StartVoicePartnerSessio
 export async function startVoicePartnerSession({
   context,
   instructions,
+  model,
+  voice,
   summary,
   onStateChange,
   onEvent,
@@ -64,6 +69,7 @@ export async function startVoicePartnerSession({
   const peerConnection = new RTCPeerConnection();
   const audioElement = new Audio();
   audioElement.autoplay = true;
+  let remoteAudioStream: MediaStream | null = null;
   let mediaStream: MediaStream | null = null;
   let stopped = false;
   let listening = false;
@@ -73,6 +79,9 @@ export async function startVoicePartnerSession({
   let summaryRejecter: ((reason?: unknown) => void) | null = null;
   let summaryMode = false;
   let responseInProgress = false;
+  let assistantAudioPlaybackActive = false;
+  let assistantPlaybackDetached = false;
+  let assistantPlaybackSettleTimer: number | null = null;
   let awaitingCommitForResponse = false;
   let pendingTurnCommitTimer: number | null = null;
   let commitFallbackTimer: number | null = null;
@@ -81,7 +90,8 @@ export async function startVoicePartnerSession({
   const queuedEvents: Record<string, unknown>[] = [];
 
   peerConnection.ontrack = (event) => {
-    audioElement.srcObject = event.streams[0];
+    remoteAudioStream = event.streams[0] ?? null;
+    attachAssistantAudioPlayback();
   };
 
   const dataChannel = peerConnection.createDataChannel("oai-events");
@@ -159,6 +169,8 @@ export async function startVoicePartnerSession({
   const session: RealtimeSessionConfig = {
     context,
     instructions,
+    model,
+    voice,
     summary,
     tools: getVoiceToolDefinitions(),
   };
@@ -247,8 +259,31 @@ export async function startVoicePartnerSession({
       return;
     }
 
+    if (type === "output_audio_buffer.started") {
+      assistantAudioPlaybackActive = true;
+      attachAssistantAudioPlayback();
+      if (assistantPlaybackSettleTimer !== null) {
+        window.clearTimeout(assistantPlaybackSettleTimer);
+        assistantPlaybackSettleTimer = null;
+      }
+      if (!summaryMode && !stopped) emitState("responding");
+      return;
+    }
+
+    if (type === "output_audio_buffer.stopped" || type === "output_audio_buffer.cleared") {
+      assistantAudioPlaybackActive = false;
+      assistantPlaybackDetached = false;
+      if (assistantPlaybackSettleTimer !== null) {
+        window.clearTimeout(assistantPlaybackSettleTimer);
+        assistantPlaybackSettleTimer = null;
+      }
+      if (!summaryMode && !stopped && !listening && !responseInProgress) emitState("live");
+      return;
+    }
+
     if (type === "response.created") {
       responseInProgress = true;
+      assistantPlaybackDetached = false;
       if (!summaryMode && !stopped) emitState("responding");
       return;
     }
@@ -269,7 +304,7 @@ export async function startVoicePartnerSession({
       assistantTextBuffer = "";
       if (text) onEvent?.({ kind: "assistant_done", text });
       completedToolCallKeys.clear();
-      if (!stopped) emitState("live");
+      settleAssistantResponseState();
       return;
     }
 
@@ -308,6 +343,7 @@ export async function startVoicePartnerSession({
     stopped = true;
     listening = false;
     clearTurnTimers();
+    clearPlaybackSettleTimer();
     summaryRejecter?.(new Error("Realtime session stopped."));
     summaryRejecter = null;
     summaryResolver = null;
@@ -319,21 +355,19 @@ export async function startVoicePartnerSession({
     peerConnection.close();
     mediaStream?.getTracks().forEach((track) => track.stop());
     audioElement.srcObject = null;
+    remoteAudioStream = null;
     emitState("closed");
   };
 
   return {
     id: sessionId,
+    cancelAssistantResponse,
     beginPushToTalk: () => {
       if (stopped || listening || pendingTurnCommitTimer !== null || awaitingCommitForResponse) return;
       listening = true;
       userTranscriptBuffer = "";
       assistantTextBuffer = "";
-      if (responseInProgress) {
-        sendEvent({ type: "response.cancel" });
-        sendEvent({ type: "output_audio_buffer.clear" });
-        responseInProgress = false;
-      }
+      cancelAssistantResponse();
       sendEvent({ type: "input_audio_buffer.clear" });
       mediaStream?.getAudioTracks().forEach((track) => {
         track.enabled = true;
@@ -366,7 +400,7 @@ export async function startVoicePartnerSession({
             content: [
               {
                 type: "input_text",
-                text: "Summarize this Mind Atlas voice session for future continuation. Include decisions, open tasks, and important referenced celestial nodes. Keep it concise.",
+                text: "Summarize this Mind Atlas voice session for future continuation. Include decisions, open tasks, and important referenced notebook nodes. Keep it concise.",
               },
             ],
           },
@@ -412,6 +446,7 @@ export async function startVoicePartnerSession({
     }
     assistantTextBuffer = "";
     responseInProgress = true;
+    assistantPlaybackDetached = false;
     emitState("responding");
     sendEvent({
       type: "response.create",
@@ -431,6 +466,71 @@ export async function startVoicePartnerSession({
       commitFallbackTimer = null;
     }
     awaitingCommitForResponse = false;
+  }
+
+  function settleAssistantResponseState() {
+    clearPlaybackSettleTimer();
+    if (stopped || summaryMode || listening) return;
+    if (!assistantAudioPlaybackActive) {
+      assistantPlaybackSettleTimer = window.setTimeout(() => {
+        assistantPlaybackSettleTimer = null;
+        if (!stopped && !summaryMode && !listening && !responseInProgress && !assistantAudioPlaybackActive) {
+          emitState("live");
+        }
+      }, 750);
+    }
+  }
+
+  function clearPlaybackSettleTimer() {
+    if (assistantPlaybackSettleTimer !== null) {
+      window.clearTimeout(assistantPlaybackSettleTimer);
+      assistantPlaybackSettleTimer = null;
+    }
+  }
+
+  function cancelAssistantResponse() {
+    if (stopped) return;
+    clearTurnTimers();
+    const shouldClearOutput = responseInProgress || summaryMode || assistantAudioPlaybackActive || Boolean(assistantTextBuffer.trim());
+    if (responseInProgress || summaryMode) {
+      sendEvent({ type: "response.cancel" });
+    }
+    if (shouldClearOutput) {
+      sendEvent({ type: "output_audio_buffer.clear" });
+      clearAssistantAudioPlayback();
+    }
+    assistantTextBuffer = "";
+    assistantAudioPlaybackActive = false;
+    clearPlaybackSettleTimer();
+    responseInProgress = false;
+    if (summaryMode) {
+      summaryMode = false;
+      summaryRejecter?.(new Error("Realtime response canceled."));
+      summaryResolver = null;
+      summaryRejecter = null;
+    }
+    if (!listening) emitState("live");
+  }
+
+  function clearAssistantAudioPlayback() {
+    assistantPlaybackDetached = true;
+    try {
+      audioElement.pause();
+      audioElement.srcObject = null;
+      audioElement.currentTime = 0;
+    } catch {
+      // MediaStream-backed audio can throw while being detached.
+    }
+  }
+
+  function attachAssistantAudioPlayback() {
+    if (!remoteAudioStream || stopped || assistantPlaybackDetached) return;
+    if (audioElement.srcObject !== remoteAudioStream) {
+      audioElement.srcObject = remoteAudioStream;
+    }
+    void audioElement.play().catch(() => {
+      // Mobile browsers can delay playback until the next user gesture.
+    });
   }
 
   function toolCallKeys(name: string, args: string, ids: { callId?: string; itemId?: string }) {

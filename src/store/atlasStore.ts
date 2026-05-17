@@ -32,6 +32,7 @@ import type {
   Selection,
   ViewportState,
   VoiceLogEntry,
+  VoicePartnerSettings,
   VoiceSessionSummary,
   WorkArea,
   WorkStatus,
@@ -40,6 +41,7 @@ import type {
 const NOTEBOOK_STORAGE_KEY = "mind-atlas-notebook-v2";
 const VOICE_LOG_STORAGE_KEY = "mind-atlas-voice-log-v1";
 const VOICE_SUMMARY_STORAGE_KEY = "mind-atlas-voice-summary-v1";
+const VOICE_SETTINGS_STORAGE_KEY = "mind-atlas-voice-settings-v1";
 export const NOTEBOOK_NODE_RADIUS = 28;
 export const NOTEBOOK_FIRST_SHELL_RADIUS = 360;
 export const NOTEBOOK_SHELL_GAP = 340;
@@ -69,6 +71,10 @@ const DEFAULT_CODEX_SETTINGS: CodexSettings = {
   webSearch: false,
   skipGitRepoCheck: false,
   timeoutMs: 60 * 60 * 1000,
+};
+const DEFAULT_VOICE_PARTNER_SETTINGS: VoicePartnerSettings = {
+  realtimeModel: "gpt-realtime-2",
+  realtimeVoice: "marin",
 };
 
 interface UnreadNotification {
@@ -101,6 +107,7 @@ interface AtlasStore {
   unreadNotifications: Record<string, UnreadNotification>;
   voiceLogEntries: VoiceLogEntry[];
   voiceSessionSummary: VoiceSessionSummary | null;
+  voicePartnerSettings: VoicePartnerSettings;
   selected: Selection;
   selectedNodeId: string;
   multiSelectedNodeIds: string[];
@@ -128,8 +135,11 @@ interface AtlasStore {
   appendVoiceLogEntry: (entry: Omit<VoiceLogEntry, "id" | "createdAt"> & Partial<Pick<VoiceLogEntry, "id" | "createdAt">>) => VoiceLogEntry;
   clearVoiceLog: () => void;
   setVoiceSessionSummary: (summary: VoiceSessionSummary | null) => void;
+  setVoicePartnerSettings: (settings: Partial<VoicePartnerSettings>) => void;
   focusParentNode: () => void;
   updateNode: (id: string, patch: Partial<Pick<AtlasNode, "title" | "body" | "tags" | "summary" | "nextDecision">>) => void;
+  setNodeReminder: (id: string, reminderAt: string) => void;
+  clearNodeReminder: (id: string) => void;
   setNodeStatus: (id: string, status: WorkStatus, nextDecision?: string) => void;
   addRootNodeAt: (position: [number, number, number], title?: string) => void;
   addChildNode: (
@@ -180,6 +190,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   unreadNotifications: {},
   voiceLogEntries: loadStoredVoiceLog(),
   voiceSessionSummary: loadStoredVoiceSessionSummary(),
+  voicePartnerSettings: loadStoredVoicePartnerSettings(),
   selected: { kind: "node", id: "atlas-root" },
   selectedNodeId: "atlas-root",
   multiSelectedNodeIds: [],
@@ -344,6 +355,17 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     set({ voiceSessionSummary: summary });
   },
 
+  setVoicePartnerSettings: (settings) => {
+    set((state) => {
+      const voicePartnerSettings = normalizeVoicePartnerSettings({
+        ...state.voicePartnerSettings,
+        ...settings,
+      });
+      persistVoicePartnerSettings(voicePartnerSettings);
+      return { voicePartnerSettings };
+    });
+  },
+
   focusParentNode: () => {
     const state = get();
     const path = findNodePath(state.atlasRoot, state.selectedNodeId);
@@ -382,6 +404,44 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
   },
 
+  setNodeReminder: (id, reminderAt) => {
+    const parsedAt = new Date(reminderAt);
+    if (Number.isNaN(parsedAt.getTime())) return;
+    const normalizedAt = parsedAt.toISOString();
+    const updatedAt = new Date().toISOString();
+    set((state) => {
+      const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => ({
+        ...node,
+        reminderAt: normalizedAt,
+        reminderFiredAt: undefined,
+        updatedAt,
+      }));
+      persistNotebook(atlasRoot);
+      return {
+        ...pushHistory(state),
+        atlasRoot,
+      };
+    });
+  },
+
+  clearNodeReminder: (id) => {
+    const updatedAt = new Date().toISOString();
+    set((state) => {
+      const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => {
+        const { reminderAt: _reminderAt, reminderFiredAt: _reminderFiredAt, ...rest } = node;
+        return {
+          ...rest,
+          updatedAt,
+        };
+      });
+      persistNotebook(atlasRoot);
+      return {
+        ...pushHistory(state),
+        atlasRoot,
+      };
+    });
+  },
+
   setNodeStatus: (id, status, nextDecision) => {
     set((state) => {
       const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => ({
@@ -395,7 +455,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
   },
 
-  addRootNodeAt: (position, title = "Untitled planet") => {
+  addRootNodeAt: (position, title = "Untitled node") => {
     const child = createNotebookNode("atlas-root", get().atlasRoot.children.length, title, "", {
       position: clampDirection(position, TOP_LEVEL_DRAG_PLANAR_LIMIT),
     });
@@ -428,7 +488,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const child = createNotebookNode(
       parentId,
       parent.children.length,
-      options.title ?? (initialBody ? titleFromBody(initialBody) : "Untitled moon"),
+      options.title ?? (initialBody ? titleFromBody(initialBody) : "Untitled node"),
       initialBody,
       { position: childPosition },
     );
@@ -1335,16 +1395,29 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   tickNotificationPulses: () => {
     const now = performance.now();
+    const nowDate = Date.now();
+    const firedAt = new Date(nowDate).toISOString();
     const cutoff = now - NOTIFICATION_PULSE_DURATION_MS - 420;
     set((state) => {
+      let atlasRoot = state.atlasRoot;
+      const dueReminders = collectDueReminderNodes(atlasRoot, nowDate);
+      if (dueReminders.length) {
+        atlasRoot = markReminderNodesFired(atlasRoot, new Set(dueReminders.map((node) => node.id)), firedAt);
+        persistNotebook(atlasRoot);
+      }
       const notificationPulses = state.notificationPulses.filter((pulse) => pulse.createdAt >= cutoff);
       const unreadNotifications = { ...state.unreadNotifications };
+      for (const node of dueReminders) {
+        const title = `Reminder: ${node.title || "Untitled node"}`;
+        notificationPulses.push(createNotificationPulse(node.id, "needs_review", title));
+        Object.assign(unreadNotifications, markUnreadNotification(unreadNotifications, node.id, "needs_review", title));
+      }
       for (const unread of Object.values(unreadNotifications)) {
         if (now - unread.lastPulseAt < NOTIFICATION_REPEAT_INTERVAL_MS) continue;
         notificationPulses.push(createNotificationPulse(unread.nodeId, unread.kind, unread.title));
         unreadNotifications[unread.nodeId] = { ...unread, lastPulseAt: now };
       }
-      return { notificationPulses, unreadNotifications };
+      return { atlasRoot, notificationPulses, unreadNotifications };
     });
   },
 }));
@@ -1537,6 +1610,17 @@ function loadStoredVoiceSessionSummary(): VoiceSessionSummary | null {
   }
 }
 
+function loadStoredVoicePartnerSettings(): VoicePartnerSettings {
+  if (typeof window === "undefined") return DEFAULT_VOICE_PARTNER_SETTINGS;
+  const raw = window.localStorage.getItem(VOICE_SETTINGS_STORAGE_KEY);
+  if (!raw) return DEFAULT_VOICE_PARTNER_SETTINGS;
+  try {
+    return normalizeVoicePartnerSettings(JSON.parse(raw) as Partial<VoicePartnerSettings>);
+  } catch {
+    return DEFAULT_VOICE_PARTNER_SETTINGS;
+  }
+}
+
 function createInitialNotebook() {
   return ensureNotebookNode(JSON.parse(JSON.stringify(atlasRoot)) as AtlasNode);
 }
@@ -1560,6 +1644,11 @@ function persistVoiceSessionSummary(summary: VoiceSessionSummary | null) {
   window.localStorage.setItem(VOICE_SUMMARY_STORAGE_KEY, JSON.stringify(summary));
 }
 
+function persistVoicePartnerSettings(settings: VoicePartnerSettings) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(VOICE_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+}
+
 function isVoiceLogEntry(value: unknown): value is VoiceLogEntry {
   if (!value || typeof value !== "object") return false;
   const entry = value as Partial<VoiceLogEntry>;
@@ -1570,6 +1659,17 @@ function isVoiceSessionSummary(value: unknown): value is VoiceSessionSummary {
   if (!value || typeof value !== "object") return false;
   const summary = value as Partial<VoiceSessionSummary>;
   return typeof summary.text === "string" && typeof summary.createdAt === "string";
+}
+
+function normalizeVoicePartnerSettings(value: Partial<VoicePartnerSettings>): VoicePartnerSettings {
+  return {
+    realtimeModel: normalizeSettingText(value.realtimeModel, DEFAULT_VOICE_PARTNER_SETTINGS.realtimeModel),
+    realtimeVoice: normalizeSettingText(value.realtimeVoice, DEFAULT_VOICE_PARTNER_SETTINGS.realtimeVoice),
+  };
+}
+
+function normalizeSettingText(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 80) : fallback;
 }
 
 function focusRootCameraOnly(setState: typeof useAtlasStore.setState, nodeId: string) {
@@ -1975,21 +2075,25 @@ function createAiErrorNode(
 ): AtlasNode {
   const now = new Date().toISOString();
   const seed = `${parentId}-${runId}-error`;
+  const codexLimit = mode === "codex" ? describeCodexTokenLimit(message, now) : null;
+  const title = codexLimit ? "Codex token limit" : `${modeLabel(mode)} error`;
+  const body = codexLimit?.body ?? message;
+  const summary = codexLimit?.summary ?? message;
   return {
     id: `${parentId}-error-${Date.now()}-${crypto.randomUUID?.() ?? "error"}`,
     kind: "event",
     nodeType: "tool_result",
-    title: `${modeLabel(mode)} error`,
+    title,
     subtitle: "execution error",
-    body: message,
+    body,
     author: "system",
     status: "error",
     color: planetColorForSeed(seed),
     texture: randomTexture(seed),
     radius: NOTEBOOK_NODE_RADIUS,
-    summary: message,
-    nextDecision: "Inspect bridge configuration, provider status, or retry with a different mode.",
-    tags: normalizeTags([mode, "error"], message),
+    summary,
+    nextDecision: codexLimit?.nextDecision ?? "Inspect bridge configuration, provider status, or retry with a different mode.",
+    tags: normalizeTags(codexLimit ? [mode, "error", "token-limit"] : [mode, "error"], message),
     attachments: [],
     createdAt: now,
     updatedAt: now,
@@ -2002,6 +2106,106 @@ function createAiErrorNode(
     position: options.position,
     children: [],
   };
+}
+
+function describeCodexTokenLimit(message: string, nowIso: string) {
+  if (!isCodexTokenLimitMessage(message)) return null;
+  const resetText = extractCodexLimitResetText(message, nowIso);
+  const body = [
+    "Codex token limit reached.",
+    resetText ? `Limit reset: ${resetText}` : "Limit reset: not reported by Codex.",
+    "",
+    "Original error:",
+    message,
+  ].join("\n");
+  return {
+    body,
+    summary: resetText ? `Codex token limit reached. Reset: ${resetText}.` : "Codex token limit reached. Reset time was not reported.",
+    nextDecision: resetText ? `Wait until ${resetText}, then retry Codex.` : "Wait for the Codex limit to reset, then retry.",
+  };
+}
+
+function isCodexTokenLimitMessage(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("token limit") ||
+    normalized.includes("usage limit") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("quota") ||
+    normalized.includes("too many requests")
+  );
+}
+
+function extractCodexLimitResetText(message: string, nowIso: string) {
+  const explicit =
+    matchFirst(message, [
+      /\b(?:resets?|reset|retry|try again|available again|come back)\s+(?:at|after|on)\s+([^\r\n.]+)/i,
+      /\b(?:resets?|retry|try again|available again|come back)\s+in\s+([^\r\n.]+)/i,
+      /\buntil\s+([^\r\n.]+)/i,
+    ]) ?? "";
+  if (!explicit) return "";
+
+  const cleaned = explicit.replace(/\s+/g, " ").trim();
+  if (/^\d+\s*(?:s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours)\b/i.test(cleaned)) {
+    const relative = addRelativeDuration(nowIso, cleaned);
+    return relative ? `${relative} (${cleaned} from now)` : cleaned;
+  }
+
+  const absolute = parseResetDate(cleaned, nowIso);
+  return absolute ?? cleaned;
+}
+
+function matchFirst(value: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function addRelativeDuration(nowIso: string, value: string) {
+  const now = new Date(nowIso);
+  let ms = 0;
+  const matches = value.matchAll(/(\d+(?:\.\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours)/gi);
+  for (const match of matches) {
+    const amount = Number(match[1]);
+    const unit = match[2].toLowerCase();
+    if (!Number.isFinite(amount)) continue;
+    if (unit.startsWith("h")) ms += amount * 60 * 60 * 1000;
+    else if (unit.startsWith("m")) ms += amount * 60 * 1000;
+    else ms += amount * 1000;
+  }
+  if (!ms) return "";
+  return formatResetDate(new Date(now.getTime() + ms));
+}
+
+function parseResetDate(value: string, nowIso: string) {
+  const direct = new Date(value);
+  if (!Number.isNaN(direct.getTime())) return formatResetDate(direct);
+
+  const timeMatch = value.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+  if (!timeMatch) return "";
+  const now = new Date(nowIso);
+  let hours = Number(timeMatch[1]);
+  const minutes = Number(timeMatch[2] ?? 0);
+  const meridiem = timeMatch[3]?.toLowerCase();
+  if (meridiem === "pm" && hours < 12) hours += 12;
+  if (meridiem === "am" && hours === 12) hours = 0;
+  if (hours > 23 || minutes > 59) return "";
+  const resetAt = new Date(now);
+  resetAt.setHours(hours, minutes, 0, 0);
+  if (resetAt.getTime() <= now.getTime()) resetAt.setDate(resetAt.getDate() + 1);
+  return formatResetDate(resetAt);
+}
+
+function formatResetDate(date: Date) {
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function insertAt<T>(items: T[], index: number, item: T) {
@@ -2073,6 +2277,39 @@ function markUnreadNotifications(
   title: string,
 ) {
   return nodeIds.reduce((next, nodeId) => markUnreadNotification(next, nodeId, kind, title), current);
+}
+
+function collectDueReminderNodes(root: AtlasNode, nowMs: number) {
+  const due: AtlasNode[] = [];
+  const visit = (node: AtlasNode) => {
+    if (node.reminderAt && !node.reminderFiredAt) {
+      const reminderMs = new Date(node.reminderAt).getTime();
+      if (!Number.isNaN(reminderMs) && reminderMs <= nowMs) due.push(node);
+    }
+    node.children.forEach(visit);
+  };
+  visit(root);
+  return due;
+}
+
+function markReminderNodesFired(root: AtlasNode, ids: Set<string>, firedAt: string): AtlasNode {
+  if (!ids.size) return root;
+  let changed = false;
+  const children = root.children.map((child) => {
+    const nextChild = markReminderNodesFired(child, ids, firedAt);
+    if (nextChild !== child) changed = true;
+    return nextChild;
+  });
+  if (ids.has(root.id)) {
+    changed = true;
+    return {
+      ...root,
+      reminderFiredAt: firedAt,
+      updatedAt: firedAt,
+      children,
+    };
+  }
+  return changed ? { ...root, children } : root;
 }
 
 function withAiDialogSettingsSaved(
@@ -2608,7 +2845,7 @@ function countDescendants(node: AtlasNode): number {
 
 function titleFromBody(body: string) {
   const firstLine = body.split("\n").find((line) => line.trim())?.trim() ?? "";
-  return truncateText(firstLine || "Untitled moon", 48).replace(/\n\[truncated\]$/, "...");
+  return truncateText(firstLine || "Untitled node", 48).replace(/\n\[truncated\]$/, "...");
 }
 
 function truncateText(value: string, maxLength: number) {

@@ -29,7 +29,7 @@ import {
   getAiContextNodeIds,
   useAtlasStore,
 } from "../store/atlasStore";
-import { UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
+import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { createNodeClipboardText, nodeTreeHasAttachments, parseNodeClipboardText } from "../nodeClipboard";
 import type { AtlasTheme } from "../theme";
 import type { AtlasNode, NotificationPulseKind } from "../types";
@@ -449,7 +449,6 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     const targetVector = new Vector3(focusRequest.x, focusRequest.y, focusRequest.z);
     const targetDirection = targetVector.lengthSq() > 0.001 ? targetVector.clone().normalize() : new Vector3(0, 0, -1);
     const targetAngles = directionToYawPitch(targetDirection);
-    const portraitPitchOffset = getPortraitPanelPitchOffset(size.width, size.height, perspective.fov);
     const targetDistance = getCameraDistanceForDiameter(focusRequest.diameter, size.height, perspective.fov);
     const targetOffset = clamp(targetVector.length() - targetDistance, MIN_CAMERA_OFFSET, MAX_CAMERA_OFFSET);
     const current = yawPitchRef.current;
@@ -459,7 +458,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
       startPitch: current.pitch,
       startOffset: current.offset,
       targetYaw: closestAngle(current.yaw, targetAngles.yaw),
-      targetPitch: clamp(targetAngles.pitch - portraitPitchOffset, -1.22, 1.22),
+      targetPitch: clamp(targetAngles.pitch, -1.22, 1.22),
       targetOffset,
       elapsed: 0,
       nonce: focusRequest.nonce,
@@ -680,6 +679,34 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
       }
     }
   };
+
+  useEffect(() => {
+    const handleMinimapNavigate = (event: Event) => {
+      const detail = (event as CustomEvent<{ yaw?: unknown; pitch?: unknown }>).detail;
+      if (typeof detail?.yaw !== "number" || typeof detail.pitch !== "number") return;
+      const state = yawPitchRef.current;
+      state.yaw = detail.yaw;
+      state.pitch = clamp(detail.pitch, -1.22, 1.22);
+      transitionRef.current = null;
+      wheelZoomOutRef.current.amount = 0;
+      wheelZoomInRef.current.amount = 0;
+      applyCameraPose(perspective, state);
+      setViewport({ x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) });
+    };
+
+    const handleMinimapZoom = (event: Event) => {
+      const detail = (event as CustomEvent<{ deltaY?: unknown }>).detail;
+      if (typeof detail?.deltaY !== "number") return;
+      handleWheelDelta(detail.deltaY);
+    };
+
+    window.addEventListener(MINIMAP_NAVIGATE_EVENT, handleMinimapNavigate);
+    window.addEventListener(MINIMAP_ZOOM_EVENT, handleMinimapZoom);
+    return () => {
+      window.removeEventListener(MINIMAP_NAVIGATE_EVENT, handleMinimapNavigate);
+      window.removeEventListener(MINIMAP_ZOOM_EVENT, handleMinimapZoom);
+    };
+  });
 
   return (
     <>
@@ -1303,7 +1330,7 @@ function HierarchyNode({
     const childWorld = clampWorldForDepth(pointerWorld, depth + 1, drag.currentWorld, childCount);
     const angle = Math.atan2(tearVector[1], tearVector[0]);
     const childId = addChildNode(node.id, "", {
-      title: "Untitled moon",
+      title: "Untitled node",
       position: childWorld,
       insertIndex: angleToInsertIndex(angle, childCount),
       focus: false,
@@ -1748,7 +1775,11 @@ function PlanetMaterial({
   theme: AtlasTheme;
 }) {
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
-  const fallbackTexture = useMemo(() => createPlanetTexture(node.color, node.texture, node.id), [node.color, node.id, node.texture]);
+  const lightSurfaceWash = theme === "light" ? getLightThemeDepthWash(depthFade.index) : 0;
+  const fallbackTexture = useMemo(
+    () => createPlanetTexture(node.color, node.texture, node.id, lightSurfaceWash),
+    [lightSurfaceWash, node.color, node.id, node.texture],
+  );
   const surfaceAttachment = useMemo(
     () => getNodeSurfaceAttachment(node.attachments, attachmentPreviewUrls),
     [attachmentPreviewUrls, node.attachments],
@@ -1759,10 +1790,10 @@ function PlanetMaterial({
   const materialColor = useMemo(() => {
     const color = new Color(hasAttachmentTexture ? "#ffffff" : node.color);
     if (theme === "light") {
-      return color.lerp(new Color("#f7fbff"), hasAttachmentTexture ? depthFade.backgroundBlend * 0.24 : depthFade.backgroundBlend * 0.9);
+      return color.lerp(new Color("#ffffff"), hasAttachmentTexture ? lightSurfaceWash * 0.42 : lightSurfaceWash);
     }
     return color.multiplyScalar(hasAttachmentTexture ? Math.max(0.62, depthFade.brightness) : depthFade.brightness);
-  }, [depthFade.backgroundBlend, depthFade.brightness, hasAttachmentTexture, node.color, theme]);
+  }, [depthFade.brightness, hasAttachmentTexture, lightSurfaceWash, node.color, theme]);
   const emissive = useMemo(() => new Color(node.color), [node.color]);
 
   return (
@@ -2693,12 +2724,15 @@ function CameraFacingGroup({ children }: { children: ReactNode }) {
   return <group ref={groupRef}>{children}</group>;
 }
 
-function createPlanetTexture(color: string, texture: AtlasNode["texture"], seedText: string) {
+function createPlanetTexture(color: string, texture: AtlasNode["texture"], seedText: string, lightSurfaceWash = 0) {
   const canvas = document.createElement("canvas");
   canvas.width = 160;
   canvas.height = 80;
   const context = canvas.getContext("2d");
   if (!context) return null;
+  const wash = clamp(lightSurfaceWash, 0, 1);
+  const textureWash = Math.min(1, wash * 1.08);
+  const lightTextureColor = (dark: string, light: string) => (textureWash > 0 ? blendHex(dark, light, textureWash) : dark);
 
   let seed = 1;
   for (let index = 0; index < seedText.length; index += 1) {
@@ -2709,13 +2743,13 @@ function createPlanetTexture(color: string, texture: AtlasNode["texture"], seedT
     return seed / 4294967295;
   };
 
-  context.fillStyle = color;
+  context.fillStyle = wash > 0 ? blendHex(color, "#ffffff", Math.min(1, wash * 0.9)) : color;
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.globalAlpha = 0.28;
 
   if (texture === "bands") {
     for (let y = 0; y < canvas.height; y += 7) {
-      context.fillStyle = rand() > 0.48 ? "#fff4bf" : "#0b1813";
+      context.fillStyle = rand() > 0.48 ? lightTextureColor("#fff4bf", "#ffffff") : lightTextureColor("#0b1813", "#ffffff");
       context.fillRect(0, y + rand() * 5, canvas.width, 1.4 + rand() * 5.2);
     }
   } else if (texture === "mist") {
@@ -2728,7 +2762,7 @@ function createPlanetTexture(color: string, texture: AtlasNode["texture"], seedT
         rand() * canvas.height,
         10 + rand() * 34,
       );
-      gradient.addColorStop(0, rand() > 0.5 ? "rgba(255,255,255,0.7)" : "rgba(11,24,19,0.55)");
+      gradient.addColorStop(0, rand() > 0.5 ? "rgba(255,255,255,0.7)" : `rgba(${Math.round(11 + textureWash * 244)},${Math.round(24 + textureWash * 231)},${Math.round(19 + textureWash * 236)},0.55)`);
       gradient.addColorStop(1, "rgba(255,255,255,0)");
       context.fillStyle = gradient;
       context.fillRect(0, 0, canvas.width, canvas.height);
@@ -2737,7 +2771,7 @@ function createPlanetTexture(color: string, texture: AtlasNode["texture"], seedT
     for (let index = 0; index < 54; index += 1) {
       const x = rand() * canvas.width;
       const y = rand() * canvas.height;
-      context.strokeStyle = rand() > 0.5 ? "rgba(255,244,191,0.62)" : "rgba(7,17,14,0.42)";
+      context.strokeStyle = rand() > 0.5 ? "rgba(255,244,191,0.62)" : `rgba(${Math.round(7 + textureWash * 248)},${Math.round(17 + textureWash * 238)},${Math.round(14 + textureWash * 241)},0.42)`;
       context.lineWidth = 1 + rand() * 2;
       context.beginPath();
       context.arc(x, y, 4 + rand() * 12, 0, Math.PI * 2);
@@ -2749,7 +2783,7 @@ function createPlanetTexture(color: string, texture: AtlasNode["texture"], seedT
       const size = texture === "craters" ? 4 + rand() * 10 : 1.5 + rand() * 4;
       context.beginPath();
       context.arc(rand() * canvas.width, rand() * canvas.height, size, 0, Math.PI * 2);
-      context.fillStyle = rand() > 0.45 ? "#fff4bf" : "#07110e";
+      context.fillStyle = rand() > 0.45 ? lightTextureColor("#fff4bf", "#ffffff") : lightTextureColor("#07110e", "#ffffff");
       context.fill();
       if (texture === "craters") {
         context.strokeStyle = "rgba(255,255,255,0.34)";
@@ -2763,9 +2797,15 @@ function createPlanetTexture(color: string, texture: AtlasNode["texture"], seedT
   const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
   gradient.addColorStop(0, "#ffffff");
   gradient.addColorStop(0.58, "transparent");
-  gradient.addColorStop(1, "#000000");
+  gradient.addColorStop(1, wash > 0 ? blendHex("#000000", "#ffffff", textureWash) : "#000000");
   context.fillStyle = gradient;
   context.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (wash > 0) {
+    context.globalAlpha = Math.min(0.96, wash * 0.72);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
 
   const planetTexture = new CanvasTexture(canvas);
   planetTexture.needsUpdate = true;
@@ -2831,10 +2871,6 @@ function getRotationGain(offset: number) {
   return 0.0023 / (1 + distance / 900);
 }
 
-function getPortraitPanelPitchOffset(width: number, height: number, fov: number) {
-  if (width > 620 || height <= width) return 0;
-  return (fov * Math.PI) / 180 * 0.18;
-}
 
 function touchDistance(a: Touch, b: Touch) {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -2851,10 +2887,17 @@ function getDepthFade(index: number) {
   const normalized = Math.min(1, Math.max(0, index / VISIBLE_DESCENDANT_DEPTH));
   const brightness = Math.max(0.045, Math.pow(0.52, index));
   return {
+    index,
     opacity: Math.max(0.05, 1 - Math.pow(normalized, 0.72) * 0.95),
     brightness,
     backgroundBlend: 1 - brightness,
   };
+}
+
+function getLightThemeDepthWash(index: number) {
+  if (index <= 0) return 0;
+  const normalized = clamp(index / VISIBLE_DESCENDANT_DEPTH, 0, 1);
+  return Math.min(1, Math.pow(normalized, 1.18) * 1.36);
 }
 
 function getLabelZoom(depth: number) {

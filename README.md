@@ -4,7 +4,7 @@
 
 Mind Atlas is a 2.5D spatial notebook for navigating parallel AI-assisted work.
 
-Instead of treating prompts, artifacts, and project states as a flat list of chats or files, Mind Atlas places them in a fixed-orientation semantic space. Each celestial object is an editable notebook node. The user can pan, zoom, focus, inspect attachments, and re-enter a work stream from the same spatial context.
+Instead of treating prompts, artifacts, and project states as a flat list of chats or files, Mind Atlas places them in a fixed-orientation semantic space. Each visible object is an editable notebook node. The user can pan, zoom, focus, inspect attachments, and re-enter a work stream from the same spatial context.
 
 Public site: https://mind-atlas.org
 
@@ -13,7 +13,7 @@ Current version: `0.1.1`
 ## What This Prototype Does
 
 - Renders a fixed-orientation 2.5D universe view with pan, zoom, focus, and semantic drill-down.
-- Treats one celestial object as one local notebook/chat-bubble node.
+- Treats one visible object as one local notebook/chat-bubble node.
 - Lets the user edit the focused node body in the Focus panel and directly on visible node labels.
 - Supports mouse-first creation of child nodes and sibling branch nodes.
 - Stores notebook data in browser local storage.
@@ -22,8 +22,8 @@ Current version: `0.1.1`
 - Attaches image, audio, video, or file metadata to a node.
 - Previews selected image/audio/video files during the current browser session.
 - Extracts shared `#tags` from notebook text for later resonance behavior.
-- Provides appearance controls for planet color and texture.
-- Sends the focused node context to a local AI bridge and saves each user request plus provider result as child celestial nodes.
+- Provides appearance controls for node color and texture.
+- Sends the focused node context to a local AI bridge and saves each user request plus provider result as child notebook nodes.
 - Saves OpenAI-generated images as attachments on the provider result node.
 - Supports OpenAI, LM Studio/OpenAI-compatible local models, and Codex CLI execution through the local bridge.
 - Saves and loads rich `.mindatlaspkg` notebook packages through the local bridge's server-side notebook folder.
@@ -31,6 +31,8 @@ Current version: `0.1.1`
 - Emits wider notification pulses when AI work completes or fails away from the user's current focus.
 - Uses the microphone button for short-click dictation with `gpt-4o-transcribe`.
 - Uses long-press push-to-talk for a Realtime Voice Partner that can inspect and operate the atlas through guarded tools.
+- Shows a square stop button while Voice Partner audio is responding, so the current reply can be canceled before the next push-to-talk turn.
+- Provides main-menu controls for Voice Partner restart, Realtime model/voice settings, and mobile-only notification alerts.
 - Keeps Voice Partner conversation logs in a global text log view from the main menu.
 
 Embeddings, summarization automation, sync, and remote storage are intentionally out of scope for `0.1.x`.

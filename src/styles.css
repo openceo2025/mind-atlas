@@ -1,4 +1,5 @@
 :root {
+  --app-height: 100dvh;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -18,11 +19,14 @@ html,
 body,
 #root {
   width: 100%;
-  height: 100%;
+  height: var(--app-height);
+  min-height: var(--app-height);
   margin: 0;
 }
 
 body {
+  position: fixed;
+  inset: 0;
   overflow: hidden;
   overscroll-behavior: none;
 }
@@ -42,12 +46,23 @@ button {
   position: relative;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
+  height: var(--app-height);
   overflow: hidden;
   touch-action: none;
   background:
     radial-gradient(circle at 50% 46%, rgba(141, 245, 207, 0.055), transparent 34%),
     linear-gradient(180deg, rgba(16, 20, 15, 0.18), rgba(5, 7, 6, 0.86)),
     #050706;
+}
+
+.mobile-workspace-panel,
+.mobile-panel-slot {
+  display: contents;
+}
+
+.mobile-workspace-tabs {
+  display: none;
 }
 
 .universe-shell {
@@ -68,6 +83,12 @@ button {
   gap: 18px;
   pointer-events: none;
   z-index: 3;
+}
+
+.top-title-stack {
+  display: grid;
+  justify-items: start;
+  min-width: 0;
 }
 
 .eyebrow {
@@ -158,6 +179,61 @@ h1 {
   color: #dbe8d8 !important;
 }
 
+.unread-notification-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 6px;
+  max-width: min(560px, calc(100vw - 420px));
+  margin-top: 8px;
+  pointer-events: auto;
+}
+
+.unread-notification-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 162px;
+  min-height: 24px;
+  border: 1px solid rgba(193, 220, 198, 0.18);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(6, 10, 8, 0.62);
+  color: #d7ead9;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.24);
+}
+
+.unread-notification-link span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unread-notification-link:hover {
+  border-color: rgba(255, 247, 207, 0.42);
+  color: #fff7cf;
+}
+
+.unread-notification-link.is-error {
+  border-color: rgba(255, 107, 107, 0.34);
+  color: #ffc9c9;
+}
+
+.unread-notification-link.is-codex {
+  border-color: rgba(134, 183, 255, 0.34);
+  color: #d3e4ff;
+}
+
+.unread-notification-link.is-done {
+  border-color: rgba(141, 245, 207, 0.32);
+  color: #cdfbe9;
+}
+
 .top-stats {
   display: flex;
   flex-wrap: wrap;
@@ -220,6 +296,10 @@ h1 {
   top: 42px;
   right: 0;
   min-width: 268px;
+  max-height: calc(var(--app-height) - 74px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .node-context-menu {
@@ -356,6 +436,59 @@ h1 {
   background: rgba(6, 10, 8, 0.96);
   box-shadow: 0 24px 90px rgba(0, 0, 0, 0.52);
   backdrop-filter: blur(18px);
+}
+
+.voice-settings-dialog {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  width: min(520px, calc(100vw - 32px));
+  border: 1px solid rgba(219, 234, 211, 0.18);
+  border-radius: 8px;
+  background: rgba(6, 10, 8, 0.96);
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(18px);
+}
+
+.voice-settings-form {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px 6px;
+}
+
+.voice-settings-field {
+  display: grid;
+  gap: 6px;
+}
+
+.voice-settings-field span {
+  color: #9fb5a9;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.voice-settings-field input,
+.voice-settings-field select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid rgba(219, 234, 211, 0.14);
+  border-radius: 7px;
+  padding: 0 9px;
+  outline: 0;
+  background: rgba(3, 7, 6, 0.88);
+  color: #f6f2db;
+}
+
+.voice-settings-field select option {
+  background: #061008;
+  color: #d9eadb;
+}
+
+.voice-settings-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 16px 16px;
 }
 
 .voice-log-header {
@@ -569,6 +702,234 @@ h1 {
   top: 44px;
   right: 0;
   width: 190px;
+}
+
+.reminder-context-menu {
+  top: 44px;
+  right: 0;
+  width: min(282px, calc(100vw - 28px));
+  max-height: min(680px, calc(var(--app-height) - 80px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.reminder-context-menu.is-mobile {
+  position: fixed;
+  z-index: 30;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  pointer-events: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.reminder-current {
+  display: grid;
+  gap: 4px;
+  border-bottom: 1px solid rgba(219, 234, 211, 0.12);
+  padding: 4px 4px 9px;
+}
+
+.reminder-current span,
+.reminder-date-field span,
+.time-stepper span {
+  color: #9fb5a9;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.reminder-current strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #fff4c5;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reminder-date-field {
+  display: grid;
+  gap: 6px;
+}
+
+.reminder-date-field:hover {
+  background: transparent;
+}
+
+.reminder-date-field input {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid rgba(219, 234, 211, 0.14);
+  border-radius: 7px;
+  padding: 0 8px;
+  background: rgba(3, 7, 6, 0.88);
+  color: #f6f2db;
+}
+
+.reminder-time-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 8px;
+}
+
+.reminder-calendar {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(219, 234, 211, 0.12);
+  border-radius: 8px;
+  padding: 7px;
+  background: rgba(3, 7, 6, 0.44);
+}
+
+.reminder-calendar-header {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 6px;
+}
+
+.reminder-calendar-header strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #fff4c5;
+  font-size: 12px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reminder-calendar-header button,
+.reminder-calendar-grid button {
+  justify-content: center;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid rgba(219, 234, 211, 0.12);
+  background: rgba(141, 245, 207, 0.06);
+  font-weight: 800;
+  text-align: center;
+}
+
+.reminder-calendar-header button {
+  font-size: 0;
+}
+
+.reminder-calendar-header button::before {
+  content: "<";
+  font-size: 12px;
+}
+
+.reminder-calendar-header button:last-child::before {
+  content: ">";
+}
+
+.reminder-calendar-weekdays,
+.reminder-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.reminder-calendar-weekdays span {
+  color: #9fb5a9;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.reminder-calendar-grid button {
+  min-width: 0;
+  color: #dfeade;
+  font-size: 11px;
+}
+
+.reminder-calendar-grid button.is-outside {
+  color: #64756b;
+  opacity: 0.72;
+}
+
+.reminder-calendar-grid button.is-selected {
+  border-color: rgba(247, 215, 101, 0.48);
+  background: rgba(247, 215, 101, 0.18);
+  color: #fff4c5;
+}
+
+.reminder-time-separator {
+  padding-bottom: 32px;
+  color: #fff4c5;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.time-stepper {
+  display: grid;
+  grid-template-rows: auto 30px 44px 30px;
+  gap: 5px;
+  min-width: 0;
+}
+
+.time-stepper button {
+  justify-content: center;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid rgba(219, 234, 211, 0.12);
+  background: rgba(141, 245, 207, 0.07);
+  font-size: 17px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.time-stepper input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(247, 215, 101, 0.24);
+  border-radius: 8px;
+  outline: 0;
+  background: rgba(255, 244, 197, 0.08);
+  color: #fff4c5;
+  font-size: 24px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.reminder-quick-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.reminder-quick-row button {
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 4px;
+  border: 1px solid rgba(219, 234, 211, 0.12);
+  background: rgba(141, 245, 207, 0.07);
+  font-size: 11px;
+}
+
+.reminder-actions {
+  display: grid;
+  gap: 6px;
+}
+
+.reminder-actions button {
+  justify-content: center;
+  border: 1px solid rgba(141, 245, 207, 0.18);
+  background: rgba(141, 245, 207, 0.1);
+  font-weight: 800;
+}
+
+.reminder-actions button:last-child {
+  border-color: rgba(255, 132, 132, 0.22);
+  background: rgba(255, 132, 132, 0.08);
+  color: #ffd4d4;
 }
 
 .surface-context-menu label {
@@ -1217,7 +1578,14 @@ button:disabled,
     radial-gradient(circle at center, rgba(141, 245, 207, 0.12) 0 2px, transparent 3px),
     radial-gradient(circle at center, transparent 0 34%, rgba(126, 165, 136, 0.12) 34% 35%, transparent 36% 67%, rgba(126, 165, 136, 0.1) 67% 68%, transparent 69%),
     rgba(1, 4, 3, 0.62);
+  cursor: grab;
   overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+
+.minimap-space:active {
+  cursor: grabbing;
 }
 
 .minimap-dot {
@@ -1670,10 +2038,41 @@ button:disabled,
   color: #0b58a8 !important;
 }
 
+.app-shell[data-theme="light"] .unread-notification-link {
+  border-color: rgba(53, 104, 164, 0.22);
+  background: rgba(255, 255, 255, 0.8);
+  color: #284b72;
+  box-shadow: 0 10px 28px rgba(55, 90, 130, 0.14);
+}
+
+.app-shell[data-theme="light"] .unread-notification-link:hover {
+  border-color: rgba(11, 88, 168, 0.38);
+  color: #0b58a8;
+}
+
+.app-shell[data-theme="light"] .unread-notification-link.is-error {
+  border-color: rgba(181, 43, 43, 0.28);
+  color: #9a2f2f;
+}
+
+.app-shell[data-theme="light"] .unread-notification-link.is-codex {
+  border-color: rgba(11, 99, 206, 0.28);
+  color: #0b63ce;
+}
+
+.app-shell[data-theme="light"] .unread-notification-link.is-done {
+  border-color: rgba(13, 129, 88, 0.28);
+  color: #0a6f4c;
+}
+
 .app-shell[data-theme="light"] .focus-panel,
 .app-shell[data-theme="light"] .minimap,
 .app-shell[data-theme="light"] .event-strip,
-.app-shell[data-theme="light"] .command-dock {
+.app-shell[data-theme="light"] .command-dock,
+.app-shell[data-theme="light"] .mobile-workspace-tabs,
+.app-shell[data-theme="light"] .voice-log-dialog,
+.app-shell[data-theme="light"] .cloud-load-dialog,
+.app-shell[data-theme="light"] .voice-settings-dialog {
   border-color: rgba(53, 104, 164, 0.22);
   background: rgba(255, 255, 255, 0.78);
   box-shadow: 0 18px 64px rgba(55, 90, 130, 0.18);
@@ -1685,8 +2084,19 @@ button:disabled,
   box-shadow: 0 18px 48px rgba(55, 90, 130, 0.2);
 }
 
+.reminder-context-menu.theme-light {
+  border-color: rgba(53, 104, 164, 0.24);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(55, 90, 130, 0.22);
+}
+
 .app-shell[data-theme="light"] .context-menu button,
 .app-shell[data-theme="light"] .context-menu label {
+  color: #17283e;
+}
+
+.reminder-context-menu.theme-light button,
+.reminder-context-menu.theme-light label {
   color: #17283e;
 }
 
@@ -1695,12 +2105,30 @@ button:disabled,
   background: rgba(28, 112, 207, 0.1);
 }
 
+.reminder-context-menu.theme-light button:hover,
+.reminder-context-menu.theme-light label:hover {
+  background: rgba(28, 112, 207, 0.1);
+}
+
 .app-shell[data-theme="light"] .context-menu button:disabled,
 .app-shell[data-theme="light"] .context-menu button:disabled:hover {
   background: transparent;
 }
 
+.reminder-context-menu.theme-light button:disabled,
+.reminder-context-menu.theme-light button:disabled:hover {
+  background: transparent;
+}
+
 .app-shell[data-theme="light"] .context-menu-section {
+  border-bottom-color: rgba(53, 104, 164, 0.16);
+}
+
+.app-shell[data-theme="light"] .reminder-current {
+  border-bottom-color: rgba(53, 104, 164, 0.16);
+}
+
+.reminder-context-menu.theme-light .reminder-current {
   border-bottom-color: rgba(53, 104, 164, 0.16);
 }
 
@@ -1752,7 +2180,9 @@ button:disabled,
 }
 
 .app-shell[data-theme="light"] .context-option-field input,
-.app-shell[data-theme="light"] .context-option-field select {
+.app-shell[data-theme="light"] .context-option-field select,
+.app-shell[data-theme="light"] .voice-settings-field input,
+.app-shell[data-theme="light"] .voice-settings-field select {
   border-color: rgba(53, 104, 164, 0.16);
   background: rgba(255, 255, 255, 0.58);
   color: #1b334d;
@@ -1763,8 +2193,35 @@ button:disabled,
   background: rgba(255, 255, 255, 0.58);
 }
 
-.app-shell[data-theme="light"] .context-option-field span {
+.app-shell[data-theme="light"] .context-option-field span,
+.app-shell[data-theme="light"] .voice-settings-field span {
   color: #5c728d;
+}
+
+.app-shell[data-theme="light"] .reminder-current span,
+.app-shell[data-theme="light"] .reminder-date-field span,
+.app-shell[data-theme="light"] .time-stepper span {
+  color: #5c728d;
+}
+
+.reminder-context-menu.theme-light .reminder-current span,
+.reminder-context-menu.theme-light .reminder-date-field span,
+.reminder-context-menu.theme-light .time-stepper span {
+  color: #5c728d;
+}
+
+.app-shell[data-theme="light"] .reminder-current strong,
+.app-shell[data-theme="light"] .reminder-time-separator,
+.app-shell[data-theme="light"] .reminder-calendar-header strong,
+.app-shell[data-theme="light"] .time-stepper input {
+  color: #0b58a8;
+}
+
+.reminder-context-menu.theme-light .reminder-current strong,
+.reminder-context-menu.theme-light .reminder-time-separator,
+.reminder-context-menu.theme-light .reminder-calendar-header strong,
+.reminder-context-menu.theme-light .time-stepper input {
+  color: #0b58a8;
 }
 
 .app-shell[data-theme="light"] .scope-select option {
@@ -1772,7 +2229,8 @@ button:disabled,
   color: #1b334d;
 }
 
-.app-shell[data-theme="light"] .context-option-field select option {
+.app-shell[data-theme="light"] .context-option-field select option,
+.app-shell[data-theme="light"] .voice-settings-field select option {
   background: #ffffff;
   color: #1b334d;
 }
@@ -1782,6 +2240,15 @@ button:disabled,
 }
 
 .app-shell[data-theme="light"] .mode-switch button.is-active {
+  background: rgba(24, 100, 190, 0.12);
+  color: #0b58a8;
+}
+
+.app-shell[data-theme="light"] .mobile-workspace-tabs button {
+  color: #48617d;
+}
+
+.app-shell[data-theme="light"] .mobile-workspace-tabs button.is-active {
   background: rgba(24, 100, 190, 0.12);
   color: #0b58a8;
 }
@@ -1801,12 +2268,97 @@ button:disabled,
 .app-shell[data-theme="light"] .node-body-input,
 .app-shell[data-theme="light"] .surface-context-menu input[type="color"],
 .app-shell[data-theme="light"] .surface-context-menu select,
+.app-shell[data-theme="light"] .reminder-date-field input,
+.app-shell[data-theme="light"] .time-stepper input,
 .app-shell[data-theme="light"] .appearance-controls input[type="color"],
 .app-shell[data-theme="light"] .appearance-controls select,
 .app-shell[data-theme="light"] .command-field input {
   border-color: rgba(53, 104, 164, 0.22);
   background: rgba(255, 255, 255, 0.72);
   color: #142338;
+}
+
+.reminder-context-menu.theme-light .reminder-date-field input,
+.reminder-context-menu.theme-light .time-stepper input {
+  border-color: rgba(53, 104, 164, 0.22);
+  background: rgba(255, 255, 255, 0.72);
+  color: #142338;
+}
+
+.app-shell[data-theme="light"] .time-stepper button,
+.app-shell[data-theme="light"] .reminder-quick-row button,
+.app-shell[data-theme="light"] .reminder-calendar-header button,
+.app-shell[data-theme="light"] .reminder-calendar-grid button,
+.app-shell[data-theme="light"] .reminder-actions button {
+  border-color: rgba(53, 104, 164, 0.18);
+  background: rgba(28, 112, 207, 0.08);
+}
+
+.reminder-context-menu.theme-light .time-stepper button,
+.reminder-context-menu.theme-light .reminder-quick-row button,
+.reminder-context-menu.theme-light .reminder-calendar-header button,
+.reminder-context-menu.theme-light .reminder-calendar-grid button,
+.reminder-context-menu.theme-light .reminder-actions button {
+  border-color: rgba(53, 104, 164, 0.18);
+  background: rgba(28, 112, 207, 0.08);
+}
+
+.app-shell[data-theme="light"] .reminder-calendar {
+  border-color: rgba(53, 104, 164, 0.16);
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.reminder-context-menu.theme-light .reminder-calendar {
+  border-color: rgba(53, 104, 164, 0.16);
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.app-shell[data-theme="light"] .reminder-calendar-weekdays span {
+  color: #5c728d;
+}
+
+.reminder-context-menu.theme-light .reminder-calendar-weekdays span {
+  color: #5c728d;
+}
+
+.app-shell[data-theme="light"] .reminder-calendar-grid button {
+  color: #17283e;
+}
+
+.reminder-context-menu.theme-light .reminder-calendar-grid button {
+  color: #17283e;
+}
+
+.app-shell[data-theme="light"] .reminder-calendar-grid button.is-outside {
+  color: #7b8da2;
+}
+
+.reminder-context-menu.theme-light .reminder-calendar-grid button.is-outside {
+  color: #7b8da2;
+}
+
+.app-shell[data-theme="light"] .reminder-calendar-grid button.is-selected {
+  border-color: rgba(11, 88, 168, 0.42);
+  background: rgba(24, 100, 190, 0.14);
+  color: #0b58a8;
+}
+
+.reminder-context-menu.theme-light .reminder-calendar-grid button.is-selected {
+  border-color: rgba(11, 88, 168, 0.42);
+  background: rgba(24, 100, 190, 0.14);
+  color: #0b58a8;
+}
+
+.app-shell[data-theme="light"] .reminder-actions button:last-child {
+  border-color: rgba(181, 43, 43, 0.22);
+  background: rgba(181, 43, 43, 0.06);
+  color: #9a2f2f;
+}
+
+.reminder-context-menu.theme-light .reminder-actions button:last-child {
+  border-color: rgba(181, 43, 43, 0.22);
+  background: rgba(181, 43, 43, 0.06);
+  color: #9a2f2f;
 }
 
 .app-shell[data-theme="light"] .node-body-input::placeholder,
@@ -1955,10 +2507,19 @@ button:disabled,
 }
 
 @media (max-width: 980px) and (orientation: portrait) {
+  .app-shell {
+    --mobile-panel-height: min(34dvh, 276px);
+    height: var(--app-height);
+  }
+
   .top-bar {
     top: 12px;
     left: 12px;
     right: 12px;
+  }
+
+  .unread-notification-links {
+    max-width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
   }
 
   .top-stats {
@@ -1984,8 +2545,74 @@ button:disabled,
     right: 12px;
   }
 
-  .panel-text-section {
+  .mobile-workspace-panel {
+    position: absolute;
+    left: calc(12px + env(safe-area-inset-left));
+    right: calc(12px + env(safe-area-inset-right));
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    z-index: 6;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 8px;
+    height: var(--mobile-panel-height);
+    max-height: calc(var(--app-height) - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    pointer-events: none;
+  }
+
+  .app-shell:has(.mobile-workspace-panel[data-active-tab="command"]) {
+    --mobile-panel-height: min(30dvh, 236px);
+  }
+
+  .app-shell:has(.mobile-workspace-panel[data-active-tab="editor"]) {
+    --mobile-panel-height: min(42dvh, 336px);
+  }
+
+  .mobile-workspace-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    min-height: 38px;
+    border: 1px solid rgba(219, 234, 211, 0.13);
+    border-radius: 8px;
+    padding: 4px;
+    background: rgba(6, 10, 8, 0.76);
+    box-shadow: 0 14px 48px rgba(0, 0, 0, 0.32);
+    backdrop-filter: blur(18px);
+    pointer-events: auto;
+  }
+
+  .mobile-workspace-tabs button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-width: 0;
+    min-height: 30px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #aabdad;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .mobile-workspace-tabs button.is-active {
+    background: rgba(141, 245, 207, 0.14);
+    color: #fff4c5;
+  }
+
+  .mobile-panel-slot {
+    min-height: 0;
+    pointer-events: auto;
+  }
+
+  .mobile-panel-slot[aria-hidden="true"] {
     display: none;
+  }
+
+  .mobile-panel-slot[aria-hidden="false"] {
+    display: block;
   }
 
   .panel-preview-frame {
@@ -2023,7 +2650,7 @@ button:disabled,
 
   .minimap {
     left: 12px;
-    bottom: calc(30vh + 28px);
+    bottom: calc(var(--mobile-panel-height) + 64px + env(safe-area-inset-bottom));
     width: 132px;
   }
 
@@ -2037,23 +2664,58 @@ button:disabled,
   }
 
   .command-dock {
-    left: 156px;
-    right: 12px;
-    bottom: calc(30vh + 28px);
-    width: auto;
+    position: static;
+    width: 100%;
+    max-height: 100%;
+    overflow: auto;
     grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 7px;
     padding: 8px;
     transform: none;
+  }
+
+  .command-field {
+    gap: 2px;
+  }
+
+  .command-field span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .focus-panel {
+    position: static;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) minmax(58px, 0.34fr);
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    overflow: hidden;
+    padding: 10px;
+  }
+
+  .panel-text-section {
+    display: block;
+  }
+
+  .node-body-input {
+    min-height: 0;
+    resize: none;
   }
 
   .mode-switch {
     grid-column: 1 / -1;
     min-width: 0;
+    order: 4;
   }
 
   .scope-select {
     grid-column: 1 / -1;
     width: 100%;
+    height: 34px;
+    order: 5;
   }
 
   .context-options-row,
@@ -2072,14 +2734,12 @@ button:disabled,
   }
 
   .command-dock {
-    left: 12px;
-    bottom: calc(30vh + 22px);
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .command-dock:has(.context-options-row),
   .command-dock:has(.codex-options-row) {
-    bottom: calc(34vh + 30px);
+    max-height: 100%;
   }
 
   .command-field input {
@@ -2087,14 +2747,36 @@ button:disabled,
   }
 
   .focus-panel {
-    height: 34vh;
-    max-height: 34vh;
+    height: 100%;
+    max-height: none;
+  }
+
+  .reminder-context-menu.is-mobile {
+    position: fixed;
+    top: calc(10px + env(safe-area-inset-top));
+    right: calc(10px + env(safe-area-inset-right));
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    left: calc(10px + env(safe-area-inset-left));
+    width: auto;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .reminder-context-menu.is-mobile .reminder-calendar {
+    display: none;
   }
 }
 
 @media (max-height: 620px) and (orientation: landscape) {
+  .app-shell {
+    height: var(--app-height);
+  }
+
   .top-bar {
-    top: 12px;
+    top: calc(8px + env(safe-area-inset-top));
     left: 14px;
     right: 316px;
     gap: 12px;
@@ -2114,17 +2796,83 @@ button:disabled,
     font-size: 11px;
   }
 
-  .focus-panel {
-    top: 12px;
+  .mobile-workspace-panel {
+    position: absolute;
+    top: calc(8px + env(safe-area-inset-top));
     right: 12px;
-    bottom: 12px;
-    width: min(300px, 34vw);
-    padding: 12px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 6;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 8px;
+    width: min(292px, 33vw);
+    max-height: calc(var(--app-height) - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    pointer-events: none;
+  }
+
+  .mobile-workspace-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    min-height: 36px;
+    border: 1px solid rgba(219, 234, 211, 0.13);
+    border-radius: 8px;
+    padding: 4px;
+    background: rgba(6, 10, 8, 0.76);
+    box-shadow: 0 14px 48px rgba(0, 0, 0, 0.32);
+    backdrop-filter: blur(18px);
+    pointer-events: auto;
+  }
+
+  .mobile-workspace-tabs button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-width: 0;
+    min-height: 28px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #aabdad;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .mobile-workspace-tabs button.is-active {
+    background: rgba(141, 245, 207, 0.14);
+    color: #fff4c5;
+  }
+
+  .mobile-panel-slot {
+    min-height: 0;
+    pointer-events: auto;
+  }
+
+  .mobile-panel-slot[aria-hidden="true"] {
+    display: none;
+  }
+
+  .mobile-panel-slot[aria-hidden="false"] {
+    display: block;
+  }
+
+  .focus-panel {
+    position: static;
+    display: grid;
+    grid-template-rows: auto minmax(72px, 1fr) minmax(48px, 0.52fr);
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    overflow: hidden;
+    padding: 10px;
   }
 
   .global-menu {
-    top: 12px;
-    right: calc(min(300px, 34vw) + 24px);
+    top: calc(8px + env(safe-area-inset-top));
+    right: calc(min(292px, 33vw) + 24px);
   }
 
   .panel-header {
@@ -2149,6 +2897,20 @@ button:disabled,
     line-height: 1.45;
   }
 
+  .panel-text-section {
+    min-height: 0;
+  }
+
+  .node-body-input {
+    min-height: 0;
+    resize: none;
+  }
+
+  .panel-preview-frame {
+    min-height: 0;
+    padding: 8px;
+  }
+
   .decision-section,
   .artifact-preview,
   .event-preview {
@@ -2157,7 +2919,7 @@ button:disabled,
 
   .minimap {
     left: 14px;
-    bottom: 14px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
     width: 142px;
     padding: 9px;
   }
@@ -2172,27 +2934,294 @@ button:disabled,
   }
 
   .command-dock {
-    bottom: 14px;
-    left: 170px;
-    right: calc(min(300px, 34vw) + 24px);
-    width: auto;
+    position: static;
+    width: 100%;
+    max-height: 100%;
+    overflow: auto;
     grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 7px;
     padding: 8px;
     transform: none;
+  }
+
+  .command-field {
+    gap: 2px;
+  }
+
+  .command-field span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .mode-switch {
     grid-column: 1 / -1;
     min-width: 0;
+    order: 4;
   }
 
   .scope-select {
     grid-column: 1 / -1;
     width: 100%;
+    height: 34px;
+    order: 5;
   }
 
   .context-options-row,
   .codex-options-row {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .reminder-context-menu.is-mobile {
+    position: fixed;
+    top: calc(8px + env(safe-area-inset-top));
+    right: calc(12px + env(safe-area-inset-right));
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    left: auto;
+    width: min(360px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+    max-height: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .reminder-time-picker {
+    gap: 6px;
+  }
+
+  .time-stepper {
+    grid-template-rows: auto 28px 38px 28px;
+  }
+
+  .time-stepper input {
+    font-size: 20px;
+  }
+
+  .reminder-context-menu.is-mobile .reminder-calendar {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  :root[data-keyboard-overlay-input="true"] .app-shell {
+    --mobile-panel-height: min(236px, calc(var(--app-height) - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    height: var(--app-height);
+  }
+
+  :root[data-keyboard-overlay-input="true"] .app-shell:has(.mobile-workspace-panel[data-active-tab="command"]) {
+    --mobile-panel-height: min(236px, calc(var(--app-height) - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+  }
+
+  :root[data-keyboard-overlay-input="true"] .app-shell:has(.mobile-workspace-panel[data-active-tab="editor"]) {
+    --mobile-panel-height: min(336px, calc(var(--app-height) - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+  }
+
+  :root[data-keyboard-overlay-input="true"] .top-bar {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .unread-notification-links {
+    max-width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
+  }
+
+  :root[data-keyboard-overlay-input="true"] .top-stats {
+    display: none;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .global-menu {
+    top: 12px;
+    right: 12px;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .mobile-workspace-panel {
+    position: absolute;
+    left: calc(12px + env(safe-area-inset-left));
+    right: calc(12px + env(safe-area-inset-right));
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    z-index: 6;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 8px;
+    height: var(--mobile-panel-height);
+    max-height: calc(var(--app-height) - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    pointer-events: none;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .mobile-workspace-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    min-height: 38px;
+    border: 1px solid rgba(219, 234, 211, 0.13);
+    border-radius: 8px;
+    padding: 4px;
+    background: rgba(6, 10, 8, 0.76);
+    box-shadow: 0 14px 48px rgba(0, 0, 0, 0.32);
+    backdrop-filter: blur(18px);
+    pointer-events: auto;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .mobile-workspace-tabs button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-width: 0;
+    min-height: 30px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #aabdad;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .mobile-workspace-tabs button.is-active {
+    background: rgba(141, 245, 207, 0.14);
+    color: #fff4c5;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .mobile-panel-slot {
+    min-height: 0;
+    pointer-events: auto;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .mobile-panel-slot[aria-hidden="true"] {
+    display: none;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .mobile-panel-slot[aria-hidden="false"] {
+    display: block;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .minimap {
+    left: 12px;
+    bottom: calc(var(--mobile-panel-height) + 64px + env(safe-area-inset-bottom));
+    width: 132px;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .minimap-space {
+    width: 76px;
+    height: 76px;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .event-strip {
+    display: none;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .command-dock {
+    position: static;
+    width: 100%;
+    max-height: 100%;
+    overflow: auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 7px;
+    padding: 8px;
+    transform: none;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .command-field {
+    gap: 2px;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .command-field span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .focus-panel {
+    position: static;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) minmax(58px, 0.34fr);
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    overflow: hidden;
+    padding: 10px;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .panel-preview-frame,
+  :root[data-keyboard-overlay-input="true"] .panel-text-section {
+    min-height: 0;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .panel-header {
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .panel-header h2 {
+    font-size: 20px;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .status-row {
+    margin-bottom: 10px;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .panel-section {
+    margin-top: 10px;
+    padding-top: 10px;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .panel-section p {
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .decision-section,
+  :root[data-keyboard-overlay-input="true"] .artifact-preview,
+  :root[data-keyboard-overlay-input="true"] .event-preview {
+    padding: 10px;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .node-body-input {
+    min-height: 0;
+    resize: none;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .mode-switch {
+    grid-column: 1 / -1;
+    min-width: 0;
+    order: 4;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .scope-select {
+    grid-column: 1 / -1;
+    width: 100%;
+    height: 34px;
+    order: 5;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .context-options-row,
+  :root[data-keyboard-overlay-input="true"] .codex-options-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  :root[data-keyboard-overlay-input="true"] h1 {
+    font-size: 24px;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .minimap {
+    display: none;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .command-dock {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .command-dock:has(.context-options-row),
+  :root[data-keyboard-overlay-input="true"] .command-dock:has(.codex-options-row) {
+    max-height: 100%;
+  }
+
+  :root[data-keyboard-overlay-input="true"] .command-field input {
+    font-size: 14px;
   }
 }

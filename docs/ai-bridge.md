@@ -74,7 +74,7 @@ Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that ne
 ## Current AI Surface
 
 - The command dock supports OpenAI, Local, and Codex modes.
-- A user request is saved as a child celestial node first. The provider result is saved as a child of that request.
+- A user request is saved as a child notebook node first. The provider result is saved as a child of that request.
 - OpenAI uses the Responses API by default.
 - OpenAI image-generation prompts are routed through the Image API and saved as image attachments on the result node.
 - Local mode uses an OpenAI-compatible `/chat/completions` endpoint such as LM Studio.
@@ -83,13 +83,17 @@ Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that ne
 - The Codex settings row has a `Skip Git` checkbox. It is off by default; when enabled, the bridge passes `--skip-git-repo-check` for first runs in a non-Git or not-yet-trusted work root.
 - If Codex appears blocked by permissions, Mind Atlas creates a pulsing approval request node. Its child option nodes have centered buttons for approving or denying a retry with `danger-full-access`.
 - Work roots can be selected in the Codex settings row. If left blank, the bridge can infer a work root from context text such as `workspace: c:\path\to\repo` or `作業ルート: c:\path\to\repo`.
-- Running, review, and error states pulse around the affected celestial body.
+- Running, review, and error states pulse around the affected notebook node.
 - Completed or failed background work emits a wider notification pulse from the result location.
 - Usage metadata is stored on runs and result nodes. Cost estimates appear only when per-token rates are configured.
 - Short-clicking the microphone button records dictation, transcribes it with `gpt-4o-transcribe`, and inserts the transcript into the prompt field.
 - Long-pressing the microphone button starts a push-to-talk WebRTC Realtime Voice Partner session through the bridge. The browser receives only a short-lived ephemeral Realtime key.
+- While Voice Partner audio is responding, the microphone button becomes a square stop button that cancels the current Realtime response and clears pending playback.
+- The main menu can restart Realtime to reset voice context. Manual restart also clears the saved voice-session summary so the next session starts fresh.
+- The main menu has Voice settings for the Realtime model id and voice id. Saving applies to the next session; saving and restarting applies immediately.
+- Mobile notifications can be enabled from the main menu on mobile-like devices. Notification sound, banner display, and vibration are controlled by browser and OS settings, and some mobile browsers only allow notifications for installed web apps.
 - Voice Partner sessions stay warm for one hour after the last interaction. Before idle shutdown, Mind Atlas asks the session for a compact summary and stores it for the next session.
-- Voice Partner conversation logs are global text logs, not celestial nodes. Open `Voice log` from the main menu to review or clear them.
+- Voice Partner conversation logs are global text logs, not notebook nodes. Open `Voice log` from the main menu to review or clear them.
 - The Voice Partner receives guarded Mind Atlas tools for search, focus, selection, node creation/editing, undo/redo, AI dispatch, notifications, and web search. Destructive operations return an approval-required result instead of executing directly.
 - Voice Partner web search is exposed through the bridge and uses the OpenAI Responses API web-search tool server-side.
 - The main menu can save rich `.mindatlaspkg` packages to the bridge server folder and load them back from a server-side package list. This is a prototype shared-data feature and does not include user accounts or access control.

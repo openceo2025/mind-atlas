@@ -1,0 +1,19 @@
+{
+  "name": "Mind Atlas",
+  "short_name": "Mind Atlas",
+  "description": "A spatial notebook for parallel AI-assisted work.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["fullscreen", "standalone"],
+  "background_color": "#061014",
+  "theme_color": "#061014",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

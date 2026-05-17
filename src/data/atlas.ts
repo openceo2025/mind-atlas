@@ -429,7 +429,7 @@ export const atlasRoot: AtlasNode = {
   texture: "speckled",
   radius: 80,
   summary: "A local spatial notebook for thoughts, files, and branches.",
-  nextDecision: "Create a first planet in the universe view.",
+  nextDecision: "Create a first node in the workspace view.",
   position: [0, 0, 0],
   children: [],
 };

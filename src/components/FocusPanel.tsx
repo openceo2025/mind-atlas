@@ -1,5 +1,6 @@
 import {
   Bot,
+  CalendarClock,
   CornerDownLeft,
   FileArchive,
   FileCode,
@@ -15,30 +16,147 @@ import {
   X,
 } from "lucide-react";
 import { ChangeEvent, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { saveStoredAttachmentBlob } from "../attachmentStorage";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { findNode, useAtlasStore } from "../store/atlasStore";
+import type { AtlasTheme } from "../theme";
 import type { AtlasNode, AttachmentKind, NodeAttachment } from "../types";
 
-export function FocusPanel() {
+let sessionReminderDraftAt = addDays(new Date(), 1).toISOString();
+
+export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const updateNode = useAtlasStore((state) => state.updateNode);
   const addAttachment = useAtlasStore((state) => state.addAttachment);
   const removeAttachment = useAtlasStore((state) => state.removeAttachment);
   const updateNodeAppearance = useAtlasStore((state) => state.updateNodeAppearance);
+  const setNodeReminder = useAtlasStore((state) => state.setNodeReminder);
+  const clearNodeReminder = useAtlasStore((state) => state.clearNodeReminder);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
   const aiRuns = useAtlasStore((state) => state.aiRuns);
   const selectedNode = findNode(atlasRoot, selectedNodeId) ?? atlasRoot;
   const isRoot = selectedNode.id === atlasRoot.id;
   const [surfaceMenuOpen, setSurfaceMenuOpen] = useState(false);
+  const [reminderMenuOpen, setReminderMenuOpen] = useState(false);
+  const [reminderDraftAt, setReminderDraftAt] = useState(sessionReminderDraftAt);
+  const [reminderCalendarMonth, setReminderCalendarMonth] = useState(() => startOfMonth(dateFromInput(sessionReminderDraftAt) ?? addDays(new Date(), 1)));
   const aiRun = selectedNode.aiRunId ? aiRuns[selectedNode.aiRunId] : undefined;
+  const reminderDraft = dateFromInput(reminderDraftAt) ?? addDays(new Date(), 1);
+  const reminderMobileLayout = useReminderMobileLayout();
 
   useEffect(() => {
-    const closeSurfaceMenu = () => setSurfaceMenuOpen(false);
-    window.addEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeSurfaceMenu);
-    return () => window.removeEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeSurfaceMenu);
+    const closeMenus = () => {
+      setSurfaceMenuOpen(false);
+      setReminderMenuOpen(false);
+    };
+    window.addEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenus);
+    return () => window.removeEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenus);
   }, []);
+
+  const updateReminderDraft = (date: Date) => {
+    const iso = date.toISOString();
+    sessionReminderDraftAt = iso;
+    setReminderDraftAt(iso);
+    setReminderCalendarMonth(startOfMonth(date));
+  };
+
+  const reminderMenu = reminderMenuOpen ? (
+    <div
+      className={`context-menu reminder-context-menu ${reminderMobileLayout ? "is-mobile" : ""} theme-${theme}`}
+      role="dialog"
+      aria-label="Reminder settings"
+      onPointerDown={(event) => event.stopPropagation()}
+      onTouchMove={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
+    >
+      <div className="reminder-current">
+        <span>Current</span>
+        <strong>{selectedNode.reminderAt ? formatReminderDate(selectedNode.reminderAt) : "No reminder"}</strong>
+      </div>
+      <label className="reminder-date-field">
+        <span>Date</span>
+        <input
+          type="date"
+          value={dateInputValue(reminderDraft)}
+          onChange={(event) => {
+            const [year, month, day] = event.target.value.split("-").map(Number);
+            if (!year || !month || !day) return;
+            const next = new Date(reminderDraft);
+            next.setFullYear(year, month - 1, day);
+            updateReminderDraft(next);
+          }}
+        />
+      </label>
+      <CalendarPicker
+        month={reminderCalendarMonth}
+        selectedDate={reminderDraft}
+        onMonthChange={setReminderCalendarMonth}
+        onSelectDate={(date) => {
+          const next = new Date(reminderDraft);
+          next.setFullYear(date.getFullYear(), date.getMonth(), date.getDate());
+          updateReminderDraft(next);
+        }}
+      />
+      <div className="reminder-time-picker" aria-label="Reminder time">
+        <TimeStepper
+          label="Hour"
+          value={reminderDraft.getHours()}
+          max={23}
+          onChange={(hour) => {
+            const next = new Date(reminderDraft);
+            next.setHours(hour);
+            updateReminderDraft(next);
+          }}
+        />
+        <span className="reminder-time-separator">:</span>
+        <TimeStepper
+          label="Minute"
+          value={reminderDraft.getMinutes()}
+          max={59}
+          onChange={(minute) => {
+            const next = new Date(reminderDraft);
+            next.setMinutes(minute);
+            updateReminderDraft(next);
+          }}
+        />
+      </div>
+      <div className="reminder-quick-row" aria-label="Quick reminder offsets">
+        {[15, 30, 60, 180].map((minutes) => (
+          <button key={minutes} type="button" onClick={() => updateReminderDraft(addMinutes(new Date(), minutes))}>
+            +{minutes < 60 ? `${minutes}m` : `${minutes / 60}h`}
+          </button>
+        ))}
+        <button type="button" onClick={() => updateReminderDraft(addDays(new Date(), 1))}>
+          +1d
+        </button>
+      </div>
+      <div className="reminder-actions">
+        <button
+          type="button"
+          onClick={() => {
+            setNodeReminder(selectedNode.id, reminderDraft.toISOString());
+            setReminderMenuOpen(false);
+          }}
+        >
+          Set reminder
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            clearNodeReminder(selectedNode.id);
+            setReminderMenuOpen(false);
+          }}
+          disabled={!selectedNode.reminderAt}
+        >
+          Clear reminder
+        </button>
+      </div>
+    </div>
+  ) : null;
+
+  const reminderPortalTarget = typeof document === "undefined" ? null : document.body;
 
   const handleAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files?.length) return;
@@ -61,7 +179,8 @@ export function FocusPanel() {
   };
 
   return (
-    <aside className="focus-panel" aria-label="Focused context">
+    <>
+      <aside className="focus-panel" aria-label="Focused context">
       <div className="panel-toolbar">
         <label className="icon-button file-button panel-tool-button" aria-label="Attach file">
           <Plus size={18} />
@@ -74,9 +193,27 @@ export function FocusPanel() {
         </div>
         <div className="panel-menu-anchor">
           <button
+            className={`icon-button panel-tool-button ${selectedNode.reminderAt && !selectedNode.reminderFiredAt ? "is-live" : ""}`}
+            type="button"
+            onClick={() => {
+              setReminderMenuOpen((open) => !open);
+              setSurfaceMenuOpen(false);
+            }}
+            aria-label="Open reminder menu"
+            title={selectedNode.reminderAt ? `Reminder: ${formatReminderDate(selectedNode.reminderAt)}` : "Set reminder"}
+          >
+            <CalendarClock size={17} />
+          </button>
+          {reminderMobileLayout ? null : reminderMenu}
+        </div>
+        <div className="panel-menu-anchor">
+          <button
             className="icon-button panel-tool-button"
             type="button"
-            onClick={() => setSurfaceMenuOpen((open) => !open)}
+            onClick={() => {
+              setSurfaceMenuOpen((open) => !open);
+              setReminderMenuOpen(false);
+            }}
             aria-label="Open surface menu"
           >
             <Paintbrush size={17} />
@@ -89,7 +226,7 @@ export function FocusPanel() {
                   type="color"
                   value={selectedNode.color}
                   onChange={(event) => updateNodeAppearance(selectedNode.id, { color: event.target.value })}
-                  aria-label="Planet color"
+                  aria-label="Node color"
                 />
               </label>
               <label>
@@ -99,7 +236,7 @@ export function FocusPanel() {
                   onChange={(event) =>
                     updateNodeAppearance(selectedNode.id, { texture: event.target.value as AtlasNode["texture"] })
                   }
-                  aria-label="Planet texture"
+                  aria-label="Node texture"
                 >
                   <option value="speckled">Speckled</option>
                   <option value="bands">Bands</option>
@@ -157,8 +294,177 @@ export function FocusPanel() {
           )}
         </div>
       </section>
-    </aside>
+      </aside>
+      {reminderMobileLayout && reminderMenu && reminderPortalTarget ? createPortal(reminderMenu, reminderPortalTarget) : null}
+    </>
   );
+}
+
+function useReminderMobileLayout() {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const update = () => {
+      const portrait = window.matchMedia("(max-width: 620px) and (orientation: portrait)").matches;
+      const landscape = window.matchMedia("(max-height: 620px) and (orientation: landscape)").matches;
+      setIsMobile(portrait || landscape);
+    };
+
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    window.visualViewport?.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+      window.visualViewport?.removeEventListener("resize", update);
+    };
+  }, []);
+
+  return isMobile;
+}
+
+function TimeStepper({
+  label,
+  value,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  const padded = String(value).padStart(2, "0");
+  const wrap = (next: number) => {
+    if (next < 0) return max;
+    if (next > max) return 0;
+    return next;
+  };
+
+  return (
+    <div className="time-stepper">
+      <span>{label}</span>
+      <button type="button" onClick={() => onChange(wrap(value + 1))} aria-label={`Increase ${label}`}>
+        +
+      </button>
+      <input
+        inputMode="numeric"
+        value={padded}
+        onChange={(event) => {
+          const next = Number(event.target.value.replace(/\D/g, "").slice(0, 2));
+          if (Number.isFinite(next)) onChange(Math.min(max, Math.max(0, next)));
+        }}
+        aria-label={label}
+      />
+      <button type="button" onClick={() => onChange(wrap(value - 1))} aria-label={`Decrease ${label}`}>
+        -
+      </button>
+    </div>
+  );
+}
+
+function CalendarPicker({
+  month,
+  selectedDate,
+  onMonthChange,
+  onSelectDate,
+}: {
+  month: Date;
+  selectedDate: Date;
+  onMonthChange: (month: Date) => void;
+  onSelectDate: (date: Date) => void;
+}) {
+  const cells = calendarCells(month);
+  const monthLabel = month.toLocaleDateString(undefined, { year: "numeric", month: "short" });
+
+  return (
+    <div className="reminder-calendar" aria-label="Reminder calendar">
+      <div className="reminder-calendar-header">
+        <button type="button" onClick={() => onMonthChange(addMonths(month, -1))} aria-label="Previous month">
+          ‹
+        </button>
+        <strong>{monthLabel}</strong>
+        <button type="button" onClick={() => onMonthChange(addMonths(month, 1))} aria-label="Next month">
+          ›
+        </button>
+      </div>
+      <div className="reminder-calendar-weekdays" aria-hidden="true">
+        {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+          <span key={`${day}-${index}`}>{day}</span>
+        ))}
+      </div>
+      <div className="reminder-calendar-grid">
+        {cells.map((date) => {
+          const isCurrentMonth = date.getMonth() === month.getMonth();
+          const isSelected = sameDate(date, selectedDate);
+          return (
+            <button
+              key={date.toISOString()}
+              className={`${isCurrentMonth ? "" : "is-outside"} ${isSelected ? "is-selected" : ""}`}
+              type="button"
+              onClick={() => onSelectDate(date)}
+              aria-pressed={isSelected}
+            >
+              {date.getDate()}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function addMinutes(date: Date, minutes: number) {
+  return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
+function addDays(date: Date, days: number) {
+  return addMinutes(date, days * 24 * 60);
+}
+
+function addMonths(date: Date, months: number) {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months, 1);
+  return startOfMonth(next);
+}
+
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function calendarCells(month: Date) {
+  const first = startOfMonth(month);
+  const start = new Date(first);
+  start.setDate(first.getDate() - first.getDay());
+  return Array.from({ length: 42 }, (_, index) => addDays(start, index));
+}
+
+function sameDate(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function dateFromInput(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function dateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatReminderDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Invalid date";
+  return date.toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function AttachmentPreviewCard({

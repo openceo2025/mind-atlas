@@ -284,7 +284,7 @@ async function createOpenAiImageResponse({ prompt, model, startedAt, requestId }
   const title = imageTitleFromPrompt(prompt);
   const output = normalizeAiOutput({
     title,
-    body: `画像を生成しました。返答天体の添付ファイルを確認してください。\n\nPrompt: ${prompt}`,
+    body: `画像を生成しました。返答ノードの添付ファイルを確認してください。\n\nPrompt: ${prompt}`,
     summary: `${generatedAttachments.length} image attachment(s) generated from the prompt.`,
     suggestedStatus: "done",
     tags: ["image", "openai", "generated"],
@@ -585,6 +585,12 @@ function buildCodexNodes({ prompt, context, settings, result, gitStatus, duratio
   const threadEvent = result.events.find((event) => event?.type === "thread.started");
   const finalText = result.lastMessage || extractLastAgentMessage(result.events) || "";
   const statusLabel = result.exitCode === 0 ? "completed" : `exited with ${result.exitCode}`;
+  const issueText = [
+    finalText,
+    result.stderr,
+    result.stdout,
+  ].filter(Boolean).join("\n");
+  const codexLimit = result.exitCode !== 0 ? describeCodexTokenLimit(issueText, new Date().toISOString()) : null;
   const detailBody = buildCodexDetailsBody({
     commandEvents,
     durationMs,
@@ -596,14 +602,14 @@ function buildCodexNodes({ prompt, context, settings, result, gitStatus, duratio
   const nodes = [{
     kind: result.exitCode === 0 ? "final" : "error",
     nodeType: "tool_result",
-    title: result.exitCode === 0 ? "Codex final" : "Codex issue",
+    title: result.exitCode === 0 ? "Codex final" : codexLimit ? "Codex token limit" : "Codex issue",
     body: [
-      finalText || "Codex did not produce a final message.",
+      codexLimit?.body ?? (finalText || "Codex did not produce a final message."),
       result.exitCode !== 0 && result.stderr.trim() ? `\nstderr:\n${result.stderr.trim()}` : "",
     ].filter(Boolean).join("\n").trim(),
-    summary: (finalText || result.stderr || "Codex run completed.").split("\n").find(Boolean)?.slice(0, 220) ?? "Codex run completed.",
+    summary: codexLimit?.summary ?? ((finalText || result.stderr || "Codex run completed.").split("\n").find(Boolean)?.slice(0, 220) ?? "Codex run completed."),
     suggestedStatus: result.exitCode === 0 ? "needs_review" : "error",
-    tags: ["codex", result.exitCode === 0 ? "final" : "error"],
+    tags: ["codex", result.exitCode === 0 ? "final" : "error", ...(codexLimit ? ["token-limit"] : [])],
   }];
 
   if (shouldOfferFullAccessApproval(result, finalText, settings)) {
@@ -676,6 +682,105 @@ function formatCommandEvent(item) {
 function extractLastAgentMessage(events) {
   const message = [...events].reverse().find((event) => event?.item?.type === "agent_message" && typeof event.item.text === "string");
   return message?.item?.text ?? "";
+}
+
+function describeCodexTokenLimit(message, nowIso) {
+  if (!isCodexTokenLimitMessage(message)) return null;
+  const resetText = extractCodexLimitResetText(message, nowIso);
+  const body = [
+    "Codex token limit reached.",
+    resetText ? `Limit reset: ${resetText}` : "Limit reset: not reported by Codex.",
+    "",
+    "Original error:",
+    message,
+  ].join("\n");
+  return {
+    body,
+    summary: resetText ? `Codex token limit reached. Reset: ${resetText}.` : "Codex token limit reached. Reset time was not reported.",
+  };
+}
+
+function isCodexTokenLimitMessage(message) {
+  const normalized = String(message).toLowerCase();
+  return (
+    normalized.includes("token limit") ||
+    normalized.includes("usage limit") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("quota") ||
+    normalized.includes("too many requests")
+  );
+}
+
+function extractCodexLimitResetText(message, nowIso) {
+  const explicit =
+    matchFirst(String(message), [
+      /\b(?:resets?|reset|retry|try again|available again|come back)\s+(?:at|after|on)\s+([^\r\n.]+)/i,
+      /\b(?:resets?|retry|try again|available again|come back)\s+in\s+([^\r\n.]+)/i,
+      /\buntil\s+([^\r\n.]+)/i,
+    ]) ?? "";
+  if (!explicit) return "";
+
+  const cleaned = explicit.replace(/\s+/g, " ").trim();
+  if (/^\d+\s*(?:s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours)\b/i.test(cleaned)) {
+    const relative = addRelativeDuration(nowIso, cleaned);
+    return relative ? `${relative} (${cleaned} from now)` : cleaned;
+  }
+
+  const absolute = parseResetDate(cleaned, nowIso);
+  return absolute || cleaned;
+}
+
+function matchFirst(value, patterns) {
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function addRelativeDuration(nowIso, value) {
+  const now = new Date(nowIso);
+  let ms = 0;
+  const matches = String(value).matchAll(/(\d+(?:\.\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours)/gi);
+  for (const match of matches) {
+    const amount = Number(match[1]);
+    const unit = match[2].toLowerCase();
+    if (!Number.isFinite(amount)) continue;
+    if (unit.startsWith("h")) ms += amount * 60 * 60 * 1000;
+    else if (unit.startsWith("m")) ms += amount * 60 * 1000;
+    else ms += amount * 1000;
+  }
+  if (!ms) return "";
+  return formatResetDate(new Date(now.getTime() + ms));
+}
+
+function parseResetDate(value, nowIso) {
+  const direct = new Date(value);
+  if (!Number.isNaN(direct.getTime())) return formatResetDate(direct);
+
+  const timeMatch = String(value).match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+  if (!timeMatch) return "";
+  const now = new Date(nowIso);
+  let hours = Number(timeMatch[1]);
+  const minutes = Number(timeMatch[2] ?? 0);
+  const meridiem = timeMatch[3]?.toLowerCase();
+  if (meridiem === "pm" && hours < 12) hours += 12;
+  if (meridiem === "am" && hours === 12) hours = 0;
+  if (hours > 23 || minutes > 59) return "";
+  const resetAt = new Date(now);
+  resetAt.setHours(hours, minutes, 0, 0);
+  if (resetAt.getTime() <= now.getTime()) resetAt.setDate(resetAt.getDate() + 1);
+  return formatResetDate(resetAt);
+}
+
+function formatResetDate(date) {
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function shouldOfferFullAccessApproval(result, finalText, settings) {
@@ -870,10 +975,18 @@ async function createAudioTranscription(request) {
   if (typeof audio.size === "number" && audio.size > 26 * 1024 * 1024) {
     throw new BridgeError(413, "Audio file is too large for transcription");
   }
+  if (typeof audio.size === "number" && audio.size < 128) {
+    throw new BridgeError(400, "No usable audio was captured");
+  }
+
+  const audioMimeType = normalizeAudioMimeType(audio.type);
+  const audioFileName = normalizeAudioFileName(audio.name, audioMimeType);
+  const audioBytes = Buffer.from(await audio.arrayBuffer());
+  const upstreamAudio = new Blob([audioBytes], { type: audioMimeType });
 
   const upstreamForm = new FormData();
   upstreamForm.set("model", openAiTranscriptionModel);
-  upstreamForm.set("file", audio, audio.name || "dictation.webm");
+  upstreamForm.set("file", upstreamAudio, audioFileName);
 
   const upstream = await fetch(`${openAiBaseUrl}/audio/transcriptions`, {
     method: "POST",
@@ -885,7 +998,31 @@ async function createAudioTranscription(request) {
     text: stringOr(data.text, ""),
     model: openAiTranscriptionModel,
     durationMs: Date.now() - startedAt,
+    audioSizeBytes: audioBytes.byteLength,
+    audioMimeType,
   };
+}
+
+function normalizeAudioMimeType(value) {
+  const mimeType = stringOr(value, "").split(";")[0].trim().toLowerCase();
+  if (mimeType === "audio/mp4" || mimeType === "audio/mpeg" || mimeType === "audio/mp3" || mimeType === "audio/wav" || mimeType === "audio/webm" || mimeType === "audio/ogg") {
+    return mimeType;
+  }
+  return "audio/webm";
+}
+
+function normalizeAudioFileName(value, mimeType) {
+  const extension = mimeType === "audio/mp4"
+    ? ".mp4"
+    : mimeType === "audio/mpeg" || mimeType === "audio/mp3"
+      ? ".mp3"
+      : mimeType === "audio/wav"
+        ? ".wav"
+        : mimeType === "audio/ogg"
+          ? ".ogg"
+          : ".webm";
+  const base = basename(stringOr(value, "dictation").replace(/[\\/:*?"<>|]+/g, "-"), extname(stringOr(value, ""))).slice(0, 80) || "dictation";
+  return `${base}${extension}`;
 }
 
 async function createWebSearchResponse(payload) {
@@ -1066,7 +1203,7 @@ function buildSystemInstruction() {
   return [
     "You are an AI collaborator working inside Mind Atlas, a spatial tree notebook co-edited by the human and AI.",
     "Mind Atlas is the surrounding thought tool and document structure. Do not speak as if you are Mind Atlas itself.",
-    "The selected celestial node is the active context. The user's request is preserved as a separate child node, and your single response will become one child of that request.",
+    "The selected notebook node is the active context. The user's request is preserved as a separate child node, and your single response will become one child of that request.",
     "Return one direct answer to the user's message. Do not propose extra child nodes, hidden branches, follow-up nodes, or multiple alternative outputs.",
     "You may summarize, critique, or suggest next actions inside the body of the single answer, but do not claim you changed files or remote systems.",
     "Return JSON only. Do not wrap it in Markdown.",
@@ -1124,7 +1261,7 @@ function buildRealtimeSessionConfig(payload) {
     model: stringOr(payload?.model, realtimeModel),
     instructions: [
       "You are speaking inside Mind Atlas, a spatial tree notebook.",
-      "Stay anchored to the selected celestial node and keep responses concise enough for voice.",
+      "Stay anchored to the selected notebook node and keep responses concise enough for voice.",
       "Use available tools to search, focus, select, add, update, run AI, inspect notifications, and search the web when the user asks.",
       "Do not execute destructive actions unless a tool returns that human approval is required.",
       "After using tools, briefly explain what changed.",

@@ -62,7 +62,7 @@ const toolSpecs: VoiceToolSpec[] = [
   {
     type: "function",
     name: "search_nodes",
-    description: "Search celestial nodes by title, body, summary, tags, status, or provider metadata.",
+    description: "Search notebook nodes by title, body, summary, tags, status, or provider metadata.",
     parameters: objectSchema({
       query: { type: "string", description: "Search text." },
       limit: { type: "number", description: "Maximum number of matches. Default 10." },
@@ -154,7 +154,7 @@ const toolSpecs: VoiceToolSpec[] = [
   {
     type: "function",
     name: "add_child_node",
-    description: "Add a child celestial node under a parent or the active node.",
+    description: "Add a child notebook node under a parent or the active node.",
     parameters: objectSchema({
       parentId: { type: "string", description: "Parent node id. If omitted, active node is used." },
       title: { type: "string" },

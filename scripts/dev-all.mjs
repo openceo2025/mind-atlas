@@ -40,7 +40,7 @@ env.VITE_MIND_ATLAS_BRIDGE_URL ??= `${protocol}://127.0.0.1:${env.MIND_ATLAS_BRI
 
 const children = [
   start("bridge", ["scripts/mind-atlas-bridge.mjs"]),
-  start("vite", ["node_modules/vite/bin/vite.js", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]),
+  start("vite", ["node_modules/vite/bin/vite.js", "--configLoader", "runner", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]),
 ];
 
 console.log("");

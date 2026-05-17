@@ -351,6 +351,11 @@ export interface VoicePartnerState {
   summary: VoiceSessionSummary | null;
 }
 
+export interface VoicePartnerSettings {
+  realtimeModel: string;
+  realtimeVoice: string;
+}
+
 export interface RealtimeToolDefinition {
   type: "function";
   name: string;
@@ -362,6 +367,8 @@ export interface AudioTranscriptionResult {
   text: string;
   model: string;
   durationMs?: number;
+  audioSizeBytes?: number;
+  audioMimeType?: string;
 }
 
 export interface WebSearchResult {
@@ -430,6 +437,8 @@ export interface AtlasNode {
   usage?: AiUsage;
   action?: AtlasNodeAction;
   aiDialogSettings?: AiDialogSettings;
+  reminderAt?: string;
+  reminderFiredAt?: string;
   children: AtlasNode[];
 }
 

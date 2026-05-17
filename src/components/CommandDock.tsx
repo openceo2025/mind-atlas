@@ -2,8 +2,8 @@ import { AudioLines, Bot, Code2, HardDrive, Mic, PenLine, SendHorizonal, Square 
 import { FormEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, useEffect, useMemo, useRef, useState } from "react";
 import { getCodexOptions, transcribeAudio } from "../ai/bridgeClient";
 import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceSession, type RealtimeSessionState } from "../ai/realtimeClient";
-import { UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
-import { buildAiNodeContextWithAttachments, findNode, findNodePath, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
+import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
+import { buildAiNodeContextWithAttachments, findNode, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
 import type { AiAttachmentMode, AiContextScope, AiExecutionMode, CodexOptionsResult, CodexReasoningEffort, CodexSandboxMode } from "../types";
 
 type CommandMode = AiExecutionMode | "note";
@@ -25,6 +25,7 @@ export function CommandDock() {
   const longPressTimerRef = useRef<number | null>(null);
   const longPressTriggeredRef = useRef(false);
   const pendingVoiceReleaseRef = useRef(false);
+  const stopResponsePressRef = useRef(false);
   const activeMicPointerIdRef = useRef<number | null>(null);
   const touchFallbackActiveRef = useRef(false);
   const voiceIdleTimerRef = useRef<number | null>(null);
@@ -44,10 +45,10 @@ export function CommandDock() {
   const appendVoiceLogEntry = useAtlasStore((state) => state.appendVoiceLogEntry);
   const voiceSessionSummary = useAtlasStore((state) => state.voiceSessionSummary);
   const setVoiceSessionSummary = useAtlasStore((state) => state.setVoiceSessionSummary);
+  const voicePartnerSettings = useAtlasStore((state) => state.voicePartnerSettings);
   const runAiOnSelectedNode = useAtlasStore((state) => state.runAiOnSelectedNode);
   const addQuickChildFromInput = useAtlasStore((state) => state.addQuickChildFromInput);
   const setNodeStatus = useAtlasStore((state) => state.setNodeStatus);
-  const selectedPath = findNodePath(atlasRoot, selectedNodeId);
   const selectedNode = findNode(atlasRoot, selectedNodeId);
   const scope = aiContextOptions.scope;
   const editableContextControls = mode !== "note" && scope === "custom";
@@ -71,10 +72,7 @@ export function CommandDock() {
     ? selectedCodexModel.supportedReasoningEfforts
     : (["low", "medium", "high", "xhigh"] as CodexReasoningEffort[]);
 
-  const targetLabel = useMemo(() => {
-    const crumbs = (selectedPath ?? []).slice(-3).map((node) => node.title.trim() || "Untitled");
-    return `to ${crumbs.join(" / ") || "Mind Atlas"}`;
-  }, [selectedPath]);
+  const selectedNodeTitle = selectedNode?.title.trim() || "Mind Atlas";
 
   useEffect(() => {
     return () => {
@@ -154,13 +152,21 @@ export function CommandDock() {
       const session = await startVoicePartnerSession({
         context,
         instructions: selectedNode?.body,
+        model: voicePartnerSettings.realtimeModel,
+        voice: voicePartnerSettings.realtimeVoice,
         summary: voiceSessionSummary,
         onStateChange: (state) => {
           setVoiceState(state);
+          setVoiceButtonState((current) => {
+            if (current === "dictation_recording" || current === "dictation_transcribing") return current;
+            if (state === "connecting") return "voice_connecting";
+            if (state === "listening") return "voice_ptt";
+            if (state === "responding") return "voice_responding";
+            return "idle";
+          });
           if (state === "closed") {
             voiceSessionRef.current = null;
             voiceSessionIdRef.current = undefined;
-            setVoiceButtonState("idle");
           }
         },
         onEvent: handleRealtimeEvent,
@@ -213,7 +219,6 @@ export function CommandDock() {
           sessionId: voiceSessionIdRef.current,
         });
       }
-      setVoiceButtonState("idle");
       scheduleVoiceIdleTimeout();
       return;
     }
@@ -308,6 +313,11 @@ export function CommandDock() {
   };
 
   const beginMicPress = () => {
+    if (voiceButtonState === "voice_responding" || voiceState === "responding") {
+      stopResponsePressRef.current = true;
+      stopAssistantResponse();
+      return;
+    }
     if (voiceButtonState === "dictation_recording") return;
     if (voiceButtonState === "dictation_transcribing" || voiceButtonState === "voice_connecting") return;
     clearLongPressTimer();
@@ -320,6 +330,10 @@ export function CommandDock() {
   };
 
   const completeMicPress = () => {
+    if (stopResponsePressRef.current) {
+      stopResponsePressRef.current = false;
+      return;
+    }
     if (voiceButtonState === "dictation_recording") {
       void stopDictationAndTranscribe();
       return;
@@ -336,6 +350,10 @@ export function CommandDock() {
   };
 
   const cancelMicPress = () => {
+    if (stopResponsePressRef.current) {
+      stopResponsePressRef.current = false;
+      return;
+    }
     clearLongPressTimer();
     if (longPressTriggeredRef.current) {
       pendingVoiceReleaseRef.current = true;
@@ -361,15 +379,20 @@ export function CommandDock() {
       dictationChunksRef.current = [];
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       dictationStreamRef.current = stream;
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
-      const recorder = new MediaRecorder(stream, { mimeType });
+      const mimeType = getSupportedDictationMimeType();
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       recorder.addEventListener("dataavailable", (event) => {
         if (event.data.size > 0) dictationChunksRef.current.push(event.data);
       });
-      recorder.start();
+      recorder.start(1000);
       dictationRecorderRef.current = recorder;
       setVoiceButtonState("dictation_recording");
-      appendVoiceLogEntry({ role: "system", title: "Dictation", text: "Dictation recording started." });
+      appendVoiceLogEntry({
+        role: "system",
+        title: "Dictation",
+        text: "Dictation recording started.",
+        metadata: { mimeType: recorder.mimeType || mimeType || "browser-default" },
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not start dictation.";
       setVoiceError(message);
@@ -388,7 +411,7 @@ export function CommandDock() {
       dictationStreamRef.current?.getTracks().forEach((track) => track.stop());
       dictationStreamRef.current = null;
       if (!blob.size) throw new Error("No audio was captured.");
-      const result = await transcribeAudio(blob, `mind-atlas-dictation-${Date.now()}.webm`);
+      const result = await transcribeAudio(blob, createDictationFileName(blob, Date.now()));
       const transcript = result.text.trim();
       if (!transcript) throw new Error("No transcript was returned.");
       setValue((current) => (current.trim() ? `${current.trimEnd()}\n${transcript}` : transcript));
@@ -396,14 +419,28 @@ export function CommandDock() {
         role: "user",
         title: "Dictation transcript",
         text: transcript,
-        metadata: { model: result.model, durationMs: result.durationMs },
+        metadata: {
+          model: result.model,
+          durationMs: result.durationMs,
+          audioSizeBytes: result.audioSizeBytes ?? blob.size,
+          audioMimeType: result.audioMimeType ?? blob.type,
+        },
       });
       setVoiceButtonState("idle");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Dictation failed.";
       setVoiceError(message);
       setVoiceButtonState("idle");
-      appendVoiceLogEntry({ role: "error", title: "Dictation error", text: message });
+      appendVoiceLogEntry({
+        role: "error",
+        title: "Dictation error",
+        text: message,
+        metadata: {
+          chunks: dictationChunksRef.current.length,
+          audioSizeBytes: dictationChunksRef.current.reduce((total, chunk) => total + chunk.size, 0),
+          audioMimeTypes: Array.from(new Set(dictationChunksRef.current.map((chunk) => chunk.type).filter(Boolean))),
+        },
+      });
     }
   };
 
@@ -422,6 +459,25 @@ export function CommandDock() {
     if (!session) return;
     session.endPushToTalk();
     setVoiceButtonState("idle");
+    scheduleVoiceIdleTimeout();
+  };
+
+  const stopAssistantResponse = () => {
+    const session = voiceSessionRef.current;
+    if (!session) {
+      setVoiceButtonState("idle");
+      return;
+    }
+    session.cancelAssistantResponse();
+    assistantBufferRef.current = "";
+    setVoiceState("live");
+    setVoiceButtonState("idle");
+    appendVoiceLogEntry({
+      role: "system",
+      title: "Voice Partner response stopped",
+      text: "The current Realtime audio response was stopped by the user.",
+      sessionId: session.id,
+    });
     scheduleVoiceIdleTimeout();
   };
 
@@ -467,6 +523,34 @@ export function CommandDock() {
     voiceIdleTimerRef.current = null;
   };
 
+  useEffect(() => {
+    const handleRestart = () => {
+      clearLongPressTimer();
+      clearVoiceIdleTimer();
+      pendingVoiceReleaseRef.current = false;
+      longPressTriggeredRef.current = false;
+      stopResponsePressRef.current = false;
+      activeMicPointerIdRef.current = null;
+      assistantBufferRef.current = "";
+      const session = voiceSessionRef.current;
+      session?.stop();
+      voiceSessionRef.current = null;
+      voiceSessionIdRef.current = undefined;
+      setVoiceSessionSummary(null);
+      setVoiceState("closed");
+      setVoiceButtonState("idle");
+      setVoiceError("");
+      appendVoiceLogEntry({
+        role: "system",
+        title: "Voice Partner restarted",
+        text: "Realtime Voice Partner context was reset. The next push-to-talk turn starts a fresh session.",
+        sessionId: session?.id,
+      });
+    };
+    window.addEventListener(REALTIME_VOICE_RESTART_EVENT, handleRestart);
+    return () => window.removeEventListener(REALTIME_VOICE_RESTART_EVENT, handleRestart);
+  }, [appendVoiceLogEntry, setVoiceSessionSummary]);
+
   const voiceIsLive = voiceState === "live" || voiceState === "connecting";
   const micLive = voiceIsLive || voiceState === "listening" || voiceState === "responding" || voiceSessionRef.current !== null;
   const selectedCount = new Set([selectedNodeId, ...multiSelectedNodeIds]).size;
@@ -488,9 +572,9 @@ export function CommandDock() {
         onTouchEnd={handleMicTouchEnd}
         onTouchCancel={handleMicTouchCancel}
         onContextMenu={(event) => event.preventDefault()}
-        aria-label={micLive ? "Voice Partner push-to-talk or dictation" : "Start dictation or hold for Voice Partner"}
+        aria-label={voiceButtonState === "voice_responding" ? "Stop Voice Partner response" : micLive ? "Voice Partner push-to-talk or dictation" : "Start dictation or hold for Voice Partner"}
       >
-        {voiceButtonState === "dictation_recording" ? (
+        {voiceButtonState === "dictation_recording" || voiceButtonState === "voice_responding" ? (
           <Square size={16} />
         ) : voiceButtonState === "voice_ptt" || voiceButtonState === "voice_connecting" ? (
           <AudioLines size={18} />
@@ -522,15 +606,13 @@ export function CommandDock() {
         <option value="custom">Custom</option>
       </select>
       <label className="command-field">
-        <span>
-          {targetLabel} / {statusText} / {contextText}
-        </span>
+        <span title={`${selectedNodeTitle} / ${contextText}`}>{statusText}</span>
         <input
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onFocus={() => setCommandInputEditing(true)}
           onBlur={() => setCommandInputEditing(false)}
-          placeholder={mode === "note" ? "Create a child celestial node here" : mode === "codex" ? "Ask Codex from this location" : "Ask AI from this location"}
+          placeholder={mode === "note" ? "Create a child node here" : mode === "codex" ? "Ask Codex from this location" : "Ask AI from this location"}
         />
       </label>
       <button className="send-button" type="submit" aria-label="Send instruction" disabled={!value.trim()}>
@@ -735,20 +817,51 @@ function ContextNumberControl({
   );
 }
 
+function getSupportedDictationMimeType() {
+  const options = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus", "audio/ogg"];
+  return options.find((type) => MediaRecorder.isTypeSupported(type)) ?? "";
+}
+
+function createDictationFileName(blob: Blob, timestamp: number) {
+  const mimeType = blob.type.split(";")[0].trim().toLowerCase();
+  const extension = mimeType === "audio/mp4" ? "mp4" : mimeType === "audio/ogg" ? "ogg" : "webm";
+  return `mind-atlas-dictation-${timestamp}.${extension}`;
+}
+
 function stopRecorder(recorder: MediaRecorder, chunks: Blob[]) {
-  return new Promise<Blob>((resolve) => {
+  return new Promise<Blob>((resolve, reject) => {
+    const finalChunks = [...chunks];
+    const mimeType = recorder.mimeType || finalChunks.find((chunk) => chunk.type)?.type || "audio/webm";
+    const handleData = (event: BlobEvent) => {
+      if (event.data.size > 0) finalChunks.push(event.data);
+    };
+    const cleanup = () => {
+      recorder.removeEventListener("dataavailable", handleData);
+      recorder.removeEventListener("error", handleError);
+    };
+    const handleError = (event: Event) => {
+      cleanup();
+      reject(new Error(event instanceof ErrorEvent ? event.message : "Audio recording failed."));
+    };
+    recorder.addEventListener(
+      "dataavailable",
+      handleData,
+    );
     recorder.addEventListener(
       "stop",
       () => {
-        resolve(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+        cleanup();
+        resolve(new Blob(finalChunks, { type: mimeType }));
       },
       { once: true },
     );
+    recorder.addEventListener("error", handleError, { once: true });
     if (recorder.state !== "inactive") {
       recorder.requestData();
       recorder.stop();
     } else {
-      resolve(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+      cleanup();
+      resolve(new Blob(finalChunks, { type: mimeType }));
     }
   });
 }
