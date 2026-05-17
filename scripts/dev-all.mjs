@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { networkInterfaces } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,8 +10,9 @@ const isWindows = process.platform === "win32";
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
   console.log("Usage: npm run dev:all");
   console.log("");
-  console.log("Starts the Mind Atlas bridge and Vite dev server together.");
+  console.log("Starts the Mind Atlas bridge and Vite dev server together over LAN HTTPS by default.");
   console.log("Configuration is read from .env and .env.local when present.");
+  console.log("Set MIND_ATLAS_DEV_HTTPS=false to use HTTP.");
   process.exit(0);
 }
 
@@ -20,21 +22,40 @@ const env = {
   ...process.env,
 };
 
+const useHttps = (process.env.MIND_ATLAS_DEV_HTTPS ?? env.MIND_ATLAS_DEV_HTTPS ?? "true") !== "false";
 env.MIND_ATLAS_BRIDGE_PORT ??= "8787";
+env.MIND_ATLAS_BRIDGE_HOST = "0.0.0.0";
 env.MIND_ATLAS_LOCAL_BASE_URL ??= "http://127.0.0.1:1234/v1";
 env.MIND_ATLAS_LOCAL_API_KEY ??= "lm-studio";
-env.MIND_ATLAS_ALLOWED_ORIGIN ??= "http://127.0.0.1:5173,http://localhost:5173";
-env.VITE_MIND_ATLAS_BRIDGE_URL ??= `http://127.0.0.1:${env.MIND_ATLAS_BRIDGE_PORT}`;
+env.MIND_ATLAS_ALLOWED_ORIGIN = process.env.MIND_ATLAS_ALLOWED_ORIGIN ?? "*";
+if (useHttps) {
+  ensureDevCertificate();
+  env.MIND_ATLAS_HTTPS_KEY ??= resolve(repoRoot, ".certs", "mind-atlas-dev-server.key");
+  env.MIND_ATLAS_HTTPS_CERT ??= resolve(repoRoot, ".certs", "mind-atlas-dev-server.crt");
+  env.MIND_ATLAS_HTTPS_CA ??= resolve(repoRoot, ".certs", "mind-atlas-dev-ca.crt");
+}
+const protocol = useHttps ? "https" : "http";
+env.MIND_ATLAS_BRIDGE_PROTOCOL = protocol;
+env.VITE_MIND_ATLAS_BRIDGE_URL ??= `${protocol}://127.0.0.1:${env.MIND_ATLAS_BRIDGE_PORT}`;
 
 const children = [
-  start("bridge", ["run", "dev:bridge"]),
-  start("vite", ["run", "dev", "--", "--host", "127.0.0.1", "--port", "5173", "--strictPort"]),
+  start("bridge", ["scripts/mind-atlas-bridge.mjs"]),
+  start("vite", ["node_modules/vite/bin/vite.js", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]),
 ];
 
 console.log("");
 console.log("Mind Atlas dev stack is starting.");
-console.log("App:    http://127.0.0.1:5173/");
+console.log(`App:    ${protocol}://127.0.0.1:5173/`);
 console.log(`Bridge: ${env.VITE_MIND_ATLAS_BRIDGE_URL}`);
+const lanUrls = getLanUrls(5173);
+if (lanUrls.length) {
+  console.log("LAN:");
+  for (const url of lanUrls) console.log(`        ${url}`);
+}
+if (useHttps) {
+  console.log(`CA:     ${env.MIND_ATLAS_HTTPS_CA}`);
+  console.log("        Install this CA on mobile devices to trust LAN HTTPS.");
+}
 console.log("Stop both with Ctrl+C.");
 console.log("");
 
@@ -68,10 +89,10 @@ process.on("SIGTERM", () => {
 });
 
 function start(name, args) {
-  const child = spawn(npmCommand(), args, {
+  const child = spawn(process.execPath, args, {
     cwd: repoRoot,
     env,
-    shell: isWindows,
+    shell: false,
     stdio: ["inherit", "pipe", "pipe"],
   });
 
@@ -101,8 +122,22 @@ function stopProcessTree(child) {
   child.kill("SIGTERM");
 }
 
-function npmCommand() {
-  return isWindows ? "npm.cmd" : "npm";
+function ensureDevCertificate() {
+  const result = spawnSync(process.execPath, ["scripts/ensure-dev-cert.mjs"], {
+    cwd: repoRoot,
+    env,
+    stdio: "inherit",
+  });
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
+}
+
+function getLanUrls(port) {
+  return Object.values(networkInterfaces())
+    .flatMap((items) => items ?? [])
+    .filter((item) => item.family === "IPv4" && !item.internal)
+    .map((item) => `${protocol}://${item.address}:${port}/`);
 }
 
 function writePrefixed(name, chunk, isError) {

@@ -24,9 +24,14 @@ Current version: `0.1.1`
 - Extracts shared `#tags` from notebook text for later resonance behavior.
 - Provides appearance controls for planet color and texture.
 - Sends the focused node context to a local AI bridge and saves each user request plus provider result as child celestial nodes.
+- Saves OpenAI-generated images as attachments on the provider result node.
 - Supports OpenAI, LM Studio/OpenAI-compatible local models, and Codex CLI execution through the local bridge.
+- Saves and loads rich `.mindatlaspkg` notebook packages through the local bridge's server-side notebook folder.
+- Expands Codex runs into spatial child nodes for summaries, commands, changed files, approval prompts, and final output.
 - Emits wider notification pulses when AI work completes or fails away from the user's current focus.
-- Starts a Realtime voice session from the focused node without exposing the standard provider API key to the browser.
+- Uses the microphone button for short-click dictation with `gpt-4o-transcribe`.
+- Uses long-press push-to-talk for a Realtime Voice Partner that can inspect and operate the atlas through guarded tools.
+- Keeps Voice Partner conversation logs in a global text log view from the main menu.
 
 Embeddings, summarization automation, sync, and remote storage are intentionally out of scope for `0.1.x`.
 
@@ -54,10 +59,27 @@ Start the app and local AI bridge together:
 npm run dev:all
 ```
 
-Open:
+Open locally:
 
 ```text
 http://127.0.0.1:5173/
+```
+
+`npm run dev:all` also publishes the dev app and bridge on the LAN. Open the LAN URL printed in the terminal from another device, for example:
+
+```text
+https://192.168.0.14:5173/
+```
+
+For mobile microphone access, `dev:all` starts the app and bridge over HTTPS by default and writes local development certificates into `.certs/`. Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on the mobile device, then open the printed LAN HTTPS URL.
+
+On Android, copy `.certs/mind-atlas-dev-ca.crt` to the phone and install it from the system security settings as a CA certificate. The exact menu name depends on the device, but it is usually under `Settings > Security > Encryption & credentials > Install a certificate > CA certificate`. Restart the browser after installing it.
+
+To temporarily go back to HTTP:
+
+```powershell
+$env:MIND_ATLAS_DEV_HTTPS="false"
+npm run dev:all
 ```
 
 Start only the development server:
@@ -81,7 +103,7 @@ npm run dev:bridge
 
 Without an API key, the bridge returns mock AI responses so the UI flow remains testable.
 
-To test from another device on the same LAN:
+To start only Vite for LAN testing without the AI bridge:
 
 ```powershell
 npm run dev -- --host 0.0.0.0
@@ -158,10 +180,12 @@ Replace `<your-github-username>` with the GitHub account or organization that ow
 ## Data Notes
 
 - Notebook data is saved in browser local storage.
-- Export and import use a single `.mindatlas` JSON file.
-- Attached file blobs are not exported.
+- Light export and import use a single `.mindatlas` JSON file.
+- Rich export and import use `.mindatlaspkg` packages and include available attachment blobs.
+- `クラウドへ保存` writes the same rich package to the bridge server's notebook folder. `クラウドから読み込み` lists that folder and imports the selected package.
 - Attachment metadata such as file name, MIME type, size, and path-like name is saved.
-- Image, audio, and video previews work only for files selected in the current browser session.
+- Attachment blobs are included only when the current browser session still has access to them; otherwise metadata is kept.
+- The default server-side notebook folder is `server-data/notebooks/`, or `MIND_ATLAS_CLOUD_DIR` when configured.
 - Provider API keys belong in the local bridge process, not in browser local storage.
 
 See [docs/ai-bridge.md](docs/ai-bridge.md) for AI bridge setup and Realtime notes.

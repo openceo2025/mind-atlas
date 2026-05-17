@@ -1,17 +1,20 @@
 import { create } from "zustand";
 import {
-  clearStoredAttachmentBlobs,
   createStoredAttachmentPreviewUrls,
-  deleteStoredAttachmentBlob,
-  deleteStoredAttachmentBlobs,
+  getStoredAttachmentBlob,
+  saveStoredAttachmentBlob,
 } from "../attachmentStorage";
 import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme";
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
 import { requestAiResponse } from "../ai/bridgeClient";
 import type {
+  AiAttachmentMode,
+  AiContextOptions,
   AiContextScope,
   AiContextStats,
+  AiDialogSettings,
   AiExecutionMode,
+  AiGeneratedAttachment,
   AiGeneratedOutput,
   AiNodeContext,
   AiNodeSnapshot,
@@ -19,17 +22,24 @@ import type {
   AiRun,
   AiUsage,
   AtlasEvent,
+  AtlasNodeAction,
   AtlasNode,
+  CodexGeneratedNode,
+  CodexSettings,
   NotificationPulse,
   NotificationPulseKind,
   NodeAttachment,
   Selection,
   ViewportState,
+  VoiceLogEntry,
+  VoiceSessionSummary,
   WorkArea,
   WorkStatus,
 } from "../types";
 
 const NOTEBOOK_STORAGE_KEY = "mind-atlas-notebook-v2";
+const VOICE_LOG_STORAGE_KEY = "mind-atlas-voice-log-v1";
+const VOICE_SUMMARY_STORAGE_KEY = "mind-atlas-voice-summary-v1";
 export const NOTEBOOK_NODE_RADIUS = 28;
 export const NOTEBOOK_FIRST_SHELL_RADIUS = 360;
 export const NOTEBOOK_SHELL_GAP = 340;
@@ -40,6 +50,26 @@ const MIN_CHILD_SCREEN_SEPARATION_RADII = 3.4;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const NOTIFICATION_PULSE_DURATION_MS = 8200;
 const NOTIFICATION_REPEAT_INTERVAL_MS = 3600;
+const HISTORY_LIMIT = 50;
+const DEFAULT_AI_CONTEXT_OPTIONS: AiContextOptions = {
+  scope: "focused",
+  ancestorDepth: 2,
+  descendantDepth: 2,
+  lateralRadius: 1,
+  attachmentMode: "metadata",
+  maxAttachmentCount: 10,
+  maxAttachmentBytes: 2 * 1024 * 1024,
+  selectedNodeIds: [],
+};
+const DEFAULT_CODEX_SETTINGS: CodexSettings = {
+  model: "gpt-5.5",
+  reasoningEffort: "medium",
+  sandbox: "workspace-write",
+  workspace: "",
+  webSearch: false,
+  skipGitRepoCheck: false,
+  timeoutMs: 60 * 60 * 1000,
+};
 
 interface UnreadNotification {
   nodeId: string;
@@ -56,22 +86,48 @@ interface FocusRequest {
   nonce: number;
 }
 
+interface HistoryEntry {
+  atlasRoot: AtlasNode;
+  selectedNodeId: string;
+}
+
 interface AtlasStore {
   atlasRoot: AtlasNode;
+  historyPast: HistoryEntry[];
+  historyFuture: HistoryEntry[];
   workAreas: WorkArea[];
   aiRuns: Record<string, AiRun>;
   notificationPulses: NotificationPulse[];
   unreadNotifications: Record<string, UnreadNotification>;
+  voiceLogEntries: VoiceLogEntry[];
+  voiceSessionSummary: VoiceSessionSummary | null;
   selected: Selection;
   selectedNodeId: string;
+  multiSelectedNodeIds: string[];
+  aiContextOptions: AiContextOptions;
+  codexSettings: CodexSettings;
+  commandInputEditing: boolean;
+  activeCommandMode: AiExecutionMode | "note";
   viewport: ViewportState;
   focusRequest: FocusRequest | null;
+  cameraFocusNodeId: string | null;
   attachmentPreviewUrls: Record<string, string>;
   birthMarks: Record<string, number>;
   titleEditRequestId: string | null;
   selectNode: (id: string) => void;
   selectNodeInPlace: (id: string) => void;
   focusNode: (id: string) => void;
+  toggleMultiSelectedNode: (id: string) => void;
+  clearMultiSelection: () => void;
+  setAiContextOptions: (patch: Partial<AiContextOptions>) => void;
+  setCodexSettings: (patch: Partial<CodexSettings>) => void;
+  loadAiDialogSettingsForNode: (id: string) => void;
+  resetAiDialogSettingsToDefaults: () => void;
+  setCommandInputEditing: (editing: boolean) => void;
+  setActiveCommandMode: (mode: AiExecutionMode | "note") => void;
+  appendVoiceLogEntry: (entry: Omit<VoiceLogEntry, "id" | "createdAt"> & Partial<Pick<VoiceLogEntry, "id" | "createdAt">>) => VoiceLogEntry;
+  clearVoiceLog: () => void;
+  setVoiceSessionSummary: (summary: VoiceSessionSummary | null) => void;
   focusParentNode: () => void;
   updateNode: (id: string, patch: Partial<Pick<AtlasNode, "title" | "body" | "tags" | "summary" | "nextDecision">>) => void;
   setNodeStatus: (id: string, status: WorkStatus, nextDecision?: string) => void;
@@ -83,6 +139,7 @@ interface AtlasStore {
   ) => string | undefined;
   pasteNodeSubtree: (parentId: string, copiedRoot: AtlasNode) => string | undefined;
   addSiblingNode: (id: string) => void;
+  promoteNodeOneLevel: (id: string) => void;
   deleteNode: (id: string) => void;
   moveNode: (id: string, worldPosition: [number, number, number]) => void;
   addAttachment: (nodeId: string, attachment: NodeAttachment, previewUrl?: string) => void;
@@ -94,29 +151,45 @@ interface AtlasStore {
   importNotebook: (root: AtlasNode, datasetName?: string, attachmentPreviewUrls?: Record<string, string>) => void;
   resetNotebook: () => void;
   saveNotebook: () => void;
+  undo: () => void;
+  redo: () => void;
   selectWorkArea: (id: string) => void;
   selectEvent: (parentId: string, id: string) => void;
   selectArtifact: (parentId: string, id: string) => void;
   setViewport: (viewport: ViewportState) => void;
   focusWorkArea: (id: string) => void;
   focusPoint: (x: number, y: number, diameter: number) => void;
+  focusNodeCameraOnly: (id: string) => void;
+  focusParentLayerCameraOnly: () => void;
+  focusSingleChildCameraOnly: () => void;
   focusParentLayer: () => void;
   appendInstruction: (workAreaId: string, content: string) => void;
   addQuickChildFromInput: (prompt: string) => string | undefined;
-  runAiOnSelectedNode: (prompt: string, mode: AiExecutionMode, scope?: AiContextScope) => Promise<void>;
+  runAiOnSelectedNode: (prompt: string, mode: AiExecutionMode, options?: AiContextScope | Partial<AiContextOptions>) => Promise<void>;
+  runNodeAction: (nodeId: string) => Promise<void>;
   tickNotificationPulses: () => void;
 }
 
 export const useAtlasStore = create<AtlasStore>((set, get) => ({
   atlasRoot: loadStoredNotebook() ?? atlasRoot,
+  historyPast: [],
+  historyFuture: [],
   workAreas: initialWorkAreas,
   aiRuns: {},
   notificationPulses: [],
   unreadNotifications: {},
+  voiceLogEntries: loadStoredVoiceLog(),
+  voiceSessionSummary: loadStoredVoiceSessionSummary(),
   selected: { kind: "node", id: "atlas-root" },
   selectedNodeId: "atlas-root",
+  multiSelectedNodeIds: [],
+  aiContextOptions: DEFAULT_AI_CONTEXT_OPTIONS,
+  codexSettings: DEFAULT_CODEX_SETTINGS,
+  commandInputEditing: false,
+  activeCommandMode: "openai",
   viewport: { x: 0, y: 0, zoom: 0.92 },
   focusRequest: null,
+  cameraFocusNodeId: null,
   attachmentPreviewUrls: {},
   birthMarks: {},
   titleEditRequestId: null,
@@ -132,6 +205,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       return {
         selected: selectionFromNode(node),
         selectedNodeId: id,
+        cameraFocusNodeId: null,
         unreadNotifications,
         focusRequest: {
           x: position[0],
@@ -153,6 +227,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       return {
         selected: selectionFromNode(node),
         selectedNodeId: id,
+        cameraFocusNodeId: null,
         unreadNotifications,
       };
     });
@@ -169,6 +244,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       return {
         selected: selectionFromNode(node),
         selectedNodeId: id,
+        cameraFocusNodeId: null,
         unreadNotifications,
         focusRequest: {
           x: position[0],
@@ -181,6 +257,93 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
   },
 
+  toggleMultiSelectedNode: (id) => {
+    const state = get();
+    if (id === state.selectedNodeId || !findNode(state.atlasRoot, id)) return;
+    set((current) => {
+      const selected = current.multiSelectedNodeIds.includes(id)
+        ? current.multiSelectedNodeIds.filter((nodeId) => nodeId !== id)
+        : [...current.multiSelectedNodeIds, id];
+      return { multiSelectedNodeIds: selected };
+    });
+  },
+
+  clearMultiSelection: () => set({ multiSelectedNodeIds: [], cameraFocusNodeId: null }),
+
+  setAiContextOptions: (patch) => {
+    set((state) => ({
+      ...withAiDialogSettingsSaved(state, {
+        contextOptions: normalizeAiContextOptions({
+          ...state.aiContextOptions,
+          ...patch,
+          selectedNodeIds: patch.selectedNodeIds ?? state.aiContextOptions.selectedNodeIds,
+        }),
+      }),
+    }));
+  },
+
+  setCodexSettings: (patch) => {
+    set((state) => ({
+      ...withAiDialogSettingsSaved(state, {
+        codexSettings: normalizeCodexSettings({
+          ...state.codexSettings,
+          ...patch,
+        }),
+      }),
+    }));
+  },
+
+  loadAiDialogSettingsForNode: (id) => {
+    const node = findNode(get().atlasRoot, id);
+    const settings = node?.aiDialogSettings;
+    set((state) => ({
+      aiContextOptions: normalizeAiContextOptions(settings?.contextOptions ?? DEFAULT_AI_CONTEXT_OPTIONS),
+      codexSettings: normalizeCodexSettings(settings?.codexSettings ?? DEFAULT_CODEX_SETTINGS),
+    }));
+  },
+
+  resetAiDialogSettingsToDefaults: () => {
+    set({
+      aiContextOptions: normalizeAiContextOptions(DEFAULT_AI_CONTEXT_OPTIONS),
+      codexSettings: normalizeCodexSettings(DEFAULT_CODEX_SETTINGS),
+    });
+  },
+
+  setCommandInputEditing: (editing) => set({ commandInputEditing: editing, ...(editing ? {} : { cameraFocusNodeId: null }) }),
+
+  setActiveCommandMode: (mode) => set({ activeCommandMode: mode }),
+
+  appendVoiceLogEntry: (entry) => {
+    const voiceLogEntry: VoiceLogEntry = {
+      id: entry.id ?? `voice-log-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`,
+      role: entry.role,
+      text: entry.text,
+      title: entry.title,
+      sessionId: entry.sessionId,
+      toolName: entry.toolName,
+      toolCallId: entry.toolCallId,
+      status: entry.status,
+      metadata: entry.metadata,
+      createdAt: entry.createdAt ?? new Date().toISOString(),
+    };
+    set((state) => {
+      const voiceLogEntries = [...state.voiceLogEntries, voiceLogEntry].slice(-600);
+      persistVoiceLog(voiceLogEntries);
+      return { voiceLogEntries };
+    });
+    return voiceLogEntry;
+  },
+
+  clearVoiceLog: () => {
+    persistVoiceLog([]);
+    set({ voiceLogEntries: [] });
+  },
+
+  setVoiceSessionSummary: (summary) => {
+    persistVoiceSessionSummary(summary);
+    set({ voiceSessionSummary: summary });
+  },
+
   focusParentNode: () => {
     const state = get();
     const path = findNodePath(state.atlasRoot, state.selectedNodeId);
@@ -189,6 +352,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       set((current) => ({
         selected: { kind: "node", id: "atlas-root" },
         selectedNodeId: "atlas-root",
+        cameraFocusNodeId: null,
         focusRequest: {
           x: 0,
           y: 0,
@@ -214,7 +378,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       };
       const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => ({ ...node, ...withoutUndefined(nextPatch) }));
       persistNotebook(atlasRoot);
-      return { atlasRoot };
+      return { ...pushHistory(state), atlasRoot };
     });
   },
 
@@ -227,7 +391,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         updatedAt: new Date().toISOString(),
       }));
       persistNotebook(atlasRoot);
-      return { atlasRoot };
+      return { ...pushHistory(state), atlasRoot };
     });
   },
 
@@ -243,6 +407,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       };
       persistNotebook(atlasRoot);
       return {
+        ...pushHistory(state),
         atlasRoot,
         birthMarks: { ...state.birthMarks, [child.id]: performance.now() },
         titleEditRequestId: child.id,
@@ -280,6 +445,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         persistNotebook(atlasRoot);
       }
       return {
+        ...pushHistory(state),
         atlasRoot,
         birthMarks: { ...state.birthMarks, [child.id]: performance.now() },
         titleEditRequestId: options.focus === false ? state.titleEditRequestId : child.id,
@@ -301,7 +467,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const insertIndex = parent.children.length;
     const rootPosition = getPhyllotaxisStoredChildPosition(childDepth, parent.children.length + 1, insertIndex, parent.id);
     const now = new Date().toISOString();
-    const pastedRoot = cloneNodeSubtreeForPaste(copiedRoot, parent.id, now, rootPosition, true);
+    const inheritedAiDialogSettings =
+      copiedRoot.aiDialogSettings ?? parent.aiDialogSettings ?? createCurrentAiDialogSettings(state.aiContextOptions, state.codexSettings);
+    const pastedRoot = cloneNodeSubtreeForPaste(copiedRoot, parent.id, now, rootPosition, true, inheritedAiDialogSettings);
     const pastedNodeIds = collectNodeIds(pastedRoot);
     const birthStartedAt = performance.now();
 
@@ -313,6 +481,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       }));
       persistNotebook(atlasRoot);
       return {
+        ...pushHistory(current),
         atlasRoot,
         birthMarks: {
           ...current.birthMarks,
@@ -352,12 +521,54 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       }));
       persistNotebook(atlasRoot);
       return {
+        ...pushHistory(current),
         atlasRoot,
         birthMarks: { ...current.birthMarks, [sibling.id]: performance.now() },
         titleEditRequestId: sibling.id,
       };
     });
     get().focusNode(sibling.id);
+  },
+
+  promoteNodeOneLevel: (id) => {
+    const state = get();
+    const path = findNodePath(state.atlasRoot, id);
+    if (!path || path.length < 3) return;
+
+    const parent = path[path.length - 2];
+    const grandparent = path[path.length - 3];
+    const source = path[path.length - 1];
+    const parentIndex = grandparent.children.findIndex((child) => child.id === parent.id);
+    if (parentIndex < 0) return;
+
+    const now = new Date().toISOString();
+    const promotedDepth = path.length - 2;
+    const insertIndex = parentIndex + 1;
+    const promotedPosition = getPromotedSiblingPosition(
+      grandparent,
+      parent,
+      promotedDepth,
+      grandparent.children.length + 1,
+      insertIndex,
+    );
+    const promotedNode: AtlasNode = {
+      ...source,
+      sourceParentId: grandparent.id,
+      position: promotedPosition,
+      updatedAt: now,
+    };
+    const nextRoot = clearResolvedPropagatedErrors(
+      promoteNodeInTree(state.atlasRoot, grandparent.id, parent.id, id, promotedNode, insertIndex, now),
+    );
+    persistNotebook(nextRoot);
+    set({
+      ...pushHistory(state),
+      atlasRoot: nextRoot,
+      selected: selectionFromNode(promotedNode),
+      selectedNodeId: promotedNode.id,
+      cameraFocusNodeId: null,
+    });
+    get().focusNode(promotedNode.id);
   },
 
   deleteNode: (id) => {
@@ -384,9 +595,6 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       delete attachmentPreviewUrls[attachmentId];
     }
-    void deleteStoredAttachmentBlobs(deletedAttachmentIds).catch((error) => {
-      console.error("Failed to remove stored attachment blobs", error);
-    });
     for (const nodeId of deletedNodeIds) {
       delete birthMarks[nodeId];
       delete unreadNotifications[nodeId];
@@ -394,9 +602,12 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
     persistNotebook(nextRoot);
     set((current) => ({
+      ...pushHistory(current),
       atlasRoot: nextRoot,
       selected: selectionFromNode(nextSelectedNode),
       selectedNodeId: nextSelectedNode.id,
+      cameraFocusNodeId: null,
+      multiSelectedNodeIds: current.multiSelectedNodeIds.filter((nodeId) => !deletedNodeIds.includes(nodeId) && findNode(nextRoot, nodeId)),
       attachmentPreviewUrls,
       birthMarks,
       unreadNotifications,
@@ -428,7 +639,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         updatedAt: new Date().toISOString(),
       }));
       persistNotebook(atlasRoot);
-      return { atlasRoot };
+      return { ...pushHistory(current), atlasRoot };
     });
   },
 
@@ -441,6 +652,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       }));
       persistNotebook(atlasRoot);
       return {
+        ...pushHistory(state),
         atlasRoot,
         attachmentPreviewUrls: previewUrl
           ? { ...state.attachmentPreviewUrls, [attachment.id]: previewUrl }
@@ -460,11 +672,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       const previewUrl = attachmentPreviewUrls[attachmentId];
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       delete attachmentPreviewUrls[attachmentId];
-      void deleteStoredAttachmentBlob(attachmentId).catch((error) => {
-        console.error("Failed to remove stored attachment blob", error);
-      });
       persistNotebook(atlasRoot);
-      return { atlasRoot, attachmentPreviewUrls };
+      return { ...pushHistory(state), atlasRoot, attachmentPreviewUrls };
     });
   },
 
@@ -476,7 +685,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         updatedAt: new Date().toISOString(),
       }));
       persistNotebook(atlasRoot);
-      return { atlasRoot };
+      return { ...pushHistory(state), atlasRoot };
     });
   },
 
@@ -503,16 +712,20 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   exportNotebook: () => JSON.stringify(get().atlasRoot, null, 2),
 
   importNotebook: (root, datasetName, nextAttachmentPreviewUrls = {}) => {
-    Object.values(get().attachmentPreviewUrls).forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
+    const current = get();
+    Object.values(current.attachmentPreviewUrls).forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
     const atlasRoot = {
       ...ensureNotebookNode(root),
       ...(datasetName ? { title: datasetName, subtitle: datasetName, updatedAt: new Date().toISOString() } : {}),
     };
     persistNotebook(atlasRoot);
     set({
+      ...pushHistory(current),
       atlasRoot,
       selected: selectionFromNode(atlasRoot.children[0] ?? atlasRoot),
       selectedNodeId: atlasRoot.children[0]?.id ?? atlasRoot.id,
+      multiSelectedNodeIds: [],
+      cameraFocusNodeId: null,
       attachmentPreviewUrls: nextAttachmentPreviewUrls,
       birthMarks: {},
       titleEditRequestId: atlasRoot.children[0]?.id ?? null,
@@ -523,14 +736,14 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const atlasRoot = createInitialNotebook();
     const previewUrls = get().attachmentPreviewUrls;
     Object.values(previewUrls).forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
-    void clearStoredAttachmentBlobs().catch((error) => {
-      console.error("Failed to clear stored attachment blobs", error);
-    });
     clearStoredNotebook();
     set((state) => ({
+      ...pushHistory(state),
       atlasRoot,
       selected: { kind: "node", id: atlasRoot.id },
       selectedNodeId: atlasRoot.id,
+      multiSelectedNodeIds: [],
+      cameraFocusNodeId: null,
       focusRequest: {
         x: 0,
         y: 0,
@@ -545,6 +758,48 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   },
 
   saveNotebook: () => persistNotebook(get().atlasRoot),
+
+  undo: () => {
+    const state = get();
+    const previous = state.historyPast.at(-1);
+    if (!previous) return;
+    const selectedNode = findNode(previous.atlasRoot, previous.selectedNodeId) ?? previous.atlasRoot;
+    persistNotebook(previous.atlasRoot);
+    set({
+      atlasRoot: previous.atlasRoot,
+      selected: selectionFromNode(selectedNode),
+      selectedNodeId: selectedNode.id,
+      multiSelectedNodeIds: state.multiSelectedNodeIds.filter((nodeId) => nodeId !== selectedNode.id && findNode(previous.atlasRoot, nodeId)),
+      cameraFocusNodeId: null,
+      attachmentPreviewUrls: filterAttachmentPreviewUrls(state.attachmentPreviewUrls, previous.atlasRoot),
+      titleEditRequestId: null,
+      historyPast: state.historyPast.slice(0, -1),
+      historyFuture: [createHistoryEntry(state.atlasRoot, state.selectedNodeId), ...state.historyFuture].slice(0, HISTORY_LIMIT),
+    });
+    void get().restoreAttachmentPreviews();
+    get().focusNode(selectedNode.id);
+  },
+
+  redo: () => {
+    const state = get();
+    const next = state.historyFuture[0];
+    if (!next) return;
+    const selectedNode = findNode(next.atlasRoot, next.selectedNodeId) ?? next.atlasRoot;
+    persistNotebook(next.atlasRoot);
+    set({
+      atlasRoot: next.atlasRoot,
+      selected: selectionFromNode(selectedNode),
+      selectedNodeId: selectedNode.id,
+      multiSelectedNodeIds: state.multiSelectedNodeIds.filter((nodeId) => nodeId !== selectedNode.id && findNode(next.atlasRoot, nodeId)),
+      cameraFocusNodeId: null,
+      attachmentPreviewUrls: filterAttachmentPreviewUrls(state.attachmentPreviewUrls, next.atlasRoot),
+      titleEditRequestId: null,
+      historyPast: [...state.historyPast, createHistoryEntry(state.atlasRoot, state.selectedNodeId)].slice(-HISTORY_LIMIT),
+      historyFuture: state.historyFuture.slice(1),
+    });
+    void get().restoreAttachmentPreviews();
+    get().focusNode(selectedNode.id);
+  },
 
   selectWorkArea: (id) => {
     get().focusNode(id);
@@ -563,6 +818,30 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         nonce: (state.focusRequest?.nonce ?? 0) + 1,
       },
     }));
+  },
+
+  focusNodeCameraOnly: (id) => {
+    focusNodeCameraOnly(set, get, id);
+  },
+
+  focusParentLayerCameraOnly: () => {
+    const state = get();
+    const originId = state.cameraFocusNodeId && findNode(state.atlasRoot, state.cameraFocusNodeId) ? state.cameraFocusNodeId : state.selectedNodeId;
+    const path = findNodePath(state.atlasRoot, originId);
+    if (!path || path.length <= 2) {
+      focusRootCameraOnly(set, state.atlasRoot.id);
+      return;
+    }
+    focusNodeCameraOnly(set, get, path[path.length - 2].id);
+  },
+
+  focusSingleChildCameraOnly: () => {
+    const state = get();
+    const originId = state.cameraFocusNodeId && findNode(state.atlasRoot, state.cameraFocusNodeId) ? state.cameraFocusNodeId : state.selectedNodeId;
+    const path = findNodePath(state.atlasRoot, originId);
+    const selectedNode = path?.at(-1);
+    if (selectedNode?.children.length !== 1) return;
+    focusNodeCameraOnly(set, get, selectedNode.children[0].id);
   },
 
   focusWorkArea: (id) => {
@@ -629,7 +908,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
   },
 
-  runAiOnSelectedNode: async (prompt, mode, scope = "focused") => {
+  runAiOnSelectedNode: async (prompt, mode, optionsInput) => {
     const trimmed = prompt.trim();
     if (!trimmed) return;
 
@@ -637,8 +916,14 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const runId = `ai-run-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
     const state = get();
     const sourceNodeId = state.selectedNodeId;
-    const context = buildAiNodeContext(state.atlasRoot, sourceNodeId, scope);
+    const contextOptions = normalizeAiContextOptions({
+      ...state.aiContextOptions,
+      ...(typeof optionsInput === "string" ? { scope: optionsInput } : optionsInput),
+      selectedNodeIds: state.multiSelectedNodeIds,
+    });
+    const context = await buildAiNodeContextWithAttachments(state.atlasRoot, sourceNodeId, contextOptions);
     if (!context) return;
+    const codexSettingsForRun = mode === "codex" ? buildCodexSettingsForRun(state.codexSettings, context) : undefined;
     const sourcePath = findNodePath(state.atlasRoot, sourceNodeId);
     if (!sourcePath) return;
     const sourceParent = sourcePath?.at(-1);
@@ -651,6 +936,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     );
     const requestNode = createAiRequestNode(sourceNodeId, sourceParent.children.length, runId, mode, trimmed, {
       position: requestPosition,
+      aiDialogSettings: createCurrentAiDialogSettings(state.aiContextOptions, state.codexSettings),
     });
 
     const initialRun: AiRun = {
@@ -659,7 +945,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       requestNodeId: requestNode.id,
       provider: providerForMode(mode),
       mode,
-      modelId: "",
+      modelId: codexSettingsForRun?.model ?? "",
       status: "running",
       prompt: trimmed,
       startedAt,
@@ -676,6 +962,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       }));
       persistNotebook(atlasRoot);
       return {
+        ...pushHistory(current),
         atlasRoot,
         birthMarks: { ...current.birthMarks, [requestNode.id]: performance.now() },
         aiRuns: { ...current.aiRuns, [runId]: initialRun },
@@ -683,26 +970,64 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
 
     try {
-      const result = await requestAiResponse({ prompt: trimmed, context, provider: mode });
+      const result = await requestAiResponse({
+        prompt: trimmed,
+        context,
+        provider: mode,
+        model: codexSettingsForRun?.model,
+        codex: codexSettingsForRun,
+      });
       let responseNodeId = "";
+      let generatedAttachmentBlobs: Array<{ attachment: NodeAttachment; blob: Blob }> = [];
       set((current) => {
         const parent = findNode(current.atlasRoot, requestNode.id);
         if (!parent) return current;
         const completedAt = new Date().toISOString();
-        const child = createAiResponseNode(
-          requestNode.id,
-          parent.children.length,
-          runId,
-          result.provider,
-          mode,
-          result.model,
-          result.output,
-          result.usage,
-          {
-            position: getPhyllotaxisStoredChildPosition(sourcePath.length + 1, parent.children.length + 1, parent.children.length, parent.id),
-          },
+        const generatedChildren = result.codexNodes?.length
+          ? createCodexGeneratedNodeTrees(
+              requestNode.id,
+              parent.children.length,
+              runId,
+              mode,
+              result.model,
+              result.codexNodes,
+              result.usage,
+              sourcePath.length + 1,
+              parent.id,
+              parent.aiDialogSettings,
+            )
+          : [
+              createAiResponseNode(
+                requestNode.id,
+                parent.children.length,
+                runId,
+                result.provider,
+                mode,
+                result.model,
+                result.output,
+                result.usage,
+                {
+                  position: getPhyllotaxisStoredChildPosition(sourcePath.length + 1, parent.children.length + 1, parent.children.length, parent.id),
+                  aiDialogSettings: parent.aiDialogSettings,
+                },
+              ),
+            ];
+        const generatedAttachments = createGeneratedAttachmentRecords(generatedChildren[0]?.id ?? requestNode.id, result.generatedAttachments ?? [], completedAt);
+        generatedAttachmentBlobs = generatedAttachments.blobs;
+        const children = generatedChildren.map((child, index) =>
+          index === 0
+            ? {
+                ...child,
+                attachments: [...child.attachments, ...generatedAttachments.attachments],
+              }
+            : child,
         );
-        responseNodeId = child.id;
+        responseNodeId = children.at(-1)?.id ?? children[0]?.id ?? "";
+        const attachmentPreviewUrls = {
+          ...current.attachmentPreviewUrls,
+          ...generatedAttachments.previewUrls,
+        };
+        const pulseTargets = getCodexPulseTargetIds(children);
         const atlasRoot = updateNodeById(
           updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
             ...node,
@@ -716,20 +1041,25 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           status: result.output.suggestedStatus === "done" ? "needs_review" : result.output.suggestedStatus,
           nextDecision: "Review the AI result, then keep, edit, or branch from it.",
           updatedAt: completedAt,
-          children: [...node.children, child],
+          children: [...node.children, ...children],
           }),
         );
         persistNotebook(atlasRoot);
         return {
+          ...pushHistory(current),
           atlasRoot,
-          birthMarks: { ...current.birthMarks, [child.id]: performance.now() },
+          attachmentPreviewUrls,
+          birthMarks: {
+            ...current.birthMarks,
+            ...Object.fromEntries(collectNodeIdsFromMany(children).map((id) => [id, performance.now()])),
+          },
           notificationPulses: [
             ...current.notificationPulses,
-            createNotificationPulse(child.id, mode === "codex" ? "codex" : "needs_review", `${modeLabel(mode)} result ready`),
+            ...pulseTargets.map((id) => createNotificationPulse(id, mode === "codex" ? "codex" : "needs_review", `${modeLabel(mode)} result ready`)),
           ],
-          unreadNotifications: markUnreadNotification(
+          unreadNotifications: markUnreadNotifications(
             current.unreadNotifications,
-            child.id,
+            pulseTargets,
             mode === "codex" ? "codex" : "needs_review",
             `${modeLabel(mode)} result ready`,
           ),
@@ -747,6 +1077,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           },
         };
       });
+      void Promise.all(generatedAttachmentBlobs.map(({ attachment, blob }) => saveStoredAttachmentBlob(attachment, blob))).catch((error) => {
+        console.error("Failed to store generated attachment blob", error);
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "AI request failed.";
       set((current) => {
@@ -759,12 +1092,14 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             parent?.children.length ?? 0,
             requestNode.id,
           ),
+          aiDialogSettings: requestNode.aiDialogSettings,
         });
         const atlasRoot = updateNodeById(
           updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
             ...node,
             status: "error",
             nextDecision: message,
+            propagatedErrorSourceId: errorNode.id,
             updatedAt: completedAt,
           })),
           requestNode.id,
@@ -772,12 +1107,14 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           ...node,
           status: "error",
           nextDecision: message,
+          propagatedErrorSourceId: errorNode.id,
           updatedAt: completedAt,
           children: [...node.children, errorNode],
           }),
         );
         persistNotebook(atlasRoot);
         return {
+          ...pushHistory(current),
           atlasRoot,
           birthMarks: { ...current.birthMarks, [errorNode.id]: performance.now() },
           notificationPulses: [...current.notificationPulses, createNotificationPulse(errorNode.id, "error", `${modeLabel(mode)} failed`)],
@@ -787,6 +1124,200 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             "error",
             `${modeLabel(mode)} failed`,
           ),
+          aiRuns: {
+            ...current.aiRuns,
+            [runId]: {
+              ...initialRun,
+              status: "error",
+              completedAt,
+              error: message,
+              responseNodeId: errorNode.id,
+            },
+          },
+        };
+      });
+    }
+  },
+
+  runNodeAction: async (nodeId) => {
+    const state = get();
+    const actionNode = findNode(state.atlasRoot, nodeId);
+    const action = actionNode?.action;
+    if (!action || action.kind !== "codex_full_access") return;
+
+    if (action.decision === "deny") {
+      const completedAt = new Date().toISOString();
+      set((current) => {
+        const atlasRoot = updateNodeById(current.atlasRoot, nodeId, (node) => {
+          const { action: _action, ...rest } = node;
+          return {
+            ...rest,
+            status: "done",
+            body: `${node.body}\n\nFull access was denied.`,
+            summary: "Full access denied.",
+            nextDecision: "Retry Codex with workspace-write or adjust the request.",
+            updatedAt: completedAt,
+          };
+        });
+        persistNotebook(atlasRoot);
+        return {
+          ...pushHistory(current),
+          atlasRoot,
+          notificationPulses: [...current.notificationPulses, createNotificationPulse(nodeId, "done", "Full access denied")],
+          unreadNotifications: markUnreadNotification(current.unreadNotifications, nodeId, "done", "Full access denied"),
+        };
+      });
+      return;
+    }
+
+    const actionPath = findNodePath(state.atlasRoot, nodeId);
+    const retryParentId = actionPath && actionPath.length >= 2 ? actionPath[actionPath.length - 2].id : nodeId;
+    const retryParentPath = retryParentId === nodeId ? actionPath : findNodePath(state.atlasRoot, retryParentId);
+    const retryParent = retryParentPath?.at(-1);
+    if (!actionPath || !retryParentPath || !retryParent) return;
+
+    const startedAt = new Date().toISOString();
+    const runId = `${action.runId}-retry-${Date.now()}`;
+    const codexSettings = normalizeCodexSettings({
+      ...action.settings,
+      sandbox: "danger-full-access",
+      fullAccessApproved: true,
+    });
+
+    set((current) => {
+      const atlasRoot = updateNodeById(
+        updateNodeById(current.atlasRoot, nodeId, (node) => {
+          const { action: _action, ...rest } = node;
+          return {
+            ...rest,
+            status: "done",
+            nextDecision: "Full access was approved.",
+            updatedAt: startedAt,
+          };
+        }),
+        retryParentId,
+        (node) => ({
+          ...node,
+          status: "running",
+          nextDecision: "Codex is retrying this request with approved Full access.",
+          updatedAt: startedAt,
+          children: removeCodexRetryResultChildren(node.children),
+        }),
+      );
+      persistNotebook(atlasRoot);
+      return {
+        ...pushHistory(current),
+        atlasRoot,
+      };
+    });
+
+    const context = await buildAiNodeContextWithAttachments(state.atlasRoot, action.sourceNodeId, action.contextOptions);
+    if (!context) return;
+    const initialRun: AiRun = {
+      id: runId,
+      nodeId: action.sourceNodeId,
+      requestNodeId: retryParentId,
+      provider: "codex",
+      mode: "codex",
+      modelId: codexSettings.model,
+      status: "running",
+      prompt: action.prompt,
+      startedAt,
+      contextStats: context.stats,
+    };
+    set((current) => ({
+      aiRuns: { ...current.aiRuns, [runId]: initialRun },
+    }));
+
+    try {
+      const result = await requestAiResponse({
+        prompt: action.prompt,
+        context,
+        provider: "codex",
+        model: codexSettings.model,
+        codex: codexSettings,
+      });
+      set((current) => {
+        const parent = findNode(current.atlasRoot, retryParentId);
+        if (!parent) return current;
+        const completedAt = new Date().toISOString();
+        const children = result.codexNodes?.length
+          ? createCodexGeneratedNodeTrees(
+              retryParentId,
+              parent.children.length,
+              runId,
+              "codex",
+              result.model,
+              result.codexNodes,
+              result.usage,
+              retryParentPath.length,
+              retryParentId,
+              parent.aiDialogSettings,
+            )
+          : [
+              createAiResponseNode(retryParentId, parent.children.length, runId, "codex", "codex", result.model, result.output, result.usage, {
+                position: getPhyllotaxisStoredChildPosition(retryParentPath.length, parent.children.length + 1, parent.children.length, retryParentId),
+                aiDialogSettings: parent.aiDialogSettings,
+              }),
+            ];
+        const pulseTargets = getCodexPulseTargetIds(children);
+        const atlasRoot = updateNodeById(current.atlasRoot, retryParentId, (node) => ({
+            ...node,
+            status: "needs_review",
+            nextDecision: "Review the Full access Codex retry output.",
+            updatedAt: completedAt,
+            children: [...removeCodexRetryResultChildren(node.children), ...children],
+        }));
+        persistNotebook(atlasRoot);
+        return {
+          ...pushHistory(current),
+          atlasRoot,
+          birthMarks: {
+            ...current.birthMarks,
+            ...Object.fromEntries(collectNodeIdsFromMany(children).map((id) => [id, performance.now()])),
+          },
+          notificationPulses: [
+            ...current.notificationPulses,
+            ...pulseTargets.map((id) => createNotificationPulse(id, "codex", "Codex Full access result ready")),
+          ],
+          unreadNotifications: markUnreadNotifications(current.unreadNotifications, pulseTargets, "codex", "Codex Full access result ready"),
+          aiRuns: {
+            ...current.aiRuns,
+            [runId]: {
+              ...initialRun,
+              provider: result.provider,
+              modelId: result.model,
+              status: "needs_review",
+              completedAt,
+              responseNodeId: children.at(-1)?.id ?? children[0]?.id,
+              usage: result.usage,
+            },
+          },
+        };
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Codex Full access retry failed.";
+      set((current) => {
+        const completedAt = new Date().toISOString();
+        const parent = findNode(current.atlasRoot, retryParentId);
+        const errorNode = createAiErrorNode(retryParentId, runId, "codex", message, {
+          position: getPhyllotaxisStoredChildPosition(retryParentPath.length, (parent?.children.length ?? 0) + 1, parent?.children.length ?? 0, retryParentId),
+          aiDialogSettings: parent?.aiDialogSettings,
+        });
+        const atlasRoot = updateNodeById(current.atlasRoot, retryParentId, (node) => ({
+          ...node,
+          status: "error",
+          nextDecision: message,
+          updatedAt: completedAt,
+          children: [...removeCodexRetryResultChildren(node.children), errorNode],
+        }));
+        persistNotebook(atlasRoot);
+        return {
+          ...pushHistory(current),
+          atlasRoot,
+          birthMarks: { ...current.birthMarks, [errorNode.id]: performance.now() },
+          notificationPulses: [...current.notificationPulses, createNotificationPulse(errorNode.id, "error", "Codex Full access retry failed")],
+          unreadNotifications: markUnreadNotification(current.unreadNotifications, errorNode.id, "error", "Codex Full access retry failed"),
           aiRuns: {
             ...current.aiRuns,
             [runId]: {
@@ -836,32 +1367,67 @@ export function findNode(root: AtlasNode, id: string): AtlasNode | undefined {
   return findNodePath(root, id)?.at(-1);
 }
 
-export function buildAiNodeContext(root: AtlasNode, selectedNodeId: string, scope: AiContextScope = "focused"): AiNodeContext | null {
+export function buildAiNodeContext(root: AtlasNode, selectedNodeId: string, optionsInput: AiContextScope | Partial<AiContextOptions> = "focused"): AiNodeContext | null {
+  const options = normalizeAiContextOptions(optionsInput);
   const path = findNodePath(root, selectedNodeId);
   if (!path) return null;
   const selectedNode = path[path.length - 1];
   const parent = path.length > 1 ? path[path.length - 2] : null;
-  const selectedDepth = getSelectedSnapshotDepth(scope);
-  const siblingDepth = scope === "neighborhood" ? 1 : 0;
-  const includeSiblings = scope === "neighborhood";
+  const selectedDepth = getSelectedSnapshotDepth(options);
+  const siblingDepth = options.scope === "neighborhood" ? 1 : 0;
+  const includeSiblings = options.scope === "neighborhood";
   const selectedSnapshot = nodeToAiSnapshot(selectedNode, selectedDepth);
-  const pathSnapshots = scope === "minimal" ? path.slice(-1).map((node) => nodeToAiSnapshot(node, 0)) : path.map((node) => nodeToAiSnapshot(node, 0));
+  const pathSnapshots = getContextPathNodes(path, options).map((node) => nodeToAiSnapshot(node, 0));
   const siblingSnapshots =
-    parent && includeSiblings ? parent.children.filter((node) => node.id !== selectedNode.id).map((node) => nodeToAiSnapshot(node, siblingDepth)) : [];
-  const stats = buildAiContextStats(scope, selectedSnapshot, pathSnapshots, siblingSnapshots);
+    options.scope === "custom"
+      ? getLateralContextNodes(root, selectedNodeId, options).map((node) => nodeToAiSnapshot(node, 0))
+      : parent && includeSiblings
+        ? parent.children.filter((node) => node.id !== selectedNode.id).map((node) => nodeToAiSnapshot(node, siblingDepth))
+        : [];
+  const selectedContextNodes = options.scope === "selected" ? getSelectedContextNodes(root, selectedNodeId, options.selectedNodeIds) : [];
+  const selectedNodes =
+    options.scope === "selected"
+      ? selectedContextNodes.map((node) => nodeToAiSnapshot(node, selectedDepth))
+      : undefined;
+  const stats = buildAiContextStats(options.scope, selectedSnapshot, pathSnapshots, siblingSnapshots, selectedNodes);
   return {
     selectedNode: selectedSnapshot,
+    selectedNodes,
     path: pathSnapshots,
     siblingNodes: siblingSnapshots,
     descendantCount: countDescendants(selectedNode),
-    scope,
+    scope: options.scope,
+    options,
     stats,
     exportedAt: new Date().toISOString(),
   };
 }
 
-export function estimateAiNodeContext(root: AtlasNode, selectedNodeId: string, scope: AiContextScope = "focused"): AiContextStats | null {
-  return buildAiNodeContext(root, selectedNodeId, scope)?.stats ?? null;
+export async function buildAiNodeContextWithAttachments(
+  root: AtlasNode,
+  selectedNodeId: string,
+  optionsInput: AiContextScope | Partial<AiContextOptions> = "focused",
+): Promise<AiNodeContext | null> {
+  const context = buildAiNodeContext(root, selectedNodeId, optionsInput);
+  if (!context || context.options?.attachmentMode !== "content") return context;
+  await attachAiContextAttachmentContent(context, context.options);
+  context.stats = buildAiContextStats(context.scope, context.selectedNode, context.path, context.siblingNodes, context.selectedNodes);
+  return context;
+}
+
+export function estimateAiNodeContext(root: AtlasNode, selectedNodeId: string, options: AiContextScope | Partial<AiContextOptions> = "focused"): AiContextStats | null {
+  return buildAiNodeContext(root, selectedNodeId, options)?.stats ?? null;
+}
+
+export function getAiContextNodeIds(root: AtlasNode, selectedNodeId: string, options: AiContextScope | Partial<AiContextOptions> = "focused"): string[] {
+  const context = buildAiNodeContext(root, selectedNodeId, options);
+  if (!context) return [];
+  const ids = new Set<string>();
+  context.path.forEach((node) => collectSnapshotNodeIds(node, ids));
+  collectSnapshotNodeIds(context.selectedNode, ids);
+  context.selectedNodes?.forEach((node) => collectSnapshotNodeIds(node, ids));
+  context.siblingNodes.forEach((node) => collectSnapshotNodeIds(node, ids));
+  return [...ids];
 }
 
 export function getNodeWorldPosition(path: AtlasNode[]): [number, number, number] {
@@ -947,6 +1513,30 @@ function loadStoredNotebook() {
   }
 }
 
+function loadStoredVoiceLog(): VoiceLogEntry[] {
+  if (typeof window === "undefined") return [];
+  const raw = window.localStorage.getItem(VOICE_LOG_STORAGE_KEY);
+  if (!raw) return [];
+  try {
+    const entries = JSON.parse(raw) as VoiceLogEntry[];
+    return Array.isArray(entries) ? entries.filter(isVoiceLogEntry) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadStoredVoiceSessionSummary(): VoiceSessionSummary | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(VOICE_SUMMARY_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const summary = JSON.parse(raw) as VoiceSessionSummary;
+    return isVoiceSessionSummary(summary) ? summary : null;
+  } catch {
+    return null;
+  }
+}
+
 function createInitialNotebook() {
   return ensureNotebookNode(JSON.parse(JSON.stringify(atlasRoot)) as AtlasNode);
 }
@@ -954,6 +1544,91 @@ function createInitialNotebook() {
 function persistNotebook(root: AtlasNode) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(NOTEBOOK_STORAGE_KEY, JSON.stringify(root));
+}
+
+function persistVoiceLog(entries: VoiceLogEntry[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(VOICE_LOG_STORAGE_KEY, JSON.stringify(entries));
+}
+
+function persistVoiceSessionSummary(summary: VoiceSessionSummary | null) {
+  if (typeof window === "undefined") return;
+  if (!summary) {
+    window.localStorage.removeItem(VOICE_SUMMARY_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(VOICE_SUMMARY_STORAGE_KEY, JSON.stringify(summary));
+}
+
+function isVoiceLogEntry(value: unknown): value is VoiceLogEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<VoiceLogEntry>;
+  return typeof entry.id === "string" && typeof entry.role === "string" && typeof entry.text === "string" && typeof entry.createdAt === "string";
+}
+
+function isVoiceSessionSummary(value: unknown): value is VoiceSessionSummary {
+  if (!value || typeof value !== "object") return false;
+  const summary = value as Partial<VoiceSessionSummary>;
+  return typeof summary.text === "string" && typeof summary.createdAt === "string";
+}
+
+function focusRootCameraOnly(setState: typeof useAtlasStore.setState, nodeId: string) {
+  const atlasDiameter = 420;
+  setState((state) => ({
+    cameraFocusNodeId: nodeId,
+    focusRequest: {
+      x: 0,
+      y: 0,
+      z: 0,
+      diameter: atlasDiameter,
+      nonce: (state.focusRequest?.nonce ?? 0) + 1,
+    },
+  }));
+}
+
+function focusNodeCameraOnly(
+  setState: typeof useAtlasStore.setState,
+  getState: typeof useAtlasStore.getState,
+  id: string,
+) {
+  const located = findNodeWithWorldPosition(getState().atlasRoot, id);
+  if (!located) return;
+  const { node, path, position } = located;
+  const visualRadius = getNodeVisualRadius(node, path.length - 1);
+  setState((state) => ({
+    cameraFocusNodeId: id,
+    focusRequest: {
+      x: position[0],
+      y: position[1],
+      z: position[2],
+      diameter: visualRadius * 2,
+      nonce: (state.focusRequest?.nonce ?? 0) + 1,
+    },
+  }));
+}
+
+function pushHistory(state: Pick<AtlasStore, "atlasRoot" | "selectedNodeId" | "historyPast">) {
+  return {
+    historyPast: [...state.historyPast, createHistoryEntry(state.atlasRoot, state.selectedNodeId)].slice(-HISTORY_LIMIT),
+    historyFuture: [],
+  };
+}
+
+function createHistoryEntry(root: AtlasNode, selectedNodeId: string): HistoryEntry {
+  return {
+    atlasRoot: cloneAtlasRoot(root),
+    selectedNodeId,
+  };
+}
+
+function cloneAtlasRoot(root: AtlasNode): AtlasNode {
+  if (typeof structuredClone === "function") return structuredClone(root);
+  return JSON.parse(JSON.stringify(root)) as AtlasNode;
+}
+
+function filterAttachmentPreviewUrls(previewUrls: Record<string, string>, root: AtlasNode) {
+  const attachmentIds = new Set(collectAttachmentIds(root));
+  return Object.fromEntries(Object.entries(previewUrls).filter(([attachmentId]) => attachmentIds.has(attachmentId)));
 }
 
 function clearStoredNotebook() {
@@ -984,14 +1659,80 @@ function removeNodeById(root: AtlasNode, id: string, updatedAt = new Date().toIS
   return changed ? { ...root, updatedAt, children } : root;
 }
 
+function promoteNodeInTree(
+  root: AtlasNode,
+  grandparentId: string,
+  parentId: string,
+  promotedId: string,
+  promotedNode: AtlasNode,
+  insertIndex: number,
+  updatedAt: string,
+): AtlasNode {
+  if (root.id === grandparentId) {
+    const children = root.children.map((child) =>
+      child.id === parentId
+        ? {
+            ...child,
+            children: child.children.filter((grandchild) => grandchild.id !== promotedId),
+            updatedAt,
+          }
+        : child,
+    );
+    return {
+      ...root,
+      children: insertAt(children, insertIndex, promotedNode),
+      updatedAt,
+    };
+  }
+
+  return {
+    ...root,
+    children: root.children.map((child) =>
+      promoteNodeInTree(child, grandparentId, parentId, promotedId, promotedNode, insertIndex, updatedAt),
+    ),
+  };
+}
+
+function getPromotedSiblingPosition(
+  grandparent: AtlasNode,
+  parent: AtlasNode,
+  promotedDepth: number,
+  siblingCount: number,
+  insertIndex: number,
+): [number, number, number] {
+  if (!parent.position) {
+    return getPhyllotaxisStoredChildPosition(promotedDepth, siblingCount, insertIndex, grandparent.id);
+  }
+
+  if (promotedDepth <= 1) {
+    return clampDirection([parent.position[0] + 0.08, parent.position[1] + 0.02, parent.position[2]], TOP_LEVEL_PLANAR_LIMIT);
+  }
+
+  return clampLocalOffset(
+    [parent.position[0] + 0.08, parent.position[1] + 0.02, 0],
+    getManualChildSpreadLimit(promotedDepth, siblingCount),
+  );
+}
+
 function clearResolvedPropagatedErrors(node: AtlasNode): AtlasNode {
   const children = node.children.map((child) => clearResolvedPropagatedErrors(child));
   const nextNode = children === node.children ? node : { ...node, children };
-  if (nextNode.status !== "error" || isIntrinsicErrorNode(nextNode) || hasIntrinsicErrorDescendant(nextNode)) {
+  const propagatedErrorResolved =
+    Boolean(nextNode.propagatedErrorSourceId) &&
+    !hasDescendant(nextNode, nextNode.propagatedErrorSourceId);
+  if (
+    nextNode.status !== "error" ||
+    (!propagatedErrorResolved && (isIntrinsicErrorNode(nextNode) || hasIntrinsicErrorDescendant(nextNode)))
+  ) {
+    if (nextNode.propagatedErrorSourceId && !hasDescendant(nextNode, nextNode.propagatedErrorSourceId)) {
+      const { propagatedErrorSourceId: _propagatedErrorSourceId, ...rest } = nextNode;
+      return rest;
+    }
     return nextNode;
   }
+  const { propagatedErrorSourceId: _propagatedErrorSourceId, ...rest } = nextNode;
   return {
-    ...nextNode,
+    ...rest,
     status: "needs_review",
     nextDecision: "Review the remaining branch.",
     updatedAt: new Date().toISOString(),
@@ -1005,8 +1746,14 @@ function hasIntrinsicErrorDescendant(node: AtlasNode): boolean {
 function isIntrinsicErrorNode(node: AtlasNode) {
   return (
     node.status === "error" &&
-    (node.nodeType === "tool_result" || node.kind === "event" || node.author === "system" || node.tags.includes("error"))
+    !node.propagatedErrorSourceId &&
+    (node.kind === "event" || node.author === "system" || node.tags.includes("error"))
   );
+}
+
+function hasDescendant(node: AtlasNode, id: string | undefined): boolean {
+  if (!id) return false;
+  return node.children.some((child) => child.id === id || hasDescendant(child, id));
 }
 
 function collectNodeIds(node: AtlasNode): string[] {
@@ -1023,9 +1770,20 @@ function cloneNodeSubtreeForPaste(
   now: string,
   position: [number, number, number] | undefined,
   isRoot = false,
+  inheritedAiDialogSettings?: AiDialogSettings,
 ): AtlasNode {
   const id = createPastedNodeId(parentId);
-  const { id: _id, sourceId: _sourceId, aiRunId: _aiRunId, attachments, children, position: _position, ...rest } = source;
+  const {
+    id: _id,
+    sourceId: _sourceId,
+    aiRunId: _aiRunId,
+    aiDialogSettings: _aiDialogSettings,
+    attachments,
+    children,
+    position: _position,
+    ...rest
+  } = source;
+  const aiDialogSettings = source.aiDialogSettings ?? inheritedAiDialogSettings;
   return {
     ...rest,
     id,
@@ -1034,8 +1792,9 @@ function cloneNodeSubtreeForPaste(
     updatedAt: now,
     sourceParentId: parentId,
     position: isRoot ? position : source.position,
+    aiDialogSettings,
     attachments: attachments.map((attachment, index) => cloneAttachmentMetadataForPaste(attachment, id, index, now)),
-    children: children.map((child) => cloneNodeSubtreeForPaste(child, id, now, child.position, false)),
+    children: children.map((child) => cloneNodeSubtreeForPaste(child, id, now, child.position, false, aiDialogSettings)),
   };
 }
 
@@ -1054,6 +1813,40 @@ function createPastedNodeId(parentId: string) {
 
 function createPastedAttachmentId(nodeId: string, index: number) {
   return `${nodeId}-attachment-${Date.now()}-${crypto.randomUUID?.() ?? index}`;
+}
+
+function createGeneratedAttachmentRecords(nodeId: string, generatedAttachments: AiGeneratedAttachment[], now: string) {
+  const attachments: NodeAttachment[] = [];
+  const blobs: Array<{ attachment: NodeAttachment; blob: Blob }> = [];
+  const previewUrls: Record<string, string> = {};
+
+  generatedAttachments.forEach((generatedAttachment, index) => {
+    const blob = base64ToBlob(generatedAttachment.base64, generatedAttachment.mimeType || "image/png");
+    const attachment: NodeAttachment = {
+      id: `${nodeId}-generated-attachment-${Date.now()}-${crypto.randomUUID?.() ?? index}`,
+      name: generatedAttachment.name || `generated-image-${index + 1}.png`,
+      kind: generatedAttachment.kind,
+      mimeType: blob.type || generatedAttachment.mimeType || "image/png",
+      size: blob.size || generatedAttachment.size,
+      path: generatedAttachment.path || generatedAttachment.name || `generated-image-${index + 1}.png`,
+      createdAt: now,
+    };
+
+    attachments.push(attachment);
+    blobs.push({ attachment, blob });
+    previewUrls[attachment.id] = URL.createObjectURL(blob);
+  });
+
+  return { attachments, blobs, previewUrls };
+}
+
+function base64ToBlob(base64: string, mimeType: string) {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mimeType });
 }
 
 function createNotebookNode(
@@ -1095,7 +1888,7 @@ function createAiRequestNode(
   runId: string,
   mode: AiExecutionMode,
   prompt: string,
-  options: { position?: [number, number, number] } = {},
+  options: { position?: [number, number, number]; aiDialogSettings?: AiDialogSettings } = {},
 ): AtlasNode {
   const now = new Date().toISOString();
   const seed = `${parentId}-${runId}-${mode}-${index}`;
@@ -1122,6 +1915,7 @@ function createAiRequestNode(
     aiRunId: runId,
     provider: providerForMode(mode),
     runMode: mode,
+    aiDialogSettings: options.aiDialogSettings,
     position: options.position,
     children: [],
   };
@@ -1136,7 +1930,7 @@ function createAiResponseNode(
   modelId: string,
   output: AiGeneratedOutput,
   usage?: AiUsage,
-  options: { position?: [number, number, number] } = {},
+  options: { position?: [number, number, number]; aiDialogSettings?: AiDialogSettings } = {},
 ): AtlasNode {
   const now = new Date().toISOString();
   const seed = `${parentId}-${runId}-${index}`;
@@ -1166,6 +1960,7 @@ function createAiResponseNode(
     provider,
     runMode: mode,
     usage,
+    aiDialogSettings: options.aiDialogSettings,
     position: options.position,
     children: [],
   };
@@ -1176,7 +1971,7 @@ function createAiErrorNode(
   runId: string,
   mode: AiExecutionMode,
   message: string,
-  options: { position?: [number, number, number] } = {},
+  options: { position?: [number, number, number]; aiDialogSettings?: AiDialogSettings } = {},
 ): AtlasNode {
   const now = new Date().toISOString();
   const seed = `${parentId}-${runId}-error`;
@@ -1203,6 +1998,7 @@ function createAiErrorNode(
     aiRunId: runId,
     provider: providerForMode(mode),
     runMode: mode,
+    aiDialogSettings: options.aiDialogSettings,
     position: options.position,
     children: [],
   };
@@ -1270,6 +2066,237 @@ function markUnreadNotification(
   };
 }
 
+function markUnreadNotifications(
+  current: Record<string, UnreadNotification>,
+  nodeIds: string[],
+  kind: NotificationPulseKind,
+  title: string,
+) {
+  return nodeIds.reduce((next, nodeId) => markUnreadNotification(next, nodeId, kind, title), current);
+}
+
+function withAiDialogSettingsSaved(
+  state: Pick<AtlasStore, "atlasRoot" | "selectedNodeId" | "aiContextOptions" | "codexSettings">,
+  patch: Partial<AiDialogSettings>,
+) {
+  const nextContextOptions = normalizeAiContextOptions(patch.contextOptions ?? state.aiContextOptions);
+  const nextCodexSettings = normalizeCodexSettings(patch.codexSettings ?? state.codexSettings);
+  const aiDialogSettings: AiDialogSettings = {
+    contextOptions: sanitizeStoredAiContextOptions(nextContextOptions),
+    codexSettings: sanitizeStoredCodexSettings(nextCodexSettings),
+  };
+  const atlasRoot = updateNodeById(state.atlasRoot, state.selectedNodeId, (node) => ({
+    ...node,
+    aiDialogSettings,
+    updatedAt: new Date().toISOString(),
+  }));
+  persistNotebook(atlasRoot);
+  return {
+    atlasRoot,
+    aiContextOptions: nextContextOptions,
+    codexSettings: nextCodexSettings,
+  };
+}
+
+function sanitizeStoredAiContextOptions(options: AiContextOptions) {
+  return normalizeAiContextOptions({
+    ...options,
+    selectedNodeIds: [],
+  });
+}
+
+function sanitizeStoredCodexSettings(settings: CodexSettings) {
+  const { fullAccessApproved: _fullAccessApproved, ...rest } = settings;
+  return normalizeCodexSettings({
+    ...rest,
+    fullAccessApproved: false,
+  });
+}
+
+function createCurrentAiDialogSettings(contextOptions: AiContextOptions, codexSettings: CodexSettings): AiDialogSettings {
+  return {
+    contextOptions: sanitizeStoredAiContextOptions(contextOptions),
+    codexSettings: sanitizeStoredCodexSettings(codexSettings),
+  };
+}
+
+function removeCodexRetryResultChildren(children: AtlasNode[]) {
+  return children.filter((child) => !(child.provider === "codex" && child.aiRunId?.startsWith("codex-approval-")));
+}
+
+function buildCodexSettingsForRun(settings: CodexSettings, context: AiNodeContext) {
+  const workspaceFromContext = inferCodexWorkspaceFromContext(context);
+  return normalizeCodexSettings({
+    ...settings,
+    workspace: workspaceFromContext || settings.workspace.trim(),
+  });
+}
+
+function normalizeCodexSettings(settings: Partial<CodexSettings>): CodexSettings {
+  const sandbox = normalizeCodexSandbox(settings.sandbox, settings.fullAccessApproved);
+  return {
+    ...DEFAULT_CODEX_SETTINGS,
+    ...settings,
+    model: (settings.model ?? DEFAULT_CODEX_SETTINGS.model).trim() || DEFAULT_CODEX_SETTINGS.model,
+    reasoningEffort: normalizeReasoningEffort(settings.reasoningEffort),
+    sandbox,
+    workspace: (settings.workspace ?? "").trim(),
+    webSearch: settings.webSearch === true,
+    skipGitRepoCheck: settings.skipGitRepoCheck === true,
+    timeoutMs: clampInteger(settings.timeoutMs ?? DEFAULT_CODEX_SETTINGS.timeoutMs, 30_000, 120 * 60_000),
+    fullAccessApproved: settings.fullAccessApproved === true,
+  };
+}
+
+function normalizeReasoningEffort(value: CodexSettings["reasoningEffort"] | undefined): CodexSettings["reasoningEffort"] {
+  return value === "low" || value === "medium" || value === "high" || value === "xhigh" ? value : "medium";
+}
+
+function normalizeCodexSandbox(value: CodexSettings["sandbox"] | undefined, fullAccessApproved?: boolean): CodexSettings["sandbox"] {
+  if (value === "read-only") return "read-only";
+  if (value === "danger-full-access") return fullAccessApproved ? "danger-full-access" : "workspace-write";
+  return "workspace-write";
+}
+
+function inferCodexWorkspaceFromContext(context: AiNodeContext) {
+  const nodes = [
+    context.selectedNode,
+    ...(context.selectedNodes ?? []),
+    ...context.path,
+  ];
+  for (const node of nodes) {
+    const value = extractWorkspaceFromText([node.title, node.summary, node.body, ...node.tags].join("\n"));
+    if (value) return value;
+  }
+  return "";
+}
+
+function extractWorkspaceFromText(text: string) {
+  const match = text.match(/(?:workspace|workroot|work root|作業ルート|作業root)\s*[:=]\s*([^\r\n]+)/i);
+  if (!match) return "";
+  return match[1].trim().replace(/^["']|["']$/g, "");
+}
+
+function createCodexGeneratedNodeTrees(
+  parentId: string,
+  startIndex: number,
+  runId: string,
+  mode: AiExecutionMode,
+  modelId: string,
+  nodes: CodexGeneratedNode[],
+  usage: AiUsage | undefined,
+  parentDepth: number,
+  layoutSeed: string,
+  aiDialogSettings?: AiDialogSettings,
+) {
+  return nodes.map((node, index) =>
+    createCodexGeneratedNodeTree(
+      parentId,
+      startIndex + index,
+      runId,
+      mode,
+      modelId,
+      node,
+      index === 0 ? usage : undefined,
+      parentDepth,
+      startIndex + nodes.length,
+      layoutSeed,
+      aiDialogSettings,
+    ),
+  );
+}
+
+function createCodexGeneratedNodeTree(
+  parentId: string,
+  index: number,
+  runId: string,
+  mode: AiExecutionMode,
+  modelId: string,
+  spec: CodexGeneratedNode,
+  usage: AiUsage | undefined,
+  parentDepth: number,
+  siblingCount: number,
+  layoutSeed: string,
+  aiDialogSettings?: AiDialogSettings,
+): AtlasNode {
+  const now = new Date().toISOString();
+  const id = `${parentId}-codex-${Date.now()}-${crypto.randomUUID?.() ?? index}`;
+  const seed = `${parentId}-${runId}-${spec.kind}-${index}`;
+  const nodeType = spec.nodeType ?? codexNodeTypeForKind(spec.kind);
+  const childSpecs = spec.children ?? [];
+  const childDepth = parentDepth + 1;
+  return {
+    id,
+    kind: spec.kind === "command" || spec.kind === "approval_request" || spec.kind === "approval_option" ? "event" : "thread",
+    nodeType,
+    title: spec.title,
+    subtitle: `codex / ${modelId}`,
+    body: spec.body,
+    author: spec.kind === "approval_request" || spec.kind === "approval_option" ? "system" : "tool",
+    status: spec.suggestedStatus,
+    color: spec.color ?? planetColorForSeed(seed),
+    texture: randomTexture(seed),
+    radius: NOTEBOOK_NODE_RADIUS,
+    summary: spec.summary,
+    nextDecision: spec.action ? "Use the centered approval button to respond." : "Review this Codex output.",
+    tags: normalizeTags(spec.tags, spec.title, spec.body, spec.summary),
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    sourceParentId: parentId,
+    sourceId: runId,
+    aiRunId: runId,
+    modelId,
+    provider: "codex",
+    runMode: mode,
+    usage,
+    action: spec.action,
+    aiDialogSettings,
+    position: getPhyllotaxisStoredChildPosition(parentDepth, siblingCount, index, layoutSeed),
+    children: childSpecs.map((child, childIndex) =>
+      createCodexGeneratedNodeTree(
+        id,
+        childIndex,
+        runId,
+        mode,
+        modelId,
+        child,
+        undefined,
+        childDepth,
+        childSpecs.length,
+        id,
+        aiDialogSettings,
+      ),
+    ),
+  };
+}
+
+function codexNodeTypeForKind(kind: CodexGeneratedNode["kind"]) {
+  if (kind === "command") return "tool_call";
+  if (kind === "approval_request" || kind === "approval_option") return "approval_request";
+  return "tool_result";
+}
+
+function collectNodeIdsFromMany(nodes: AtlasNode[]) {
+  return nodes.flatMap((node) => collectNodeIds(node));
+}
+
+function getCodexPulseTargetIds(nodes: AtlasNode[]) {
+  const flatNodes: AtlasNode[] = [];
+  const visit = (node: AtlasNode) => {
+    flatNodes.push(node);
+    node.children.forEach(visit);
+  };
+  nodes.forEach(visit);
+  const target =
+    flatNodes.find((node) => node.tags.includes("final")) ??
+    flatNodes.find((node) => node.title === "Codex issue" || node.tags.includes("error")) ??
+    flatNodes.find((node) => node.tags.includes("approval") && !node.action) ??
+    flatNodes.find((node) => node.action) ??
+    flatNodes[0];
+  return target ? [target.id] : [];
+}
+
 function withoutUndefined<T extends Record<string, unknown>>(value: T) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as Partial<T>;
 }
@@ -1325,8 +2352,28 @@ function nodeToAiSnapshot(node: AtlasNode, depthRemaining: number): AiNodeSnapsh
   };
 }
 
-function getSelectedSnapshotDepth(scope: AiContextScope) {
-  switch (scope) {
+export function normalizeAiContextOptions(optionsInput: AiContextScope | Partial<AiContextOptions> = "focused"): AiContextOptions {
+  const options = typeof optionsInput === "string" ? { scope: optionsInput } : optionsInput;
+  return {
+    ...DEFAULT_AI_CONTEXT_OPTIONS,
+    ...options,
+    scope: options.scope ?? DEFAULT_AI_CONTEXT_OPTIONS.scope,
+    ancestorDepth: clampInteger(options.ancestorDepth ?? DEFAULT_AI_CONTEXT_OPTIONS.ancestorDepth, 0, 12),
+    descendantDepth: clampInteger(options.descendantDepth ?? DEFAULT_AI_CONTEXT_OPTIONS.descendantDepth, 0, 6),
+    lateralRadius: clampInteger(options.lateralRadius ?? DEFAULT_AI_CONTEXT_OPTIONS.lateralRadius, 0, 4),
+    attachmentMode: normalizeAttachmentMode(options.attachmentMode),
+    maxAttachmentCount: clampInteger(options.maxAttachmentCount ?? DEFAULT_AI_CONTEXT_OPTIONS.maxAttachmentCount, 0, 20),
+    maxAttachmentBytes: clampInteger(options.maxAttachmentBytes ?? DEFAULT_AI_CONTEXT_OPTIONS.maxAttachmentBytes, 64 * 1024, 12 * 1024 * 1024),
+    selectedNodeIds: dedupeIds(options.selectedNodeIds ?? DEFAULT_AI_CONTEXT_OPTIONS.selectedNodeIds),
+  };
+}
+
+function normalizeAttachmentMode(mode: AiAttachmentMode | undefined): AiAttachmentMode {
+  return mode === "content" ? "content" : "metadata";
+}
+
+function getSelectedSnapshotDepth(options: AiContextOptions) {
+  switch (options.scope) {
     case "minimal":
       return 0;
     case "focused":
@@ -1335,7 +2382,78 @@ function getSelectedSnapshotDepth(scope: AiContextScope) {
       return 4;
     case "neighborhood":
       return 2;
+    case "selected":
+      return 0;
+    case "custom":
+      return options.descendantDepth;
   }
+}
+
+function getContextPathNodes(path: AtlasNode[], options: AiContextOptions) {
+  if (options.scope === "selected") return [];
+  if (options.scope === "minimal") return path.slice(-1);
+  if (options.scope === "custom") {
+    return path.slice(Math.max(0, path.length - options.ancestorDepth - 1));
+  }
+  return path;
+}
+
+function getSelectedContextNodes(root: AtlasNode, selectedNodeId: string, selectedNodeIds: string[]) {
+  return dedupeIds(selectedNodeIds).filter((id) => id !== selectedNodeId)
+    .map((id) => findNode(root, id))
+    .filter((node): node is AtlasNode => Boolean(node));
+}
+
+function getLateralContextNodes(root: AtlasNode, selectedNodeId: string, options: AiContextOptions) {
+  if (options.lateralRadius <= 0) return [];
+  const selectedIds = new Set([selectedNodeId]);
+  const excludedIds = new Set<string>();
+  for (const id of selectedIds) {
+    const path = findNodePath(root, id);
+    if (!path) continue;
+    for (const node of path) excludedIds.add(node.id);
+    collectTreeIds(path[path.length - 1], excludedIds, Number.MAX_SAFE_INTEGER);
+  }
+
+  const { nodesById, neighborsById } = buildNodeGraph(root);
+  const queue = [...selectedIds].map((id) => ({ id, distance: 0 }));
+  const visited = new Set(selectedIds);
+  const lateralNodes: AtlasNode[] = [];
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    const neighbors = neighborsById.get(current.id) ?? [];
+    for (const neighborId of neighbors) {
+      if (visited.has(neighborId)) continue;
+      const distance = current.distance + 1;
+      if (distance > options.lateralRadius) continue;
+      visited.add(neighborId);
+      queue.push({ id: neighborId, distance });
+      if (!excludedIds.has(neighborId)) {
+        const node = nodesById.get(neighborId);
+        if (node) lateralNodes.push(node);
+      }
+    }
+  }
+
+  return lateralNodes.slice(0, 32);
+}
+
+function buildNodeGraph(root: AtlasNode) {
+  const nodesById = new Map<string, AtlasNode>();
+  const neighborsById = new Map<string, string[]>();
+
+  const visit = (node: AtlasNode, parentId: string | null) => {
+    nodesById.set(node.id, node);
+    const neighbors = neighborsById.get(node.id) ?? [];
+    if (parentId) neighbors.push(parentId);
+    for (const child of node.children) neighbors.push(child.id);
+    neighborsById.set(node.id, neighbors);
+    for (const child of node.children) visit(child, node.id);
+  };
+
+  visit(root, null);
+  return { nodesById, neighborsById };
 }
 
 function buildAiContextStats(
@@ -1343,25 +2461,145 @@ function buildAiContextStats(
   selectedNode: AiNodeSnapshot,
   path: AiNodeSnapshot[],
   siblingNodes: AiNodeSnapshot[],
+  selectedNodes?: AiNodeSnapshot[],
 ): AiContextStats {
   const selectedCount = countSnapshotNodes(selectedNode);
   const pathCount = path.reduce((sum, node) => sum + countSnapshotNodes(node), 0);
   const siblingCount = siblingNodes.reduce((sum, node) => sum + countSnapshotNodes(node), 0);
-  const text = JSON.stringify({ selectedNode, path, siblingNodes });
+  const selectedNodesCount = selectedNodes?.reduce((sum, node) => sum + countSnapshotNodes(node), 0) ?? 0;
+  const text = JSON.stringify({ selectedNode, selectedNodes, path, siblingNodes });
+  const attachmentStats = countSnapshotAttachments([selectedNode, ...(selectedNodes ?? []), ...path, ...siblingNodes]);
   return {
     scope,
-    includedNodeCount: selectedCount + pathCount + siblingCount,
+    includedNodeCount: selectedCount + pathCount + siblingCount + selectedNodesCount,
     estimatedInputTokens: Math.ceil(text.length / 3.8),
+    includedAttachmentCount: attachmentStats.count,
+    includedAttachmentBytes: attachmentStats.bytes,
     sections: {
       selected: selectedCount,
       path: pathCount,
       siblings: siblingCount,
+      selectedNodes: selectedNodes ? selectedNodesCount : undefined,
     },
   };
 }
 
+async function attachAiContextAttachmentContent(context: AiNodeContext, options: AiContextOptions) {
+  const snapshots = [context.selectedNode, ...(context.selectedNodes ?? []), ...context.path, ...context.siblingNodes];
+  const visitedAttachments = new Set<string>();
+  const contentByAttachmentId = new Map<string, NonNullable<AiNodeSnapshot["attachments"][number]["content"]>>();
+  let includedCount = 0;
+
+  for (const snapshot of snapshots) {
+    await visitSnapshotAttachments(snapshot);
+  }
+
+  async function visitSnapshotAttachments(snapshot: AiNodeSnapshot): Promise<void> {
+    for (const attachment of snapshot.attachments) {
+      const existingContent = contentByAttachmentId.get(attachment.id);
+      if (existingContent) {
+        attachment.content = existingContent;
+        continue;
+      }
+      if (visitedAttachments.has(attachment.id)) continue;
+      visitedAttachments.add(attachment.id);
+      if (includedCount >= options.maxAttachmentCount) continue;
+      if (attachment.size > options.maxAttachmentBytes) continue;
+      const content = await readAttachmentContent(attachment.id, attachment.mimeType, options.maxAttachmentBytes);
+      if (!content) continue;
+      attachment.content = content;
+      contentByAttachmentId.set(attachment.id, content);
+      includedCount += 1;
+    }
+    for (const child of snapshot.children) {
+      await visitSnapshotAttachments(child);
+    }
+  }
+}
+
+async function readAttachmentContent(attachmentId: string, mimeType: string, maxBytes: number) {
+  try {
+    const blob = await getStoredAttachmentBlob(attachmentId);
+    if (!blob || blob.size > maxBytes) return undefined;
+    if (isTextAttachment(mimeType)) {
+      const text = await blob.text();
+      const maxChars = 24000;
+      return {
+        encoding: "text" as const,
+        value: text.length > maxChars ? text.slice(0, maxChars) : text,
+        bytes: blob.size,
+        truncated: text.length > maxChars,
+      };
+    }
+    return {
+      encoding: "data_url" as const,
+      value: await blobToDataUrl(blob),
+      bytes: blob.size,
+    };
+  } catch (error) {
+    return {
+      encoding: "text" as const,
+      value: "",
+      bytes: 0,
+      unavailable: true,
+      error: error instanceof Error ? error.message : "Attachment content could not be read.",
+    };
+  }
+}
+
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function isTextAttachment(mimeType: string) {
+  return mimeType.startsWith("text/") || mimeType.includes("json") || mimeType.includes("xml") || mimeType.includes("csv");
+}
+
+function countSnapshotAttachments(nodes: AiNodeSnapshot[]) {
+  const attachmentIds = new Set<string>();
+  let bytes = 0;
+  for (const node of nodes) {
+    visit(node);
+  }
+  return { count: attachmentIds.size, bytes };
+
+  function visit(node: AiNodeSnapshot) {
+    for (const attachment of node.attachments) {
+      if (attachmentIds.has(attachment.id)) continue;
+      attachmentIds.add(attachment.id);
+      if (attachment.content) bytes += attachment.content.bytes;
+    }
+    for (const child of node.children) visit(child);
+  }
+}
+
 function countSnapshotNodes(node: AiNodeSnapshot): number {
   return 1 + node.children.reduce((sum, child) => sum + countSnapshotNodes(child), 0);
+}
+
+function collectSnapshotNodeIds(node: AiNodeSnapshot, ids: Set<string>) {
+  ids.add(node.id);
+  node.children.forEach((child) => collectSnapshotNodeIds(child, ids));
+}
+
+function collectTreeIds(node: AtlasNode, ids: Set<string>, depthRemaining: number) {
+  ids.add(node.id);
+  if (depthRemaining <= 0) return;
+  node.children.forEach((child) => collectTreeIds(child, ids, depthRemaining - 1));
+}
+
+function dedupeIds(ids: string[]) {
+  return [...new Set(ids.filter(Boolean))];
+}
+
+function clampInteger(value: number, min: number, max: number) {
+  const number = Number.isFinite(value) ? Math.trunc(value) : min;
+  return Math.min(max, Math.max(min, number));
 }
 
 function countDescendants(node: AtlasNode): number {

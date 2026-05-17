@@ -1,6 +1,6 @@
 import { Html, Line } from "@react-three/drei";
 import { Canvas, ThreeEvent, createPortal, useFrame, useThree } from "@react-three/fiber";
-import { ClipboardCopy, ClipboardPaste, Copy, Trash2 } from "lucide-react";
+import { ClipboardCopy, ClipboardPaste, Copy, MoveUp, Trash2 } from "lucide-react";
 import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   AdditiveBlending,
@@ -26,9 +26,10 @@ import {
   getPlanarLimitForDepth,
   getNodeWorldPosition,
   getShellRadius,
+  getAiContextNodeIds,
   useAtlasStore,
 } from "../store/atlasStore";
-import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
+import { UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { createNodeClipboardText, nodeTreeHasAttachments, parseNodeClipboardText } from "../nodeClipboard";
 import type { AtlasTheme } from "../theme";
 import type { AtlasNode, NotificationPulseKind } from "../types";
@@ -332,7 +333,8 @@ function markStatusNotificationPaths(
 function isNotificationErrorSource(node: AtlasNode) {
   return (
     node.status === "error" &&
-    (node.nodeType === "tool_result" || node.kind === "event" || node.author === "system" || node.tags.includes("error"))
+    !node.propagatedErrorSourceId &&
+    (node.kind === "event" || node.author === "system" || node.tags.includes("error"))
   );
 }
 
@@ -353,6 +355,11 @@ function notificationPriority(kind: NotificationPulseKind) {
   return 1;
 }
 
+function isAutoFocusSuppressed() {
+  const state = useAtlasStore.getState();
+  return state.commandInputEditing || state.multiSelectedNodeIds.length > 0;
+}
+
 function NavigationController({ theme }: { theme: AtlasTheme }) {
   const focusRequest = useAtlasStore((state) => state.focusRequest);
   const setViewport = useAtlasStore((state) => state.setViewport);
@@ -365,6 +372,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
   const wheelZoomOutRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelZoomInRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelSuppressUntilRef = useRef(0);
+  const backgroundClickRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const pinchRef = useRef<{ distance: number; center: { x: number; y: number } } | null>(null);
   const transitionRef = useRef<{
     startYaw: number;
@@ -512,6 +520,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     event.stopPropagation();
     window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_INTERACTION_EVENT));
     (event.target as Element | null)?.setPointerCapture?.(event.pointerId);
+    backgroundClickRef.current = event.button === 0 ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY } : null;
     const canBirth = canStartRootBirth(yawPitchRef.current.offset, size.height, perspective.fov);
     const direction = directionFromRay(event.ray, NOTEBOOK_FIRST_SHELL_RADIUS);
 
@@ -546,6 +555,10 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     const dx = event.clientX - drag.startScreen.x;
     const dy = event.clientY - drag.startScreen.y;
     const moved = Math.hypot(dx, dy);
+    const backgroundClick = backgroundClickRef.current;
+    if (backgroundClick?.pointerId === event.pointerId && Math.hypot(event.clientX - backgroundClick.x, event.clientY - backgroundClick.y) > 6) {
+      backgroundClickRef.current = null;
+    }
 
     if (drag.mode === "hold" && moved > WHITE_HOLE_CANCEL_PX && !drag.created) {
       drag.mode = "rotate";
@@ -576,6 +589,15 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.stopPropagation();
+    const backgroundClick = backgroundClickRef.current;
+    if (
+      backgroundClick?.pointerId === event.pointerId &&
+      Math.hypot(event.clientX - backgroundClick.x, event.clientY - backgroundClick.y) <= 6
+    ) {
+      useAtlasStore.getState().clearMultiSelection();
+      window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_CLICK_EVENT));
+    }
+    backgroundClickRef.current = null;
     dragRef.current = null;
     if (!drag.created && drag.mode === "hold" && drag.canBirth) {
       setBirthEffect(null);
@@ -594,6 +616,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
 
     const zoomOutState = wheelZoomOutRef.current;
     const zoomInState = wheelZoomInRef.current;
+    const suppressActiveSwitch = isAutoFocusSuppressed();
     if (deltaY <= 0) {
       zoomOutState.amount = 0;
       zoomOutState.startedAt = 0;
@@ -614,19 +637,28 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
         zoomOutState.startedAt = 0;
         zoomOutState.lastFiredAt = now;
         wheelSuppressUntilRef.current = now + 900;
-        useAtlasStore.getState().focusParentLayer();
+        const atlasState = useAtlasStore.getState();
+        if (suppressActiveSwitch) {
+          atlasState.focusParentLayerCameraOnly();
+        } else {
+          atlasState.focusParentLayer();
+        }
       }
       return;
     }
 
     if (deltaY < 0) {
       const atlasState = useAtlasStore.getState();
-      const selectedPath = findNodePath(atlasState.atlasRoot, atlasState.selectedNodeId);
-      const selectedNode = selectedPath?.at(-1);
-      if (selectedNode?.children.length !== 1) {
-        zoomInState.amount = 0;
-        zoomInState.startedAt = 0;
-        return;
+      let targetChildId: string | null = null;
+      if (!suppressActiveSwitch) {
+        const selectedPath = findNodePath(atlasState.atlasRoot, atlasState.selectedNodeId);
+        const selectedNode = selectedPath?.at(-1);
+        if (selectedNode?.children.length !== 1) {
+          zoomInState.amount = 0;
+          zoomInState.startedAt = 0;
+          return;
+        }
+        targetChildId = selectedNode.children[0].id;
       }
 
       if (now - zoomInState.lastFiredAt < ZOOM_OUT_PARENT_COOLDOWN_MS) return;
@@ -640,7 +672,11 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
         zoomInState.startedAt = 0;
         zoomInState.lastFiredAt = now;
         wheelSuppressUntilRef.current = now + 900;
-        atlasState.focusNode(selectedNode.children[0].id);
+        if (suppressActiveSwitch) {
+          atlasState.focusSingleChildCameraOnly();
+        } else if (targetChildId) {
+          atlasState.focusNode(targetChildId);
+        }
       }
     }
   };
@@ -665,9 +701,11 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const deleteNode = useAtlasStore((state) => state.deleteNode);
   const pasteNodeSubtree = useAtlasStore((state) => state.pasteNodeSubtree);
+  const promoteNodeOneLevel = useAtlasStore((state) => state.promoteNodeOneLevel);
   const [clipboardNode, setClipboardNode] = useState<AtlasNode | null>(null);
   const [clipboardState, setClipboardState] = useState<"checking" | "available" | "unavailable">("unavailable");
-  const node = menu ? findNodePath(atlasRoot, menu.nodeId)?.at(-1) : undefined;
+  const nodePath = menu ? findNodePath(atlasRoot, menu.nodeId) : null;
+  const node = nodePath?.at(-1);
 
   useEffect(() => {
     let cancelled = false;
@@ -762,7 +800,13 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
     if (pastedId) onClose();
   };
 
+  const handlePromoteOneLevel = () => {
+    promoteNodeOneLevel(node.id);
+    onClose();
+  };
+
   const canPaste = clipboardState === "available" && clipboardNode !== null;
+  const canPromote = Boolean(nodePath && nodePath.length >= 3);
 
   return (
     <div
@@ -782,6 +826,14 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
         title={canPaste ? "Mind Atlas object paste" : "Mind Atlasで読み込めるオブジェクトデータがクリップボードにありません"}
       >
         <ClipboardPaste size={15} /> 貼り付け
+      </button>
+      <button
+        type="button"
+        onClick={handlePromoteOneLevel}
+        disabled={!canPromote}
+        title={canPromote ? "直接の親と兄弟になるように一つ上の階層へ移動" : "これ以上、上の階層には移動できません"}
+      >
+        <MoveUp size={15} /> 一つ上の階層に移動
       </button>
       <button type="button" onClick={handleCopyAsText}>
         <Copy size={15} /> テキストにコピー
@@ -971,17 +1023,33 @@ function NotebookNodes({
 }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
+  const cameraFocusNodeId = useAtlasStore((state) => state.cameraFocusNodeId);
+  const multiSelectedNodeIds = useAtlasStore((state) => state.multiSelectedNodeIds);
+  const aiContextOptions = useAtlasStore((state) => state.aiContextOptions);
+  const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
+  const activeCommandMode = useAtlasStore((state) => state.activeCommandMode);
   const unreadNotifications = useAtlasStore((state) => state.unreadNotifications);
   const focusNonce = useAtlasStore((state) => state.focusRequest?.nonce ?? 0);
   const [focusWaveStartedAt, setFocusWaveStartedAt] = useState(() => performance.now());
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
+  const cameraFocusPath = cameraFocusNodeId ? findNodePath(atlasRoot, cameraFocusNodeId) : null;
+  const renderFocusPath = cameraFocusPath ?? selectedPath;
   const rootIsSelected = selectedNodeId === atlasRoot.id;
   const effectiveSelectedNodeId = rootIsSelected ? atlasRoot.id : selectedNodeId;
   const highlightSelectedNodeId = rootIsSelected ? "" : selectedNodeId;
   const selectedParentId = selectedPath.length > 1 ? selectedPath[selectedPath.length - 2].id : null;
-  const focusBaseIndex = selectedPath.length > 2 ? selectedPath.length - 2 : 0;
-  const focusParent = selectedPath[focusBaseIndex];
+  const focusBaseIndex = cameraFocusPath ? Math.max(0, renderFocusPath.length - 1) : selectedPath.length > 2 ? selectedPath.length - 2 : 0;
+  const focusParent = renderFocusPath[focusBaseIndex];
+  const selectedPathIndexByNodeId = useMemo(
+    () => new Map(selectedPath.map((node, index) => [node.id, index])),
+    [selectedPath],
+  );
   const notificationKindsByNodeId = useMemo(() => buildNotificationPathKinds(atlasRoot, unreadNotifications), [atlasRoot, unreadNotifications]);
+  const multiSelectedNodeIdSet = useMemo(() => new Set(multiSelectedNodeIds), [multiSelectedNodeIds]);
+  const aiContextPreviewNodeIds = useMemo(() => {
+    if (!commandInputEditing || activeCommandMode === "note") return new Set<string>();
+    return new Set(getAiContextNodeIds(atlasRoot, selectedNodeId, { ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds }));
+  }, [activeCommandMode, aiContextOptions, atlasRoot, commandInputEditing, multiSelectedNodeIds, selectedNodeId]);
 
   useEffect(() => {
     setFocusWaveStartedAt(performance.now());
@@ -992,7 +1060,7 @@ function NotebookNodes({
   }
 
   if (focusBaseIndex > 0) {
-    const parentPath = selectedPath.slice(0, focusBaseIndex + 1);
+    const parentPath = renderFocusPath.slice(0, focusBaseIndex + 1);
     const parentPosition = getNodeWorldPosition(parentPath);
     return (
       <group>
@@ -1006,6 +1074,10 @@ function NotebookNodes({
           visibleDepthIndex={0}
           selectedNodeId={effectiveSelectedNodeId}
           highlightSelectedNodeId={highlightSelectedNodeId}
+          multiSelectedNodeIds={multiSelectedNodeIdSet}
+          aiContextPreviewNodeIds={aiContextPreviewNodeIds}
+          selectedPathIndexByNodeId={selectedPathIndexByNodeId}
+          selectedPathLength={selectedPath.length}
           selectedParentId={rootIsSelected ? null : selectedParentId}
           focusWaveStartedAt={focusWaveStartedAt}
           notificationKind={notificationKindsByNodeId.get(focusParent.id) ?? null}
@@ -1034,6 +1106,10 @@ function NotebookNodes({
             visibleDepthIndex={0}
             selectedNodeId={effectiveSelectedNodeId}
             highlightSelectedNodeId={highlightSelectedNodeId}
+            multiSelectedNodeIds={multiSelectedNodeIdSet}
+            aiContextPreviewNodeIds={aiContextPreviewNodeIds}
+            selectedPathIndexByNodeId={selectedPathIndexByNodeId}
+            selectedPathLength={selectedPath.length}
             selectedParentId={rootIsSelected ? null : selectedParentId}
             focusWaveStartedAt={focusWaveStartedAt}
             notificationKind={notificationKindsByNodeId.get(node.id) ?? null}
@@ -1057,6 +1133,10 @@ function HierarchyNode({
   visibleDepthIndex,
   selectedNodeId,
   highlightSelectedNodeId,
+  multiSelectedNodeIds,
+  aiContextPreviewNodeIds,
+  selectedPathIndexByNodeId,
+  selectedPathLength,
   selectedParentId,
   focusWaveStartedAt,
   notificationKind,
@@ -1073,6 +1153,10 @@ function HierarchyNode({
   visibleDepthIndex: number;
   selectedNodeId: string;
   highlightSelectedNodeId: string;
+  multiSelectedNodeIds: Set<string>;
+  aiContextPreviewNodeIds: Set<string>;
+  selectedPathIndexByNodeId: Map<string, number>;
+  selectedPathLength: number;
   selectedParentId: string | null;
   focusWaveStartedAt: number;
   notificationKind: NotificationPulseKind | null;
@@ -1082,23 +1166,32 @@ function HierarchyNode({
 }) {
   const selectNodeInPlace = useAtlasStore((state) => state.selectNodeInPlace);
   const focusNode = useAtlasStore((state) => state.focusNode);
+  const toggleMultiSelectedNode = useAtlasStore((state) => state.toggleMultiSelectedNode);
   const moveNode = useAtlasStore((state) => state.moveNode);
   const addChildNode = useAtlasStore((state) => state.addChildNode);
   const updateNode = useAtlasStore((state) => state.updateNode);
+  const runNodeAction = useAtlasStore((state) => state.runNodeAction);
   const birthMarks = useAtlasStore((state) => state.birthMarks);
   const zoom = useAtlasStore((state) => state.viewport.zoom);
   const hiddenDragEdgeNodeId = useHiddenDragEdgeNodeId();
   const { camera, scene } = useThree();
   const perspective = camera as PerspectiveCamera;
   const isSelected = highlightSelectedNodeId === node.id;
+  const isMultiSelected = multiSelectedNodeIds.has(node.id);
+  const previewNotificationKind = aiContextPreviewNodeIds.has(node.id) ? "codex" : null;
+  const effectiveNotificationKind = notificationKind === "error" ? notificationKind : previewNotificationKind ?? notificationKind;
   const parentId = path.length > 1 ? path[path.length - 2].id : null;
   const selectedIndexInPath = path.findIndex((item) => item.id === selectedNodeId);
   const activeDescendantDistance =
     selectedIndexInPath >= 0 ? path.length - 1 - selectedIndexInPath : null;
+  const activePathIndex = selectedPathIndexByNodeId.get(node.id);
+  const activeAncestorDistance =
+    typeof activePathIndex === "number" ? selectedPathLength - 1 - activePathIndex : null;
   const isDirectChildOfSelected = parentId === selectedNodeId;
-  const isDirectParentOfSelected = selectedParentId === node.id;
+  const isDirectParentOfSelected = activeAncestorDistance === 1;
+  const isActiveAncestor = activeAncestorDistance !== null && activeAncestorDistance > 0;
   const isActiveSibling = selectedParentId !== null && parentId === selectedParentId && !isSelected;
-  const isFocusedBranch = activeDescendantDistance !== null || isDirectParentOfSelected;
+  const isFocusedBranch = activeDescendantDistance !== null || isActiveAncestor;
   const themeColors = getUniverseThemeColors(theme);
   const structuralColor = theme === "light" ? themeColors.edge : node.color;
   const statusColor = getStatusColor(node.status);
@@ -1108,8 +1201,8 @@ function HierarchyNode({
   const visualDepthIndex =
     activeDescendantDistance !== null
       ? activeDescendantDistance
-      : isDirectParentOfSelected
-        ? 0
+      : activeAncestorDistance !== null
+        ? Math.max(0, activeAncestorDistance - 1)
         : isActiveSibling
           ? 1
           : visibleDepthIndex;
@@ -1117,9 +1210,9 @@ function HierarchyNode({
   const childrenVisible =
     visibleDepthRemaining > 0 &&
     node.children.length > 0 &&
-    (isDirectParentOfSelected ||
+    (isActiveAncestor ||
       (activeDescendantDistance !== null && activeDescendantDistance < VISIBLE_DESCENDANT_DEPTH));
-  const isLocalContextNode = isSelected || isDirectParentOfSelected || isActiveSibling || isDirectChildOfSelected;
+  const isLocalContextNode = isSelected || isMultiSelected || aiContextPreviewNodeIds.has(node.id) || isActiveAncestor || isActiveSibling || isDirectChildOfSelected;
   const labelVisible = isLocalContextNode || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
   const parentEdgeVisible = path.length > 2 && hiddenDragEdgeNodeId !== node.id;
   const focusWaveDepth =
@@ -1155,6 +1248,7 @@ function HierarchyNode({
     handoffChildWorld?: Vec3Tuple;
     hasMoved: boolean;
     torn: boolean;
+    shiftKey: boolean;
   } | null>(null);
   const groupRef = useRef<Group>(null);
   const parentWorldRef = useRef<Vec3Tuple>(subtractPosition(worldPosition, localPosition));
@@ -1258,6 +1352,7 @@ function HierarchyNode({
       samples: [{ t: performance.now(), x: event.clientX, y: event.clientY }],
       hasMoved: false,
       torn: false,
+      shiftKey: event.nativeEvent.shiftKey,
     };
     setHiddenDragEdgeNodeId(node.id);
     setDragBoundary({
@@ -1384,7 +1479,11 @@ function HierarchyNode({
     event.stopPropagation();
     const screenDistance = Math.hypot(event.clientX - drag.startScreen.x, event.clientY - drag.startScreen.y);
     if (!drag.torn && screenDistance <= 3) {
-      focusNode(node.id);
+      if (drag.shiftKey || event.nativeEvent.shiftKey) {
+        toggleMultiSelectedNode(node.id);
+      } else {
+        focusNode(node.id);
+      }
     }
     dragRef.current = null;
     if (drag.hasMoved || drag.torn) {
@@ -1441,12 +1540,12 @@ function HierarchyNode({
         <NodeFocusRing
           radius={radius}
           baseColor={ringColor}
-          isSelected={isSelected}
+          isSelected={isSelected || isMultiSelected}
           status={node.status}
           depthFade={depthFade}
           waveDepth={focusWaveDepth}
           waveStartedAt={focusWaveStartedAt}
-          notificationKind={notificationKind}
+          notificationKind={effectiveNotificationKind}
           theme={theme}
         />
         {birthStartedAt ? <BirthRing startedAt={birthStartedAt} radius={radius} color={structuralColor} /> : null}
@@ -1485,6 +1584,22 @@ function HierarchyNode({
         <meshBasicMaterial color={themeColors.specular} transparent opacity={(theme === "light" ? 0.56 : 0.7) * depthFade.opacity} />
       </mesh>
 
+      {node.action && node.id === selectedNodeId ? (
+        <Html center position={[0, 0, radius + 22]} transform={false} zIndexRange={[5, 1]}>
+          <button
+            className={`node-action-button ${node.action.decision === "approve" ? "is-approve" : "is-deny"}`}
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              void runNodeAction(node.id);
+            }}
+          >
+            {node.action.label}
+          </button>
+        </Html>
+      ) : null}
+
       {childrenVisible
         ? node.children.map((child) => {
             const childPath = [...path, child];
@@ -1502,6 +1617,10 @@ function HierarchyNode({
                 visibleDepthIndex={visibleDepthIndex + 1}
                 selectedNodeId={selectedNodeId}
                 highlightSelectedNodeId={highlightSelectedNodeId}
+                multiSelectedNodeIds={multiSelectedNodeIds}
+                aiContextPreviewNodeIds={aiContextPreviewNodeIds}
+                selectedPathIndexByNodeId={selectedPathIndexByNodeId}
+                selectedPathLength={selectedPathLength}
                 selectedParentId={selectedParentId}
                 focusWaveStartedAt={focusWaveStartedAt}
                 notificationKind={notificationKindsByNodeId.get(child.id) ?? null}
@@ -1517,7 +1636,7 @@ function HierarchyNode({
         <Html center position={[0, -radius - 14, 16]} transform={false} zIndexRange={[2, 0]}>
           <SpaceNodeEditor
             node={node}
-            isSelected={isSelected}
+            isSelected={isSelected || isMultiSelected}
             onSelect={() => selectNodeInPlace(node.id)}
             onChange={(body) =>
               updateNode(node.id, {
@@ -1628,14 +1747,22 @@ function PlanetMaterial({
   depthFade: ReturnType<typeof getDepthFade>;
   theme: AtlasTheme;
 }) {
-  const texture = useMemo(() => createPlanetTexture(node.color, node.texture, node.id), [node.color, node.id, node.texture]);
+  const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
+  const fallbackTexture = useMemo(() => createPlanetTexture(node.color, node.texture, node.id), [node.color, node.id, node.texture]);
+  const surfaceAttachment = useMemo(
+    () => getNodeSurfaceAttachment(node.attachments, attachmentPreviewUrls),
+    [attachmentPreviewUrls, node.attachments],
+  );
+  const attachmentTexture = useAttachmentSurfaceTexture(surfaceAttachment, node.color);
+  const texture = attachmentTexture ?? fallbackTexture;
+  const hasAttachmentTexture = Boolean(attachmentTexture);
   const materialColor = useMemo(() => {
-    const color = new Color(node.color);
+    const color = new Color(hasAttachmentTexture ? "#ffffff" : node.color);
     if (theme === "light") {
-      return color.lerp(new Color("#f7fbff"), depthFade.backgroundBlend * 0.9);
+      return color.lerp(new Color("#f7fbff"), hasAttachmentTexture ? depthFade.backgroundBlend * 0.24 : depthFade.backgroundBlend * 0.9);
     }
-    return color.multiplyScalar(depthFade.brightness);
-  }, [depthFade.backgroundBlend, depthFade.brightness, node.color, theme]);
+    return color.multiplyScalar(hasAttachmentTexture ? Math.max(0.62, depthFade.brightness) : depthFade.brightness);
+  }, [depthFade.backgroundBlend, depthFade.brightness, hasAttachmentTexture, node.color, theme]);
   const emissive = useMemo(() => new Color(node.color), [node.color]);
 
   return (
@@ -1648,6 +1775,436 @@ function PlanetMaterial({
       metalness={0.04}
     />
   );
+}
+
+type AttachmentSurface =
+  | {
+      id: string;
+      kind: "image" | "video";
+      name: string;
+      mimeType: string;
+      url?: string;
+    }
+  | {
+      id: string;
+      kind: "file" | "audio";
+      name: string;
+      mimeType: string;
+      url?: string;
+    };
+
+function useAttachmentSurfaceTexture(surface: AttachmentSurface | null, baseColor: string) {
+  const [texture, setTexture] = useState<CanvasTexture | null>(null);
+  const textureRef = useRef<CanvasTexture | null>(null);
+
+  useEffect(() => {
+    textureRef.current = texture;
+  }, [texture]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const setNextTexture = (nextTexture: CanvasTexture | null) => {
+      if (cancelled) {
+        nextTexture?.dispose();
+        return;
+      }
+      setTexture((previous) => {
+        if (previous !== nextTexture) previous?.dispose();
+        return nextTexture;
+      });
+    };
+
+    if (!surface) {
+      setNextTexture(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const fallback = createAttachmentIconTexture(surface, baseColor);
+    setNextTexture(fallback);
+
+    if (surface.kind === "image" && surface.url) {
+      void createImageAttachmentTexture(surface.url, baseColor)
+        .then(setNextTexture)
+        .catch(() => undefined);
+    }
+
+    if (surface.kind === "video" && surface.url) {
+      void createVideoAttachmentTexture(surface.url, baseColor, surface.name)
+        .then(setNextTexture)
+        .catch(() => undefined);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [baseColor, surface?.id, surface?.kind, surface?.mimeType, surface?.name, surface?.url]);
+
+  useEffect(() => {
+    return () => {
+      textureRef.current?.dispose();
+      textureRef.current = null;
+    };
+  }, []);
+
+  return texture;
+}
+
+function getNodeSurfaceAttachment(
+  attachments: AtlasNode["attachments"],
+  previewUrls: Record<string, string>,
+): AttachmentSurface | null {
+  const attachment = [...attachments].reverse()[0];
+  if (!attachment) return null;
+  return {
+    id: attachment.id,
+    kind: attachment.kind,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    url: previewUrls[attachment.id],
+  };
+}
+
+function createImageAttachmentTexture(url: string, baseColor: string) {
+  return new Promise<CanvasTexture>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(createMediaCanvasTexture(image, baseColor));
+    image.onerror = () => reject(new Error("Image attachment texture failed to load."));
+    image.src = url;
+  });
+}
+
+function createVideoAttachmentTexture(url: string, baseColor: string, name: string) {
+  return new Promise<CanvasTexture>((resolve, reject) => {
+    const video = document.createElement("video");
+    let finished = false;
+    const timeout = window.setTimeout(() => rejectOnce(), 2200);
+
+    const rejectOnce = () => {
+      if (finished) return;
+      finished = true;
+      window.clearTimeout(timeout);
+      reject(new Error("Video attachment thumbnail failed to load."));
+    };
+
+    const resolveOnce = () => {
+      if (finished || !video.videoWidth || !video.videoHeight) return;
+      finished = true;
+      window.clearTimeout(timeout);
+      resolve(createMediaCanvasTexture(video, baseColor, { video: true, label: getFileExtensionLabel(name) || "VIDEO" }));
+    };
+
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      const seekTime = Number.isFinite(video.duration) && video.duration > 0 ? Math.min(1, video.duration * 0.08) : 0;
+      try {
+        video.currentTime = seekTime;
+      } catch {
+        resolveOnce();
+      }
+    };
+    video.onloadeddata = resolveOnce;
+    video.onseeked = resolveOnce;
+    video.onerror = rejectOnce;
+    video.src = url;
+    video.load();
+  });
+}
+
+function createMediaCanvasTexture(
+  source: CanvasImageSource,
+  baseColor: string,
+  options: { video?: boolean; label?: string } = {},
+) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 128;
+  const context = canvas.getContext("2d");
+  if (!context) return finalizeAttachmentCanvasTexture(canvas);
+
+  context.fillStyle = baseColor;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  drawCoveredImage(context, source, canvas.width, canvas.height);
+  context.fillStyle = "rgba(0, 0, 0, 0.18)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  drawTextureEdgeShade(context, canvas.width, canvas.height);
+
+  if (options.video) {
+    drawPlayBadge(context, canvas.width / 2, canvas.height / 2, 23);
+    drawAttachmentLabel(context, options.label ?? "VIDEO", canvas.width, canvas.height);
+  }
+
+  return finalizeAttachmentCanvasTexture(canvas);
+}
+
+function createAttachmentIconTexture(surface: AttachmentSurface, baseColor: string) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 128;
+  const context = canvas.getContext("2d");
+  if (!context) return finalizeAttachmentCanvasTexture(canvas);
+
+  const extension = getFileExtensionLabel(surface.name);
+  const profile = getAttachmentIconProfile(surface, extension);
+  const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
+  gradient.addColorStop(0, blendHex(baseColor, profile.color, 0.74));
+  gradient.addColorStop(1, blendHex("#07110e", profile.color, 0.28));
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  context.save();
+  context.translate(62, 22);
+  drawDocumentShape(context, profile);
+  context.restore();
+
+  context.fillStyle = "rgba(255, 255, 255, 0.92)";
+  context.font = "700 21px system-ui, sans-serif";
+  context.textAlign = "left";
+  context.textBaseline = "middle";
+  context.fillText(profile.label, 122, 50);
+
+  context.fillStyle = "rgba(255, 255, 255, 0.66)";
+  context.font = "600 12px system-ui, sans-serif";
+  context.fillText(profile.caption, 122, 76);
+
+  drawTextureEdgeShade(context, canvas.width, canvas.height);
+
+  return finalizeAttachmentCanvasTexture(canvas);
+}
+
+function finalizeAttachmentCanvasTexture(canvas: HTMLCanvasElement) {
+  const texture = new CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function drawCoveredImage(context: CanvasRenderingContext2D, source: CanvasImageSource, width: number, height: number) {
+  const sourceWidth =
+    source instanceof HTMLVideoElement
+      ? source.videoWidth
+      : source instanceof HTMLImageElement
+        ? source.naturalWidth || source.width
+        : "width" in source
+          ? Number(source.width)
+          : width;
+  const sourceHeight =
+    source instanceof HTMLVideoElement
+      ? source.videoHeight
+      : source instanceof HTMLImageElement
+        ? source.naturalHeight || source.height
+        : "height" in source
+          ? Number(source.height)
+          : height;
+  if (!sourceWidth || !sourceHeight) return;
+  const scale = Math.max(width / sourceWidth, height / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  context.drawImage(source, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+}
+
+function drawTextureEdgeShade(context: CanvasRenderingContext2D, width: number, height: number) {
+  const gradient = context.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, "rgba(255,255,255,0.22)");
+  gradient.addColorStop(0.5, "rgba(255,255,255,0)");
+  gradient.addColorStop(1, "rgba(0,0,0,0.34)");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, width, height);
+}
+
+function drawPlayBadge(context: CanvasRenderingContext2D, x: number, y: number, radius: number) {
+  context.fillStyle = "rgba(0, 0, 0, 0.48)";
+  context.beginPath();
+  context.arc(x, y, radius, 0, Math.PI * 2);
+  context.fill();
+
+  context.fillStyle = "rgba(255, 255, 255, 0.92)";
+  context.beginPath();
+  context.moveTo(x - radius * 0.28, y - radius * 0.42);
+  context.lineTo(x - radius * 0.28, y + radius * 0.42);
+  context.lineTo(x + radius * 0.46, y);
+  context.closePath();
+  context.fill();
+}
+
+function drawAttachmentLabel(context: CanvasRenderingContext2D, label: string, width: number, height: number) {
+  context.fillStyle = "rgba(0, 0, 0, 0.46)";
+  context.fillRect(0, height - 28, width, 28);
+  context.fillStyle = "rgba(255, 255, 255, 0.92)";
+  context.font = "700 13px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(label.slice(0, 8), width / 2, height - 14);
+}
+
+type AttachmentIconProfile = {
+  label: string;
+  caption: string;
+  color: string;
+  variant: "document" | "spreadsheet" | "presentation" | "archive" | "code" | "data" | "image" | "audio" | "video" | "app";
+};
+
+function getAttachmentIconProfile(surface: AttachmentSurface, extension: string): AttachmentIconProfile {
+  if (surface.kind === "image") return { label: extension || "IMG", caption: "image", color: "#4ea4ff", variant: "image" };
+  if (surface.kind === "video") return { label: extension || "VIDEO", caption: "video", color: "#e85f7d", variant: "video" };
+  if (surface.kind === "audio") return { label: extension || "AUDIO", caption: "audio", color: "#b26cff", variant: "audio" };
+
+  if (["XLS", "XLSX", "CSV", "TSV", "ODS"].includes(extension)) {
+    return { label: extension || "SHEET", caption: "spreadsheet", color: "#2fbf7b", variant: "spreadsheet" };
+  }
+  if (["PPT", "PPTX", "KEY", "ODP"].includes(extension)) {
+    return { label: extension || "SLIDE", caption: "presentation", color: "#f26b3a", variant: "presentation" };
+  }
+  if (["ZIP", "RAR", "7Z", "TAR", "GZ", "BZ2"].includes(extension)) {
+    return { label: extension || "ZIP", caption: "archive", color: "#d7a72f", variant: "archive" };
+  }
+  if (["JSON", "YAML", "YML", "XML", "TOML"].includes(extension)) {
+    return { label: extension || "DATA", caption: "data", color: "#32b6b0", variant: "data" };
+  }
+  if (["JS", "TS", "TSX", "JSX", "HTML", "CSS", "PY", "RB", "GO", "RS", "JAVA", "C", "CPP", "H", "HPP", "CS", "PHP", "SH", "SQL"].includes(extension)) {
+    return { label: extension || "CODE", caption: "code", color: "#6f8cff", variant: "code" };
+  }
+  if (["PNG", "JPG", "JPEG", "GIF", "WEBP", "SVG", "AVIF"].includes(extension)) {
+    return { label: extension || "IMG", caption: "image", color: "#4ea4ff", variant: "image" };
+  }
+  if (["MP4", "MOV", "AVI", "MKV", "WEBM", "M4V"].includes(extension)) {
+    return { label: extension || "VIDEO", caption: "video", color: "#e85f7d", variant: "video" };
+  }
+  if (["MP3", "WAV", "OGG", "M4A", "FLAC", "AAC"].includes(extension)) {
+    return { label: extension || "AUDIO", caption: "audio", color: "#b26cff", variant: "audio" };
+  }
+  if (["EXE", "DMG", "PKG", "APK", "MSI"].includes(extension)) {
+    return { label: extension || "APP", caption: "application", color: "#8896a8", variant: "app" };
+  }
+  if (["PDF", "DOC", "DOCX", "TXT", "MD", "RTF", "ODT"].includes(extension) || surface.mimeType.startsWith("text/")) {
+    return { label: extension || "TEXT", caption: "document", color: "#e1e6ef", variant: "document" };
+  }
+  return { label: extension || "FILE", caption: "file", color: "#9aa7b6", variant: "document" };
+}
+
+function drawDocumentShape(context: CanvasRenderingContext2D, profile: AttachmentIconProfile) {
+  context.fillStyle = "rgba(255,255,255,0.9)";
+  context.beginPath();
+  context.roundRect(0, 0, 46, 66, 5);
+  context.fill();
+  context.fillStyle = "rgba(0,0,0,0.14)";
+  context.beginPath();
+  context.moveTo(32, 0);
+  context.lineTo(46, 14);
+  context.lineTo(32, 14);
+  context.closePath();
+  context.fill();
+
+  context.strokeStyle = "rgba(15, 22, 30, 0.28)";
+  context.lineWidth = 2;
+
+  if (profile.variant === "spreadsheet") {
+    for (let x = 11; x <= 35; x += 12) {
+      context.beginPath();
+      context.moveTo(x, 20);
+      context.lineTo(x, 52);
+      context.stroke();
+    }
+    for (let y = 28; y <= 44; y += 8) {
+      context.beginPath();
+      context.moveTo(8, y);
+      context.lineTo(38, y);
+      context.stroke();
+    }
+    return;
+  }
+
+  if (profile.variant === "presentation") {
+    context.strokeRect(9, 22, 28, 20);
+    context.beginPath();
+    context.moveTo(23, 42);
+    context.lineTo(23, 54);
+    context.moveTo(14, 54);
+    context.lineTo(32, 54);
+    context.stroke();
+    return;
+  }
+
+  if (profile.variant === "archive") {
+    context.beginPath();
+    context.moveTo(23, 17);
+    context.lineTo(23, 55);
+    context.stroke();
+    for (let y = 20; y < 54; y += 8) {
+      context.fillStyle = y % 16 === 4 ? "rgba(15,22,30,0.3)" : "rgba(15,22,30,0.16)";
+      context.fillRect(19, y, 8, 5);
+    }
+    return;
+  }
+
+  if (profile.variant === "code" || profile.variant === "data") {
+    context.font = "700 22px ui-monospace, monospace";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillStyle = "rgba(15, 22, 30, 0.46)";
+    context.fillText(profile.variant === "code" ? "</>" : "{}", 23, 39);
+    return;
+  }
+
+  if (profile.variant === "image") {
+    context.beginPath();
+    context.moveTo(8, 48);
+    context.lineTo(18, 34);
+    context.lineTo(27, 44);
+    context.lineTo(34, 30);
+    context.lineTo(39, 48);
+    context.closePath();
+    context.stroke();
+    context.beginPath();
+    context.arc(17, 24, 3, 0, Math.PI * 2);
+    context.stroke();
+    return;
+  }
+
+  if (profile.variant === "video") {
+    drawPlayBadge(context, 23, 38, 15);
+    return;
+  }
+
+  if (profile.variant === "audio") {
+    for (let index = 0; index < 4; index += 1) {
+      const height = 14 + (index % 2) * 14;
+      context.beginPath();
+      context.moveTo(13 + index * 7, 47);
+      context.lineTo(13 + index * 7, 47 - height);
+      context.stroke();
+    }
+    return;
+  }
+
+  if (profile.variant === "app") {
+    context.strokeRect(9, 21, 28, 30);
+    context.beginPath();
+    context.moveTo(9, 29);
+    context.lineTo(37, 29);
+    context.stroke();
+    return;
+  }
+
+  for (let y = 22; y <= 46; y += 8) {
+    context.beginPath();
+    context.moveTo(10, y);
+    context.lineTo(36, y);
+    context.stroke();
+  }
+}
+
+function getFileExtensionLabel(name: string) {
+  const extension = name.split(".").pop()?.trim().toUpperCase() ?? "";
+  return extension.length > 1 && extension.length <= 6 ? extension : "";
+}
+
+function blendHex(from: string, to: string, amount: number) {
+  const color = new Color(from).lerp(new Color(to), amount);
+  return `#${color.getHexString()}`;
 }
 
 function NodeFocusRing({

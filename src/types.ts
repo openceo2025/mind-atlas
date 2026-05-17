@@ -25,6 +25,7 @@ export type NotebookNodeType =
   | "ai_reply"
   | "tool_call"
   | "tool_result"
+  | "approval_request"
   | "note"
   | "file_context";
 
@@ -89,11 +90,94 @@ export type PlanetTexture = "speckled" | "bands" | "freckles" | "craters" | "mis
 
 export type AiExecutionMode = "openai" | "local" | "codex";
 
-export type AiContextScope = "minimal" | "focused" | "subtree" | "neighborhood";
+export type AiContextScope = "minimal" | "focused" | "subtree" | "neighborhood" | "selected" | "custom";
+
+export type AiAttachmentMode = "metadata" | "content";
+
+export interface AiContextOptions {
+  scope: AiContextScope;
+  ancestorDepth: number;
+  descendantDepth: number;
+  lateralRadius: number;
+  attachmentMode: AiAttachmentMode;
+  maxAttachmentCount: number;
+  maxAttachmentBytes: number;
+  selectedNodeIds: string[];
+}
 
 export type AiProvider = "openai" | "openai-compatible" | "local" | "codex" | "mock";
 
 export type AiRunStatus = "running" | "needs_review" | "error" | "done";
+
+export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
+export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+
+export interface CodexSettings {
+  model: string;
+  reasoningEffort: CodexReasoningEffort;
+  sandbox: CodexSandboxMode;
+  workspace: string;
+  webSearch: boolean;
+  skipGitRepoCheck: boolean;
+  timeoutMs: number;
+  fullAccessApproved?: boolean;
+}
+
+export interface CodexModelOption {
+  model: string;
+  displayName: string;
+  description?: string;
+  defaultReasoningEffort: CodexReasoningEffort;
+  supportedReasoningEfforts: CodexReasoningEffort[];
+}
+
+export interface CodexOptionsResult {
+  models: CodexModelOption[];
+  defaultModel: string;
+  defaultReasoningEffort: CodexReasoningEffort;
+  defaultWorkspace: string;
+  defaultSandbox: CodexSandboxMode;
+  defaultTimeoutMs: number;
+}
+
+export type CodexGeneratedNodeKind =
+  | "summary"
+  | "command"
+  | "file_change"
+  | "approval_request"
+  | "approval_option"
+  | "final"
+  | "error";
+
+export interface AtlasNodeAction {
+  kind: "codex_full_access";
+  label: string;
+  decision: "approve" | "deny";
+  prompt: string;
+  sourceNodeId: string;
+  runId: string;
+  contextOptions: AiContextOptions;
+  settings: CodexSettings;
+}
+
+export interface CodexGeneratedNode {
+  kind: CodexGeneratedNodeKind;
+  title: string;
+  body: string;
+  summary: string;
+  suggestedStatus: WorkStatus;
+  tags: string[];
+  nodeType?: NotebookNodeType;
+  color?: string;
+  action?: AtlasNodeAction;
+  children?: CodexGeneratedNode[];
+}
+
+export interface AiDialogSettings {
+  contextOptions: AiContextOptions;
+  codexSettings: CodexSettings;
+}
 
 export interface AiUsage {
   inputTokens?: number;
@@ -129,16 +213,29 @@ export interface AiNodeSnapshot {
   author: AtlasNode["author"];
   nodeType: NotebookNodeType;
   tags: string[];
-  attachments: Array<Pick<NodeAttachment, "id" | "name" | "kind" | "mimeType" | "size">>;
+  attachments: AiAttachmentSnapshot[];
   children: AiNodeSnapshot[];
+}
+
+export interface AiAttachmentSnapshot extends Pick<NodeAttachment, "id" | "name" | "kind" | "mimeType" | "size"> {
+  content?: {
+    encoding: "text" | "data_url";
+    value: string;
+    bytes: number;
+    truncated?: boolean;
+    unavailable?: boolean;
+    error?: string;
+  };
 }
 
 export interface AiNodeContext {
   selectedNode: AiNodeSnapshot;
+  selectedNodes?: AiNodeSnapshot[];
   path: AiNodeSnapshot[];
   siblingNodes: AiNodeSnapshot[];
   descendantCount: number;
   scope: AiContextScope;
+  options?: AiContextOptions;
   stats: AiContextStats;
   exportedAt: string;
 }
@@ -147,10 +244,13 @@ export interface AiContextStats {
   scope: AiContextScope;
   includedNodeCount: number;
   estimatedInputTokens: number;
+  includedAttachmentCount: number;
+  includedAttachmentBytes: number;
   sections: {
     selected: number;
     path: number;
     siblings: number;
+    selectedNodes?: number;
   };
 }
 
@@ -159,6 +259,7 @@ export interface AiResponsePayload {
   context: AiNodeContext;
   provider: AiExecutionMode;
   model?: string;
+  codex?: Partial<CodexSettings>;
 }
 
 export interface AiGeneratedOutput {
@@ -169,11 +270,22 @@ export interface AiGeneratedOutput {
   tags: string[];
 }
 
+export interface AiGeneratedAttachment {
+  name: string;
+  kind: AttachmentKind;
+  mimeType: string;
+  size: number;
+  path: string;
+  base64: string;
+}
+
 export interface AiResponseResult {
   id: string;
   provider: AiProvider;
   model: string;
   output: AiGeneratedOutput;
+  codexNodes?: CodexGeneratedNode[];
+  generatedAttachments?: AiGeneratedAttachment[];
   rawText: string;
   usage?: AiUsage;
 }
@@ -186,6 +298,8 @@ export interface AiBridgeHealth {
   openAiMode: string;
   defaultModel: string;
   realtimeModel: string;
+  transcriptionModel?: string;
+  realtimeTranscriptionModel?: string;
   mockFallback: boolean;
   providers: AiBridgeProvider[];
 }
@@ -209,11 +323,82 @@ export interface NotificationPulse {
   createdAt: number;
 }
 
+export type VoiceLogRole = "user" | "assistant" | "tool" | "system" | "summary" | "error";
+
+export interface VoiceLogEntry {
+  id: string;
+  role: VoiceLogRole;
+  text: string;
+  createdAt: string;
+  sessionId?: string;
+  title?: string;
+  toolName?: string;
+  toolCallId?: string;
+  status?: "pending" | "running" | "done" | "error" | "approval_required";
+  metadata?: Record<string, unknown>;
+}
+
+export interface VoiceSessionSummary {
+  text: string;
+  createdAt: string;
+  sessionId?: string;
+}
+
+export interface VoicePartnerState {
+  sessionId: string | null;
+  connected: boolean;
+  lastInteractionAt: string | null;
+  summary: VoiceSessionSummary | null;
+}
+
+export interface RealtimeToolDefinition {
+  type: "function";
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface AudioTranscriptionResult {
+  text: string;
+  model: string;
+  durationMs?: number;
+}
+
+export interface WebSearchResult {
+  text: string;
+  citations: Array<{
+    title?: string;
+    url: string;
+  }>;
+  sources: Array<{
+    title?: string;
+    url: string;
+  }>;
+  raw?: unknown;
+}
+
+export interface CloudNotebookEntry {
+  name: string;
+  size: number;
+  updatedAt: string;
+}
+
+export interface CloudNotebookListResult {
+  directory: string;
+  notebooks: CloudNotebookEntry[];
+}
+
+export interface CloudNotebookSaveResult extends CloudNotebookEntry {
+  directory: string;
+}
+
 export interface RealtimeSessionConfig {
   context: AiNodeContext;
   instructions?: string;
   model?: string;
   voice?: string;
+  summary?: VoiceSessionSummary | null;
+  tools?: RealtimeToolDefinition[];
 }
 
 export interface AtlasNode {
@@ -237,11 +422,14 @@ export interface AtlasNode {
   position?: [number, number, number];
   sourceParentId?: string;
   sourceId?: string;
+  propagatedErrorSourceId?: string;
   aiRunId?: string;
   modelId?: string;
   provider?: AiProvider;
   runMode?: AiExecutionMode;
   usage?: AiUsage;
+  action?: AtlasNodeAction;
+  aiDialogSettings?: AiDialogSettings;
   children: AtlasNode[];
 }
 

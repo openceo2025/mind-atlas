@@ -1,25 +1,75 @@
-import { Bot, Code2, HardDrive, Mic, PenLine, SendHorizonal, Square } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { startRealtimeVoiceSession, type RealtimeVoiceSession, type RealtimeSessionState } from "../ai/realtimeClient";
-import { buildAiNodeContext, findNode, findNodePath, useAtlasStore } from "../store/atlasStore";
-import type { AiContextScope, AiExecutionMode } from "../types";
+import { AudioLines, Bot, Code2, HardDrive, Mic, PenLine, SendHorizonal, Square } from "lucide-react";
+import { FormEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, useEffect, useMemo, useRef, useState } from "react";
+import { getCodexOptions, transcribeAudio } from "../ai/bridgeClient";
+import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceSession, type RealtimeSessionState } from "../ai/realtimeClient";
+import { UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
+import { buildAiNodeContextWithAttachments, findNode, findNodePath, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
+import type { AiAttachmentMode, AiContextScope, AiExecutionMode, CodexOptionsResult, CodexReasoningEffort, CodexSandboxMode } from "../types";
 
 type CommandMode = AiExecutionMode | "note";
+type VoiceButtonState = "idle" | "dictation_recording" | "dictation_transcribing" | "voice_connecting" | "voice_ptt" | "voice_responding";
+
+const VOICE_LONG_PRESS_MS = 460;
+const VOICE_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 
 export function CommandDock() {
   const [value, setValue] = useState("");
   const [mode, setMode] = useState<CommandMode>("openai");
-  const [scope, setScope] = useState<AiContextScope>("focused");
+  const [voiceButtonState, setVoiceButtonState] = useState<VoiceButtonState>("idle");
   const [voiceState, setVoiceState] = useState<RealtimeSessionState>("closed");
   const [voiceError, setVoiceError] = useState("");
   const voiceSessionRef = useRef<RealtimeVoiceSession | null>(null);
+  const dictationRecorderRef = useRef<MediaRecorder | null>(null);
+  const dictationStreamRef = useRef<MediaStream | null>(null);
+  const dictationChunksRef = useRef<Blob[]>([]);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const pendingVoiceReleaseRef = useRef(false);
+  const activeMicPointerIdRef = useRef<number | null>(null);
+  const touchFallbackActiveRef = useRef(false);
+  const voiceIdleTimerRef = useRef<number | null>(null);
+  const voiceSessionIdRef = useRef<string | undefined>(undefined);
+  const assistantBufferRef = useRef("");
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
+  const multiSelectedNodeIds = useAtlasStore((state) => state.multiSelectedNodeIds);
+  const aiContextOptions = useAtlasStore((state) => state.aiContextOptions);
+  const setAiContextOptions = useAtlasStore((state) => state.setAiContextOptions);
+  const codexSettings = useAtlasStore((state) => state.codexSettings);
+  const setCodexSettings = useAtlasStore((state) => state.setCodexSettings);
+  const loadAiDialogSettingsForNode = useAtlasStore((state) => state.loadAiDialogSettingsForNode);
+  const resetAiDialogSettingsToDefaults = useAtlasStore((state) => state.resetAiDialogSettingsToDefaults);
+  const setCommandInputEditing = useAtlasStore((state) => state.setCommandInputEditing);
+  const setActiveCommandMode = useAtlasStore((state) => state.setActiveCommandMode);
+  const appendVoiceLogEntry = useAtlasStore((state) => state.appendVoiceLogEntry);
+  const voiceSessionSummary = useAtlasStore((state) => state.voiceSessionSummary);
+  const setVoiceSessionSummary = useAtlasStore((state) => state.setVoiceSessionSummary);
   const runAiOnSelectedNode = useAtlasStore((state) => state.runAiOnSelectedNode);
   const addQuickChildFromInput = useAtlasStore((state) => state.addQuickChildFromInput);
   const setNodeStatus = useAtlasStore((state) => state.setNodeStatus);
   const selectedPath = findNodePath(atlasRoot, selectedNodeId);
   const selectedNode = findNode(atlasRoot, selectedNodeId);
+  const scope = aiContextOptions.scope;
+  const editableContextControls = mode !== "note" && scope === "custom";
+  const [codexOptions, setCodexOptions] = useState<CodexOptionsResult | null>(null);
+  const contextOptionsForRun = useMemo(
+    () => normalizeAiContextOptions({ ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds }),
+    [aiContextOptions, multiSelectedNodeIds],
+  );
+  const codexModelOptions = codexOptions?.models.length
+    ? codexOptions.models
+    : [
+        {
+          model: "gpt-5.5",
+          displayName: "GPT-5.5",
+          defaultReasoningEffort: "medium" as CodexReasoningEffort,
+          supportedReasoningEfforts: ["low", "medium", "high", "xhigh"] as CodexReasoningEffort[],
+        },
+      ];
+  const selectedCodexModel = codexModelOptions.find((option) => option.model === codexSettings.model) ?? codexModelOptions[0];
+  const codexEfforts = selectedCodexModel?.supportedReasoningEfforts.length
+    ? selectedCodexModel.supportedReasoningEfforts
+    : (["low", "medium", "high", "xhigh"] as CodexReasoningEffort[]);
 
   const targetLabel = useMemo(() => {
     const crumbs = (selectedPath ?? []).slice(-3).map((node) => node.title.trim() || "Untitled");
@@ -28,10 +78,58 @@ export function CommandDock() {
 
   useEffect(() => {
     return () => {
+      clearLongPressTimer();
+      clearVoiceIdleTimer();
       voiceSessionRef.current?.stop();
       voiceSessionRef.current = null;
+      dictationRecorderRef.current?.stream.getTracks().forEach((track) => track.stop());
+      dictationStreamRef.current?.getTracks().forEach((track) => track.stop());
+      setCommandInputEditing(false);
     };
-  }, []);
+  }, [setCommandInputEditing]);
+
+  useEffect(() => {
+    if (value.trim()) return;
+    loadAiDialogSettingsForNode(selectedNodeId);
+  }, [loadAiDialogSettingsForNode, selectedNodeId, value]);
+
+  useEffect(() => {
+    const resetIfPromptIsEmpty = () => {
+      if (value.trim()) return;
+      resetAiDialogSettingsToDefaults();
+    };
+    window.addEventListener(UNIVERSE_BACKGROUND_CLICK_EVENT, resetIfPromptIsEmpty);
+    return () => window.removeEventListener(UNIVERSE_BACKGROUND_CLICK_EVENT, resetIfPromptIsEmpty);
+  }, [resetAiDialogSettingsToDefaults, value]);
+
+  useEffect(() => {
+    setActiveCommandMode(mode);
+  }, [mode, setActiveCommandMode]);
+
+  useEffect(() => {
+    let alive = true;
+    void getCodexOptions()
+      .then((options) => {
+        if (!alive) return;
+        setCodexOptions(options);
+        const current = useAtlasStore.getState();
+        const currentNode = findNode(current.atlasRoot, current.selectedNodeId);
+        if (currentNode?.aiDialogSettings?.codexSettings) return;
+        setCodexSettings({
+          model: options.defaultModel,
+          reasoningEffort: options.defaultReasoningEffort,
+          sandbox: options.defaultSandbox,
+          workspace: options.defaultWorkspace,
+          timeoutMs: options.defaultTimeoutMs,
+        });
+      })
+      .catch(() => {
+        if (alive) setCodexOptions(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [setCodexSettings]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -43,68 +141,362 @@ export function CommandDock() {
       addQuickChildFromInput(trimmed);
       return;
     }
-    void runAiOnSelectedNode(trimmed, mode, scope);
+    void runAiOnSelectedNode(trimmed, mode, contextOptionsForRun);
   };
 
-  const handleVoiceClick = async () => {
-    if (voiceSessionRef.current) {
-      voiceSessionRef.current.stop();
-      voiceSessionRef.current = null;
-      setNodeStatus(selectedNodeId, "needs_review", "Realtime voice session ended.");
-      return;
-    }
-
-    const context = buildAiNodeContext(atlasRoot, selectedNodeId, scope);
-    if (!context) return;
-
+  const ensureVoicePartnerSession = async () => {
+    if (voiceSessionRef.current) return voiceSessionRef.current;
     try {
+      const context = await buildAiNodeContextWithAttachments(atlasRoot, selectedNodeId, contextOptionsForRun);
+      if (!context) return null;
       setVoiceError("");
-      setNodeStatus(selectedNodeId, "running", "Realtime voice session is connecting.");
-      const session = await startRealtimeVoiceSession({
+      setVoiceButtonState("voice_connecting");
+      const session = await startVoicePartnerSession({
         context,
         instructions: selectedNode?.body,
+        summary: voiceSessionSummary,
         onStateChange: (state) => {
           setVoiceState(state);
-          if (state === "live") {
-            setNodeStatus(selectedNodeId, "running", "Realtime voice is live. Speak from this node.");
-          }
           if (state === "closed") {
-            setNodeStatus(selectedNodeId, "needs_review", "Realtime voice session ended.");
+            voiceSessionRef.current = null;
+            voiceSessionIdRef.current = undefined;
+            setVoiceButtonState("idle");
           }
         },
-        onEvent: (event) => {
-          if (!event || typeof event !== "object" || !("type" in event)) return;
-          const type = String((event as { type: unknown }).type);
-          if (type === "response.done") {
-            setNodeStatus(selectedNodeId, "needs_review", "Realtime voice response completed.");
-          }
-          if (type.includes("error")) {
-            setNodeStatus(selectedNodeId, "error", "Realtime voice reported an error.");
-          }
-        },
+        onEvent: handleRealtimeEvent,
       });
       voiceSessionRef.current = session;
+      voiceSessionIdRef.current = session.id;
+      appendVoiceLogEntry({
+        role: "system",
+        title: "Voice Partner connected",
+        text: "Realtime Voice Partner session started.",
+        sessionId: session.id,
+      });
+      scheduleVoiceIdleTimeout();
+      return session;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Realtime voice failed.";
       setVoiceState("error");
       setVoiceError(message);
-      setNodeStatus(selectedNodeId, "error", message);
+      setVoiceButtonState("idle");
+      appendVoiceLogEntry({ role: "error", title: "Voice Partner error", text: message });
+      return null;
     }
   };
 
+  const handleRealtimeEvent = (event: RealtimeClientEvent) => {
+    if (event.kind === "user_transcript_done") {
+      appendVoiceLogEntry({
+        role: "user",
+        title: "Spoken input",
+        text: event.text,
+        sessionId: voiceSessionIdRef.current,
+      });
+      scheduleVoiceIdleTimeout();
+      return;
+    }
+
+    if (event.kind === "assistant_delta") {
+      assistantBufferRef.current += event.text;
+      return;
+    }
+
+    if (event.kind === "assistant_done") {
+      const text = event.text || assistantBufferRef.current.trim();
+      assistantBufferRef.current = "";
+      if (text) {
+        appendVoiceLogEntry({
+          role: "assistant",
+          title: "Voice Partner",
+          text,
+          sessionId: voiceSessionIdRef.current,
+        });
+      }
+      setVoiceButtonState("idle");
+      scheduleVoiceIdleTimeout();
+      return;
+    }
+
+    if (event.kind === "summary_done") {
+      if (!event.text.trim()) return;
+      const summary = {
+        text: event.text.trim(),
+        createdAt: new Date().toISOString(),
+        sessionId: voiceSessionIdRef.current,
+      };
+      setVoiceSessionSummary(summary);
+      appendVoiceLogEntry({
+        role: "summary",
+        title: "Voice session summary",
+        text: summary.text,
+        sessionId: summary.sessionId,
+      });
+      return;
+    }
+
+    if (event.kind === "tool_call" || event.kind === "tool_result") {
+      scheduleVoiceIdleTimeout();
+      return;
+    }
+
+    if (event.kind === "error") {
+      setVoiceError(event.message);
+      setVoiceButtonState("idle");
+      appendVoiceLogEntry({
+        role: "error",
+        title: "Realtime error",
+        text: event.message,
+        sessionId: voiceSessionIdRef.current,
+      });
+    }
+  };
+
+  const handleMicPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (activeMicPointerIdRef.current !== null) return;
+    activeMicPointerIdRef.current = event.pointerId;
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Some mobile browsers can reject capture if the pointer was already canceled.
+    }
+    beginMicPress();
+  };
+
+  const handleMicPointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (activeMicPointerIdRef.current !== event.pointerId) return;
+    activeMicPointerIdRef.current = null;
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // ignore capture races on touch browsers
+    }
+    completeMicPress();
+  };
+
+  const handleMicPointerCancel = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (activeMicPointerIdRef.current !== null && activeMicPointerIdRef.current !== event.pointerId) return;
+    activeMicPointerIdRef.current = null;
+    cancelMicPress();
+  };
+
+  const handleMicTouchStart = (event: ReactTouchEvent<HTMLButtonElement>) => {
+    if (window.PointerEvent) return;
+    event.preventDefault();
+    if (touchFallbackActiveRef.current || event.touches.length !== 1) return;
+    touchFallbackActiveRef.current = true;
+    beginMicPress();
+  };
+
+  const handleMicTouchEnd = (event: ReactTouchEvent<HTMLButtonElement>) => {
+    if (window.PointerEvent) return;
+    event.preventDefault();
+    if (!touchFallbackActiveRef.current) return;
+    touchFallbackActiveRef.current = false;
+    completeMicPress();
+  };
+
+  const handleMicTouchCancel = (event: ReactTouchEvent<HTMLButtonElement>) => {
+    if (window.PointerEvent) return;
+    event.preventDefault();
+    if (!touchFallbackActiveRef.current) return;
+    touchFallbackActiveRef.current = false;
+    cancelMicPress();
+  };
+
+  const beginMicPress = () => {
+    if (voiceButtonState === "dictation_recording") return;
+    if (voiceButtonState === "dictation_transcribing" || voiceButtonState === "voice_connecting") return;
+    clearLongPressTimer();
+    longPressTriggeredRef.current = false;
+    pendingVoiceReleaseRef.current = false;
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTriggeredRef.current = true;
+      void beginVoicePartnerTurn();
+    }, VOICE_LONG_PRESS_MS);
+  };
+
+  const completeMicPress = () => {
+    if (voiceButtonState === "dictation_recording") {
+      void stopDictationAndTranscribe();
+      return;
+    }
+    clearLongPressTimer();
+    if (longPressTriggeredRef.current) {
+      pendingVoiceReleaseRef.current = true;
+      endVoicePartnerTurn();
+      return;
+    }
+    if (voiceButtonState === "idle") {
+      void startDictation();
+    }
+  };
+
+  const cancelMicPress = () => {
+    clearLongPressTimer();
+    if (longPressTriggeredRef.current) {
+      pendingVoiceReleaseRef.current = true;
+      endVoicePartnerTurn();
+    }
+  };
+
+  const startDictation = async () => {
+    if (!window.isSecureContext) {
+      const message = "Microphone access requires HTTPS or localhost. Use a secure origin for mobile LAN dictation.";
+      setVoiceError(message);
+      appendVoiceLogEntry({ role: "error", title: "Dictation error", text: message });
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      const message = "This browser does not support microphone recording.";
+      setVoiceError(message);
+      appendVoiceLogEntry({ role: "error", title: "Dictation error", text: message });
+      return;
+    }
+    try {
+      setVoiceError("");
+      dictationChunksRef.current = [];
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      dictationStreamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) dictationChunksRef.current.push(event.data);
+      });
+      recorder.start();
+      dictationRecorderRef.current = recorder;
+      setVoiceButtonState("dictation_recording");
+      appendVoiceLogEntry({ role: "system", title: "Dictation", text: "Dictation recording started." });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not start dictation.";
+      setVoiceError(message);
+      setVoiceButtonState("idle");
+      appendVoiceLogEntry({ role: "error", title: "Dictation error", text: message });
+    }
+  };
+
+  const stopDictationAndTranscribe = async () => {
+    const recorder = dictationRecorderRef.current;
+    if (!recorder) return;
+    try {
+      setVoiceButtonState("dictation_transcribing");
+      const blob = await stopRecorder(recorder, dictationChunksRef.current);
+      dictationRecorderRef.current = null;
+      dictationStreamRef.current?.getTracks().forEach((track) => track.stop());
+      dictationStreamRef.current = null;
+      if (!blob.size) throw new Error("No audio was captured.");
+      const result = await transcribeAudio(blob, `mind-atlas-dictation-${Date.now()}.webm`);
+      const transcript = result.text.trim();
+      if (!transcript) throw new Error("No transcript was returned.");
+      setValue((current) => (current.trim() ? `${current.trimEnd()}\n${transcript}` : transcript));
+      appendVoiceLogEntry({
+        role: "user",
+        title: "Dictation transcript",
+        text: transcript,
+        metadata: { model: result.model, durationMs: result.durationMs },
+      });
+      setVoiceButtonState("idle");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Dictation failed.";
+      setVoiceError(message);
+      setVoiceButtonState("idle");
+      appendVoiceLogEntry({ role: "error", title: "Dictation error", text: message });
+    }
+  };
+
+  const beginVoicePartnerTurn = async () => {
+    const session = await ensureVoicePartnerSession();
+    if (!session) return;
+    session.beginPushToTalk();
+    setVoiceButtonState("voice_ptt");
+    if (pendingVoiceReleaseRef.current) {
+      endVoicePartnerTurn();
+    }
+  };
+
+  const endVoicePartnerTurn = () => {
+    const session = voiceSessionRef.current;
+    if (!session) return;
+    session.endPushToTalk();
+    setVoiceButtonState("idle");
+    scheduleVoiceIdleTimeout();
+  };
+
+  const scheduleVoiceIdleTimeout = () => {
+    clearVoiceIdleTimer();
+    if (!voiceSessionRef.current) return;
+    voiceIdleTimerRef.current = window.setTimeout(() => {
+      void closeIdleVoiceSession();
+    }, VOICE_IDLE_TIMEOUT_MS);
+  };
+
+  const closeIdleVoiceSession = async () => {
+    const session = voiceSessionRef.current;
+    if (!session) return;
+    appendVoiceLogEntry({
+      role: "system",
+      title: "Voice Partner idle",
+      text: "Voice Partner was idle for one hour. Requesting summary before closing.",
+      sessionId: session.id,
+    });
+    try {
+      await session.requestSessionSummaryAndClose();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Voice summary failed.";
+      appendVoiceLogEntry({ role: "error", title: "Voice summary error", text: message, sessionId: session.id });
+      session.stop();
+    } finally {
+      voiceSessionRef.current = null;
+      voiceSessionIdRef.current = undefined;
+      setVoiceButtonState("idle");
+    }
+  };
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current === null) return;
+    window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+  };
+
+  const clearVoiceIdleTimer = () => {
+    if (voiceIdleTimerRef.current === null) return;
+    window.clearTimeout(voiceIdleTimerRef.current);
+    voiceIdleTimerRef.current = null;
+  };
+
   const voiceIsLive = voiceState === "live" || voiceState === "connecting";
-  const contextText = mode === "note" ? "Note mode / no API" : `${scopeLabel(scope)} scope`;
-  const statusText = voiceError || (voiceIsLive ? `Realtime ${voiceState}` : `${modeLabel(mode)} / ${selectedNode?.status ?? "waiting"}`);
+  const micLive = voiceIsLive || voiceState === "listening" || voiceState === "responding" || voiceSessionRef.current !== null;
+  const selectedCount = new Set([selectedNodeId, ...multiSelectedNodeIds]).size;
+  const contextText =
+    mode === "note"
+      ? "Note mode / no API"
+      : `${scopeLabel(scope)} / ${selectedCount} selected / ${attachmentModeLabel(aiContextOptions.attachmentMode)}`;
+  const statusText = voiceError || (voiceButtonState !== "idle" ? voiceStatusLabel(voiceButtonState) : micLive ? `Voice Partner ${voiceState}` : `${modeLabel(mode)} / ${selectedNode?.status ?? "waiting"}`);
 
   return (
     <form className="command-dock" onSubmit={handleSubmit} aria-label="Re-instruction input">
       <button
-        className={`icon-button ghost ${voiceIsLive ? "is-live" : ""}`}
+        className={`icon-button ghost ${micLive || voiceButtonState !== "idle" ? "is-live" : ""}`}
         type="button"
-        onClick={handleVoiceClick}
-        aria-label={voiceIsLive ? "Stop realtime voice" : "Start realtime voice"}
+        onPointerDown={handleMicPointerDown}
+        onPointerUp={handleMicPointerUp}
+        onPointerCancel={handleMicPointerCancel}
+        onTouchStart={handleMicTouchStart}
+        onTouchEnd={handleMicTouchEnd}
+        onTouchCancel={handleMicTouchCancel}
+        onContextMenu={(event) => event.preventDefault()}
+        aria-label={micLive ? "Voice Partner push-to-talk or dictation" : "Start dictation or hold for Voice Partner"}
       >
-        {voiceIsLive ? <Square size={16} /> : <Mic size={18} />}
+        {voiceButtonState === "dictation_recording" ? (
+          <Square size={16} />
+        ) : voiceButtonState === "voice_ptt" || voiceButtonState === "voice_connecting" ? (
+          <AudioLines size={18} />
+        ) : (
+          <Mic size={18} />
+        )}
       </button>
       <div className="mode-switch" aria-label="AI execution mode">
         <ModeButton mode="openai" activeMode={mode} onSelect={setMode} />
@@ -115,15 +507,19 @@ export function CommandDock() {
       <select
         className="scope-select"
         value={scope}
-        onChange={(event) => setScope(event.target.value as AiContextScope)}
+        onChange={(event) => setAiContextOptions({ scope: event.target.value as AiContextScope })}
+        onFocus={() => setCommandInputEditing(true)}
+        onBlur={() => setCommandInputEditing(false)}
         disabled={mode === "note"}
         aria-label="AI context scope"
         title="AI context scope"
       >
-        <option value="minimal">Minimal</option>
+        <option value="minimal">Active</option>
         <option value="focused">Focused</option>
         <option value="subtree">Subtree</option>
         <option value="neighborhood">Neighborhood</option>
+        <option value="selected">Selected</option>
+        <option value="custom">Custom</option>
       </select>
       <label className="command-field">
         <span>
@@ -132,14 +528,246 @@ export function CommandDock() {
         <input
           value={value}
           onChange={(event) => setValue(event.target.value)}
+          onFocus={() => setCommandInputEditing(true)}
+          onBlur={() => setCommandInputEditing(false)}
           placeholder={mode === "note" ? "Create a child celestial node here" : mode === "codex" ? "Ask Codex from this location" : "Ask AI from this location"}
         />
       </label>
       <button className="send-button" type="submit" aria-label="Send instruction" disabled={!value.trim()}>
         <SendHorizonal size={18} />
       </button>
+      {editableContextControls ? (
+        <div className="context-options-row" aria-label="AI context settings">
+          <ContextNumberControl
+            label="Parent"
+            value={aiContextOptions.ancestorDepth}
+            min={0}
+            max={12}
+            onChange={(ancestorDepth) => setAiContextOptions({ ancestorDepth })}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+          />
+          <ContextNumberControl
+            label="Child"
+            value={aiContextOptions.descendantDepth}
+            min={0}
+            max={6}
+            onChange={(descendantDepth) => setAiContextOptions({ descendantDepth })}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+          />
+          <ContextNumberControl
+            label="Degree"
+            value={aiContextOptions.lateralRadius}
+            min={0}
+            max={4}
+            onChange={(lateralRadius) => setAiContextOptions({ lateralRadius })}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+          />
+          <label className="context-option-field">
+            <span>Files</span>
+            <select
+              value={aiContextOptions.attachmentMode}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setAiContextOptions({ attachmentMode: event.target.value as AiAttachmentMode })}
+            >
+              <option value="metadata">Meta</option>
+              <option value="content">Body</option>
+            </select>
+          </label>
+          <ContextNumberControl
+            label="Max file count"
+            value={aiContextOptions.maxAttachmentCount}
+            min={0}
+            max={20}
+            onChange={(maxAttachmentCount) => setAiContextOptions({ maxAttachmentCount })}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+          />
+          <ContextNumberControl
+            label="Max MB/file"
+            value={Math.round(aiContextOptions.maxAttachmentBytes / 1024 / 1024)}
+            min={1}
+            max={12}
+            onChange={(megabytes) => setAiContextOptions({ maxAttachmentBytes: megabytes * 1024 * 1024 })}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+          />
+        </div>
+      ) : null}
+      {mode === "codex" ? (
+        <div className="codex-options-row" aria-label="Codex settings">
+          <label className="context-option-field">
+            <span>Model</span>
+            <select
+              value={codexSettings.model}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => {
+                const option = codexModelOptions.find((item) => item.model === event.target.value);
+                setCodexSettings({
+                  model: event.target.value,
+                  reasoningEffort: option?.supportedReasoningEfforts.includes(codexSettings.reasoningEffort)
+                    ? codexSettings.reasoningEffort
+                    : option?.defaultReasoningEffort ?? "medium",
+                });
+              }}
+            >
+              {codexModelOptions.map((option) => (
+                <option key={option.model} value={option.model}>
+                  {option.displayName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="context-option-field">
+            <span>Effort</span>
+            <select
+              value={codexSettings.reasoningEffort}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setCodexSettings({ reasoningEffort: event.target.value as CodexReasoningEffort })}
+            >
+              {codexEfforts.map((effort) => (
+                <option key={effort} value={effort}>
+                  {effort === "xhigh" ? "extra high" : effort}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="context-option-field">
+            <span>Sandbox</span>
+            <select
+              value={codexSettings.sandbox === "danger-full-access" ? "workspace-write" : codexSettings.sandbox}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setCodexSettings({ sandbox: event.target.value as CodexSandboxMode, fullAccessApproved: false })}
+            >
+              <option value="workspace-write">workspace</option>
+              <option value="read-only">read only</option>
+            </select>
+          </label>
+          <label className="context-option-field codex-workspace-field">
+            <span>Work root</span>
+            <input
+              value={codexSettings.workspace}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setCodexSettings({ workspace: event.target.value })}
+              placeholder="workspace: from selected node or bridge"
+            />
+          </label>
+          <label className="context-option-field">
+            <span>Web search</span>
+            <select
+              value={codexSettings.webSearch ? "on" : "off"}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setCodexSettings({ webSearch: event.target.value === "on" })}
+            >
+              <option value="off">off</option>
+              <option value="on">on</option>
+            </select>
+          </label>
+          <label className="context-option-field codex-check-field" title="Pass --skip-git-repo-check for a non-Git or not-yet-trusted work root. Default is off.">
+            <span>Skip Git</span>
+            <span className="codex-check-control">
+              <input
+                type="checkbox"
+                checked={codexSettings.skipGitRepoCheck}
+                onFocus={() => setCommandInputEditing(true)}
+                onBlur={() => setCommandInputEditing(false)}
+                onChange={(event) => setCodexSettings({ skipGitRepoCheck: event.target.checked })}
+              />
+            </span>
+          </label>
+          <ContextNumberControl
+            label="Timeout (min)"
+            value={Math.round(codexSettings.timeoutMs / 60000)}
+            min={1}
+            max={120}
+            onChange={(minutes) => setCodexSettings({ timeoutMs: minutes * 60000 })}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+          />
+        </div>
+      ) : null}
     </form>
   );
+}
+
+function ContextNumberControl({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+  onFocus,
+  onBlur,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
+}) {
+  return (
+    <label className="context-option-field">
+      <span>{label}</span>
+      <input
+        type="number"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        value={value}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        onChange={(event) => {
+          const next = Number.parseInt(event.target.value, 10);
+          if (Number.isFinite(next)) onChange(Math.min(max, Math.max(min, next)));
+        }}
+      />
+    </label>
+  );
+}
+
+function stopRecorder(recorder: MediaRecorder, chunks: Blob[]) {
+  return new Promise<Blob>((resolve) => {
+    recorder.addEventListener(
+      "stop",
+      () => {
+        resolve(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+      },
+      { once: true },
+    );
+    if (recorder.state !== "inactive") {
+      recorder.requestData();
+      recorder.stop();
+    } else {
+      resolve(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+    }
+  });
+}
+
+function voiceStatusLabel(state: VoiceButtonState) {
+  switch (state) {
+    case "dictation_recording":
+      return "Dictation recording";
+    case "dictation_transcribing":
+      return "Transcribing";
+    case "voice_connecting":
+      return "Voice Partner connecting";
+    case "voice_ptt":
+      return "Voice Partner listening";
+    case "voice_responding":
+      return "Voice Partner responding";
+    case "idle":
+      return "Voice ready";
+  }
 }
 
 function ModeButton({
@@ -183,12 +811,20 @@ function modeLabel(mode: CommandMode) {
 function scopeLabel(scope: AiContextScope) {
   switch (scope) {
     case "minimal":
-      return "Minimal";
+      return "Active";
     case "focused":
       return "Focused";
     case "subtree":
       return "Subtree";
     case "neighborhood":
       return "Neighborhood";
+    case "selected":
+      return "Selected";
+    case "custom":
+      return "Custom";
   }
+}
+
+function attachmentModeLabel(mode: AiAttachmentMode) {
+  return mode === "content" ? "file bodies" : "file metadata";
 }

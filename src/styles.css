@@ -224,7 +224,7 @@ h1 {
 
 .node-context-menu {
   position: fixed;
-  width: 190px;
+  width: 220px;
 }
 
 .context-menu button,
@@ -315,6 +315,200 @@ h1 {
   border: 1px solid rgba(247, 215, 101, 0.38);
   background: rgba(247, 215, 101, 0.14);
   color: #fff4c5;
+}
+
+.undo-redo-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.42);
+  pointer-events: auto;
+}
+
+.voice-log-dialog {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 32px));
+  border: 1px solid rgba(219, 234, 211, 0.18);
+  border-radius: 8px;
+  background: rgba(6, 10, 8, 0.96);
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(18px);
+}
+
+.cloud-load-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(680px, calc(100vh - 32px));
+  border: 1px solid rgba(219, 234, 211, 0.18);
+  border-radius: 8px;
+  background: rgba(6, 10, 8, 0.96);
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(18px);
+}
+
+.voice-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid rgba(219, 234, 211, 0.12);
+  padding: 14px 16px;
+}
+
+.voice-log-header h2 {
+  margin: 0;
+  color: #fff8da;
+  font-size: 18px;
+}
+
+.voice-log-header p {
+  margin: 4px 0 0;
+  color: #9fb5a9;
+  font-size: 12px;
+}
+
+.voice-log-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.voice-log-summary {
+  display: grid;
+  gap: 5px;
+  margin: 12px 16px 0;
+  border: 1px solid rgba(141, 245, 207, 0.16);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(141, 245, 207, 0.07);
+}
+
+.voice-log-summary strong,
+.voice-log-entry strong {
+  color: #fff4c5;
+  font-size: 12px;
+}
+
+.voice-log-summary time,
+.voice-log-entry span,
+.voice-log-entry small {
+  color: #9fb5a9;
+  font-size: 11px;
+}
+
+.voice-log-summary p,
+.voice-log-entry p,
+.voice-log-empty {
+  margin: 0;
+  color: #e8f2e6;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.voice-log-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 16px;
+}
+
+.voice-log-entry {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(219, 234, 211, 0.12);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(3, 7, 6, 0.62);
+}
+
+.voice-log-entry header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.voice-log-entry.is-error {
+  border-color: rgba(255, 135, 104, 0.32);
+  background: rgba(255, 104, 104, 0.08);
+}
+
+.voice-log-entry.is-tool {
+  border-color: rgba(143, 183, 255, 0.22);
+}
+
+.cloud-package-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 16px;
+}
+
+.cloud-package-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(219, 234, 211, 0.12);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(3, 7, 6, 0.62);
+  color: #e8f2e6;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cloud-package-button:hover {
+  border-color: rgba(141, 245, 207, 0.38);
+  background: rgba(12, 36, 32, 0.72);
+}
+
+.cloud-package-button span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cloud-package-button strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #fff4c5;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloud-package-button small,
+.cloud-dialog-status {
+  color: #9fb5a9;
+  font-size: 12px;
+}
+
+.cloud-dialog-status {
+  margin: 0;
+}
+
+.cloud-dialog-status.is-error {
+  color: #ffb1a2;
 }
 
 .panel-toolbar {
@@ -569,10 +763,18 @@ h1 {
   border-radius: 8px;
   background: rgba(239, 225, 156, 0.1);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
   transition:
     border-color 150ms ease,
     background 150ms ease,
     transform 150ms ease;
+}
+
+.command-dock > .icon-button:first-child {
+  -webkit-touch-callout: none;
+  touch-action: none;
+  user-select: none;
 }
 
 button:disabled,
@@ -1178,6 +1380,71 @@ button:disabled,
   opacity: 0.72;
 }
 
+.context-options-row,
+.codex-options-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(72px, 1fr));
+  gap: 6px;
+}
+
+.codex-options-row {
+  grid-template-columns: minmax(116px, 1.1fr) minmax(88px, 0.8fr) minmax(96px, 0.8fr) minmax(210px, 2fr) minmax(72px, 0.6fr) minmax(78px, 0.6fr) minmax(72px, 0.6fr);
+}
+
+.codex-workspace-field {
+  min-width: 180px;
+}
+
+.codex-check-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  border: 1px solid rgba(219, 234, 211, 0.12);
+  border-radius: 7px;
+  background: rgba(6, 10, 8, 0.74);
+}
+
+.codex-check-control input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  accent-color: #8df5cf;
+}
+
+.context-option-field {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.context-option-field span {
+  color: #93aa9c;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.context-option-field input,
+.context-option-field select {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid rgba(219, 234, 211, 0.12);
+  border-radius: 7px;
+  padding: 0 8px;
+  outline: 0;
+  background: rgba(6, 10, 8, 0.74);
+  color: #d9eadb;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.context-option-field select option {
+  background: #061008;
+  color: #d9eadb;
+}
+
 .command-field {
   display: grid;
   gap: 4px;
@@ -1295,6 +1562,35 @@ button:disabled,
 
 .node-text-card.is-selected {
   color: #fff7cf;
+}
+
+.node-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 78px;
+  min-height: 30px;
+  border: 1px solid rgba(255, 244, 197, 0.56);
+  border-radius: 7px;
+  padding: 5px 8px;
+  background: rgba(6, 10, 8, 0.82);
+  color: #fff7cf;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.1;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.36);
+}
+
+.node-action-button:hover {
+  border-color: rgba(141, 245, 207, 0.78);
+  background: rgba(12, 36, 32, 0.92);
+}
+
+.node-action-button.is-deny {
+  border-color: rgba(255, 132, 132, 0.5);
+  color: #ffd4d4;
 }
 
 .space-body-editor {
@@ -1455,7 +1751,28 @@ button:disabled,
   color: #1b334d;
 }
 
+.app-shell[data-theme="light"] .context-option-field input,
+.app-shell[data-theme="light"] .context-option-field select {
+  border-color: rgba(53, 104, 164, 0.16);
+  background: rgba(255, 255, 255, 0.58);
+  color: #1b334d;
+}
+
+.app-shell[data-theme="light"] .codex-check-control {
+  border-color: rgba(53, 104, 164, 0.16);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.app-shell[data-theme="light"] .context-option-field span {
+  color: #5c728d;
+}
+
 .app-shell[data-theme="light"] .scope-select option {
+  background: #ffffff;
+  color: #1b334d;
+}
+
+.app-shell[data-theme="light"] .context-option-field select option {
   background: #ffffff;
   color: #1b334d;
 }
@@ -1605,6 +1922,17 @@ button:disabled,
   color: #0b58a8;
 }
 
+.app-shell[data-theme="light"] .node-action-button {
+  border-color: rgba(41, 104, 180, 0.3);
+  background: rgba(255, 255, 255, 0.78);
+  color: #17446f;
+}
+
+.app-shell[data-theme="light"] .node-action-button:hover {
+  border-color: rgba(20, 117, 120, 0.48);
+  background: rgba(226, 246, 241, 0.9);
+}
+
 .app-shell[data-theme="light"] .space-body-editor::placeholder {
   color: rgba(19, 36, 58, 0.48);
 }
@@ -1727,6 +2055,11 @@ button:disabled,
     grid-column: 1 / -1;
     width: 100%;
   }
+
+  .context-options-row,
+  .codex-options-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) and (orientation: portrait) {
@@ -1742,6 +2075,11 @@ button:disabled,
     left: 12px;
     bottom: calc(30vh + 22px);
     grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .command-dock:has(.context-options-row),
+  .command-dock:has(.codex-options-row) {
+    bottom: calc(34vh + 30px);
   }
 
   .command-field input {
@@ -1846,5 +2184,15 @@ button:disabled,
   .mode-switch {
     grid-column: 1 / -1;
     min-width: 0;
+  }
+
+  .scope-select {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .context-options-row,
+  .codex-options-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }

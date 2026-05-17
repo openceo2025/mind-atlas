@@ -1,6 +1,7 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { Download, Moon, MoreHorizontal, RotateCcw, Sun, Upload } from "lucide-react";
+import { CloudDownload, CloudUpload, Download, MessageSquareText, Moon, MoreHorizontal, Redo2, RefreshCw, RotateCcw, Sun, Trash2, Undo2, Upload, X } from "lucide-react";
 import { ChangeEvent, useEffect, useState } from "react";
+import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
 import { CommandDock } from "./components/CommandDock";
 import { Minimap } from "./components/Minimap";
@@ -9,20 +10,33 @@ import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
 import { createNotebookPackage, importNotebookPackage } from "./notebookPackage";
 import { findNodePath, useAtlasStore } from "./store/atlasStore";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
-import type { AtlasNode } from "./types";
+import type { AtlasNode, CloudNotebookEntry } from "./types";
 
 export default function App() {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const focusNode = useAtlasStore((state) => state.focusNode);
-  const focusParentLayer = useAtlasStore((state) => state.focusParentLayer);
   const updateNode = useAtlasStore((state) => state.updateNode);
   const exportNotebook = useAtlasStore((state) => state.exportNotebook);
   const importNotebook = useAtlasStore((state) => state.importNotebook);
   const resetNotebook = useAtlasStore((state) => state.resetNotebook);
+  const undo = useAtlasStore((state) => state.undo);
+  const redo = useAtlasStore((state) => state.redo);
+  const canUndo = useAtlasStore((state) => state.historyPast.length > 0);
+  const canRedo = useAtlasStore((state) => state.historyFuture.length > 0);
+  const voiceLogEntries = useAtlasStore((state) => state.voiceLogEntries);
+  const voiceSessionSummary = useAtlasStore((state) => state.voiceSessionSummary);
+  const clearVoiceLog = useAtlasStore((state) => state.clearVoiceLog);
   const restoreAttachmentPreviews = useAtlasStore((state) => state.restoreAttachmentPreviews);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [voiceLogOpen, setVoiceLogOpen] = useState(false);
+  const [cloudLoadOpen, setCloudLoadOpen] = useState(false);
+  const [cloudNotebooks, setCloudNotebooks] = useState<CloudNotebookEntry[]>([]);
+  const [cloudDirectory, setCloudDirectory] = useState("");
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState("");
+  const [cloudError, setCloudError] = useState("");
   const [theme, setTheme] = useState<AtlasTheme>(() => loadStoredTheme());
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
 
@@ -42,18 +56,6 @@ export default function App() {
     });
   }, [restoreAttachmentPreviews]);
 
-  useEffect(() => {
-    const marker = { mindAtlasBackTrap: true };
-    window.history.pushState(marker, "");
-    const handlePopState = (event: PopStateEvent) => {
-      event.preventDefault();
-      focusParentLayer();
-      window.history.pushState(marker, "");
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [focusParentLayer]);
-
   const handleExportLight = () => {
     const blob = new Blob([exportNotebook()], { type: "application/mindatlas+json" });
     downloadBlob(blob, `${datasetFileName(atlasRoot.title)}.mindatlas`);
@@ -69,6 +71,66 @@ export default function App() {
       );
     }
     setMenuOpen(false);
+  };
+
+  const handleSaveToCloud = async () => {
+    try {
+      setCloudError("");
+      setCloudStatus("Saving to cloud...");
+      const result = await createNotebookPackage(atlasRoot, attachmentPreviewUrls);
+      const saved = await saveCloudNotebookPackage(result.blob, `${datasetFileName(atlasRoot.title)}.mindatlaspkg`);
+      setCloudStatus(`Saved: ${saved.name}`);
+      if (result.missingCount > 0) {
+        window.alert(
+          `${result.missingCount} attachment(s) could not be included because this browser session only has metadata for them.`,
+        );
+      }
+      setMenuOpen(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Cloud save failed.";
+      setCloudError(message);
+      setCloudStatus("");
+      window.alert(message);
+    }
+  };
+
+  const refreshCloudNotebooks = async () => {
+    try {
+      setCloudLoading(true);
+      setCloudError("");
+      const result = await listCloudNotebookPackages();
+      setCloudNotebooks(result.notebooks);
+      setCloudDirectory(result.directory);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Cloud notebook list failed.";
+      setCloudError(message);
+    } finally {
+      setCloudLoading(false);
+    }
+  };
+
+  const handleOpenCloudLoad = () => {
+    setCloudLoadOpen(true);
+    setMenuOpen(false);
+    void refreshCloudNotebooks();
+  };
+
+  const handleLoadCloudNotebook = async (entry: CloudNotebookEntry) => {
+    try {
+      setCloudLoading(true);
+      setCloudError("");
+      const blob = await downloadCloudNotebookPackage(entry.name);
+      const file = new File([blob], entry.name, { type: "application/x-mindatlas-package" });
+      const { root, attachmentPreviewUrls, attachmentBlobs } = await importNotebookPackage(file);
+      await replaceStoredAttachmentBlobs(root, attachmentBlobs);
+      importNotebook(root, datasetNameFromFile(entry.name), attachmentPreviewUrls);
+      setCloudLoadOpen(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Cloud notebook load failed.";
+      setCloudError(message);
+    } finally {
+      setCloudLoading(false);
+    }
   };
 
   const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -103,6 +165,21 @@ export default function App() {
     const confirmed = window.confirm("Initialize this atlas and remove all local notebook changes?");
     if (!confirmed) return;
     resetNotebook();
+    setMenuOpen(false);
+  };
+
+  const handleUndo = () => {
+    undo();
+    setMenuOpen(false);
+  };
+
+  const handleRedo = () => {
+    redo();
+    setMenuOpen(false);
+  };
+
+  const handleOpenVoiceLog = () => {
+    setVoiceLogOpen(true);
     setMenuOpen(false);
   };
 
@@ -144,6 +221,21 @@ export default function App() {
                 </button>
               </div>
             </div>
+            <div className="undo-redo-row" aria-label="History actions">
+              <button type="button" onClick={handleUndo} disabled={!canUndo}>
+                <Undo2 size={15} /> Undo
+              </button>
+            <button type="button" onClick={handleRedo} disabled={!canRedo}>
+                <Redo2 size={15} /> Redo
+              </button>
+            </div>
+            <button type="button" onClick={handleOpenVoiceLog}>
+              <MessageSquareText size={15} />
+              <span>
+                Voice log
+                <small>{voiceLogEntries.length} entries</small>
+              </span>
+            </button>
             <button type="button" onClick={handleExportLight}>
               <Download size={15} />
               <span>
@@ -156,6 +248,20 @@ export default function App() {
               <span>
                 Export with files
                 <small>.mindatlaspkg / includes images and video</small>
+              </span>
+            </button>
+            <button type="button" onClick={handleSaveToCloud}>
+              <CloudUpload size={15} />
+              <span>
+                クラウドへ保存
+                <small>{cloudStatus || ".mindatlaspkg / server folder"}</small>
+              </span>
+            </button>
+            <button type="button" onClick={handleOpenCloudLoad}>
+              <CloudDownload size={15} />
+              <span>
+                クラウドから読み込み
+                <small>{cloudError || "choose a server package"}</small>
               </span>
             </button>
             <label>
@@ -172,8 +278,180 @@ export default function App() {
       <Minimap />
       <CommandDock />
       <FocusPanel />
+      {voiceLogOpen ? (
+        <VoiceLogDialog
+          entries={voiceLogEntries}
+          summary={voiceSessionSummary}
+          onClose={() => setVoiceLogOpen(false)}
+          onClear={clearVoiceLog}
+        />
+      ) : null}
+      {cloudLoadOpen ? (
+        <CloudLoadDialog
+          notebooks={cloudNotebooks}
+          directory={cloudDirectory}
+          loading={cloudLoading}
+          error={cloudError}
+          onClose={() => setCloudLoadOpen(false)}
+          onRefresh={refreshCloudNotebooks}
+          onLoad={handleLoadCloudNotebook}
+        />
+      ) : null}
     </main>
   );
+}
+
+function CloudLoadDialog({
+  notebooks,
+  directory,
+  loading,
+  error,
+  onClose,
+  onRefresh,
+  onLoad,
+}: {
+  notebooks: CloudNotebookEntry[];
+  directory: string;
+  loading: boolean;
+  error: string;
+  onClose: () => void;
+  onRefresh: () => void;
+  onLoad: (entry: CloudNotebookEntry) => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="cloud-load-dialog" role="dialog" aria-modal="true" aria-label="クラウドから読み込み" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="voice-log-header">
+          <div>
+            <h2>クラウドから読み込み</h2>
+            <p>{directory || "Server notebook folder"}</p>
+          </div>
+          <div className="voice-log-actions">
+            <button className="icon-button" type="button" onClick={onRefresh} aria-label="Refresh cloud notebooks" disabled={loading}>
+              <RefreshCw size={16} />
+            </button>
+            <button className="icon-button" type="button" onClick={onClose} aria-label="Close cloud loader">
+              <X size={17} />
+            </button>
+          </div>
+        </header>
+        <div className="cloud-package-list">
+          {error ? <p className="cloud-dialog-status is-error">{error}</p> : null}
+          {loading ? <p className="cloud-dialog-status">Loading...</p> : null}
+          {!loading && !notebooks.length ? <p className="cloud-dialog-status">No cloud packages found.</p> : null}
+          {notebooks.map((entry) => (
+            <button key={entry.name} className="cloud-package-button" type="button" onClick={() => onLoad(entry)} disabled={loading}>
+              <span>
+                <strong>{entry.name}</strong>
+                <small>{formatBytes(entry.size)} / {formatVoiceLogTime(entry.updatedAt)}</small>
+              </span>
+              <CloudDownload size={16} />
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function VoiceLogDialog({
+  entries,
+  summary,
+  onClose,
+  onClear,
+}: {
+  entries: ReturnType<typeof useAtlasStore.getState>["voiceLogEntries"];
+  summary: ReturnType<typeof useAtlasStore.getState>["voiceSessionSummary"];
+  onClose: () => void;
+  onClear: () => void;
+}) {
+  const handleClear = () => {
+    const confirmed = window.confirm("Clear the local Voice Partner log?");
+    if (!confirmed) return;
+    onClear();
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="voice-log-dialog" role="dialog" aria-modal="true" aria-label="Voice log" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="voice-log-header">
+          <div>
+            <h2>Voice log</h2>
+            <p>{entries.length} entries</p>
+          </div>
+          <div className="voice-log-actions">
+            <button className="icon-button" type="button" onClick={handleClear} aria-label="Clear Voice log" disabled={entries.length === 0}>
+              <Trash2 size={16} />
+            </button>
+            <button className="icon-button" type="button" onClick={onClose} aria-label="Close Voice log">
+              <X size={17} />
+            </button>
+          </div>
+        </header>
+        {summary ? (
+          <article className="voice-log-summary">
+            <strong>Latest summary</strong>
+            <time>{formatVoiceLogTime(summary.createdAt)}</time>
+            <p>{summary.text}</p>
+          </article>
+        ) : null}
+        <div className="voice-log-list">
+          {entries.length ? (
+            entries.map((entry) => (
+              <article key={entry.id} className={`voice-log-entry is-${entry.role}`}>
+                <header>
+                  <strong>{entry.title || voiceRoleLabel(entry.role)}</strong>
+                  <span>{entry.status ? `${entry.status} / ` : ""}{formatVoiceLogTime(entry.createdAt)}</span>
+                </header>
+                <p>{entry.text}</p>
+                {entry.toolName ? <small>tool: {entry.toolName}</small> : null}
+              </article>
+            ))
+          ) : (
+            <p className="voice-log-empty">No Voice Partner log entries yet.</p>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function voiceRoleLabel(role: string) {
+  switch (role) {
+    case "user":
+      return "User";
+    case "assistant":
+      return "Voice Partner";
+    case "tool":
+      return "Tool";
+    case "summary":
+      return "Summary";
+    case "error":
+      return "Error";
+    default:
+      return "System";
+  }
+}
+
+function formatVoiceLogTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1024) return `${kilobytes.toFixed(1)} KB`;
+  const megabytes = kilobytes / 1024;
+  if (megabytes < 1024) return `${megabytes.toFixed(1)} MB`;
+  return `${(megabytes / 1024).toFixed(1)} GB`;
 }
 
 function DatasetTitleInput({ title, onChange }: { title: string; onChange: (title: string) => void }) {

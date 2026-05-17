@@ -4,9 +4,11 @@ artifacts/
 coverage/
 test-results/
 playwright-report/
+server-data/
 .vite/
 .turbo/
 .cache/
+.certs/
 
 # Local-only files
 AGENTS.md

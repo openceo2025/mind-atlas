@@ -1,16 +1,26 @@
-import { createServer } from "node:http";
+import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, extname, join, relative, resolve } from "node:path";
+import { Readable } from "node:stream";
 
 const port = Number(process.env.MIND_ATLAS_BRIDGE_PORT ?? process.env.PORT ?? 8787);
+const host = process.env.MIND_ATLAS_BRIDGE_HOST ?? "127.0.0.1";
+const bridgeProtocol = process.env.MIND_ATLAS_BRIDGE_PROTOCOL ?? "http";
+const httpsKeyPath = process.env.MIND_ATLAS_HTTPS_KEY ?? "";
+const httpsCertPath = process.env.MIND_ATLAS_HTTPS_CERT ?? "";
 
 const openAiApiKey = process.env.MIND_ATLAS_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY ?? "";
 const openAiBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_OPENAI_BASE_URL ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1");
 const openAiMode = process.env.MIND_ATLAS_OPENAI_MODE ?? "responses";
 const defaultModel = process.env.MIND_ATLAS_OPENAI_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5.5";
+const openAiImageModel = process.env.MIND_ATLAS_OPENAI_IMAGE_MODEL ?? "gpt-image-1";
+const openAiImageSize = process.env.MIND_ATLAS_OPENAI_IMAGE_SIZE ?? "1024x1024";
+const openAiTranscriptionModel = process.env.MIND_ATLAS_OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe";
 
 const localBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_LOCAL_BASE_URL ?? "http://127.0.0.1:1234/v1");
 const localApiKey = process.env.MIND_ATLAS_LOCAL_API_KEY ?? "lm-studio";
@@ -20,14 +30,21 @@ const codexBin = process.env.MIND_ATLAS_CODEX_BIN ?? "codex";
 const codexUseWsl = process.env.MIND_ATLAS_CODEX_USE_WSL === "true";
 const codexWorkspace = process.env.MIND_ATLAS_CODEX_WORKSPACE ?? process.cwd();
 const codexModel = process.env.MIND_ATLAS_CODEX_MODEL ?? "";
-const codexTimeoutMs = Number(process.env.MIND_ATLAS_CODEX_TIMEOUT_MS ?? 180000);
+const codexReasoningEffort = normalizeReasoningEffort(process.env.MIND_ATLAS_CODEX_REASONING_EFFORT ?? "medium");
+const codexSandbox = normalizeCodexSandbox(process.env.MIND_ATLAS_CODEX_SANDBOX ?? "workspace-write");
+const codexTimeoutMs = Number(process.env.MIND_ATLAS_CODEX_TIMEOUT_MS ?? 60 * 60 * 1000);
 const codexDisabled = process.env.MIND_ATLAS_CODEX_DISABLED === "true";
+const codexModelsOverride = process.env.MIND_ATLAS_CODEX_MODELS ?? "";
+let codexOptionsCache = null;
+let codexSearchFlagSupportCache = null;
 
-const realtimeModel = process.env.MIND_ATLAS_REALTIME_MODEL ?? "gpt-realtime";
+const realtimeModel = process.env.MIND_ATLAS_REALTIME_MODEL ?? "gpt-realtime-2";
 const realtimeVoice = process.env.MIND_ATLAS_REALTIME_VOICE ?? "marin";
+const realtimeTranscriptionModel = process.env.MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL ?? "gpt-realtime-whisper";
 const allowMockWithoutKey = process.env.MIND_ATLAS_ALLOW_MOCK_WITHOUT_KEY !== "false";
+const cloudNotebookDir = resolve(process.env.MIND_ATLAS_CLOUD_DIR ?? join(process.cwd(), "server-data", "notebooks"));
 
-const server = createServer(async (request, response) => {
+const server = createBridgeServer(async (request, response) => {
   setCors(request, response);
 
   if (request.method === "OPTIONS") {
@@ -48,6 +65,8 @@ const server = createServer(async (request, response) => {
         openAiMode,
         defaultModel,
         realtimeModel,
+        transcriptionModel: openAiTranscriptionModel,
+        realtimeTranscriptionModel,
         mockFallback: allowMockWithoutKey,
         providers: [
           {
@@ -56,7 +75,7 @@ const server = createServer(async (request, response) => {
             configured: Boolean(openAiApiKey) || allowMockWithoutKey,
             model: defaultModel,
             baseUrl: openAiBaseUrl,
-            detail: openAiApiKey ? "API key configured" : "mock fallback",
+            detail: openAiApiKey ? `API key configured; image model ${openAiImageModel}` : "mock fallback",
           },
           {
             id: "local",
@@ -70,11 +89,17 @@ const server = createServer(async (request, response) => {
             id: "codex",
             label: "Codex CLI",
             configured: !codexDisabled,
-            model: codexModel || undefined,
-            detail: codexUseWsl ? `wsl ${codexBin}` : codexBin,
+            model: codexModel || "codex-default",
+            detail: `${codexUseWsl ? `wsl ${codexBin}` : codexBin}; ${codexSandbox}; ${codexWorkspace}`,
           },
         ],
       });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/codex/options") {
+      const result = await createCodexOptionsResponse();
+      sendJson(response, 200, result);
       return;
     }
 
@@ -100,6 +125,36 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/audio/transcriptions") {
+      const result = await createAudioTranscription(request);
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/tools/web-search") {
+      const payload = await readJson(request);
+      const result = await createWebSearchResponse(payload);
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/cloud/notebooks") {
+      const result = await listCloudNotebooks();
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/cloud/notebooks") {
+      const result = await saveCloudNotebookPackage(request);
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/api/cloud/notebooks/")) {
+      await sendCloudNotebookPackage(url.pathname.slice("/api/cloud/notebooks/".length), response);
+      return;
+    }
+
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
     const status = error instanceof BridgeError ? error.status : 500;
@@ -109,12 +164,23 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, "127.0.0.1", () => {
-  console.log(`Mind Atlas bridge listening on http://127.0.0.1:${port}`);
+server.listen(port, host, () => {
+  console.log(`Mind Atlas bridge listening on ${bridgeProtocol}://${host}:${port}`);
   console.log(openAiApiKey ? `OpenAI upstream: ${openAiBaseUrl}` : "OpenAI key not set; mock text responses are enabled.");
   console.log(`Local upstream: ${localBaseUrl}`);
   console.log(`Codex command: ${codexUseWsl ? "wsl " : ""}${codexBin}`);
 });
+
+function createBridgeServer(handler) {
+  if (bridgeProtocol !== "https") return createHttpServer(handler);
+  if (!httpsKeyPath || !httpsCertPath || !existsSync(httpsKeyPath) || !existsSync(httpsCertPath)) {
+    throw new Error("MIND_ATLAS_HTTPS_KEY and MIND_ATLAS_HTTPS_CERT are required when MIND_ATLAS_BRIDGE_PROTOCOL=https");
+  }
+  return createHttpsServer({
+    key: readFileSync(httpsKeyPath),
+    cert: readFileSync(httpsCertPath),
+  }, handler);
+}
 
 async function createAiResponse(payload) {
   const startedAt = Date.now();
@@ -146,6 +212,7 @@ async function createAiResponse(payload) {
       prompt,
       context,
       model: stringOr(payload?.model, codexModel),
+      codex: payload?.codex ?? {},
       startedAt,
     });
   }
@@ -162,6 +229,15 @@ async function createAiResponse(payload) {
       rawText: JSON.stringify(output, null, 2),
       usage: { durationMs: Date.now() - startedAt },
     };
+  }
+
+  if (shouldGenerateImage(prompt)) {
+    return await createOpenAiImageResponse({
+      prompt,
+      model: openAiImageModel,
+      startedAt,
+      requestId,
+    });
   }
 
   const system = buildSystemInstruction();
@@ -198,18 +274,138 @@ async function createOpenAiCompatibleResponse({ baseUrl, apiKey, model, prompt, 
   };
 }
 
-async function createCodexResponse({ prompt, context, model, startedAt }) {
+async function createOpenAiImageResponse({ prompt, model, startedAt, requestId }) {
+  const data = await callImageGenerations(openAiBaseUrl, openAiApiKey, model, prompt);
+  const generatedAttachments = await extractGeneratedImageAttachments(data, prompt);
+  if (!generatedAttachments.length) {
+    throw new BridgeError(502, "OpenAI image generation completed without image data.");
+  }
+
+  const title = imageTitleFromPrompt(prompt);
+  const output = normalizeAiOutput({
+    title,
+    body: `画像を生成しました。返答天体の添付ファイルを確認してください。\n\nPrompt: ${prompt}`,
+    summary: `${generatedAttachments.length} image attachment(s) generated from the prompt.`,
+    suggestedStatus: "done",
+    tags: ["image", "openai", "generated"],
+  }, prompt);
+
+  return {
+    id: data.id ?? requestId,
+    provider: "openai",
+    model,
+    output,
+    generatedAttachments,
+    rawText: JSON.stringify({
+      id: data.id,
+      created: data.created,
+      model,
+      attachmentCount: generatedAttachments.length,
+      revisedPrompts: generatedAttachments.map((attachment) => attachment.revisedPrompt).filter(Boolean),
+    }, null, 2),
+    usage: normalizeUsage(data.usage, "openai", Date.now() - startedAt),
+  };
+}
+
+async function createCodexOptionsResponse() {
+  const fallback = createFallbackCodexOptions();
+  if (codexDisabled) return fallback;
+  const cacheIsFresh = codexOptionsCache && Date.now() - codexOptionsCache.createdAt < 60_000;
+  if (cacheIsFresh) return codexOptionsCache.value;
+
+  try {
+    const models = await readCodexModels();
+    const value = {
+      ...fallback,
+      models: models.length ? models : fallback.models,
+      defaultModel: codexModel || models[0]?.model || fallback.defaultModel,
+      defaultReasoningEffort: codexReasoningEffort,
+    };
+    codexOptionsCache = { createdAt: Date.now(), value };
+    return value;
+  } catch {
+    codexOptionsCache = { createdAt: Date.now(), value: fallback };
+    return fallback;
+  }
+}
+
+async function readCodexModels() {
+  const overrideModels = parseCodexModelOverride(codexModelsOverride);
+  if (overrideModels.length) return overrideModels;
+
+  const command = codexUseWsl ? "wsl" : codexBin;
+  const args = codexUseWsl ? [codexBin, "debug", "models"] : ["debug", "models"];
+  const result = await runProcess(command, args, "", 10_000, codexWorkspace);
+  if (result.exitCode !== 0) return [];
+  const parsed = parseJsonText(result.stdout);
+  const models = Array.isArray(parsed?.models) ? parsed.models : [];
+  return models.map(normalizeCodexModelOption).filter(Boolean);
+}
+
+function createFallbackCodexOptions() {
+  const fallbackModels = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"].map((model) => ({
+    model,
+    displayName: model.toUpperCase(),
+    description: "Codex CLI model",
+    defaultReasoningEffort: "medium",
+    supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+  }));
+  return {
+    models: fallbackModels,
+    defaultModel: codexModel || "gpt-5.5",
+    defaultReasoningEffort: codexReasoningEffort,
+    defaultWorkspace: codexWorkspace,
+    defaultSandbox: codexSandbox,
+    defaultTimeoutMs: codexTimeoutMs,
+  };
+}
+
+function parseCodexModelOverride(value) {
+  return String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((model) => ({
+      model,
+      displayName: model,
+      defaultReasoningEffort: codexReasoningEffort,
+      supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+    }));
+}
+
+function normalizeCodexModelOption(model) {
+  const slug = stringOr(model?.slug ?? model?.model, "");
+  if (!slug) return null;
+  const supported = Array.isArray(model?.supported_reasoning_levels)
+    ? model.supported_reasoning_levels.map((item) => normalizeReasoningEffort(item?.effort)).filter(Boolean)
+    : ["low", "medium", "high", "xhigh"];
+  return {
+    model: slug,
+    displayName: stringOr(model?.display_name, slug),
+    description: stringOr(model?.description, ""),
+    defaultReasoningEffort: normalizeReasoningEffort(model?.default_reasoning_level ?? codexReasoningEffort),
+    supportedReasoningEfforts: supported.length ? supported : ["low", "medium", "high", "xhigh"],
+  };
+}
+
+async function createCodexResponse({ prompt, context, model, codex, startedAt }) {
   if (codexDisabled) throw new BridgeError(503, "Codex CLI is disabled");
-  const codexPrompt = buildCodexPrompt(prompt, context);
-  const result = await runCodex(codexPrompt, model);
+  const settings = normalizeCodexSettings(codex, model, context);
+  const codexPrompt = buildCodexPrompt(prompt, context, settings);
+  const beforeGitStatus = await collectGitStatus(settings.workspace);
+  const result = await runCodex(codexPrompt, settings);
+  const durationMs = Date.now() - startedAt;
+  const afterGitStatus = await collectGitStatus(settings.workspace);
+  const gitStatus = diffGitStatus(beforeGitStatus, afterGitStatus);
   const body = [
     result.lastMessage || result.stdout || "Codex did not produce a final message.",
     result.exitCode !== 0 && result.stderr.trim() ? `\n\nstderr:\n${result.stderr.trim()}` : "",
   ].join("").trim();
+  const modelId = settings.model || "codex-cli";
   return {
     id: randomUUID(),
     provider: "codex",
-    model: model || "codex-cli",
+    model: modelId,
     output: normalizeAiOutput({
       title: "Codex result",
       body,
@@ -217,33 +413,53 @@ async function createCodexResponse({ prompt, context, model, startedAt }) {
       suggestedStatus: result.exitCode === 0 ? "needs_review" : "needs_review",
       tags: ["codex", "code"],
     }, prompt),
+    codexNodes: buildCodexNodes({
+      prompt,
+      context,
+      settings,
+      result,
+      gitStatus,
+      durationMs,
+    }),
     rawText: result.stdout,
-    usage: { durationMs: Date.now() - startedAt },
+    usage: {
+      ...normalizeCodexUsage(result.usage),
+      durationMs,
+    },
   };
 }
 
-async function runCodex(prompt, model) {
+async function runCodex(prompt, settings) {
   const outputFile = join(tmpdir(), `mind-atlas-codex-${Date.now()}-${randomUUID()}.txt`);
-  const workspace = codexUseWsl ? toWslPath(codexWorkspace) : codexWorkspace;
+  const workspace = codexUseWsl ? toWslPath(settings.workspace) : settings.workspace;
+  const sandbox = settings.sandbox === "danger-full-access" && !settings.fullAccessApproved ? "workspace-write" : settings.sandbox;
+  const searchFlagSupported = settings.webSearch ? await codexSupportsSearchFlag() : false;
   const codexArgs = [
     "--ask-for-approval",
     "never",
     "exec",
+    "--json",
+  ];
+  if (searchFlagSupported) codexArgs.push("--search");
+  codexArgs.push(
     "--sandbox",
-    "read-only",
+    sandbox,
     "--cd",
     workspace,
     "--color",
     "never",
     "--output-last-message",
     codexUseWsl ? toWslPath(outputFile) : outputFile,
-  ];
-  if (model) codexArgs.push("--model", model);
+    "-c",
+    `model_reasoning_effort="${settings.reasoningEffort}"`,
+  );
+  if (settings.skipGitRepoCheck) codexArgs.push("--skip-git-repo-check");
+  if (settings.model) codexArgs.push("--model", settings.model);
   codexArgs.push("-");
 
   const command = codexUseWsl ? "wsl" : codexBin;
   const args = codexUseWsl ? [codexBin, ...codexArgs] : codexArgs;
-  const result = await runProcess(command, args, prompt, codexTimeoutMs, codexWorkspace);
+  const result = await runProcess(command, args, prompt, settings.timeoutMs, settings.workspace);
   const lastMessage = existsSync(outputFile) ? readFileSync(outputFile, "utf8") : "";
   try {
     if (existsSync(outputFile)) unlinkSync(outputFile);
@@ -254,7 +470,310 @@ async function runCodex(prompt, model) {
   if (result.exitCode !== 0 && !lastMessage.trim() && !result.stdout.trim()) {
     throw new BridgeError(502, result.stderr.trim() || `Codex CLI exited with ${result.exitCode}`);
   }
-  return { ...result, lastMessage };
+  return { ...result, lastMessage, events: parseCodexJsonl(result.stdout), usage: extractCodexUsage(result.stdout) };
+}
+
+async function codexSupportsSearchFlag() {
+  if (codexSearchFlagSupportCache !== null) return codexSearchFlagSupportCache;
+  if (codexDisabled) {
+    codexSearchFlagSupportCache = false;
+    return codexSearchFlagSupportCache;
+  }
+
+  const command = codexUseWsl ? "wsl" : codexBin;
+  const args = codexUseWsl ? [codexBin, "exec", "--help"] : ["exec", "--help"];
+  try {
+    const result = await runProcess(command, args, "", 10_000, codexWorkspace);
+    const helpText = `${result.stdout}\n${result.stderr}`;
+    codexSearchFlagSupportCache = result.exitCode === 0 && /(^|\s)--search(\s|,|$)/.test(helpText);
+  } catch {
+    codexSearchFlagSupportCache = false;
+  }
+  return codexSearchFlagSupportCache;
+}
+
+function normalizeCodexSettings(input, model, context) {
+  const workspace = stringOr(extractWorkspaceFromContext(context), stringOr(input?.workspace, codexWorkspace));
+  const requestedSandbox = normalizeCodexSandbox(input?.sandbox ?? codexSandbox);
+  const fullAccessApproved = input?.fullAccessApproved === true;
+  const sandbox = requestedSandbox === "danger-full-access" && !fullAccessApproved ? "workspace-write" : requestedSandbox;
+  return {
+    model: stringOr(input?.model, model || codexModel || "gpt-5.5"),
+    reasoningEffort: normalizeReasoningEffort(input?.reasoningEffort ?? codexReasoningEffort),
+    sandbox,
+    workspace,
+    webSearch: input?.webSearch === true,
+    skipGitRepoCheck: input?.skipGitRepoCheck === true,
+    timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input.timeoutMs) : codexTimeoutMs,
+    fullAccessApproved,
+  };
+}
+
+function extractWorkspaceFromContext(context) {
+  const nodes = [
+    context?.selectedNode,
+    ...(Array.isArray(context?.selectedNodes) ? context.selectedNodes : []),
+    ...(Array.isArray(context?.path) ? context.path : []),
+  ].filter(Boolean);
+  for (const node of nodes) {
+    const value = extractWorkspaceFromText([node.title, node.summary, node.body, ...(node.tags ?? [])].join("\n"));
+    if (value) return value;
+  }
+  return "";
+}
+
+function extractWorkspaceFromText(text) {
+  const match = String(text).match(/(?:workspace|workroot|work root|作業ルート|作業root)\s*[:=]\s*([^\r\n]+)/i);
+  if (!match) return "";
+  return match[1].trim().replace(/^["']|["']$/g, "");
+}
+
+function parseCodexJsonl(stdout) {
+  return String(stdout)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+function extractCodexUsage(stdout) {
+  const events = parseCodexJsonl(stdout);
+  const completed = [...events].reverse().find((event) => event?.type === "turn.completed" && event?.usage);
+  return completed?.usage ?? {};
+}
+
+function normalizeCodexUsage(usage) {
+  return withoutUndefined({
+    inputTokens: numberOrUndefined(usage?.input_tokens ?? usage?.inputTokens),
+    outputTokens: numberOrUndefined(usage?.output_tokens ?? usage?.outputTokens),
+    totalTokens: numberOrUndefined(usage?.total_tokens ?? usage?.totalTokens),
+  });
+}
+
+async function collectGitStatus(workspace) {
+  if (!workspace) return "";
+  try {
+    const result = await runProcess("git", ["-C", workspace, "status", "--short"], "", 5_000, workspace);
+    return result.exitCode === 0 ? result.stdout.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+function diffGitStatus(before, after) {
+  const beforeLines = new Set(String(before).split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
+  return String(after)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !beforeLines.has(line))
+    .join("\n");
+}
+
+function buildCodexNodes({ prompt, context, settings, result, gitStatus, durationMs }) {
+  const commandEvents = result.events
+    .filter((event) => event?.type === "item.completed")
+    .map((event) => event?.item)
+    .filter((item) => item?.type === "command_execution" && item?.command);
+  const threadEvent = result.events.find((event) => event?.type === "thread.started");
+  const finalText = result.lastMessage || extractLastAgentMessage(result.events) || "";
+  const statusLabel = result.exitCode === 0 ? "completed" : `exited with ${result.exitCode}`;
+  const detailBody = buildCodexDetailsBody({
+    commandEvents,
+    durationMs,
+    gitStatus,
+    settings,
+    statusLabel,
+    threadId: threadEvent?.thread_id,
+  });
+  const nodes = [{
+    kind: result.exitCode === 0 ? "final" : "error",
+    nodeType: "tool_result",
+    title: result.exitCode === 0 ? "Codex final" : "Codex issue",
+    body: [
+      finalText || "Codex did not produce a final message.",
+      result.exitCode !== 0 && result.stderr.trim() ? `\nstderr:\n${result.stderr.trim()}` : "",
+    ].filter(Boolean).join("\n").trim(),
+    summary: (finalText || result.stderr || "Codex run completed.").split("\n").find(Boolean)?.slice(0, 220) ?? "Codex run completed.",
+    suggestedStatus: result.exitCode === 0 ? "needs_review" : "error",
+    tags: ["codex", result.exitCode === 0 ? "final" : "error"],
+  }];
+
+  if (shouldOfferFullAccessApproval(result, finalText, settings)) {
+    nodes.push(createFullAccessApprovalNode({ prompt, context, settings }));
+  }
+
+  if (detailBody) {
+    nodes.push({
+      kind: "summary",
+      nodeType: "tool_result",
+      title: "Codex details",
+      body: detailBody,
+      summary: `${settings.model} / ${settings.reasoningEffort} / ${formatDuration(durationMs)} / ${commandEvents.length} command(s)`,
+      suggestedStatus: "done",
+      tags: ["codex", "details"],
+    });
+  }
+
+  return nodes;
+}
+
+function buildCodexDetailsBody({ commandEvents, durationMs, gitStatus, settings, statusLabel, threadId }) {
+  const sections = [
+    [
+      "# Run",
+      `Status: ${statusLabel}`,
+      `Worked for: ${formatDuration(durationMs)}`,
+      `Model: ${settings.model}`,
+      `Reasoning: ${settings.reasoningEffort}`,
+      `Sandbox: ${settings.sandbox}`,
+      `Workspace: ${settings.workspace}`,
+      threadId ? `Thread: ${threadId}` : "",
+      `Web search: ${settings.webSearch ? "on" : "off"}`,
+      `Skip git repo check: ${settings.skipGitRepoCheck ? "on" : "off"}`,
+    ].filter(Boolean).join("\n"),
+  ];
+
+  if (commandEvents.length) {
+    sections.push([
+      "# Commands",
+      ...commandEvents.map((item, index) => [
+        `## Command ${index + 1}`,
+        formatCommandEvent(item),
+      ].join("\n")),
+    ].join("\n\n"));
+  }
+
+  if (gitStatus) {
+    sections.push([
+      "# Changed files",
+      gitStatus,
+    ].join("\n"));
+  }
+
+  return sections.filter(Boolean).join("\n\n");
+}
+
+function formatCommandEvent(item) {
+  return [
+    "Command:",
+    String(item.command),
+    "",
+    `Status: ${item.status ?? "unknown"}`,
+    typeof item.exit_code === "number" ? `Exit code: ${item.exit_code}` : "",
+    item.aggregated_output ? "\nOutput:" : "",
+    item.aggregated_output ? truncateText(String(item.aggregated_output), 8000) : "",
+  ].filter(Boolean).join("\n");
+}
+
+function extractLastAgentMessage(events) {
+  const message = [...events].reverse().find((event) => event?.item?.type === "agent_message" && typeof event.item.text === "string");
+  return message?.item?.text ?? "";
+}
+
+function shouldOfferFullAccessApproval(result, finalText, settings) {
+  if (settings.sandbox === "danger-full-access") return false;
+  const text = `${finalText}\n${result.stderr}\n${result.stdout}`.toLowerCase();
+  return [
+    "read-only",
+    "readonly",
+    "permission denied",
+    "access is denied",
+    "requires full access",
+    "danger-full-access",
+    "cannot write",
+    "can't write",
+    "cannot create",
+  ].some((needle) => text.includes(needle));
+}
+
+function createFullAccessApprovalNode({ prompt, context, settings }) {
+  const sourceNodeId = stringOr(context?.selectedNode?.id, "");
+  const contextOptions = context?.options ?? {
+    scope: context?.scope ?? "focused",
+    ancestorDepth: 2,
+    descendantDepth: 2,
+    lateralRadius: 1,
+    attachmentMode: "metadata",
+    maxAttachmentCount: 3,
+    maxAttachmentBytes: 2 * 1024 * 1024,
+    selectedNodeIds: [],
+  };
+  const approvedSettings = {
+    ...settings,
+    sandbox: "danger-full-access",
+    fullAccessApproved: true,
+  };
+  const baseAction = {
+    kind: "codex_full_access",
+    prompt,
+    sourceNodeId,
+    runId: `codex-approval-${Date.now()}-${randomUUID()}`,
+    contextOptions,
+    settings: approvedSettings,
+  };
+  return {
+    kind: "approval_request",
+    nodeType: "approval_request",
+    title: "Full access approval",
+    body: [
+      "Codex appears to need filesystem access outside the current sandbox.",
+      "Approve only when this request should be retried with danger-full-access.",
+      `Workspace: ${settings.workspace}`,
+    ].join("\n"),
+    summary: "Codex is asking whether to retry with Full access.",
+    suggestedStatus: "blocked",
+    tags: ["codex", "approval"],
+    children: [
+      {
+        kind: "approval_option",
+        nodeType: "approval_request",
+        title: "Approve Full access",
+        body: "Retry this Codex request with danger-full-access.",
+        summary: "Approve and retry with Full access.",
+        suggestedStatus: "waiting",
+        tags: ["codex", "approval", "approve"],
+        action: {
+          ...baseAction,
+          label: "Approve Full",
+          decision: "approve",
+        },
+      },
+      {
+        kind: "approval_option",
+        nodeType: "approval_request",
+        title: "Deny Full access",
+        body: "Do not retry this Codex request with Full access.",
+        summary: "Deny Full access.",
+        suggestedStatus: "waiting",
+        tags: ["codex", "approval", "deny"],
+        action: {
+          ...baseAction,
+          label: "Deny",
+          decision: "deny",
+        },
+      },
+    ],
+  };
+}
+
+function formatDuration(ms) {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return minutes > 0 ? `${minutes}m ${rest}s` : `${rest}s`;
+}
+
+function truncateText(value, maxLength) {
+  const text = String(value);
+  return text.length > maxLength ? `${text.slice(0, maxLength)}\n...truncated` : text;
 }
 
 function runProcess(command, args, stdin, timeoutMs, cwd) {
@@ -332,6 +851,146 @@ async function createRealtimeCall(payload) {
   return text;
 }
 
+async function createAudioTranscription(request) {
+  const startedAt = Date.now();
+  if (!openAiApiKey) {
+    if (allowMockWithoutKey) {
+      return {
+        text: "Mock transcription because OpenAI API key is not configured.",
+        model: openAiTranscriptionModel,
+        durationMs: Date.now() - startedAt,
+      };
+    }
+    throw new BridgeError(503, "OpenAI API key is not configured");
+  }
+
+  const formData = await readFormData(request);
+  const audio = formData.get("audio");
+  if (!audio || typeof audio === "string") throw new BridgeError(400, "audio file is required");
+  if (typeof audio.size === "number" && audio.size > 26 * 1024 * 1024) {
+    throw new BridgeError(413, "Audio file is too large for transcription");
+  }
+
+  const upstreamForm = new FormData();
+  upstreamForm.set("model", openAiTranscriptionModel);
+  upstreamForm.set("file", audio, audio.name || "dictation.webm");
+
+  const upstream = await fetch(`${openAiBaseUrl}/audio/transcriptions`, {
+    method: "POST",
+    headers: openAiHeaders(openAiApiKey),
+    body: upstreamForm,
+  });
+  const data = await readUpstreamJson(upstream);
+  return {
+    text: stringOr(data.text, ""),
+    model: openAiTranscriptionModel,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
+async function createWebSearchResponse(payload) {
+  if (!openAiApiKey) {
+    if (allowMockWithoutKey) {
+      const query = stringOr(payload?.query, "");
+      return {
+        text: `Mock web search result for: ${query}`,
+        citations: [],
+        sources: [],
+      };
+    }
+    throw new BridgeError(503, "OpenAI API key is not configured");
+  }
+
+  const query = stringOr(payload?.query, "");
+  if (!query.trim()) throw new BridgeError(400, "query is required");
+  const data = await callWebSearch(openAiBaseUrl, openAiApiKey, stringOr(payload?.model, defaultModel), query);
+  const citations = extractWebSearchCitations(data);
+  return {
+    text: extractModelText(data),
+    citations,
+    sources: dedupeSources(citations),
+    raw: data,
+  };
+}
+
+async function listCloudNotebooks() {
+  await mkdir(cloudNotebookDir, { recursive: true });
+  const entries = await readdir(cloudNotebookDir, { withFileTypes: true });
+  const notebooks = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const name = entry.name;
+    if (!name.toLowerCase().endsWith(".mindatlaspkg")) continue;
+    const filePath = join(cloudNotebookDir, name);
+    const stats = await stat(filePath);
+    notebooks.push({
+      name,
+      size: stats.size,
+      updatedAt: stats.mtime.toISOString(),
+    });
+  }
+  notebooks.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  return {
+    directory: cloudNotebookDir,
+    notebooks,
+  };
+}
+
+async function saveCloudNotebookPackage(request) {
+  await mkdir(cloudNotebookDir, { recursive: true });
+  const formData = await readFormData(request);
+  const file = formData.get("package");
+  if (!file || typeof file === "string") throw new BridgeError(400, "package file is required");
+  const originalName = typeof file.name === "string" ? file.name : "mind-atlas.mindatlaspkg";
+  const safeName = createCloudNotebookFileName(originalName);
+  const filePath = safeCloudNotebookPath(safeName);
+  const bytes = Buffer.from(await file.arrayBuffer());
+  await writeFile(filePath, bytes);
+  return {
+    name: safeName,
+    size: bytes.byteLength,
+    updatedAt: new Date().toISOString(),
+    directory: cloudNotebookDir,
+  };
+}
+
+async function sendCloudNotebookPackage(rawName, response) {
+  const name = decodeURIComponent(String(rawName ?? ""));
+  const filePath = safeCloudNotebookPath(name);
+  if (!existsSync(filePath)) throw new BridgeError(404, "Cloud notebook package not found");
+  const bytes = readFileSync(filePath);
+  response.writeHead(200, {
+    "Content-Type": "application/x-mindatlas-package",
+    "Content-Disposition": `attachment; filename="${encodeURIComponent(basename(filePath))}"`,
+    "Content-Length": String(bytes.byteLength),
+  });
+  response.end(bytes);
+}
+
+function createCloudNotebookFileName(originalName) {
+  const extension = extname(originalName).toLowerCase() === ".mindatlaspkg" ? ".mindatlaspkg" : ".mindatlaspkg";
+  const base = basename(originalName, extname(originalName))
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 80) || "Mind Atlas";
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 17);
+  return `${base}-${stamp}-${randomUUID().slice(0, 8)}${extension}`;
+}
+
+function safeCloudNotebookPath(name) {
+  const safeName = basename(name);
+  if (!safeName.toLowerCase().endsWith(".mindatlaspkg")) {
+    throw new BridgeError(400, "Cloud notebook file must be a .mindatlaspkg package");
+  }
+  const resolved = resolve(cloudNotebookDir, safeName);
+  const relativePath = relative(cloudNotebookDir, resolved);
+  if (relativePath.startsWith("..") || relativePath === "" || relativePath.includes(":")) {
+    throw new BridgeError(400, "Invalid cloud notebook path");
+  }
+  return resolved;
+}
+
 async function callResponses(baseUrl, apiKey, model, system, user) {
   const upstream = await fetch(`${baseUrl}/responses`, {
     method: "POST",
@@ -342,6 +1001,47 @@ async function callResponses(baseUrl, apiKey, model, system, user) {
       input: user,
       max_output_tokens: 1800,
     }),
+  });
+  return await readUpstreamJson(upstream);
+}
+
+async function callWebSearch(baseUrl, apiKey, model, query) {
+  const body = {
+    model,
+    input: query,
+    tools: [{ type: "web_search" }],
+    max_output_tokens: 1200,
+  };
+  let upstream = await fetch(`${baseUrl}/responses`, {
+    method: "POST",
+    headers: openAiHeaders(apiKey, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (!upstream.ok && upstream.status === 400) {
+    upstream = await fetch(`${baseUrl}/responses`, {
+      method: "POST",
+      headers: openAiHeaders(apiKey, { "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        ...body,
+        tools: [{ type: "web_search_preview" }],
+      }),
+    });
+  }
+  return await readUpstreamJson(upstream);
+}
+
+async function callImageGenerations(baseUrl, apiKey, model, prompt) {
+  const body = {
+    model,
+    prompt,
+    n: 1,
+  };
+  if (openAiImageSize) body.size = openAiImageSize;
+
+  const upstream = await fetch(`${baseUrl}/images/generations`, {
+    method: "POST",
+    headers: openAiHeaders(apiKey, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
   });
   return await readUpstreamJson(upstream);
 }
@@ -385,11 +1085,26 @@ function buildUserInstruction(prompt, context) {
   ].join("\n");
 }
 
-function buildCodexPrompt(prompt, context) {
+function buildCodexPrompt(prompt, context, settings) {
   return [
     "You are Codex CLI being invoked from Mind Atlas.",
-    "Run in analysis/proposal mode. Do not modify files. If code changes are needed, describe the patch or commands instead of applying them.",
+    "Use the provided Mind Atlas context as project orientation, then work in the configured workspace.",
+    "You may read and edit files within the active sandbox. Do not request or assume danger-full-access unless the task truly requires it.",
+    "If the task is blocked by sandbox permissions, explain exactly what access is required and stop.",
+    settings.webSearch
+      ? "Mind Atlas Web search is enabled. Use web-search capability only if this Codex CLI environment exposes it; otherwise continue without failing and mention any need for current external verification."
+      : "Mind Atlas Web search is disabled. Do not browse the web unless the user explicitly asks and the environment permits it.",
     "Return a concise final answer that can be stored as a Mind Atlas child node.",
+    "",
+    "Codex run settings:",
+    JSON.stringify({
+      model: settings.model,
+      reasoningEffort: settings.reasoningEffort,
+      sandbox: settings.sandbox,
+      workspace: settings.workspace,
+      webSearch: settings.webSearch,
+      skipGitRepoCheck: settings.skipGitRepoCheck,
+    }, null, 2),
     "",
     "User task:",
     prompt,
@@ -402,18 +1117,29 @@ function buildCodexPrompt(prompt, context) {
 function buildRealtimeSessionConfig(payload) {
   const context = payload?.context ? JSON.stringify(payload.context, null, 2).slice(0, 8000) : "";
   const extraInstructions = stringOr(payload?.instructions, "");
+  const summary = payload?.summary?.text ? String(payload.summary.text).slice(0, 4000) : "";
+  const tools = Array.isArray(payload?.tools) ? payload.tools : [];
   return {
     type: "realtime",
     model: stringOr(payload?.model, realtimeModel),
     instructions: [
       "You are speaking inside Mind Atlas, a spatial tree notebook.",
       "Stay anchored to the selected celestial node and keep responses concise enough for voice.",
+      "Use available tools to search, focus, select, add, update, run AI, inspect notifications, and search the web when the user asks.",
+      "Do not execute destructive actions unless a tool returns that human approval is required.",
+      "After using tools, briefly explain what changed.",
       extraInstructions,
+      summary ? `Previous voice session summary:\n${summary}` : "",
       context ? `Selected context JSON:\n${context}` : "",
     ].filter(Boolean).join("\n\n"),
+    tools,
+    tool_choice: "auto",
     audio: {
       input: {
-        turn_detection: { type: "server_vad", create_response: true, interrupt_response: true },
+        turn_detection: null,
+        transcription: {
+          model: realtimeTranscriptionModel,
+        },
       },
       output: {
         voice: stringOr(payload?.voice, realtimeVoice),
@@ -440,6 +1166,80 @@ function createMockOutput(prompt, context) {
     suggestedStatus: "needs_review",
     tags: ["ai", "mock"],
   }, prompt);
+}
+
+function shouldGenerateImage(prompt) {
+  const normalized = prompt.toLowerCase();
+  const hasImageNoun = /(画像|写真|イラスト|絵|図|ビジュアル|image|picture|photo|illustration|drawing|artwork)/i.test(normalized);
+  const hasCreateVerb = /(生成|作成|作って|つくって|描いて|出力|generate|create|make|draw|render)/i.test(normalized);
+  return hasImageNoun && hasCreateVerb;
+}
+
+async function extractGeneratedImageAttachments(data, prompt) {
+  const items = Array.isArray(data?.data) ? data.data : [];
+  const attachments = [];
+
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const revisedPrompt = stringOr(item?.revised_prompt, "");
+    const baseName = imageFileName(prompt, index);
+    const base64 = stringOr(item?.b64_json ?? item?.base64_json, "");
+    if (base64) {
+      attachments.push({
+        name: baseName,
+        kind: "image",
+        mimeType: "image/png",
+        size: Buffer.byteLength(base64, "base64"),
+        path: baseName,
+        base64,
+        revisedPrompt,
+      });
+      continue;
+    }
+
+    const imageUrl = stringOr(item?.url, "");
+    if (!imageUrl) continue;
+    const fetched = await fetchImageAsBase64(imageUrl);
+    attachments.push({
+      name: baseName,
+      kind: "image",
+      mimeType: fetched.mimeType,
+      size: fetched.size,
+      path: baseName,
+      base64: fetched.base64,
+      revisedPrompt,
+    });
+  }
+
+  return attachments;
+}
+
+async function fetchImageAsBase64(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new BridgeError(response.status, `Failed to fetch generated image from ${url}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  return {
+    base64: bytes.toString("base64"),
+    size: bytes.byteLength,
+    mimeType: response.headers.get("content-type")?.split(";")[0] || "image/png",
+  };
+}
+
+function imageTitleFromPrompt(prompt) {
+  const cleaned = prompt.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "Generated image";
+  return `Generated image: ${cleaned.slice(0, 44)}`;
+}
+
+function imageFileName(prompt, index) {
+  const cleaned = prompt
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 42)
+    .toLowerCase();
+  const suffix = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  return `${cleaned || "generated-image"}-${suffix}-${index + 1}.png`;
 }
 
 function normalizeAiOutput(value, prompt) {
@@ -490,6 +1290,40 @@ function extractModelText(data) {
   return JSON.stringify(data);
 }
 
+function extractWebSearchCitations(data) {
+  const citations = [];
+  visit(data);
+  return citations.filter((citation) => citation.url);
+
+  function visit(value) {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    const type = String(value.type ?? "");
+    const url = value.url ?? value.uri;
+    if (typeof url === "string" && (type.includes("citation") || type.includes("url") || value.title)) {
+      citations.push({
+        title: typeof value.title === "string" ? value.title : undefined,
+        url,
+      });
+    }
+    for (const item of Object.values(value)) visit(item);
+  }
+}
+
+function dedupeSources(citations) {
+  const seen = new Set();
+  const sources = [];
+  for (const citation of citations) {
+    if (!citation.url || seen.has(citation.url)) continue;
+    seen.add(citation.url);
+    sources.push(citation);
+  }
+  return sources;
+}
+
 function normalizeUsage(usage, provider, durationMs) {
   const inputTokens = numberOrUndefined(usage?.input_tokens ?? usage?.prompt_tokens);
   const outputTokens = numberOrUndefined(usage?.output_tokens ?? usage?.completion_tokens);
@@ -526,6 +1360,16 @@ async function readUpstreamJson(upstream) {
     throw new BridgeError(upstream.status, detail);
   }
   return data;
+}
+
+async function readFormData(request) {
+  const webRequest = new Request("http://127.0.0.1/upload", {
+    method: "POST",
+    headers: request.headers,
+    body: Readable.toWeb(request),
+    duplex: "half",
+  });
+  return await webRequest.formData();
 }
 
 function readJson(request) {
@@ -573,7 +1417,11 @@ function setCors(request, response) {
     .map((origin) => origin.trim())
     .filter(Boolean);
   const requestOrigin = request.headers.origin;
-  const origin = requestOrigin && allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0] ?? "http://127.0.0.1:5173";
+  const origin = allowedOrigins.includes("*")
+    ? "*"
+    : requestOrigin && allowedOrigins.includes(requestOrigin)
+      ? requestOrigin
+      : allowedOrigins[0] ?? "http://127.0.0.1:5173";
   response.setHeader("Access-Control-Allow-Origin", origin);
   response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   response.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -599,6 +1447,23 @@ function addOptional(left, right) {
 
 function withoutUndefined(value) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function normalizeReasoningEffort(value) {
+  const normalized = String(value ?? "").toLowerCase();
+  if (normalized === "low" || normalized === "medium" || normalized === "high" || normalized === "xhigh") {
+    return normalized;
+  }
+  if (normalized === "extra-high" || normalized === "extrahigh") return "xhigh";
+  return "medium";
+}
+
+function normalizeCodexSandbox(value) {
+  const normalized = String(value ?? "").toLowerCase();
+  if (normalized === "read-only" || normalized === "workspace-write" || normalized === "danger-full-access") {
+    return normalized;
+  }
+  return "workspace-write";
 }
 
 function toWslPath(value) {
