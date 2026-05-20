@@ -7,6 +7,8 @@ import type {
   CloudNotebookSaveResult,
   CodexOptionsResult,
   RealtimeSessionConfig,
+  TextPartnerTurnPayload,
+  TextPartnerTurnResult,
   WebSearchResult,
 } from "../types";
 
@@ -50,6 +52,15 @@ export async function requestAiResponse(payload: AiResponsePayload): Promise<AiR
     body: JSON.stringify(payload),
   });
   return await readJsonResponse<AiResponseResult>(response);
+}
+
+export async function requestTextPartnerTurn(payload: TextPartnerTurnPayload): Promise<TextPartnerTurnResult> {
+  const response = await fetch(`${getBridgeUrl()}/api/ai/text-partner-turn`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return await readJsonResponse<TextPartnerTurnResult>(response);
 }
 
 export async function getCodexOptions(): Promise<CodexOptionsResult> {

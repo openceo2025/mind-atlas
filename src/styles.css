@@ -181,10 +181,11 @@ h1 {
 
 .unread-notification-links {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
   justify-content: flex-start;
   gap: 6px;
-  max-width: min(560px, calc(100vw - 420px));
+  max-width: min(260px, calc(100vw - 420px));
   margin-top: 8px;
   pointer-events: auto;
 }
@@ -193,7 +194,7 @@ h1 {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: 162px;
+  max-width: 100%;
   min-height: 24px;
   border: 1px solid rgba(193, 220, 198, 0.18);
   border-radius: 999px;
@@ -220,6 +221,16 @@ h1 {
 }
 
 .unread-notification-link.is-error {
+  border-color: rgba(255, 107, 107, 0.34);
+  color: #ffc9c9;
+}
+
+.unread-notification-link.is-voice-log {
+  border-color: rgba(247, 215, 101, 0.36);
+  color: #fff4c5;
+}
+
+.unread-notification-link.is-voice-log.is-error {
   border-color: rgba(255, 107, 107, 0.34);
   color: #ffc9c9;
 }
@@ -664,8 +675,16 @@ h1 {
   padding: 0 9px;
   background: rgba(141, 245, 207, 0.08);
   color: #d8f3e5;
+  cursor: pointer;
   font-size: 11px;
   line-height: 1;
+  white-space: nowrap;
+}
+
+.ai-node-status:hover,
+.ai-node-status[aria-expanded="true"] {
+  border-color: rgba(141, 245, 207, 0.34);
+  background: rgba(141, 245, 207, 0.13);
 }
 
 .ai-node-status span,
@@ -702,6 +721,23 @@ h1 {
   top: 44px;
   right: 0;
   width: 190px;
+}
+
+.status-context-menu {
+  top: 38px;
+  left: 0;
+  width: 178px;
+}
+
+.status-context-menu button {
+  justify-content: space-between;
+  text-transform: capitalize;
+}
+
+.status-context-menu button.is-active {
+  border: 1px solid rgba(247, 215, 101, 0.34);
+  background: rgba(247, 215, 101, 0.14);
+  color: #fff4c5;
 }
 
 .reminder-context-menu {
@@ -901,7 +937,7 @@ h1 {
 
 .reminder-quick-row {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 5px;
 }
 
@@ -1961,6 +1997,43 @@ button:disabled,
   color: #ffd4d4;
 }
 
+.node-snooze-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: min(260px, 84vw);
+  padding: 5px;
+  border: 1px solid rgba(255, 244, 197, 0.42);
+  border-radius: 8px;
+  background: rgba(6, 10, 8, 0.86);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+  pointer-events: auto;
+}
+
+.node-snooze-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 62px;
+  min-height: 30px;
+  border: 1px solid rgba(141, 245, 207, 0.36);
+  border-radius: 7px;
+  padding: 5px 8px;
+  background: rgba(12, 36, 32, 0.74);
+  color: #e9fff5;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.1;
+  text-align: center;
+  cursor: pointer;
+}
+
+.node-snooze-button:hover {
+  border-color: rgba(141, 245, 207, 0.78);
+  background: rgba(20, 58, 50, 0.95);
+}
+
 .space-body-editor {
   --space-label-max-lines: 4;
 }
@@ -2051,6 +2124,16 @@ button:disabled,
 }
 
 .app-shell[data-theme="light"] .unread-notification-link.is-error {
+  border-color: rgba(181, 43, 43, 0.28);
+  color: #9a2f2f;
+}
+
+.app-shell[data-theme="light"] .unread-notification-link.is-voice-log {
+  border-color: rgba(164, 113, 18, 0.28);
+  color: #8a5b00;
+}
+
+.app-shell[data-theme="light"] .unread-notification-link.is-voice-log.is-error {
   border-color: rgba(181, 43, 43, 0.28);
   color: #9a2f2f;
 }
@@ -2442,7 +2525,19 @@ button:disabled,
   color: #1f4164;
 }
 
+.app-shell[data-theme="light"] .ai-node-status:hover,
+.app-shell[data-theme="light"] .ai-node-status[aria-expanded="true"] {
+  border-color: rgba(24, 100, 190, 0.34);
+  background: rgba(24, 100, 190, 0.13);
+}
+
 .app-shell[data-theme="light"] .ai-node-status b {
+  color: #0b58a8;
+}
+
+.app-shell[data-theme="light"] .status-context-menu button.is-active {
+  border-color: rgba(11, 88, 168, 0.32);
+  background: rgba(24, 100, 190, 0.13);
   color: #0b58a8;
 }
 
@@ -2483,6 +2578,23 @@ button:disabled,
 .app-shell[data-theme="light"] .node-action-button:hover {
   border-color: rgba(20, 117, 120, 0.48);
   background: rgba(226, 246, 241, 0.9);
+}
+
+.app-shell[data-theme="light"] .node-snooze-actions {
+  border-color: rgba(41, 104, 180, 0.24);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 10px 28px rgba(32, 76, 120, 0.18);
+}
+
+.app-shell[data-theme="light"] .node-snooze-button {
+  border-color: rgba(24, 100, 190, 0.28);
+  background: rgba(240, 247, 255, 0.9);
+  color: #17446f;
+}
+
+.app-shell[data-theme="light"] .node-snooze-button:hover {
+  border-color: rgba(20, 117, 120, 0.48);
+  background: rgba(226, 246, 241, 0.94);
 }
 
 .app-shell[data-theme="light"] .space-body-editor::placeholder {
@@ -2753,16 +2865,52 @@ button:disabled,
 
   .reminder-context-menu.is-mobile {
     position: fixed;
-    top: calc(10px + env(safe-area-inset-top));
+    top: calc(78px + env(safe-area-inset-top));
     right: calc(10px + env(safe-area-inset-right));
-    bottom: calc(10px + env(safe-area-inset-bottom));
+    bottom: auto;
     left: calc(10px + env(safe-area-inset-left));
     width: auto;
     min-height: 0;
-    max-height: none;
+    max-height: min(430px, calc(var(--app-height) - 118px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .reminder-context-menu.is-mobile .reminder-current {
+    padding-bottom: 7px;
+  }
+
+  .reminder-context-menu.is-mobile .reminder-date-field input {
+    min-height: 32px;
+  }
+
+  .reminder-context-menu.is-mobile .reminder-time-picker {
+    gap: 6px;
+  }
+
+  .reminder-context-menu.is-mobile .time-stepper {
+    grid-template-rows: auto 26px 36px 26px;
+    gap: 4px;
+  }
+
+  .reminder-context-menu.is-mobile .time-stepper input {
+    font-size: 20px;
+  }
+
+  .reminder-context-menu.is-mobile .reminder-time-separator {
+    padding-bottom: 27px;
+  }
+
+  .reminder-context-menu.is-mobile .reminder-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .reminder-context-menu.is-mobile .reminder-actions button {
+    min-height: 30px;
+    padding: 6px 5px;
+    font-size: 11px;
+    text-align: center;
   }
 
   .reminder-context-menu.is-mobile .reminder-calendar {

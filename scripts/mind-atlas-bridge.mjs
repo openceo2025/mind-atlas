@@ -2,7 +2,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
@@ -18,16 +18,20 @@ const openAiApiKey = process.env.MIND_ATLAS_OPENAI_API_KEY ?? process.env.OPENAI
 const openAiBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_OPENAI_BASE_URL ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1");
 const openAiMode = process.env.MIND_ATLAS_OPENAI_MODE ?? "responses";
 const defaultModel = process.env.MIND_ATLAS_OPENAI_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5.5";
+const defaultMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_MAX_OUTPUT_TOKENS", 8192);
+const openAiMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_OPENAI_MAX_OUTPUT_TOKENS", defaultMaxOutputTokens);
+const localMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_LOCAL_MAX_OUTPUT_TOKENS", defaultMaxOutputTokens);
+const webSearchMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_WEB_SEARCH_MAX_OUTPUT_TOKENS", 2048);
 const openAiImageModel = process.env.MIND_ATLAS_OPENAI_IMAGE_MODEL ?? "gpt-image-1";
 const openAiImageSize = process.env.MIND_ATLAS_OPENAI_IMAGE_SIZE ?? "1024x1024";
 const openAiTranscriptionModel = process.env.MIND_ATLAS_OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe";
 
 const localBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_LOCAL_BASE_URL ?? "http://127.0.0.1:1234/v1");
 const localApiKey = process.env.MIND_ATLAS_LOCAL_API_KEY ?? "lm-studio";
-const localModel = process.env.MIND_ATLAS_LOCAL_MODEL ?? "local-model";
+const deprecatedLocalModel = process.env.MIND_ATLAS_LOCAL_MODEL ?? "";
 
-const codexBin = process.env.MIND_ATLAS_CODEX_BIN ?? "codex";
 const codexUseWsl = process.env.MIND_ATLAS_CODEX_USE_WSL === "true";
+const codexBin = resolveCodexBin(process.env.MIND_ATLAS_CODEX_BIN ?? "codex", codexUseWsl);
 const codexWorkspace = process.env.MIND_ATLAS_CODEX_WORKSPACE ?? process.cwd();
 const codexModel = process.env.MIND_ATLAS_CODEX_MODEL ?? "";
 const codexReasoningEffort = normalizeReasoningEffort(process.env.MIND_ATLAS_CODEX_REASONING_EFFORT ?? "medium");
@@ -43,6 +47,53 @@ const realtimeVoice = process.env.MIND_ATLAS_REALTIME_VOICE ?? "marin";
 const realtimeTranscriptionModel = process.env.MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL ?? "gpt-realtime-whisper";
 const allowMockWithoutKey = process.env.MIND_ATLAS_ALLOW_MOCK_WITHOUT_KEY !== "false";
 const cloudNotebookDir = resolve(process.env.MIND_ATLAS_CLOUD_DIR ?? join(process.cwd(), "server-data", "notebooks"));
+
+function resolveCodexBin(configuredBin, useWsl) {
+  const value = String(configuredBin || "codex").trim() || "codex";
+  if (useWsl) return value;
+  if (!looksLikePath(value) || existsSync(value)) return value;
+
+  const discovered = findVsCodeCodexBin();
+  if (discovered) {
+    console.warn(`Configured MIND_ATLAS_CODEX_BIN was not found: ${value}`);
+    console.warn(`Using discovered Codex executable instead: ${discovered}`);
+    return discovered;
+  }
+
+  console.warn(`Configured MIND_ATLAS_CODEX_BIN was not found: ${value}`);
+  console.warn("Falling back to 'codex' from PATH.");
+  return "codex";
+}
+
+function looksLikePath(value) {
+  return value.includes("/") || value.includes("\\") || /^[A-Za-z]:/.test(value);
+}
+
+function findVsCodeCodexBin() {
+  if (process.platform !== "win32") return "";
+  const userProfile = process.env.USERPROFILE;
+  if (!userProfile) return "";
+  const extensionRoots = [
+    join(userProfile, ".vscode", "extensions"),
+    join(userProfile, ".vscode-insiders", "extensions"),
+    join(userProfile, ".cursor", "extensions"),
+  ];
+
+  for (const root of extensionRoots) {
+    if (!existsSync(root)) continue;
+    const matches = readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith("openai.chatgpt-"))
+      .map((entry) => entry.name)
+      .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }));
+
+    for (const name of matches) {
+      const candidate = join(root, name, "bin", "windows-x86_64", "codex.exe");
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+
+  return "";
+}
 
 const server = createBridgeServer(async (request, response) => {
   setCors(request, response);
@@ -64,6 +115,8 @@ const server = createBridgeServer(async (request, response) => {
         openAiBaseUrl,
         openAiMode,
         defaultModel,
+        maxOutputTokens: openAiMaxOutputTokens,
+        localMaxOutputTokens,
         realtimeModel,
         transcriptionModel: openAiTranscriptionModel,
         realtimeTranscriptionModel,
@@ -81,9 +134,11 @@ const server = createBridgeServer(async (request, response) => {
             id: "local",
             label: "LM Studio",
             configured: true,
-            model: localModel,
+            model: "loaded-model",
             baseUrl: localBaseUrl,
-            detail: "OpenAI-compatible local endpoint",
+            detail: deprecatedLocalModel
+              ? "MIND_ATLAS_LOCAL_MODEL is ignored; Local uses the model currently loaded in LM Studio"
+              : "Local uses the model currently loaded in LM Studio",
           },
           {
             id: "codex",
@@ -106,6 +161,13 @@ const server = createBridgeServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/ai/respond") {
       const payload = await readJson(request);
       const result = await createAiResponse(payload);
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/ai/text-partner-turn") {
+      const payload = await readJson(request);
+      const result = await createTextPartnerTurn(payload);
       sendJson(response, 200, result);
       return;
     }
@@ -194,7 +256,7 @@ async function createAiResponse(payload) {
   }
 
   if (provider === "local") {
-    const model = stringOr(payload?.model, localModel);
+    const model = await resolveLoadedLocalModel();
     const result = await createOpenAiCompatibleResponse({
       baseUrl: localBaseUrl,
       apiKey: localApiKey,
@@ -243,10 +305,14 @@ async function createAiResponse(payload) {
   const system = buildSystemInstruction();
   const user = buildUserInstruction(prompt, context);
   const data = openAiMode === "chat-completions"
-    ? await callChatCompletions(openAiBaseUrl, openAiApiKey, model, system, user)
-    : await callResponses(openAiBaseUrl, openAiApiKey, model, system, user);
+    ? await callChatCompletions(openAiBaseUrl, openAiApiKey, model, system, user, openAiMaxOutputTokens)
+    : await callResponses(openAiBaseUrl, openAiApiKey, model, system, user, openAiMaxOutputTokens);
   const rawText = extractModelText(data);
-  const output = normalizeAiOutput(parseJsonText(rawText) ?? { body: rawText }, prompt);
+  const output = withCompletionNotice(
+    normalizeAiOutput(parseJsonText(rawText) ?? { body: rawText }, prompt),
+    data,
+    openAiMaxOutputTokens,
+  );
 
   return {
     id: data.id ?? requestId,
@@ -254,23 +320,166 @@ async function createAiResponse(payload) {
     model,
     output,
     rawText,
-    usage: normalizeUsage(data.usage, "openai", Date.now() - startedAt),
+    usage: normalizeUsage(data.usage, "openai", Date.now() - startedAt, data, openAiMaxOutputTokens),
   };
 }
 
 async function createOpenAiCompatibleResponse({ baseUrl, apiKey, model, prompt, context, provider, startedAt }) {
   const system = buildSystemInstruction();
   const user = buildUserInstruction(prompt, context);
-  const data = await callChatCompletions(baseUrl, apiKey, model, system, user);
+  const maxOutputTokens = provider === "local" ? localMaxOutputTokens : openAiMaxOutputTokens;
+  const data = await callChatCompletions(baseUrl, apiKey, model, system, user, maxOutputTokens);
   const rawText = extractModelText(data);
-  const output = normalizeAiOutput(parseJsonText(rawText) ?? { body: rawText }, prompt);
+  const output = withCompletionNotice(
+    normalizeAiOutput(parseJsonText(rawText) ?? { body: rawText }, prompt),
+    data,
+    maxOutputTokens,
+  );
+  const responseModel = stringOr(data?.model, model || "loaded-local-model");
   return {
     id: data.id ?? randomUUID(),
     provider,
-    model,
+    model: responseModel,
     output,
     rawText,
-    usage: normalizeUsage(data.usage, provider, Date.now() - startedAt),
+    usage: normalizeUsage(data.usage, provider, Date.now() - startedAt, data, maxOutputTokens),
+  };
+}
+
+async function resolveLoadedLocalModel() {
+  let data;
+  try {
+    const upstream = await fetch(`${localBaseUrl}/models`, {
+      method: "GET",
+      headers: openAiHeaders(localApiKey),
+    });
+    data = await readUpstreamJson(upstream);
+  } catch (error) {
+    if (error instanceof BridgeError) throw error;
+    throw new BridgeError(
+      503,
+      `Could not inspect LM Studio loaded models at ${localBaseUrl}/models. Start LM Studio local server and load a model, then retry Local. ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const loadedModel = extractLoadedLocalModelId(data);
+  if (!loadedModel) {
+    throw new BridgeError(409, "LM Studio model is unloaded. Load one model in LM Studio, then retry Local.");
+  }
+  return loadedModel;
+}
+
+function extractLoadedLocalModelId(data) {
+  const models = Array.isArray(data?.data) ? data.data : [];
+  for (const model of models) {
+    const id = stringOr(model?.id, "");
+    if (id) return id;
+  }
+  return "";
+}
+
+async function createTextPartnerTurn(payload) {
+  const startedAt = Date.now();
+  const provider = stringOr(payload?.provider, "openai");
+  if (provider !== "openai" && provider !== "local") {
+    throw new BridgeError(400, "text partner provider must be openai or local");
+  }
+  const context = payload?.context ?? {};
+  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+  if (!messages.length) throw new BridgeError(400, "messages are required");
+  const tools = Array.isArray(payload?.tools) ? payload.tools : [];
+  const summary = payload?.summary?.text ? String(payload.summary.text).slice(0, 4000) : "";
+  const voiceLogContext = stringOr(payload?.voiceLogContext, "").slice(0, 14000);
+
+  if (provider === "local") {
+    const model = await resolveLoadedLocalModel();
+    const data = await callChatToolTurn(localBaseUrl, localApiKey, model, "local", context, messages, tools, summary, voiceLogContext);
+    return {
+      ...data,
+      usage: normalizeUsage(data.raw?.usage, "local", Date.now() - startedAt, data.raw, localMaxOutputTokens),
+    };
+  }
+
+  const model = stringOr(payload?.model, defaultModel);
+  if (!openAiApiKey) {
+    if (!allowMockWithoutKey) throw new BridgeError(503, "OpenAI API key is not configured");
+    return {
+      text: "Mock Text Partner response because OpenAI API key is not configured.",
+      toolCalls: [],
+      provider: "mock",
+      model,
+      usage: { durationMs: Date.now() - startedAt },
+    };
+  }
+
+  const data = openAiMode === "chat-completions"
+    ? await callChatToolTurn(openAiBaseUrl, openAiApiKey, model, "openai", context, messages, tools, summary, voiceLogContext)
+    : await callResponsesToolTurn(openAiBaseUrl, openAiApiKey, model, context, messages, tools, summary, voiceLogContext);
+  return {
+    ...data,
+    usage: normalizeUsage(data.raw?.usage, "openai", Date.now() - startedAt, data.raw, openAiMaxOutputTokens),
+  };
+}
+
+async function callResponsesToolTurn(baseUrl, apiKey, model, context, messages, tools, summary, voiceLogContext) {
+  const upstream = await fetch(`${baseUrl}/responses`, {
+    method: "POST",
+    headers: openAiHeaders(apiKey, { "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      model,
+      instructions: buildMindAtlasPartnerInstructions({
+        mode: "text",
+        summary,
+        voiceLogContext,
+        context,
+      }),
+      input: buildTextPartnerInput(messages),
+      tools: normalizeRealtimeTools(tools),
+      tool_choice: "auto",
+      max_output_tokens: openAiMaxOutputTokens,
+    }),
+  });
+  const raw = await readUpstreamJson(upstream);
+  return {
+    text: extractAssistantText(raw),
+    toolCalls: extractResponsesToolCalls(raw),
+    provider: "openai",
+    model,
+    raw,
+  };
+}
+
+async function callChatToolTurn(baseUrl, apiKey, model, provider, context, messages, tools, summary, voiceLogContext) {
+  const body = {
+    messages: [
+      {
+        role: "system",
+        content: buildMindAtlasPartnerInstructions({
+          mode: "text",
+          summary,
+          voiceLogContext,
+          context,
+        }),
+      },
+      ...buildChatPartnerMessages(messages),
+    ],
+    tools: normalizeChatTools(tools),
+    tool_choice: "auto",
+    max_tokens: provider === "local" ? localMaxOutputTokens : openAiMaxOutputTokens,
+  };
+  if (model) body.model = model;
+  const upstream = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: openAiHeaders(apiKey, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  const raw = await readUpstreamJson(upstream);
+  return {
+    text: extractAssistantText(raw),
+    toolCalls: extractChatToolCalls(raw),
+    provider,
+    model: stringOr(raw?.model, model || "loaded-local-model"),
+    raw,
   };
 }
 
@@ -1128,7 +1337,7 @@ function safeCloudNotebookPath(name) {
   return resolved;
 }
 
-async function callResponses(baseUrl, apiKey, model, system, user) {
+async function callResponses(baseUrl, apiKey, model, system, user, maxOutputTokens = openAiMaxOutputTokens) {
   const upstream = await fetch(`${baseUrl}/responses`, {
     method: "POST",
     headers: openAiHeaders(apiKey, { "Content-Type": "application/json" }),
@@ -1136,7 +1345,7 @@ async function callResponses(baseUrl, apiKey, model, system, user) {
       model,
       instructions: system,
       input: user,
-      max_output_tokens: 1800,
+      max_output_tokens: maxOutputTokens,
     }),
   });
   return await readUpstreamJson(upstream);
@@ -1147,7 +1356,7 @@ async function callWebSearch(baseUrl, apiKey, model, query) {
     model,
     input: query,
     tools: [{ type: "web_search" }],
-    max_output_tokens: 1200,
+    max_output_tokens: webSearchMaxOutputTokens,
   };
   let upstream = await fetch(`${baseUrl}/responses`, {
     method: "POST",
@@ -1183,18 +1392,19 @@ async function callImageGenerations(baseUrl, apiKey, model, prompt) {
   return await readUpstreamJson(upstream);
 }
 
-async function callChatCompletions(baseUrl, apiKey, model, system, user) {
+async function callChatCompletions(baseUrl, apiKey, model, system, user, maxOutputTokens = openAiMaxOutputTokens) {
+  const body = {
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    max_tokens: maxOutputTokens,
+  };
+  if (model) body.model = model;
   const upstream = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: openAiHeaders(apiKey, { "Content-Type": "application/json" }),
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      max_tokens: 1800,
-    }),
+    body: JSON.stringify(body),
   });
   return await readUpstreamJson(upstream);
 }
@@ -1251,24 +1461,42 @@ function buildCodexPrompt(prompt, context, settings) {
   ].join("\n");
 }
 
+function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summary = "", voiceLogContext = "", context = null }) {
+  const contextText = context ? JSON.stringify(context, null, 2).slice(0, 8000) : "";
+  const voiceMode = mode === "voice";
+  return [
+    "You are operating inside Mind Atlas, a spatial tree notebook made of celestial nodes.",
+    "Mind Atlas has an active node, optional multi-selection, AI context scopes, attachments, notification pulses, unread notifications, approval requests, errors, and completed results.",
+    "Codex work roots are inherited from parent nodes. Multiple Codex work roots and runs may coexist in one universe.",
+    "You may operate Mind Atlas broadly through tools: search, focus, select, add, update, run AI, inspect notifications, and search the web.",
+    "Do not use run_ai_from_active_node to answer the current global conversation, inspect existing nodes, pick up tasks, summarize state, or check notifications. That tool starts a separate node-anchored AI run and creates notebook nodes. Use it only when the user explicitly asks for a persistent node-based AI result or delegation to a specific node context.",
+    "Destructive operations require approval. If a tool reports approval is required, do not claim the operation was executed.",
+    "After tool use, briefly say what changed.",
+    voiceMode ? "Keep responses concise enough for voice." : "This is a text conversation. Be concise, but include enough detail to be useful in the Voice log.",
+    "Do not create a celestial response node unless a tool explicitly creates or edits nodes.",
+    "Write in the user's language unless the user asks otherwise.",
+    extraInstructions,
+    summary ? `Previous session summary:\n${summary}` : "",
+    voiceLogContext ? `Persistent Voice log context:\n${voiceLogContext}` : "",
+    contextText ? `Selected context JSON:\n${contextText}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
 function buildRealtimeSessionConfig(payload) {
-  const context = payload?.context ? JSON.stringify(payload.context, null, 2).slice(0, 8000) : "";
   const extraInstructions = stringOr(payload?.instructions, "");
   const summary = payload?.summary?.text ? String(payload.summary.text).slice(0, 4000) : "";
+  const voiceLogContext = stringOr(payload?.voiceLogContext, "").slice(0, 14000);
   const tools = Array.isArray(payload?.tools) ? payload.tools : [];
   return {
     type: "realtime",
     model: stringOr(payload?.model, realtimeModel),
-    instructions: [
-      "You are speaking inside Mind Atlas, a spatial tree notebook.",
-      "Stay anchored to the selected notebook node and keep responses concise enough for voice.",
-      "Use available tools to search, focus, select, add, update, run AI, inspect notifications, and search the web when the user asks.",
-      "Do not execute destructive actions unless a tool returns that human approval is required.",
-      "After using tools, briefly explain what changed.",
+    instructions: buildMindAtlasPartnerInstructions({
+      mode: "voice",
       extraInstructions,
-      summary ? `Previous voice session summary:\n${summary}` : "",
-      context ? `Selected context JSON:\n${context}` : "",
-    ].filter(Boolean).join("\n\n"),
+      summary,
+      voiceLogContext,
+      context: payload?.context ?? null,
+    }),
     tools,
     tool_choice: "auto",
     audio: {
@@ -1283,6 +1511,79 @@ function buildRealtimeSessionConfig(payload) {
       },
     },
   };
+}
+
+function buildTextPartnerInput(messages) {
+  return messages.map((message) => ({
+    role: message?.role === "assistant" ? "assistant" : "user",
+    content: textPartnerMessageContent(message),
+  }));
+}
+
+function buildChatPartnerMessages(messages) {
+  return messages.map((message) => ({
+    role: message?.role === "assistant" ? "assistant" : "user",
+    content: textPartnerMessageContent(message),
+  }));
+}
+
+function textPartnerMessageContent(message) {
+  const content = stringOr(message?.content, "");
+  if (message?.role !== "tool") return content;
+  return [
+    `Tool result${message.name ? `: ${message.name}` : ""}`,
+    message.toolCallId ? `Tool call id: ${message.toolCallId}` : "",
+    content,
+  ].filter(Boolean).join("\n");
+}
+
+function normalizeRealtimeTools(tools) {
+  return tools
+    .filter((tool) => tool?.type === "function" && tool?.name)
+    .map((tool) => ({
+      type: "function",
+      name: String(tool.name),
+      description: stringOr(tool.description, ""),
+      parameters: tool.parameters && typeof tool.parameters === "object" ? tool.parameters : { type: "object", properties: {} },
+    }));
+}
+
+function normalizeChatTools(tools) {
+  return normalizeRealtimeTools(tools).map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    },
+  }));
+}
+
+function extractResponsesToolCalls(raw) {
+  const calls = [];
+  const output = Array.isArray(raw?.output) ? raw.output : [];
+  for (const item of output) {
+    if (item?.type === "function_call" && item.name) {
+      calls.push({
+        name: String(item.name),
+        arguments: typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments ?? {}),
+        callId: stringOr(item.call_id ?? item.id, ""),
+      });
+    }
+  }
+  return calls;
+}
+
+function extractChatToolCalls(raw) {
+  const toolCalls = raw?.choices?.[0]?.message?.tool_calls;
+  if (!Array.isArray(toolCalls)) return [];
+  return toolCalls
+    .map((call) => ({
+      name: stringOr(call?.function?.name, ""),
+      arguments: stringOr(call?.function?.arguments, "{}"),
+      callId: stringOr(call?.id, ""),
+    }))
+    .filter((call) => call.name);
 }
 
 function createMockOutput(prompt, context) {
@@ -1427,6 +1728,27 @@ function extractModelText(data) {
   return JSON.stringify(data);
 }
 
+function extractAssistantText(data) {
+  if (typeof data.output_text === "string") return data.output_text;
+  if (Array.isArray(data.output)) {
+    const values = [];
+    for (const item of data.output) {
+      if (item?.type === "function_call") continue;
+      if (typeof item?.text === "string") values.push(item.text);
+      if (Array.isArray(item?.content)) {
+        for (const content of item.content) {
+          if (typeof content?.text === "string") values.push(content.text);
+          if (typeof content?.value === "string") values.push(content.value);
+        }
+      }
+    }
+    return values.join("\n");
+  }
+  const choice = data.choices?.[0];
+  if (typeof choice?.message?.content === "string") return choice.message.content;
+  return "";
+}
+
 function extractWebSearchCitations(data) {
   const citations = [];
   visit(data);
@@ -1461,18 +1783,73 @@ function dedupeSources(citations) {
   return sources;
 }
 
-function normalizeUsage(usage, provider, durationMs) {
+function normalizeUsage(usage, provider, durationMs, rawResponse, maxOutputTokens) {
   const inputTokens = numberOrUndefined(usage?.input_tokens ?? usage?.prompt_tokens);
   const outputTokens = numberOrUndefined(usage?.output_tokens ?? usage?.completion_tokens);
   const totalTokens = numberOrUndefined(usage?.total_tokens) ?? addOptional(inputTokens, outputTokens);
   const estimatedCostUsd = estimateCost(provider, inputTokens, outputTokens);
+  const completion = describeCompletion(rawResponse, maxOutputTokens);
   return withoutUndefined({
     inputTokens,
     outputTokens,
     totalTokens,
     estimatedCostUsd,
     durationMs,
+    maxOutputTokens: numberOrUndefined(maxOutputTokens),
+    finishReason: completion.finishReason,
+    outputLimitHit: completion.outputLimitHit,
   });
+}
+
+function withCompletionNotice(output, rawResponse, maxOutputTokens) {
+  const completion = describeCompletion(rawResponse, maxOutputTokens);
+  if (!completion.outputLimitHit) return output;
+  const details = [
+    `maxOutputTokens=${maxOutputTokens}`,
+    completion.finishReason ? `finishReason=${completion.finishReason}` : "",
+  ].filter(Boolean).join(", ");
+  const notice = [
+    "",
+    "",
+    `[Mind Atlas bridge note: This response may have been cut off by the bridge output token limit (${details}).`,
+    "Increase MIND_ATLAS_OPENAI_MAX_OUTPUT_TOKENS or MIND_ATLAS_LOCAL_MAX_OUTPUT_TOKENS if this answer is incomplete.]",
+  ].join("\n");
+  return {
+    ...output,
+    body: output.body.includes("[Mind Atlas bridge note:") ? output.body : `${output.body}${notice}`,
+    summary: output.summary || "AI response may have reached the bridge output token limit.",
+    tags: Array.from(new Set([...(Array.isArray(output.tags) ? output.tags : []), "token-limit"])).slice(0, 8),
+  };
+}
+
+function describeCompletion(rawResponse, maxOutputTokens) {
+  const finishReason = extractFinishReason(rawResponse);
+  const outputTokens = numberOrUndefined(rawResponse?.usage?.output_tokens ?? rawResponse?.usage?.completion_tokens);
+  const limit = numberOrUndefined(maxOutputTokens);
+  const reason = String(finishReason ?? "").toLowerCase();
+  const outputLimitHit =
+    reason === "length" ||
+    reason === "max_output_tokens" ||
+    reason === "max_tokens" ||
+    reason.includes("max_output") ||
+    (typeof outputTokens === "number" && typeof limit === "number" && outputTokens >= limit);
+  return withoutUndefined({
+    finishReason,
+    outputLimitHit: outputLimitHit || undefined,
+  });
+}
+
+function extractFinishReason(rawResponse) {
+  const choiceReason = rawResponse?.choices?.[0]?.finish_reason;
+  if (typeof choiceReason === "string" && choiceReason) return choiceReason;
+  const incompleteReason = rawResponse?.incomplete_details?.reason;
+  if (typeof incompleteReason === "string" && incompleteReason) return incompleteReason;
+  if (rawResponse?.status === "incomplete") return "incomplete";
+  if (Array.isArray(rawResponse?.output)) {
+    const incompleteItem = rawResponse.output.find((item) => typeof item?.status === "string" && item.status !== "completed");
+    if (incompleteItem?.status) return String(incompleteItem.status);
+  }
+  return undefined;
 }
 
 function estimateCost(provider, inputTokens, outputTokens) {
@@ -1575,6 +1952,12 @@ function stringOr(value, fallback) {
 function numberOrUndefined(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : undefined;
+}
+
+function readPositiveIntEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  if (Number.isInteger(value) && value > 0) return value;
+  return fallback;
 }
 
 function addOptional(left, right) {

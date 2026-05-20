@@ -21,9 +21,10 @@ import { saveStoredAttachmentBlob } from "../attachmentStorage";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { findNode, useAtlasStore } from "../store/atlasStore";
 import type { AtlasTheme } from "../theme";
-import type { AtlasNode, AttachmentKind, NodeAttachment } from "../types";
+import type { AtlasNode, AttachmentKind, NodeAttachment, WorkStatus } from "../types";
 
 let sessionReminderDraftAt = addDays(new Date(), 1).toISOString();
+const STATUS_OPTIONS: WorkStatus[] = ["running", "needs_review", "waiting", "blocked", "error", "done"];
 
 export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -34,12 +35,14 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
   const updateNodeAppearance = useAtlasStore((state) => state.updateNodeAppearance);
   const setNodeReminder = useAtlasStore((state) => state.setNodeReminder);
   const clearNodeReminder = useAtlasStore((state) => state.clearNodeReminder);
+  const setNodeStatus = useAtlasStore((state) => state.setNodeStatus);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
   const aiRuns = useAtlasStore((state) => state.aiRuns);
   const selectedNode = findNode(atlasRoot, selectedNodeId) ?? atlasRoot;
   const isRoot = selectedNode.id === atlasRoot.id;
   const [surfaceMenuOpen, setSurfaceMenuOpen] = useState(false);
   const [reminderMenuOpen, setReminderMenuOpen] = useState(false);
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [reminderDraftAt, setReminderDraftAt] = useState(sessionReminderDraftAt);
   const [reminderCalendarMonth, setReminderCalendarMonth] = useState(() => startOfMonth(dateFromInput(sessionReminderDraftAt) ?? addDays(new Date(), 1)));
   const aiRun = selectedNode.aiRunId ? aiRuns[selectedNode.aiRunId] : undefined;
@@ -50,6 +53,7 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
     const closeMenus = () => {
       setSurfaceMenuOpen(false);
       setReminderMenuOpen(false);
+      setStatusMenuOpen(false);
     };
     window.addEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenus);
     return () => window.removeEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenus);
@@ -60,6 +64,17 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
     sessionReminderDraftAt = iso;
     setReminderDraftAt(iso);
     setReminderCalendarMonth(startOfMonth(date));
+  };
+
+  const handleSetReminder = () => {
+    if (reminderDraft.getTime() < Date.now()) {
+      const confirmed = window.confirm(
+        `The selected reminder time is in the past:\n\n${formatReminderDate(reminderDraft.toISOString())}\n\nThis notification may fire immediately. Set it anyway?`,
+      );
+      if (!confirmed) return;
+    }
+    setNodeReminder(selectedNode.id, reminderDraft.toISOString());
+    setReminderMenuOpen(false);
   };
 
   const reminderMenu = reminderMenuOpen ? (
@@ -123,22 +138,22 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
         />
       </div>
       <div className="reminder-quick-row" aria-label="Quick reminder offsets">
+        <button type="button" onClick={() => updateReminderDraft(new Date())}>
+          Now
+        </button>
         {[15, 30, 60, 180].map((minutes) => (
-          <button key={minutes} type="button" onClick={() => updateReminderDraft(addMinutes(new Date(), minutes))}>
+          <button key={minutes} type="button" onClick={() => updateReminderDraft(addMinutes(reminderDraft, minutes))}>
             +{minutes < 60 ? `${minutes}m` : `${minutes / 60}h`}
           </button>
         ))}
-        <button type="button" onClick={() => updateReminderDraft(addDays(new Date(), 1))}>
+        <button type="button" onClick={() => updateReminderDraft(addDays(reminderDraft, 1))}>
           +1d
         </button>
       </div>
       <div className="reminder-actions">
         <button
           type="button"
-          onClick={() => {
-            setNodeReminder(selectedNode.id, reminderDraft.toISOString());
-            setReminderMenuOpen(false);
-          }}
+          onClick={handleSetReminder}
         >
           Set reminder
         </button>
@@ -151,6 +166,9 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
           disabled={!selectedNode.reminderAt}
         >
           Clear reminder
+        </button>
+        <button type="button" onClick={() => setReminderMenuOpen(false)}>
+          Close
         </button>
       </div>
     </div>
@@ -186,10 +204,43 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
           <Plus size={18} />
           <input type="file" multiple onChange={handleAttachmentChange} />
         </label>
-        <div className="ai-node-status" title={aiRun?.error ?? selectedNode.nextDecision}>
-          <Bot size={14} />
-          <span>{selectedNode.author === "ai" ? selectedNode.provider ?? "ai" : selectedNode.status}</span>
-          {selectedNode.modelId ? <b>{selectedNode.modelId}</b> : null}
+        <div className="panel-menu-anchor">
+          <button
+            className="ai-node-status"
+            type="button"
+            title={aiRun?.error ?? selectedNode.nextDecision}
+            aria-label="Change node status"
+            aria-haspopup="menu"
+            aria-expanded={statusMenuOpen}
+            onClick={() => {
+              setStatusMenuOpen((open) => !open);
+              setReminderMenuOpen(false);
+              setSurfaceMenuOpen(false);
+            }}
+          >
+            <Bot size={14} />
+            <span>{formatStatusLabel(selectedNode.status)}</span>
+            {selectedNode.modelId ? <b>{selectedNode.modelId}</b> : null}
+          </button>
+          {statusMenuOpen ? (
+            <div className="context-menu status-context-menu" role="menu" aria-label="Node status">
+              {STATUS_OPTIONS.map((status) => (
+                <button
+                  key={status}
+                  className={selectedNode.status === status ? "is-active" : ""}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={selectedNode.status === status}
+                  onClick={() => {
+                    setNodeStatus(selectedNode.id, status, `Status changed to ${formatStatusLabel(status)} by human.`);
+                    setStatusMenuOpen(false);
+                  }}
+                >
+                  <span>{formatStatusLabel(status)}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="panel-menu-anchor">
           <button
@@ -198,6 +249,7 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
             onClick={() => {
               setReminderMenuOpen((open) => !open);
               setSurfaceMenuOpen(false);
+              setStatusMenuOpen(false);
             }}
             aria-label="Open reminder menu"
             title={selectedNode.reminderAt ? `Reminder: ${formatReminderDate(selectedNode.reminderAt)}` : "Set reminder"}
@@ -213,6 +265,7 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
             onClick={() => {
               setSurfaceMenuOpen((open) => !open);
               setReminderMenuOpen(false);
+              setStatusMenuOpen(false);
             }}
             aria-label="Open surface menu"
           >
@@ -322,6 +375,10 @@ function useReminderMobileLayout() {
   }, []);
 
   return isMobile;
+}
+
+function formatStatusLabel(status: WorkStatus) {
+  return status.replace(/_/g, " ");
 }
 
 function TimeStepper({

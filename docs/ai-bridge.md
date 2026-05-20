@@ -33,6 +33,8 @@ Copy `.env.example` values into your shell or deployment environment.
 
 - `MIND_ATLAS_OPENAI_API_KEY`: server-side OpenAI key. `OPENAI_API_KEY` also works.
 - `MIND_ATLAS_OPENAI_MODEL`: default Responses API model.
+- `MIND_ATLAS_MAX_OUTPUT_TOKENS`: default text output cap for bridge AI calls. Defaults to `8192`.
+- `MIND_ATLAS_OPENAI_MAX_OUTPUT_TOKENS`: OpenAI text output cap. Defaults to `MIND_ATLAS_MAX_OUTPUT_TOKENS`.
 - `MIND_ATLAS_OPENAI_IMAGE_MODEL`: image generation model. Defaults to `gpt-image-1`.
 - `MIND_ATLAS_OPENAI_IMAGE_SIZE`: image generation size. Defaults to `1024x1024`.
 - `MIND_ATLAS_OPENAI_TRANSCRIPTION_MODEL`: dictation transcription model. Defaults to `gpt-4o-transcribe`.
@@ -40,8 +42,10 @@ Copy `.env.example` values into your shell or deployment environment.
 - `MIND_ATLAS_OPENAI_MODE`: `responses` by default.
 - `MIND_ATLAS_OPENAI_INPUT_USD_PER_1M` / `MIND_ATLAS_OPENAI_OUTPUT_USD_PER_1M`: optional cost-rate inputs for UI estimates.
 - `MIND_ATLAS_LOCAL_BASE_URL`: LM Studio or another OpenAI-compatible local endpoint. Defaults to `http://127.0.0.1:1234/v1`.
-- `MIND_ATLAS_LOCAL_MODEL`: local model id passed to the OpenAI-compatible endpoint.
 - `MIND_ATLAS_LOCAL_API_KEY`: optional local endpoint key. Defaults to `lm-studio`.
+- `MIND_ATLAS_LOCAL_MAX_OUTPUT_TOKENS`: Local `/chat/completions` output cap. Defaults to `MIND_ATLAS_MAX_OUTPUT_TOKENS`.
+- `MIND_ATLAS_WEB_SEARCH_MAX_OUTPUT_TOKENS`: web-search response cap. Defaults to `2048`.
+- Local mode inspects `${MIND_ATLAS_LOCAL_BASE_URL}/models` and uses the first model currently loaded by LM Studio. `MIND_ATLAS_LOCAL_MODEL` is intentionally ignored to avoid auto-loading a model.
 - `MIND_ATLAS_CODEX_BIN`: Codex executable name. Defaults to `codex`.
 - `MIND_ATLAS_CODEX_USE_WSL`: set `true` to run `wsl codex ...`.
 - `MIND_ATLAS_CODEX_WORKSPACE`: workspace passed to `codex exec --cd`.
@@ -86,6 +90,7 @@ Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that ne
 - Running, review, and error states pulse around the affected notebook node.
 - Completed or failed background work emits a wider notification pulse from the result location.
 - Usage metadata is stored on runs and result nodes. Cost estimates appear only when per-token rates are configured.
+- When an upstream response appears to hit the configured bridge output cap, Mind Atlas appends a bridge note to the result body and includes `maxOutputTokens`, `finishReason`, and `outputLimitHit` in usage metadata.
 - Short-clicking the microphone button records dictation, transcribes it with `gpt-4o-transcribe`, and inserts the transcript into the prompt field.
 - Long-pressing the microphone button starts a push-to-talk WebRTC Realtime Voice Partner session through the bridge. The browser receives only a short-lived ephemeral Realtime key.
 - While Voice Partner audio is responding, the microphone button becomes a square stop button that cancels the current Realtime response and clears pending playback.

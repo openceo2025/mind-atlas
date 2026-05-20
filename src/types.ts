@@ -185,6 +185,9 @@ export interface AiUsage {
   totalTokens?: number;
   estimatedCostUsd?: number;
   durationMs?: number;
+  maxOutputTokens?: number;
+  finishReason?: string;
+  outputLimitHit?: boolean;
 }
 
 export interface AiRun {
@@ -405,7 +408,42 @@ export interface RealtimeSessionConfig {
   model?: string;
   voice?: string;
   summary?: VoiceSessionSummary | null;
+  voiceLogContext?: string;
   tools?: RealtimeToolDefinition[];
+}
+
+export type TextPartnerMessageRole = "user" | "assistant" | "tool";
+
+export interface TextPartnerMessage {
+  role: TextPartnerMessageRole;
+  content: string;
+  name?: string;
+  toolCallId?: string;
+}
+
+export interface TextPartnerToolCall {
+  name: string;
+  arguments: string;
+  callId?: string;
+}
+
+export interface TextPartnerTurnPayload {
+  provider: "openai" | "local";
+  context: AiNodeContext;
+  messages: TextPartnerMessage[];
+  tools: RealtimeToolDefinition[];
+  model?: string;
+  summary?: VoiceSessionSummary | null;
+  voiceLogContext?: string;
+}
+
+export interface TextPartnerTurnResult {
+  text: string;
+  toolCalls: TextPartnerToolCall[];
+  provider: AiProvider;
+  model: string;
+  usage?: AiUsage;
+  raw?: unknown;
 }
 
 export interface AtlasNode {

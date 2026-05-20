@@ -1,3 +1,4 @@
+import { sanitizeAttachmentForExport } from "./notebookExport";
 import type { AtlasNode, NodeAttachment } from "./types";
 
 export const MIND_ATLAS_NODE_CLIPBOARD_FORMAT = "mind-atlas-node-subtree";
@@ -63,7 +64,7 @@ function cloneNodeMetadataOnly(node: AtlasNode): AtlasNode {
 }
 
 function stripAttachmentAssetPath(attachment: NodeAttachment): NodeAttachment {
-  const { assetPath: _assetPath, ...metadata } = attachment;
+  const { assetPath: _assetPath, ...metadata } = sanitizeAttachmentForExport(attachment);
   return metadata;
 }
 

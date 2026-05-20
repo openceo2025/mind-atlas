@@ -31,6 +31,7 @@ interface StartVoicePartnerSessionOptions {
   model?: string;
   voice?: string;
   summary?: VoiceSessionSummary | null;
+  voiceLogContext?: string;
   onStateChange?: (state: RealtimeSessionState) => void;
   onEvent?: (event: RealtimeClientEvent) => void;
 }
@@ -45,6 +46,7 @@ export async function startVoicePartnerSession({
   model,
   voice,
   summary,
+  voiceLogContext,
   onStateChange,
   onEvent,
 }: StartVoicePartnerSessionOptions): Promise<RealtimeVoiceSession> {
@@ -124,7 +126,7 @@ export async function startVoicePartnerSession({
         content: [
           {
             type: "input_text",
-            text: buildInitialRealtimeMessage(context, summary),
+            text: buildInitialRealtimeMessage(context, summary, voiceLogContext),
           },
         ],
       },
@@ -172,6 +174,7 @@ export async function startVoicePartnerSession({
     model,
     voice,
     summary,
+    voiceLogContext,
     tools: getVoiceToolDefinitions(),
   };
   const answerSdp = await createRealtimeCall({ ...session, sdp: offer.sdp });
@@ -550,11 +553,12 @@ function normalizeArgumentsForKey(args: string) {
   }
 }
 
-function buildInitialRealtimeMessage(context: AiNodeContext, summary?: VoiceSessionSummary | null) {
+function buildInitialRealtimeMessage(context: AiNodeContext, summary?: VoiceSessionSummary | null, voiceLogContext?: string) {
   return [
     "Mind Atlas Voice Partner session started.",
     `Active node: ${context.selectedNode.title}`,
     summary?.text ? `Previous voice session summary:\n${summary.text}` : "",
+    voiceLogContext ? `Voice log context for global continuity:\n${voiceLogContext}` : "",
     "Wait for push-to-talk speech before taking action. Use tools when the user asks to operate Mind Atlas.",
   ].filter(Boolean).join("\n\n");
 }

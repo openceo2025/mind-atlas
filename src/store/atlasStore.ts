@@ -6,7 +6,8 @@ import {
 } from "../attachmentStorage";
 import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme";
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
-import { requestAiResponse } from "../ai/bridgeClient";
+import { getBridgeUrl, requestAiResponse } from "../ai/bridgeClient";
+import { sanitizeNotebookForExport } from "../notebookExport";
 import type {
   AiAttachmentMode,
   AiContextOptions,
@@ -39,7 +40,10 @@ import type {
 } from "../types";
 
 const NOTEBOOK_STORAGE_KEY = "mind-atlas-notebook-v2";
+const UNREAD_NOTIFICATIONS_STORAGE_KEY = "mind-atlas-unread-notifications-v1";
+const NOTIFICATION_READ_STATE_STORAGE_KEY = "mind-atlas-notification-read-state-v1";
 const VOICE_LOG_STORAGE_KEY = "mind-atlas-voice-log-v1";
+const VOICE_LOG_LAST_SEEN_STORAGE_KEY = "mind-atlas-voice-log-last-seen-v1";
 const VOICE_SUMMARY_STORAGE_KEY = "mind-atlas-voice-summary-v1";
 const VOICE_SETTINGS_STORAGE_KEY = "mind-atlas-voice-settings-v1";
 export const NOTEBOOK_NODE_RADIUS = 28;
@@ -82,6 +86,14 @@ interface UnreadNotification {
   kind: NotificationPulseKind;
   title: string;
   lastPulseAt: number;
+  signature?: string;
+}
+
+interface NotificationSource {
+  nodeId: string;
+  kind: NotificationPulseKind;
+  title: string;
+  signature: string;
 }
 
 interface FocusRequest {
@@ -92,10 +104,21 @@ interface FocusRequest {
   nonce: number;
 }
 
+interface NotificationSnoozePrompt {
+  nodeId: string;
+  createdAt: number;
+  expiresAt: number;
+  nonce: number;
+}
+
 interface HistoryEntry {
   atlasRoot: AtlasNode;
   selectedNodeId: string;
 }
+
+const initialAtlasRoot = loadStoredNotebook() ?? atlasRoot;
+const initialVoiceLogEntries = loadStoredVoiceLog();
+const initialVoiceLogLastSeenAt = loadStoredVoiceLogLastSeenAt(initialVoiceLogEntries);
 
 interface AtlasStore {
   atlasRoot: AtlasNode;
@@ -105,7 +128,9 @@ interface AtlasStore {
   aiRuns: Record<string, AiRun>;
   notificationPulses: NotificationPulse[];
   unreadNotifications: Record<string, UnreadNotification>;
+  notificationSnoozePrompt: NotificationSnoozePrompt | null;
   voiceLogEntries: VoiceLogEntry[];
+  voiceLogLastSeenAt: string;
   voiceSessionSummary: VoiceSessionSummary | null;
   voicePartnerSettings: VoicePartnerSettings;
   selected: Selection;
@@ -134,12 +159,16 @@ interface AtlasStore {
   setActiveCommandMode: (mode: AiExecutionMode | "note") => void;
   appendVoiceLogEntry: (entry: Omit<VoiceLogEntry, "id" | "createdAt"> & Partial<Pick<VoiceLogEntry, "id" | "createdAt">>) => VoiceLogEntry;
   clearVoiceLog: () => void;
+  markVoiceLogSeen: () => void;
   setVoiceSessionSummary: (summary: VoiceSessionSummary | null) => void;
   setVoicePartnerSettings: (settings: Partial<VoicePartnerSettings>) => void;
   focusParentNode: () => void;
   updateNode: (id: string, patch: Partial<Pick<AtlasNode, "title" | "body" | "tags" | "summary" | "nextDecision">>) => void;
   setNodeReminder: (id: string, reminderAt: string) => void;
   clearNodeReminder: (id: string) => void;
+  showNotificationSnoozePrompt: (id: string) => void;
+  dismissNotificationSnoozePrompt: (id?: string) => void;
+  snoozeNodeNotification: (id: string, delayMs: number) => void;
   setNodeStatus: (id: string, status: WorkStatus, nextDecision?: string) => void;
   addRootNodeAt: (position: [number, number, number], title?: string) => void;
   addChildNode: (
@@ -181,14 +210,16 @@ interface AtlasStore {
 }
 
 export const useAtlasStore = create<AtlasStore>((set, get) => ({
-  atlasRoot: loadStoredNotebook() ?? atlasRoot,
+  atlasRoot: initialAtlasRoot,
   historyPast: [],
   historyFuture: [],
   workAreas: initialWorkAreas,
   aiRuns: {},
   notificationPulses: [],
-  unreadNotifications: {},
-  voiceLogEntries: loadStoredVoiceLog(),
+  unreadNotifications: restoreUnreadNotifications(initialAtlasRoot),
+  notificationSnoozePrompt: null,
+  voiceLogEntries: initialVoiceLogEntries,
+  voiceLogLastSeenAt: initialVoiceLogLastSeenAt,
   voiceSessionSummary: loadStoredVoiceSessionSummary(),
   voicePartnerSettings: loadStoredVoicePartnerSettings(),
   selected: { kind: "node", id: "atlas-root" },
@@ -211,8 +242,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const { node, path, position } = located;
     const visualRadius = getNodeVisualRadius(node, path.length - 1);
     set((state) => {
-      const unreadNotifications = { ...state.unreadNotifications };
-      delete unreadNotifications[id];
+      const unreadNotifications = markNodeNotificationsRead(state.atlasRoot, state.unreadNotifications, id);
       return {
         selected: selectionFromNode(node),
         selectedNodeId: id,
@@ -233,8 +263,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const node = findNode(get().atlasRoot, id);
     if (!node) return;
     set((state) => {
-      const unreadNotifications = { ...state.unreadNotifications };
-      delete unreadNotifications[id];
+      const unreadNotifications = markNodeNotificationsRead(state.atlasRoot, state.unreadNotifications, id);
       return {
         selected: selectionFromNode(node),
         selectedNodeId: id,
@@ -250,8 +279,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const { node, path, position } = located;
     const visualRadius = getNodeVisualRadius(node, path.length - 1);
     set((state) => {
-      const unreadNotifications = { ...state.unreadNotifications };
-      delete unreadNotifications[id];
+      const unreadNotifications = markNodeNotificationsRead(state.atlasRoot, state.unreadNotifications, id);
       return {
         selected: selectionFromNode(node),
         selectedNodeId: id,
@@ -346,8 +374,16 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   },
 
   clearVoiceLog: () => {
+    const seenAt = new Date().toISOString();
     persistVoiceLog([]);
-    set({ voiceLogEntries: [] });
+    persistVoiceLogLastSeenAt(seenAt);
+    set({ voiceLogEntries: [], voiceLogLastSeenAt: seenAt });
+  },
+
+  markVoiceLogSeen: () => {
+    const seenAt = new Date().toISOString();
+    persistVoiceLogLastSeenAt(seenAt);
+    set({ voiceLogLastSeenAt: seenAt });
   },
 
   setVoiceSessionSummary: (summary) => {
@@ -438,6 +474,52 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       return {
         ...pushHistory(state),
         atlasRoot,
+      };
+    });
+  },
+
+  showNotificationSnoozePrompt: (id) => {
+    if (!findNode(get().atlasRoot, id)) return;
+    const now = Date.now();
+    set((state) => ({
+      notificationSnoozePrompt: {
+        nodeId: id,
+        createdAt: now,
+        expiresAt: now + 60_000,
+        nonce: (state.notificationSnoozePrompt?.nonce ?? 0) + 1,
+      },
+    }));
+  },
+
+  dismissNotificationSnoozePrompt: (id) => {
+    set((state) => {
+      if (!state.notificationSnoozePrompt) return {};
+      if (id && state.notificationSnoozePrompt.nodeId !== id) return {};
+      return { notificationSnoozePrompt: null };
+    });
+  },
+
+  snoozeNodeNotification: (id, delayMs) => {
+    if (!Number.isFinite(delayMs) || delayMs <= 0) return;
+    const nowMs = Date.now();
+    const reminderAt = new Date(nowMs + delayMs).toISOString();
+    const updatedAt = new Date(nowMs).toISOString();
+    set((state) => {
+      if (!findNode(state.atlasRoot, id)) return {};
+      const unreadNotifications = markNodeNotificationsRead(state.atlasRoot, state.unreadNotifications, id);
+      const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => ({
+        ...node,
+        reminderAt,
+        reminderFiredAt: undefined,
+        updatedAt,
+      }));
+      persistNotebook(atlasRoot);
+      return {
+        ...pushHistory(state),
+        atlasRoot,
+        unreadNotifications,
+        notificationPulses: state.notificationPulses.filter((pulse) => pulse.nodeId !== id),
+        notificationSnoozePrompt: state.notificationSnoozePrompt?.nodeId === id ? null : state.notificationSnoozePrompt,
       };
     });
   },
@@ -661,6 +743,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     }
 
     persistNotebook(nextRoot);
+    persistUnreadNotifications(unreadNotifications);
     set((current) => ({
       ...pushHistory(current),
       atlasRoot: nextRoot,
@@ -672,6 +755,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       birthMarks,
       unreadNotifications,
       notificationPulses: current.notificationPulses.filter((pulse) => !deletedNodeIds.includes(pulse.nodeId)),
+      notificationSnoozePrompt: current.notificationSnoozePrompt && deletedNodeIds.includes(current.notificationSnoozePrompt.nodeId) ? null : current.notificationSnoozePrompt,
       titleEditRequestId: current.titleEditRequestId && deletedNodeIds.includes(current.titleEditRequestId) ? null : current.titleEditRequestId,
       focusRequest: {
         x: nextPosition[0],
@@ -769,7 +853,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
   },
 
-  exportNotebook: () => JSON.stringify(get().atlasRoot, null, 2),
+  exportNotebook: () => JSON.stringify(sanitizeNotebookForExport(get().atlasRoot, { includeAttachmentAssetPaths: false }), null, 2),
 
   importNotebook: (root, datasetName, nextAttachmentPreviewUrls = {}) => {
     const current = get();
@@ -779,6 +863,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       ...(datasetName ? { title: datasetName, subtitle: datasetName, updatedAt: new Date().toISOString() } : {}),
     };
     persistNotebook(atlasRoot);
+    clearStoredNotificationState();
+    const unreadNotifications = restoreUnreadNotifications(atlasRoot, {});
+    persistUnreadNotifications(unreadNotifications);
     set({
       ...pushHistory(current),
       atlasRoot,
@@ -788,6 +875,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       cameraFocusNodeId: null,
       attachmentPreviewUrls: nextAttachmentPreviewUrls,
       birthMarks: {},
+      unreadNotifications,
+      notificationPulses: [],
+      notificationSnoozePrompt: null,
       titleEditRequestId: atlasRoot.children[0]?.id ?? null,
     });
   },
@@ -797,6 +887,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const previewUrls = get().attachmentPreviewUrls;
     Object.values(previewUrls).forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
     clearStoredNotebook();
+    persistUnreadNotifications({});
     set((state) => ({
       ...pushHistory(state),
       atlasRoot,
@@ -813,6 +904,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       },
       attachmentPreviewUrls: {},
       birthMarks: {},
+      unreadNotifications: {},
+      notificationPulses: [],
+      notificationSnoozePrompt: null,
       titleEditRequestId: null,
     }));
   },
@@ -825,6 +919,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!previous) return;
     const selectedNode = findNode(previous.atlasRoot, previous.selectedNodeId) ?? previous.atlasRoot;
     persistNotebook(previous.atlasRoot);
+    const unreadNotifications = restoreUnreadNotifications(previous.atlasRoot, state.unreadNotifications);
+    persistUnreadNotifications(unreadNotifications);
     set({
       atlasRoot: previous.atlasRoot,
       selected: selectionFromNode(selectedNode),
@@ -833,6 +929,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       cameraFocusNodeId: null,
       attachmentPreviewUrls: filterAttachmentPreviewUrls(state.attachmentPreviewUrls, previous.atlasRoot),
       titleEditRequestId: null,
+      unreadNotifications,
+      notificationPulses: [],
+      notificationSnoozePrompt: null,
       historyPast: state.historyPast.slice(0, -1),
       historyFuture: [createHistoryEntry(state.atlasRoot, state.selectedNodeId), ...state.historyFuture].slice(0, HISTORY_LIMIT),
     });
@@ -846,6 +945,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!next) return;
     const selectedNode = findNode(next.atlasRoot, next.selectedNodeId) ?? next.atlasRoot;
     persistNotebook(next.atlasRoot);
+    const unreadNotifications = restoreUnreadNotifications(next.atlasRoot, state.unreadNotifications);
+    persistUnreadNotifications(unreadNotifications);
     set({
       atlasRoot: next.atlasRoot,
       selected: selectionFromNode(selectedNode),
@@ -854,6 +955,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       cameraFocusNodeId: null,
       attachmentPreviewUrls: filterAttachmentPreviewUrls(state.attachmentPreviewUrls, next.atlasRoot),
       titleEditRequestId: null,
+      unreadNotifications,
+      notificationPulses: [],
+      notificationSnoozePrompt: null,
       historyPast: [...state.historyPast, createHistoryEntry(state.atlasRoot, state.selectedNodeId)].slice(-HISTORY_LIMIT),
       historyFuture: state.historyFuture.slice(1),
     });
@@ -1405,20 +1509,27 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         atlasRoot = markReminderNodesFired(atlasRoot, new Set(dueReminders.map((node) => node.id)), firedAt);
         persistNotebook(atlasRoot);
       }
-      const notificationPulses = state.notificationPulses.filter((pulse) => pulse.createdAt >= cutoff);
-      const unreadNotifications = { ...state.unreadNotifications };
-      for (const node of dueReminders) {
-        const title = `Reminder: ${node.title || "Untitled node"}`;
-        notificationPulses.push(createNotificationPulse(node.id, "needs_review", title));
-        Object.assign(unreadNotifications, markUnreadNotification(unreadNotifications, node.id, "needs_review", title));
-      }
-      for (const unread of Object.values(unreadNotifications)) {
-        if (now - unread.lastPulseAt < NOTIFICATION_REPEAT_INTERVAL_MS) continue;
-        notificationPulses.push(createNotificationPulse(unread.nodeId, unread.kind, unread.title));
-        unreadNotifications[unread.nodeId] = { ...unread, lastPulseAt: now };
-      }
-      return { atlasRoot, notificationPulses, unreadNotifications };
-    });
+        const notificationPulses = state.notificationPulses.filter((pulse) => pulse.createdAt >= cutoff);
+        let unreadNotifications = restoreUnreadNotifications(atlasRoot, state.unreadNotifications);
+        for (const node of dueReminders) {
+          const title = `Reminder: ${node.title || "Untitled node"}`;
+          notificationPulses.push(createNotificationPulse(node.id, "needs_review", title));
+          unreadNotifications = markUnreadNotification(
+            unreadNotifications,
+            node.id,
+            "needs_review",
+            title,
+            reminderNotificationSignatureFromParts(node.id, node.reminderAt, firedAt),
+          );
+        }
+        for (const unread of Object.values(unreadNotifications)) {
+          if (now - unread.lastPulseAt < NOTIFICATION_REPEAT_INTERVAL_MS) continue;
+          notificationPulses.push(createNotificationPulse(unread.nodeId, unread.kind, unread.title));
+          unreadNotifications[unread.nodeId] = { ...unread, lastPulseAt: now };
+        }
+        persistUnreadNotifications(unreadNotifications);
+        return { atlasRoot, notificationPulses, unreadNotifications };
+      });
   },
 }));
 
@@ -1586,6 +1697,59 @@ function loadStoredNotebook() {
   }
 }
 
+function loadStoredUnreadNotifications(): Record<string, UnreadNotification> {
+  if (typeof window === "undefined") return {};
+  const raw = window.localStorage.getItem(UNREAD_NOTIFICATIONS_STORAGE_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, Partial<UnreadNotification>>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const entries = Object.values(parsed)
+      .filter(isStoredUnreadNotification)
+      .filter((notification) => notification.signature?.startsWith("reminder:"))
+      .map((notification) => [
+        notification.nodeId,
+        {
+          nodeId: notification.nodeId,
+          kind: notification.kind,
+          title: notification.title,
+          signature: notification.signature,
+          lastPulseAt: 0,
+        },
+      ]);
+    return Object.fromEntries(entries);
+  } catch {
+    return {};
+  }
+}
+
+function restoreUnreadNotifications(
+  root: AtlasNode,
+  current: Record<string, UnreadNotification> = loadStoredUnreadNotifications(),
+) {
+  const readState = loadNotificationReadState();
+  const sources = collectNotificationSources(root);
+  const sourceSignatures = new Set(sources.map((source) => source.signature));
+  const next: Record<string, UnreadNotification> = {};
+  for (const unread of Object.values(current)) {
+    if (!findNode(root, unread.nodeId)) continue;
+    if (unread.signature && !unread.signature.startsWith("transient:") && !sourceSignatures.has(unread.signature)) continue;
+    if (unread.signature && isNotificationRead(readState, unread.nodeId, unread.signature)) continue;
+    next[unread.nodeId] = unread;
+  }
+  for (const source of sources) {
+    if (isNotificationRead(readState, source.nodeId, source.signature)) continue;
+    next[source.nodeId] = {
+      nodeId: source.nodeId,
+      kind: source.kind,
+      title: source.title,
+      signature: source.signature,
+      lastPulseAt: next[source.nodeId]?.lastPulseAt ?? 0,
+    };
+  }
+  return next;
+}
+
 function loadStoredVoiceLog(): VoiceLogEntry[] {
   if (typeof window === "undefined") return [];
   const raw = window.localStorage.getItem(VOICE_LOG_STORAGE_KEY);
@@ -1596,6 +1760,15 @@ function loadStoredVoiceLog(): VoiceLogEntry[] {
   } catch {
     return [];
   }
+}
+
+function loadStoredVoiceLogLastSeenAt(entries: VoiceLogEntry[]) {
+  if (typeof window !== "undefined") {
+    const raw = window.localStorage.getItem(VOICE_LOG_LAST_SEEN_STORAGE_KEY);
+    if (raw && !Number.isNaN(new Date(raw).getTime())) return raw;
+  }
+  const latestEntry = entries.at(-1);
+  return latestEntry?.createdAt ?? new Date().toISOString();
 }
 
 function loadStoredVoiceSessionSummary(): VoiceSessionSummary | null {
@@ -1630,9 +1803,48 @@ function persistNotebook(root: AtlasNode) {
   window.localStorage.setItem(NOTEBOOK_STORAGE_KEY, JSON.stringify(root));
 }
 
+function persistUnreadNotifications(unreadNotifications: Record<string, UnreadNotification>) {
+  if (typeof window === "undefined") return;
+  const serializable = Object.fromEntries(
+    Object.entries(unreadNotifications).map(([nodeId, notification]) => [
+      nodeId,
+      {
+        nodeId: notification.nodeId,
+        kind: notification.kind,
+        title: notification.title,
+        signature: notification.signature,
+      },
+    ]),
+  );
+  window.localStorage.setItem(UNREAD_NOTIFICATIONS_STORAGE_KEY, JSON.stringify(serializable));
+}
+
+function loadNotificationReadState(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const raw = window.localStorage.getItem(NOTIFICATION_READ_STATE_STORAGE_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  } catch {
+    return {};
+  }
+}
+
+function persistNotificationReadState(readState: Record<string, string>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(NOTIFICATION_READ_STATE_STORAGE_KEY, JSON.stringify(readState));
+}
+
 function persistVoiceLog(entries: VoiceLogEntry[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(VOICE_LOG_STORAGE_KEY, JSON.stringify(entries));
+}
+
+function persistVoiceLogLastSeenAt(value: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(VOICE_LOG_LAST_SEEN_STORAGE_KEY, value);
 }
 
 function persistVoiceSessionSummary(summary: VoiceSessionSummary | null) {
@@ -1670,6 +1882,21 @@ function normalizeVoicePartnerSettings(value: Partial<VoicePartnerSettings>): Vo
 
 function normalizeSettingText(value: unknown, fallback: string) {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, 80) : fallback;
+}
+
+function isStoredUnreadNotification(value: unknown): value is UnreadNotification {
+  if (!value || typeof value !== "object") return false;
+  const notification = value as Partial<UnreadNotification>;
+  return (
+    typeof notification.nodeId === "string" &&
+    isNotificationPulseKind(notification.kind) &&
+    typeof notification.title === "string" &&
+    (notification.signature === undefined || typeof notification.signature === "string")
+  );
+}
+
+function isNotificationPulseKind(value: unknown): value is NotificationPulseKind {
+  return value === "done" || value === "needs_review" || value === "error" || value === "codex" || value === "cost";
 }
 
 function focusRootCameraOnly(setState: typeof useAtlasStore.setState, nodeId: string) {
@@ -1734,6 +1961,13 @@ function filterAttachmentPreviewUrls(previewUrls: Record<string, string>, root: 
 function clearStoredNotebook() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(NOTEBOOK_STORAGE_KEY);
+  clearStoredNotificationState();
+}
+
+function clearStoredNotificationState() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(UNREAD_NOTIFICATIONS_STORAGE_KEY);
+  window.localStorage.removeItem(NOTIFICATION_READ_STATE_STORAGE_KEY);
 }
 
 function updateNodeById(root: AtlasNode, id: string, updater: (node: AtlasNode) => AtlasNode): AtlasNode {
@@ -2076,9 +2310,14 @@ function createAiErrorNode(
   const now = new Date().toISOString();
   const seed = `${parentId}-${runId}-error`;
   const codexLimit = mode === "codex" ? describeCodexTokenLimit(message, now) : null;
-  const title = codexLimit ? "Codex token limit" : `${modeLabel(mode)} error`;
-  const body = codexLimit?.body ?? message;
-  const summary = codexLimit?.summary ?? message;
+  const bridgeFailure = codexLimit ? null : describeBridgeConnectionFailure(mode, message);
+  const title = codexLimit ? "Codex token limit" : bridgeFailure ? "Mind Atlas server unreachable" : `${modeLabel(mode)} error`;
+  const body = codexLimit?.body ?? bridgeFailure?.body ?? message;
+  const summary = codexLimit?.summary ?? bridgeFailure?.summary ?? message;
+  const nextDecision =
+    codexLimit?.nextDecision ??
+    bridgeFailure?.nextDecision ??
+    "Inspect bridge configuration, provider status, or retry with a different mode.";
   return {
     id: `${parentId}-error-${Date.now()}-${crypto.randomUUID?.() ?? "error"}`,
     kind: "event",
@@ -2092,8 +2331,11 @@ function createAiErrorNode(
     texture: randomTexture(seed),
     radius: NOTEBOOK_NODE_RADIUS,
     summary,
-    nextDecision: codexLimit?.nextDecision ?? "Inspect bridge configuration, provider status, or retry with a different mode.",
-    tags: normalizeTags(codexLimit ? [mode, "error", "token-limit"] : [mode, "error"], message),
+    nextDecision,
+    tags: normalizeTags(
+      codexLimit ? [mode, "error", "token-limit"] : bridgeFailure ? [mode, "error", "bridge-unreachable"] : [mode, "error"],
+      message,
+    ),
     attachments: [],
     createdAt: now,
     updatedAt: now,
@@ -2106,6 +2348,45 @@ function createAiErrorNode(
     position: options.position,
     children: [],
   };
+}
+
+function describeBridgeConnectionFailure(mode: AiExecutionMode, message: string) {
+  if (!isBridgeConnectionFailureMessage(message)) return null;
+  const bridgeUrl = getBridgeUrl();
+  const label = modeLabel(mode);
+  const body = [
+    `${label} could not reach the Mind Atlas bridge server.`,
+    "",
+    `Bridge URL: ${bridgeUrl}`,
+    "",
+    "Most likely cause:",
+    "The Mind Atlas server or bridge process is not running, crashed, or is unreachable from this browser.",
+    "",
+    "What to check:",
+    "- Start or restart the Mind Atlas server/bridge, then retry.",
+    "- Open the bridge health URL in this browser: " + `${bridgeUrl}/health`,
+    "- On Android or another LAN device, confirm the PC firewall allows the bridge port.",
+    "- Confirm VITE_MIND_ATLAS_BRIDGE_URL points to this PC's reachable LAN address.",
+    "- Confirm MIND_ATLAS_ALLOWED_ORIGIN allows the Mind Atlas page origin.",
+    "",
+    "Original error:",
+    message,
+  ].join("\n");
+  return {
+    body,
+    summary: `Mind Atlas bridge is unreachable for ${label}.`,
+    nextDecision: `Restart or reconnect the Mind Atlas bridge at ${bridgeUrl}, then retry ${label}.`,
+  };
+}
+
+function isBridgeConnectionFailureMessage(message: string) {
+  const normalized = message.trim().toLowerCase();
+  return (
+    normalized === "failed to fetch" ||
+    normalized.includes("networkerror when attempting to fetch resource") ||
+    normalized.includes("load failed") ||
+    normalized.includes("network request failed")
+  );
 }
 
 function describeCodexTokenLimit(message: string, nowIso: string) {
@@ -2258,16 +2539,20 @@ function markUnreadNotification(
   nodeId: string,
   kind: NotificationPulseKind,
   title: string,
+  signature = fallbackNotificationSignature(nodeId, kind, title),
 ) {
-  return {
+  const next = {
     ...current,
     [nodeId]: {
       nodeId,
       kind,
       title,
+      signature,
       lastPulseAt: performance.now(),
     },
   };
+  persistUnreadNotifications(next);
+  return next;
 }
 
 function markUnreadNotifications(
@@ -2277,6 +2562,69 @@ function markUnreadNotifications(
   title: string,
 ) {
   return nodeIds.reduce((next, nodeId) => markUnreadNotification(next, nodeId, kind, title), current);
+}
+
+function markNodeNotificationsRead(
+  root: AtlasNode,
+  current: Record<string, UnreadNotification>,
+  nodeId: string,
+): Record<string, UnreadNotification> {
+  const node = findNode(root, nodeId);
+  const readState = loadNotificationReadState();
+  for (const source of node ? collectNodeNotificationSources(node) : []) {
+    readState[notificationReadKey(source.nodeId, source.signature)] = "read";
+  }
+  if (current[nodeId]?.signature) {
+    readState[notificationReadKey(nodeId, current[nodeId].signature)] = "read";
+  }
+  persistNotificationReadState(readState);
+  const next = { ...current };
+  delete next[nodeId];
+  persistUnreadNotifications(next);
+  return next;
+}
+
+function collectNotificationSources(root: AtlasNode): NotificationSource[] {
+  const sources: NotificationSource[] = [];
+  const visit = (node: AtlasNode) => {
+    sources.push(...collectNodeNotificationSources(node));
+    node.children.forEach(visit);
+  };
+  visit(root);
+  return sources;
+}
+
+function collectNodeNotificationSources(node: AtlasNode): NotificationSource[] {
+  const sources: NotificationSource[] = [];
+  if (node.reminderAt && node.reminderFiredAt) {
+    sources.push({
+      nodeId: node.id,
+      kind: "needs_review",
+      title: `Reminder: ${node.title || "Untitled node"}`,
+      signature: reminderNotificationSignature(node),
+    });
+  }
+  return sources;
+}
+
+function reminderNotificationSignature(node: Pick<AtlasNode, "id" | "reminderAt" | "reminderFiredAt">) {
+  return reminderNotificationSignatureFromParts(node.id, node.reminderAt, node.reminderFiredAt);
+}
+
+function reminderNotificationSignatureFromParts(nodeId: string, reminderAt?: string, reminderFiredAt?: string) {
+  return `reminder:${nodeId}:${reminderAt ?? ""}:${reminderFiredAt ?? ""}`;
+}
+
+function fallbackNotificationSignature(nodeId: string, kind: NotificationPulseKind, title: string) {
+  return `transient:${nodeId}:${kind}:${title}`;
+}
+
+function notificationReadKey(nodeId: string, signature: string) {
+  return `${nodeId}:${signature}`;
+}
+
+function isNotificationRead(readState: Record<string, string>, nodeId: string, signature: string) {
+  return readState[notificationReadKey(nodeId, signature)] === "read" || readState[nodeId] === signature;
 }
 
 function collectDueReminderNodes(root: AtlasNode, nowMs: number) {

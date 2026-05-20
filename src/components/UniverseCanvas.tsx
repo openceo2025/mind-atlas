@@ -59,8 +59,14 @@ const DRAG_BOUNDARY_TUBE_RADIUS = 0.55;
 const DRAG_BOUNDARY_INNER_TUBE_RADIUS = 0.24;
 const PINCH_WHEEL_SCALE = 3.4;
 const NOTIFICATION_PULSE_DURATION_MS = 8200;
+const NOTIFICATION_SNOOZE_OPTIONS = [
+  { label: "半日後", delayMs: 12 * 60 * 60 * 1000 },
+  { label: "1日後", delayMs: 24 * 60 * 60 * 1000 },
+  { label: "1週間後", delayMs: 7 * 24 * 60 * 60 * 1000 },
+] as const;
 
 type Vec3Tuple = [number, number, number];
+type NotificationSnoozePromptState = ReturnType<typeof useAtlasStore.getState>["notificationSnoozePrompt"];
 
 type BirthEffect = {
   id: string;
@@ -1036,6 +1042,9 @@ function formatUsageForExport(usage: NonNullable<AtlasNode["usage"]>) {
     typeof usage.inputTokens === "number" ? `inputTokens=${usage.inputTokens}` : "",
     typeof usage.outputTokens === "number" ? `outputTokens=${usage.outputTokens}` : "",
     typeof usage.totalTokens === "number" ? `totalTokens=${usage.totalTokens}` : "",
+    typeof usage.maxOutputTokens === "number" ? `maxOutputTokens=${usage.maxOutputTokens}` : "",
+    usage.finishReason ? `finishReason=${usage.finishReason}` : "",
+    usage.outputLimitHit ? "outputLimitHit=true" : "",
     typeof usage.estimatedCostUsd === "number" ? `estimatedCostUsd=${usage.estimatedCostUsd}` : "",
     typeof usage.durationMs === "number" ? `durationMs=${usage.durationMs}` : "",
   ].filter(Boolean).join(", ");
@@ -1056,6 +1065,8 @@ function NotebookNodes({
   const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
   const activeCommandMode = useAtlasStore((state) => state.activeCommandMode);
   const unreadNotifications = useAtlasStore((state) => state.unreadNotifications);
+  const notificationSnoozePrompt = useAtlasStore((state) => state.notificationSnoozePrompt);
+  const dismissNotificationSnoozePrompt = useAtlasStore((state) => state.dismissNotificationSnoozePrompt);
   const focusNonce = useAtlasStore((state) => state.focusRequest?.nonce ?? 0);
   const [focusWaveStartedAt, setFocusWaveStartedAt] = useState(() => performance.now());
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
@@ -1072,6 +1083,8 @@ function NotebookNodes({
     [selectedPath],
   );
   const notificationKindsByNodeId = useMemo(() => buildNotificationPathKinds(atlasRoot, unreadNotifications), [atlasRoot, unreadNotifications]);
+  const activeNotificationSnoozePrompt =
+    notificationSnoozePrompt && notificationSnoozePrompt.expiresAt > Date.now() ? notificationSnoozePrompt : null;
   const multiSelectedNodeIdSet = useMemo(() => new Set(multiSelectedNodeIds), [multiSelectedNodeIds]);
   const aiContextPreviewNodeIds = useMemo(() => {
     if (!commandInputEditing || activeCommandMode === "note") return new Set<string>();
@@ -1081,6 +1094,15 @@ function NotebookNodes({
   useEffect(() => {
     setFocusWaveStartedAt(performance.now());
   }, [focusNonce, selectedNodeId]);
+
+  useEffect(() => {
+    if (!notificationSnoozePrompt) return;
+    const remainingMs = Math.max(0, notificationSnoozePrompt.expiresAt - Date.now());
+    const timeout = window.setTimeout(() => {
+      dismissNotificationSnoozePrompt(notificationSnoozePrompt.nodeId);
+    }, remainingMs);
+    return () => window.clearTimeout(timeout);
+  }, [dismissNotificationSnoozePrompt, notificationSnoozePrompt]);
 
   if (!atlasRoot.children.length) {
     return <EmptyAtlasPulse theme={theme} />;
@@ -1109,6 +1131,7 @@ function NotebookNodes({
           focusWaveStartedAt={focusWaveStartedAt}
           notificationKind={notificationKindsByNodeId.get(focusParent.id) ?? null}
           notificationKindsByNodeId={notificationKindsByNodeId}
+          notificationSnoozePrompt={activeNotificationSnoozePrompt}
           theme={theme}
           onOpenNodeContextMenu={onOpenNodeContextMenu}
         />
@@ -1141,6 +1164,7 @@ function NotebookNodes({
             focusWaveStartedAt={focusWaveStartedAt}
             notificationKind={notificationKindsByNodeId.get(node.id) ?? null}
             notificationKindsByNodeId={notificationKindsByNodeId}
+            notificationSnoozePrompt={activeNotificationSnoozePrompt}
             theme={theme}
             onOpenNodeContextMenu={onOpenNodeContextMenu}
           />
@@ -1168,6 +1192,7 @@ function HierarchyNode({
   focusWaveStartedAt,
   notificationKind,
   notificationKindsByNodeId,
+  notificationSnoozePrompt,
   theme,
   onOpenNodeContextMenu,
 }: {
@@ -1188,6 +1213,7 @@ function HierarchyNode({
   focusWaveStartedAt: number;
   notificationKind: NotificationPulseKind | null;
   notificationKindsByNodeId: Map<string, NotificationPulseKind>;
+  notificationSnoozePrompt: NotificationSnoozePromptState;
   theme: AtlasTheme;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
@@ -1198,6 +1224,7 @@ function HierarchyNode({
   const addChildNode = useAtlasStore((state) => state.addChildNode);
   const updateNode = useAtlasStore((state) => state.updateNode);
   const runNodeAction = useAtlasStore((state) => state.runNodeAction);
+  const snoozeNodeNotification = useAtlasStore((state) => state.snoozeNodeNotification);
   const birthMarks = useAtlasStore((state) => state.birthMarks);
   const zoom = useAtlasStore((state) => state.viewport.zoom);
   const hiddenDragEdgeNodeId = useHiddenDragEdgeNodeId();
@@ -1242,6 +1269,7 @@ function HierarchyNode({
   const isLocalContextNode = isSelected || isMultiSelected || aiContextPreviewNodeIds.has(node.id) || isActiveAncestor || isActiveSibling || isDirectChildOfSelected;
   const labelVisible = isLocalContextNode || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
   const parentEdgeVisible = path.length > 2 && hiddenDragEdgeNodeId !== node.id;
+  const showNotificationSnoozeActions = notificationSnoozePrompt?.nodeId === node.id && notificationSnoozePrompt.expiresAt > Date.now();
   const focusWaveDepth =
     activeDescendantDistance === 1
       ? activeDescendantDistance
@@ -1627,6 +1655,27 @@ function HierarchyNode({
         </Html>
       ) : null}
 
+      {showNotificationSnoozeActions ? (
+        <Html center position={[0, 0, radius + (node.action ? 62 : 26)]} transform={false} zIndexRange={[6, 2]}>
+          <div className="node-snooze-actions" role="group" aria-label="Snooze notification">
+            {NOTIFICATION_SNOOZE_OPTIONS.map((option) => (
+              <button
+                key={option.label}
+                className="node-snooze-button"
+                type="button"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  snoozeNodeNotification(node.id, option.delayMs);
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </Html>
+      ) : null}
+
       {childrenVisible
         ? node.children.map((child) => {
             const childPath = [...path, child];
@@ -1652,6 +1701,7 @@ function HierarchyNode({
                 focusWaveStartedAt={focusWaveStartedAt}
                 notificationKind={notificationKindsByNodeId.get(child.id) ?? null}
                 notificationKindsByNodeId={notificationKindsByNodeId}
+                notificationSnoozePrompt={notificationSnoozePrompt}
                 theme={theme}
                 onOpenNodeContextMenu={onOpenNodeContextMenu}
               />

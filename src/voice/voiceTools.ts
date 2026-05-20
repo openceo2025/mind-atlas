@@ -28,6 +28,7 @@ type VoiceToolSpec = RealtimeToolDefinition & {
 const scopeValues: AiContextScope[] = ["minimal", "focused", "subtree", "neighborhood", "selected", "custom"];
 const aiModes: AiExecutionMode[] = ["openai", "local", "codex"];
 const statuses: WorkStatus[] = ["running", "needs_review", "waiting", "blocked", "error", "done"];
+const runAiPurposes = ["node_ai_run", "persistent_result", "delegate_to_node_context"] as const;
 
 const toolSpecs: VoiceToolSpec[] = [
   {
@@ -237,19 +238,60 @@ const toolSpecs: VoiceToolSpec[] = [
   {
     type: "function",
     name: "run_ai_from_active_node",
-    description: "Send a prompt to OpenAI, Local, or Codex from the active node using current Mind Atlas context settings.",
+    description:
+      "Run a separate node-anchored AI job from the active node. This creates AI request/result celestial nodes under the active node and is NOT for answering the current global conversation. Use only when the user explicitly asks to run OpenAI, Local, or Codex on a specific node, delegate work to that node context, or create a persistent node-based AI result. Do not use this tool for listing, picking up, summarizing, inspecting, searching, checking notifications, or answering from existing Mind Atlas state; use search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and answer directly instead.",
     parameters: objectSchema({
-      prompt: { type: "string" },
-      mode: { type: "string", enum: aiModes },
+      prompt: {
+        type: "string",
+        description: "Prompt for the separate node-anchored AI job. This will create notebook nodes.",
+      },
+      mode: {
+        type: "string",
+        enum: aiModes,
+        description: "Provider for the separate node-based run.",
+      },
       scope: { type: "string", enum: scopeValues },
-    }, ["prompt", "mode"]),
+      purpose: {
+        type: "string",
+        enum: runAiPurposes,
+        description:
+          "Explicit reason this must create a persistent node-based AI run instead of answering in the current global conversation.",
+      },
+      createsNotebookNodes: {
+        type: "boolean",
+        description: "Must be true to acknowledge this tool creates AI request/result notebook nodes.",
+      },
+      userRequestQuote: {
+        type: "string",
+        description: "Short quote or paraphrase showing the user explicitly asked for a node-anchored AI run.",
+      },
+    }, ["prompt", "mode", "purpose", "createsNotebookNodes", "userRequestQuote"]),
     handler: async (args) => {
+      const purpose = optionalEnumArg(args, "purpose", runAiPurposes);
+      const createsNotebookNodes = args.createsNotebookNodes === true;
+      const userRequestQuote = stringArg(args, "userRequestQuote");
+      if (!purpose || !createsNotebookNodes || !userRequestQuote) {
+        return fail(
+          [
+            "run_ai_from_active_node was not executed because it creates AI request/result notebook nodes.",
+            "Use it only when the user explicitly asks for a separate node-anchored AI run or persistent node-based AI result.",
+            "For picking up nodes, listing tasks, summarizing state, inspecting notifications, or answering the current global conversation, use search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and then answer directly in Voice log.",
+          ].join("\n"),
+        );
+      }
       const prompt = stringArg(args, "prompt");
       const mode = enumArg(args, "mode", aiModes);
       const scope = optionalEnumArg(args, "scope", scopeValues);
       const state = useAtlasStore.getState();
       await state.runAiOnSelectedNode(prompt, mode, scope ? normalizeAiContextOptions({ ...state.aiContextOptions, scope }) : state.aiContextOptions);
-      return ok(`${mode} request started from the active node.`, { mode });
+      return ok(
+        [
+          `Started a separate node-anchored ${mode} run from the active node.`,
+          "Its result will appear as notebook nodes, not as this global conversation's final answer.",
+          "Continue the global response without waiting for it unless the user explicitly asked you to monitor that node.",
+        ].join("\n"),
+        { mode, purpose, createsNotebookNodes: true, userRequestQuote },
+      );
     },
   },
   {

@@ -2,8 +2,10 @@ import { AudioLines, Bot, Code2, HardDrive, Mic, PenLine, SendHorizonal, Square 
 import { FormEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, useEffect, useMemo, useRef, useState } from "react";
 import { getCodexOptions, transcribeAudio } from "../ai/bridgeClient";
 import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceSession, type RealtimeSessionState } from "../ai/realtimeClient";
+import { runTextPartnerTurn } from "../ai/textPartnerClient";
+import { buildVoiceLogContext } from "../ai/voiceLogContext";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
-import { buildAiNodeContextWithAttachments, findNode, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
+import { buildAiNodeContextWithAttachments, findNode, findNodePath, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
 import type { AiAttachmentMode, AiContextScope, AiExecutionMode, CodexOptionsResult, CodexReasoningEffort, CodexSandboxMode } from "../types";
 
 type CommandMode = AiExecutionMode | "note";
@@ -43,6 +45,7 @@ export function CommandDock() {
   const setCommandInputEditing = useAtlasStore((state) => state.setCommandInputEditing);
   const setActiveCommandMode = useAtlasStore((state) => state.setActiveCommandMode);
   const appendVoiceLogEntry = useAtlasStore((state) => state.appendVoiceLogEntry);
+  const voiceLogEntries = useAtlasStore((state) => state.voiceLogEntries);
   const voiceSessionSummary = useAtlasStore((state) => state.voiceSessionSummary);
   const setVoiceSessionSummary = useAtlasStore((state) => state.setVoiceSessionSummary);
   const voicePartnerSettings = useAtlasStore((state) => state.voicePartnerSettings);
@@ -139,6 +142,10 @@ export function CommandDock() {
       addQuickChildFromInput(trimmed);
       return;
     }
+    if ((mode === "openai" || mode === "local") && isGlobalTextPartnerSurface(atlasRoot, selectedNodeId)) {
+      void runTextPartnerTurn(trimmed, mode, contextOptionsForRun);
+      return;
+    }
     void runAiOnSelectedNode(trimmed, mode, contextOptionsForRun);
   };
 
@@ -155,6 +162,7 @@ export function CommandDock() {
         model: voicePartnerSettings.realtimeModel,
         voice: voicePartnerSettings.realtimeVoice,
         summary: voiceSessionSummary,
+        voiceLogContext: buildVoiceLogContext(voiceLogEntries, voiceSessionSummary),
         onStateChange: (state) => {
           setVoiceState(state);
           setVoiceButtonState((current) => {
@@ -864,6 +872,12 @@ function stopRecorder(recorder: MediaRecorder, chunks: Blob[]) {
       resolve(new Blob(finalChunks, { type: mimeType }));
     }
   });
+}
+
+function isGlobalTextPartnerSurface(atlasRoot: ReturnType<typeof useAtlasStore.getState>["atlasRoot"], selectedNodeId: string) {
+  const path = findNodePath(atlasRoot, selectedNodeId);
+  if (!path) return false;
+  return path.length <= 2;
 }
 
 function voiceStatusLabel(state: VoiceButtonState) {

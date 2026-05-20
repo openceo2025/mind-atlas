@@ -7,10 +7,10 @@ import { CommandDock } from "./components/CommandDock";
 import { Minimap } from "./components/Minimap";
 import { UniverseCanvas } from "./components/UniverseCanvas";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
-import { createNotebookPackage, importNotebookPackage } from "./notebookPackage";
+import { createNotebookJsonPackage, createNotebookPackage, importNotebookPackage, type NotebookPackageResult } from "./notebookPackage";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
-import type { AtlasNode, CloudNotebookEntry, NotificationPulse, VoicePartnerSettings } from "./types";
+import type { AtlasNode, CloudNotebookEntry, NotificationPulse, VoiceLogEntry, VoicePartnerSettings } from "./types";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 
@@ -18,6 +18,7 @@ export default function App() {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const focusNode = useAtlasStore((state) => state.focusNode);
+  const showNotificationSnoozePrompt = useAtlasStore((state) => state.showNotificationSnoozePrompt);
   const updateNode = useAtlasStore((state) => state.updateNode);
   const exportNotebook = useAtlasStore((state) => state.exportNotebook);
   const importNotebook = useAtlasStore((state) => state.importNotebook);
@@ -27,10 +28,12 @@ export default function App() {
   const canUndo = useAtlasStore((state) => state.historyPast.length > 0);
   const canRedo = useAtlasStore((state) => state.historyFuture.length > 0);
   const voiceLogEntries = useAtlasStore((state) => state.voiceLogEntries);
+  const voiceLogLastSeenAt = useAtlasStore((state) => state.voiceLogLastSeenAt);
   const voiceSessionSummary = useAtlasStore((state) => state.voiceSessionSummary);
   const voicePartnerSettings = useAtlasStore((state) => state.voicePartnerSettings);
   const setVoicePartnerSettings = useAtlasStore((state) => state.setVoicePartnerSettings);
   const clearVoiceLog = useAtlasStore((state) => state.clearVoiceLog);
+  const markVoiceLogSeen = useAtlasStore((state) => state.markVoiceLogSeen);
   const notificationPulses = useAtlasStore((state) => state.notificationPulses);
   const unreadNotifications = useAtlasStore((state) => state.unreadNotifications);
   const restoreAttachmentPreviews = useAtlasStore((state) => state.restoreAttachmentPreviews);
@@ -60,10 +63,14 @@ export default function App() {
           return node ? { notification, node } : null;
         })
         .filter((item): item is NonNullable<typeof item> => Boolean(item))
-        .sort((a, b) => b.notification.lastPulseAt - a.notification.lastPulseAt)
         .slice(0, 8),
     [atlasRoot, unreadNotifications],
   );
+  const unreadTextPartnerEntries = useMemo(
+    () => voiceLogEntries.filter((entry) => isUnreadTextPartnerEntry(entry, voiceLogLastSeenAt)),
+    [voiceLogEntries, voiceLogLastSeenAt],
+  );
+  const latestTextPartnerEntry = unreadTextPartnerEntries.at(-1);
 
   useVisualViewportHeight(commandInputEditing);
 
@@ -78,6 +85,11 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    if (!voiceLogOpen) return;
+    markVoiceLogSeen();
+  }, [voiceLogOpen, voiceLogEntries.length, markVoiceLogSeen]);
+
+  useEffect(() => {
     setFullscreenSupported(Boolean(document.documentElement.requestFullscreen));
   }, []);
 
@@ -90,19 +102,28 @@ export default function App() {
   }, [restoreAttachmentPreviews]);
 
   const handleExportLight = () => {
-    const blob = new Blob([exportNotebook()], { type: "application/mindatlas+json" });
-    downloadBlob(blob, `${datasetFileName(atlasRoot.title)}.mindatlas`);
-    setMenuOpen(false);
+    try {
+      const blob = new Blob([exportNotebook()], { type: "application/mindatlas+json" });
+      downloadBlob(blob, `${datasetFileName(atlasRoot.title)}.mindatlas`);
+      setMenuOpen(false);
+    } catch (error) {
+      const message = exportErrorMessage("Light export failed.", error);
+      console.error(message, error);
+      window.alert(message);
+    }
   };
 
   const handleExportPackage = async () => {
-    const result = await createNotebookPackage(atlasRoot, attachmentPreviewUrls);
-    downloadBlob(result.blob, `${datasetFileName(atlasRoot.title)}.mindatlaspkg`);
-    if (result.missingCount > 0) {
-      window.alert(
-        `${result.missingCount} attachment(s) could not be included because this browser session only has metadata for them.`,
-      );
+    let result: NotebookPackageResult;
+    try {
+      result = await createNotebookPackage(atlasRoot, attachmentPreviewUrls);
+    } catch (error) {
+      const fallback = confirmJsonOnlyPackageFallback(atlasRoot, "Package export failed.", error);
+      if (!fallback) return;
+      result = fallback;
     }
+    downloadBlob(result.blob, `${datasetFileName(atlasRoot.title)}.mindatlaspkg`);
+    showPackageResultNotice(result);
     setMenuOpen(false);
   };
 
@@ -110,18 +131,25 @@ export default function App() {
     try {
       setCloudError("");
       setCloudStatus("Saving to cloud...");
-      const result = await createNotebookPackage(atlasRoot, attachmentPreviewUrls);
-      const saved = await saveCloudNotebookPackage(result.blob, `${datasetFileName(atlasRoot.title)}.mindatlaspkg`);
-      setCloudStatus(`Saved: ${saved.name}`);
-      window.alert(`クラウドへの保存が完了しました。\n\n保存ファイル: ${saved.name}`);
-      if (result.missingCount > 0) {
-        window.alert(
-          `${result.missingCount} attachment(s) could not be included because this browser session only has metadata for them.`,
-        );
+      let result: NotebookPackageResult;
+      try {
+        result = await createNotebookPackage(atlasRoot, attachmentPreviewUrls);
+      } catch (packageError) {
+        const fallback = confirmJsonOnlyPackageFallback(atlasRoot, "Cloud save package creation failed.", packageError);
+        if (!fallback) {
+          setCloudError(exportErrorMessage("Cloud save failed before upload completed.", packageError));
+          setCloudStatus("");
+          return;
+        }
+        result = fallback;
       }
+      const saved = await saveCloudNotebookPackage(result.blob, `${datasetFileName(atlasRoot.title)}.mindatlaspkg`);
+      setCloudStatus(`Saved: ${saved.name}${result.packageKind === "json" ? " (JSON-only)" : ""}`);
+      window.alert(`クラウドへの保存が完了しました。\n\n保存ファイル: ${saved.name}`);
+      showPackageResultNotice(result);
       setMenuOpen(false);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Cloud save failed.";
+      const message = exportErrorMessage("Cloud save failed.", error);
       setCloudError(message);
       setCloudStatus("");
       window.alert(message);
@@ -214,12 +242,18 @@ export default function App() {
 
   const handleOpenVoiceLog = () => {
     setVoiceLogOpen(true);
+    markVoiceLogSeen();
     setMenuOpen(false);
   };
 
   const handleOpenVoiceSettings = () => {
     setVoiceSettingsOpen(true);
     setMenuOpen(false);
+  };
+
+  const handleFocusNotification = (id: string) => {
+    focusNode(id);
+    showNotificationSnoozePrompt(id);
   };
 
   const handleRestartRealtime = () => {
@@ -272,7 +306,13 @@ export default function App() {
         <div className="top-title-stack">
           <AtlasBreadcrumb path={selectedPath} onFocus={focusNode} />
           <DatasetTitleInput title={atlasRoot.title} onChange={(title) => updateNode(atlasRoot.id, { title })} />
-          <UnreadNotificationLinks items={unreadNotificationLinks} onFocus={focusNode} />
+          <UnreadNotificationLinks
+            items={unreadNotificationLinks}
+            voiceLogEntry={latestTextPartnerEntry}
+            voiceLogUnreadCount={unreadTextPartnerEntries.length}
+            onFocus={handleFocusNotification}
+            onOpenVoiceLog={handleOpenVoiceLog}
+          />
         </div>
       </header>
 
@@ -315,7 +355,7 @@ export default function App() {
               <MessageSquareText size={15} />
               <span>
                 Voice log
-                <small>{voiceLogEntries.length} entries</small>
+                <small>{voiceLogUnreadLabel(unreadTextPartnerEntries.length, voiceLogEntries.length)}</small>
               </span>
             </button>
             <button type="button" onClick={handleRestartRealtime}>
@@ -602,6 +642,8 @@ function VoiceLogDialog({
   onClose: () => void;
   onClear: () => void;
 }) {
+  const displayedEntries = [...entries].reverse();
+
   const handleClear = () => {
     const confirmed = window.confirm("Clear the local Voice Partner log?");
     if (!confirmed) return;
@@ -633,8 +675,8 @@ function VoiceLogDialog({
           </article>
         ) : null}
         <div className="voice-log-list">
-          {entries.length ? (
-            entries.map((entry) => (
+          {displayedEntries.length ? (
+            displayedEntries.map((entry) => (
               <article key={entry.id} className={`voice-log-entry is-${entry.role}`}>
                 <header>
                   <strong>{entry.title || voiceRoleLabel(entry.role)}</strong>
@@ -1031,7 +1073,10 @@ function AtlasBreadcrumb({ path, onFocus }: { path: AtlasNode[]; onFocus: (id: s
 
 function UnreadNotificationLinks({
   items,
+  voiceLogEntry,
+  voiceLogUnreadCount,
   onFocus,
+  onOpenVoiceLog,
 }: {
   items: Array<{
     notification: {
@@ -1041,12 +1086,26 @@ function UnreadNotificationLinks({
     };
     node: AtlasNode;
   }>;
+  voiceLogEntry?: VoiceLogEntry;
+  voiceLogUnreadCount: number;
   onFocus: (id: string) => void;
+  onOpenVoiceLog: () => void;
 }) {
-  if (!items.length) return null;
+  if (!items.length && !voiceLogEntry) return null;
 
   return (
-    <nav className="unread-notification-links" aria-label="Unread notification nodes">
+    <nav className="unread-notification-links" aria-label="Unread notifications">
+      {voiceLogEntry ? (
+        <button
+          className={`unread-notification-link is-voice-log ${voiceLogEntry.role === "error" ? "is-error" : ""}`}
+          type="button"
+          onClick={onOpenVoiceLog}
+          title={voiceLogEntry.title || "Text Partner reply"}
+        >
+          <MessageSquareText size={12} />
+          <span>{voiceLogUnreadCount > 1 ? `${voiceLogUnreadCount} text replies` : shortNotificationTitle(voiceLogEntry.title || "Text reply")}</span>
+        </button>
+      ) : null}
       {items.map(({ notification, node }) => (
         <button
           key={notification.nodeId}
@@ -1061,6 +1120,20 @@ function UnreadNotificationLinks({
       ))}
     </nav>
   );
+}
+
+function isUnreadTextPartnerEntry(entry: VoiceLogEntry, lastSeenAt: string) {
+  if (entry.role !== "assistant" && entry.role !== "error") return false;
+  if (!entry.sessionId?.startsWith("text-partner-")) return false;
+  const entryTime = new Date(entry.createdAt).getTime();
+  const seenTime = new Date(lastSeenAt).getTime();
+  if (!Number.isFinite(entryTime)) return false;
+  return !Number.isFinite(seenTime) || entryTime > seenTime;
+}
+
+function voiceLogUnreadLabel(unreadCount: number, totalCount: number) {
+  if (unreadCount > 0) return `${unreadCount} unread / ${totalCount} entries`;
+  return `${totalCount} entries`;
 }
 
 function compactBreadcrumb(path: AtlasNode[]) {
@@ -1104,4 +1177,33 @@ function downloadBlob(blob: Blob, fileName: string) {
   anchor.download = fileName;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function exportErrorMessage(prefix: string, error: unknown) {
+  const detail = error instanceof Error ? error.message : String(error);
+  return `${prefix}\n\n${detail}`;
+}
+
+function confirmJsonOnlyPackageFallback(atlasRoot: AtlasNode, prefix: string, error: unknown) {
+  const message = [
+    exportErrorMessage(prefix, error),
+    "",
+    "A JSON-only Mind Atlas package can still preserve the notebook text and structure.",
+    "Attachment files will not be embedded in that fallback package.",
+    "",
+    "Create the JSON-only package instead?",
+  ].join("\n");
+  if (!window.confirm(message)) return null;
+  return createNotebookJsonPackage(atlasRoot);
+}
+
+function showPackageResultNotice(result: NotebookPackageResult) {
+  const messages: string[] = [];
+  if (result.packageKind === "json") {
+    messages.push("Created a JSON-only Mind Atlas package. Notebook text is preserved, but attachment files are not embedded.");
+  }
+  if (result.missingCount > 0) {
+    messages.push(`${result.missingCount} attachment(s) could not be included because this browser session only has metadata for them.`);
+  }
+  if (messages.length) window.alert(messages.join("\n\n"));
 }
