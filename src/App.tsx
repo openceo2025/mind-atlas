@@ -8,11 +8,13 @@ import { Minimap } from "./components/Minimap";
 import { UniverseCanvas } from "./components/UniverseCanvas";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
 import { createNotebookJsonPackage, createNotebookPackage, importNotebookPackage, type NotebookPackageResult } from "./notebookPackage";
+import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import type { AtlasNode, CloudNotebookEntry, NotificationPulse, VoiceLogEntry, VoicePartnerSettings } from "./types";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
+const WORKSPACE_PANEL_EXIT_MS = 960;
 
 export default function App() {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -54,7 +56,17 @@ export default function App() {
   const [mobilePanelTab, setMobilePanelTab] = useState<"command" | "editor">("command");
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
+  const onboarding = useOnboarding();
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
+  const effectiveMobilePanelTab = onboarding.showAiFeatures ? mobilePanelTab : "editor";
+  const showWorkspacePanel = onboarding.showAiFeatures || selectedNodeId !== atlasRoot.id;
+  const [renderWorkspacePanel, setRenderWorkspacePanel] = useState(showWorkspacePanel);
+  const appClassName = [
+    "app-shell",
+    onboarding.showLogoOnly ? "is-onboarding-logo-only" : "",
+    !onboarding.showMainChrome ? "is-onboarding-main-hidden" : "",
+    onboarding.showAiFeatures ? "is-ai-unlocked" : "is-ai-locked",
+  ].filter(Boolean).join(" ");
   const unreadNotificationLinks = useMemo(
     () =>
       Object.values(unreadNotifications)
@@ -88,6 +100,47 @@ export default function App() {
     if (!voiceLogOpen) return;
     markVoiceLogSeen();
   }, [voiceLogOpen, voiceLogEntries.length, markVoiceLogSeen]);
+
+  useEffect(() => {
+    if (onboarding.showAiFeatures || mobilePanelTab !== "command") return;
+    setMobilePanelTab("editor");
+  }, [mobilePanelTab, onboarding.showAiFeatures]);
+
+  useEffect(() => {
+    if (showWorkspacePanel) {
+      setRenderWorkspacePanel(true);
+      return;
+    }
+    const timeout = window.setTimeout(() => setRenderWorkspacePanel(false), WORKSPACE_PANEL_EXIT_MS);
+    return () => window.clearTimeout(timeout);
+  }, [showWorkspacePanel]);
+
+  useEffect(() => {
+    if (onboarding.showMainChrome) return;
+    setMenuOpen(false);
+  }, [onboarding.showMainChrome]);
+
+  useEffect(() => {
+    if (onboarding.showAiFeatures) return;
+    setVoiceLogOpen(false);
+    setVoiceSettingsOpen(false);
+    setCloudLoadOpen(false);
+  }, [onboarding.showAiFeatures]);
+
+  useEffect(() => {
+    if (!onboarding.shouldApplyUniverseTitlePrompt) return;
+    if (atlasRoot.title === "Mind Atlas") {
+      updateNode(atlasRoot.id, { title: onboarding.titlePrompt });
+    }
+    onboarding.markUniverseTitlePromptApplied();
+  }, [
+    atlasRoot.id,
+    atlasRoot.title,
+    onboarding.markUniverseTitlePromptApplied,
+    onboarding.shouldApplyUniverseTitlePrompt,
+    onboarding.titlePrompt,
+    updateNode,
+  ]);
 
   useEffect(() => {
     setFullscreenSupported(Boolean(document.documentElement.requestFullscreen));
@@ -240,6 +293,32 @@ export default function App() {
     setMenuOpen(false);
   };
 
+  useEffect(() => {
+    const handleHistoryShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.metaKey || event.shiftKey || !event.ctrlKey) return;
+      if (isEditableShortcutTarget(event.target)) return;
+
+      const key = event.key.toLowerCase();
+      if (key === "z") {
+        if (!canUndo) return;
+        event.preventDefault();
+        undo();
+        setMenuOpen(false);
+        return;
+      }
+
+      if (key === "y") {
+        if (!canRedo) return;
+        event.preventDefault();
+        redo();
+        setMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleHistoryShortcut);
+    return () => window.removeEventListener("keydown", handleHistoryShortcut);
+  }, [canRedo, canUndo, redo, undo]);
+
   const handleOpenVoiceLog = () => {
     setVoiceLogOpen(true);
     markVoiceLogSeen();
@@ -299,23 +378,34 @@ export default function App() {
   };
 
   return (
-    <main className="app-shell" data-theme={theme}>
+    <main className={appClassName} data-theme={theme}>
       <UniverseCanvas theme={theme} />
+      {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
+      {onboarding.message ? (
+        <div className="onboarding-message" role="status" aria-live="polite">
+          {onboarding.message}
+        </div>
+      ) : null}
 
       <header className="top-bar" aria-label="Mind Atlas status">
         <div className="top-title-stack">
-          <AtlasBreadcrumb path={selectedPath} onFocus={focusNode} />
-          <DatasetTitleInput title={atlasRoot.title} onChange={(title) => updateNode(atlasRoot.id, { title })} />
-          <UnreadNotificationLinks
-            items={unreadNotificationLinks}
-            voiceLogEntry={latestTextPartnerEntry}
-            voiceLogUnreadCount={unreadTextPartnerEntries.length}
-            onFocus={handleFocusNotification}
-            onOpenVoiceLog={handleOpenVoiceLog}
-          />
+          <AtlasBreadcrumb path={onboarding.showLogoOnly ? [atlasRoot] : selectedPath} onFocus={focusNode} />
+          {onboarding.showMainChrome ? (
+            <>
+              <DatasetTitleInput title={atlasRoot.title} onChange={(title) => updateNode(atlasRoot.id, { title })} />
+              <UnreadNotificationLinks
+                items={unreadNotificationLinks}
+                voiceLogEntry={latestTextPartnerEntry}
+                voiceLogUnreadCount={unreadTextPartnerEntries.length}
+                onFocus={handleFocusNotification}
+                onOpenVoiceLog={handleOpenVoiceLog}
+              />
+            </>
+          ) : null}
         </div>
       </header>
 
+      {onboarding.showMainChrome ? (
       <div className="global-menu" aria-label="Atlas actions">
         <button className="icon-button" type="button" onClick={() => setMenuOpen((open) => !open)} aria-label="Open atlas menu">
           <MoreHorizontal size={19} />
@@ -344,34 +434,38 @@ export default function App() {
               </div>
             </div>
             <div className="undo-redo-row" aria-label="History actions">
-              <button type="button" onClick={handleUndo} disabled={!canUndo}>
+              <button type="button" onClick={handleUndo} disabled={!canUndo} aria-keyshortcuts="Control+Z" title="Undo (Ctrl+Z)">
                 <Undo2 size={15} /> Undo
               </button>
-            <button type="button" onClick={handleRedo} disabled={!canRedo}>
+              <button type="button" onClick={handleRedo} disabled={!canRedo} aria-keyshortcuts="Control+Y" title="Redo (Ctrl+Y)">
                 <Redo2 size={15} /> Redo
               </button>
             </div>
-            <button type="button" onClick={handleOpenVoiceLog}>
-              <MessageSquareText size={15} />
-              <span>
-                Voice log
-                <small>{voiceLogUnreadLabel(unreadTextPartnerEntries.length, voiceLogEntries.length)}</small>
-              </span>
-            </button>
-            <button type="button" onClick={handleRestartRealtime}>
-              <Radio size={15} />
-              <span>
-                Restart Realtime
-                <small>reset voice context</small>
-              </span>
-            </button>
-            <button type="button" onClick={handleOpenVoiceSettings}>
-              <Settings2 size={15} />
-              <span>
-                Voice settings
-                <small>{voicePartnerSettings.realtimeVoice} / {voicePartnerSettings.realtimeModel}</small>
-              </span>
-            </button>
+            {onboarding.showAiFeatures ? (
+              <>
+                <button type="button" onClick={handleOpenVoiceLog}>
+                  <MessageSquareText size={15} />
+                  <span>
+                    Voice log
+                    <small>{voiceLogUnreadLabel(unreadTextPartnerEntries.length, voiceLogEntries.length)}</small>
+                  </span>
+                </button>
+                <button type="button" onClick={handleRestartRealtime}>
+                  <Radio size={15} />
+                  <span>
+                    Restart Realtime
+                    <small>reset voice context</small>
+                  </span>
+                </button>
+                <button type="button" onClick={handleOpenVoiceSettings}>
+                  <Settings2 size={15} />
+                  <span>
+                    Voice settings
+                    <small>{voicePartnerSettings.realtimeVoice} / {voicePartnerSettings.realtimeModel}</small>
+                  </span>
+                </button>
+              </>
+            ) : null}
             <button type="button" onClick={handleToggleMobileNotifications}>
               {mobileNotificationsEnabled ? <Bell size={15} /> : <BellOff size={15} />}
               <span>
@@ -400,20 +494,24 @@ export default function App() {
                 <small>.mindatlaspkg / includes images and video</small>
               </span>
             </button>
-            <button type="button" onClick={handleSaveToCloud}>
-              <CloudUpload size={15} />
-              <span>
-                クラウドへ保存
-                <small>{cloudStatus || ".mindatlaspkg / server folder"}</small>
-              </span>
-            </button>
-            <button type="button" onClick={handleOpenCloudLoad}>
-              <CloudDownload size={15} />
-              <span>
-                クラウドから読み込み
-                <small>{cloudError || "choose a server package"}</small>
-              </span>
-            </button>
+            {onboarding.showAiFeatures ? (
+              <>
+                <button type="button" onClick={handleSaveToCloud}>
+                  <CloudUpload size={15} />
+                  <span>
+                    クラウドへ保存
+                    <small>{cloudStatus || ".mindatlaspkg / server folder"}</small>
+                  </span>
+                </button>
+                <button type="button" onClick={handleOpenCloudLoad}>
+                  <CloudDownload size={15} />
+                  <span>
+                    クラウドから読み込み
+                    <small>{cloudError || "choose a server package"}</small>
+                  </span>
+                </button>
+              </>
+            ) : null}
             <label>
               <Upload size={15} /> Import
               <input type="file" accept=".mindatlas,.mindatlaspkg,application/mindatlas+json,application/x-mindatlas-package" onChange={handleImport} />
@@ -424,39 +522,50 @@ export default function App() {
           </div>
         ) : null}
       </div>
+      ) : null}
 
-      <Minimap />
-      <section className="mobile-workspace-panel" data-active-tab={mobilePanelTab} aria-label="Mobile workspace">
-        <div className="mobile-workspace-tabs" role="tablist" aria-label="Workspace panel">
-          <button
-            className={mobilePanelTab === "command" ? "is-active" : ""}
-            type="button"
-            role="tab"
-            aria-selected={mobilePanelTab === "command"}
-            onClick={() => setMobilePanelTab("command")}
-          >
-            <MessageSquareText size={15} />
-            <span>Command</span>
-          </button>
-          <button
-            className={mobilePanelTab === "editor" ? "is-active" : ""}
-            type="button"
-            role="tab"
-            aria-selected={mobilePanelTab === "editor"}
-            onClick={() => setMobilePanelTab("editor")}
-          >
-            <PenLine size={15} />
-            <span>Editor</span>
-          </button>
-        </div>
-        <div className="mobile-panel-slot mobile-command-slot" role="tabpanel" aria-hidden={mobilePanelTab !== "command"}>
-          <CommandDock />
-        </div>
-        <div className="mobile-panel-slot mobile-editor-slot" role="tabpanel" aria-hidden={mobilePanelTab !== "editor"}>
-          <FocusPanel theme={theme} />
-        </div>
-      </section>
-      {voiceLogOpen ? (
+      {onboarding.showMainChrome ? <Minimap /> : null}
+      {renderWorkspacePanel ? (
+        <section
+          className={`mobile-workspace-panel ${showWorkspacePanel ? "is-open" : "is-closing"}`}
+          data-active-tab={effectiveMobilePanelTab}
+          aria-label="Mobile workspace"
+        >
+          <div className="mobile-workspace-tabs" role="tablist" aria-label="Workspace panel">
+            {onboarding.showAiFeatures ? (
+              <button
+                className={effectiveMobilePanelTab === "command" ? "is-active" : ""}
+                type="button"
+                role="tab"
+                aria-selected={effectiveMobilePanelTab === "command"}
+                onClick={() => setMobilePanelTab("command")}
+              >
+                <MessageSquareText size={15} />
+                <span>Command</span>
+              </button>
+            ) : null}
+            <button
+              className={effectiveMobilePanelTab === "editor" ? "is-active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={effectiveMobilePanelTab === "editor"}
+              onClick={() => setMobilePanelTab("editor")}
+            >
+              <PenLine size={15} />
+              <span>Editor</span>
+            </button>
+          </div>
+          {onboarding.showAiFeatures ? (
+            <div className="mobile-panel-slot mobile-command-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "command"}>
+              <CommandDock />
+            </div>
+          ) : null}
+          <div className="mobile-panel-slot mobile-editor-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "editor"}>
+            <FocusPanel theme={theme} />
+          </div>
+        </section>
+      ) : null}
+      {onboarding.showAiFeatures && voiceLogOpen ? (
         <VoiceLogDialog
           entries={voiceLogEntries}
           summary={voiceSessionSummary}
@@ -464,7 +573,7 @@ export default function App() {
           onClear={clearVoiceLog}
         />
       ) : null}
-      {voiceSettingsOpen ? (
+      {onboarding.showAiFeatures && voiceSettingsOpen ? (
         <VoiceSettingsDialog
           settings={voicePartnerSettings}
           onClose={() => setVoiceSettingsOpen(false)}
@@ -472,7 +581,7 @@ export default function App() {
           onRestart={handleRestartRealtime}
         />
       ) : null}
-      {cloudLoadOpen ? (
+      {onboarding.showAiFeatures && cloudLoadOpen ? (
         <CloudLoadDialog
           notebooks={cloudNotebooks}
           directory={cloudDirectory}
@@ -1021,6 +1130,11 @@ type NavigatorWithVirtualKeyboard = Navigator & {
   };
 };
 
+function isEditableShortcutTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+}
+
 function DatasetTitleInput({ title, onChange }: { title: string; onChange: (title: string) => void }) {
   const storedTitle = title && title !== "Mind Atlas" ? title : "";
   const [draftTitle, setDraftTitle] = useState(storedTitle);
@@ -1050,10 +1164,14 @@ function DatasetTitleInput({ title, onChange }: { title: string; onChange: (titl
 
 function AtlasBreadcrumb({ path, onFocus }: { path: AtlasNode[]; onFocus: (id: string) => void }) {
   const crumbs = compactBreadcrumb(path);
+  const handleLogoClick = () => {
+    emitOnboardingEvent("home-logo-clicked");
+    onFocus(path[0].id);
+  };
 
   return (
     <nav className="atlas-breadcrumb" aria-label="Atlas path">
-      <button className="atlas-logo-crumb" type="button" onClick={() => onFocus(path[0].id)}>
+      <button className="atlas-logo-crumb" type="button" onClick={handleLogoClick}>
         MindAtlas
       </button>
       {crumbs.map((crumb, index) =>

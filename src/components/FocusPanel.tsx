@@ -198,8 +198,8 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
 
   return (
     <>
-      <aside className="focus-panel" aria-label="Focused context">
-      <div className="panel-toolbar">
+      <aside className={`focus-panel ${isRoot ? "is-hidden" : "is-active"}`} aria-label="Focused context" aria-hidden={isRoot}>
+        <div className="panel-toolbar">
         <label className="icon-button file-button panel-tool-button" aria-label="Attach file">
           <Plus size={18} />
           <input type="file" multiple onChange={handleAttachmentChange} />

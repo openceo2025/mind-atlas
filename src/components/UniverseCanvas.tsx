@@ -31,6 +31,7 @@ import {
 } from "../store/atlasStore";
 import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { createNodeClipboardText, nodeTreeHasAttachments, parseNodeClipboardText } from "../nodeClipboard";
+import { emitOnboardingEvent, getOnboardingCurrentSpaceStep } from "../onboarding/useOnboarding";
 import type { AtlasTheme } from "../theme";
 import type { AtlasNode, NotificationPulseKind } from "../types";
 import { getStatusColor } from "../utils/status";
@@ -378,6 +379,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
   const wheelZoomOutRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelZoomInRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelSuppressUntilRef = useRef(0);
+  const onboardingFastFocusSuppressUntilRef = useRef(0);
   const backgroundClickRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const pinchRef = useRef<{ distance: number; center: { x: number; y: number } } | null>(null);
   const transitionRef = useRef<{
@@ -493,6 +495,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
       if (heldFor >= HOLD_TO_BIRTH_MS) {
         drag.created = true;
         addRootNodeAt(drag.direction);
+        emitOnboardingEvent("root-node-created");
         setBirthEffect({
           id: `burst-${performance.now()}`,
           direction: drag.direction,
@@ -542,6 +545,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     transitionRef.current = null;
 
     if (canBirth) {
+      emitOnboardingEvent("root-birth-start");
       setBirthEffect({
         id: `charge-${performance.now()}`,
         direction,
@@ -581,6 +585,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
 
   const applyPanDelta = (deltaX: number, deltaY: number) => {
     if (Math.abs(deltaX) < 0.01 && Math.abs(deltaY) < 0.01) return;
+    if (Math.hypot(deltaX, deltaY) > 4) emitOnboardingEvent("pan");
     const state = yawPitchRef.current;
     const rotationGain = getRotationGain(state.offset);
     state.yaw -= deltaX * rotationGain;
@@ -612,6 +617,14 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
   const handleWheelDelta = (deltaY: number) => {
     const now = performance.now();
     if (now < wheelSuppressUntilRef.current) return;
+    const onboardingSpaceStep = getOnboardingCurrentSpaceStep();
+    const suppressOnboardingFastFocus =
+      (onboardingSpaceStep !== null && onboardingSpaceStep !== "fastZoomOut" && onboardingSpaceStep !== "fastZoomIn") ||
+      now < onboardingFastFocusSuppressUntilRef.current;
+    if (onboardingSpaceStep === "zoom") {
+      onboardingFastFocusSuppressUntilRef.current = now + 1800;
+    }
+    if (Math.abs(deltaY) > 0.5) emitOnboardingEvent("zoom");
 
     const state = yawPitchRef.current;
     state.offset = clamp(state.offset - deltaY * 0.35, MIN_CAMERA_OFFSET, MAX_CAMERA_OFFSET);
@@ -622,6 +635,13 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     const zoomOutState = wheelZoomOutRef.current;
     const zoomInState = wheelZoomInRef.current;
     const suppressActiveSwitch = isAutoFocusSuppressed();
+    if (suppressOnboardingFastFocus) {
+      zoomOutState.amount = 0;
+      zoomOutState.startedAt = 0;
+      zoomInState.amount = 0;
+      zoomInState.startedAt = 0;
+      return;
+    }
     if (deltaY <= 0) {
       zoomOutState.amount = 0;
       zoomOutState.startedAt = 0;
@@ -642,6 +662,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
         zoomOutState.startedAt = 0;
         zoomOutState.lastFiredAt = now;
         wheelSuppressUntilRef.current = now + 900;
+        emitOnboardingEvent("fast-zoom-out");
         const atlasState = useAtlasStore.getState();
         if (suppressActiveSwitch) {
           atlasState.focusParentLayerCameraOnly();
@@ -677,6 +698,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
         zoomInState.startedAt = 0;
         zoomInState.lastFiredAt = now;
         wheelSuppressUntilRef.current = now + 900;
+        emitOnboardingEvent("fast-zoom-in");
         if (suppressActiveSwitch) {
           atlasState.focusSingleChildCameraOnly();
         } else if (targetChildId) {
@@ -1285,6 +1307,7 @@ function HierarchyNode({
     startScreen: { x: number; y: number };
     lastScreen: { x: number; y: number };
     lastAt: number;
+    startedAt: number;
     startWorld: Vec3Tuple;
     currentWorld: Vec3Tuple;
     parentWorld?: Vec3Tuple;
@@ -1302,6 +1325,8 @@ function HierarchyNode({
     handoffLayerRadius?: number;
     handoffChildWorld?: Vec3Tuple;
     hasMoved: boolean;
+    onboardingNodeDragEmitted?: boolean;
+    suppressChildCreationForDrag: boolean;
     torn: boolean;
     shiftKey: boolean;
   } | null>(null);
@@ -1366,6 +1391,7 @@ function HierarchyNode({
     });
 
     if (childId) {
+      emitOnboardingEvent("child-node-created", { childDepth: depth + 1 });
       drag.handoffChildId = childId;
       drag.handoffLayerRadius = getShellRadius(depth + 1);
       drag.handoffChildWorld = childWorld;
@@ -1397,6 +1423,7 @@ function HierarchyNode({
       startScreen: { x: event.clientX, y: event.clientY },
       lastScreen: { x: event.clientX, y: event.clientY },
       lastAt: performance.now(),
+      startedAt: performance.now(),
       startWorld: worldPosition,
       currentWorld: worldPosition,
       parentWorld: path.length > 2 ? getNodeWorldPosition(path.slice(0, -1)) : undefined,
@@ -1406,6 +1433,7 @@ function HierarchyNode({
       canCreateChild: true,
       samples: [{ t: performance.now(), x: event.clientX, y: event.clientY }],
       hasMoved: false,
+      suppressChildCreationForDrag: getOnboardingCurrentSpaceStep() === "nodeDrag",
       torn: false,
       shiftKey: event.nativeEvent.shiftKey,
     };
@@ -1439,6 +1467,10 @@ function HierarchyNode({
     const pointerWorld = intersectRaySphere(event.ray, drag.layerRadius);
     const now = performance.now();
     const screenDistance = Math.hypot(event.clientX - drag.startScreen.x, event.clientY - drag.startScreen.y);
+    if (!drag.onboardingNodeDragEmitted && drag.hasMoved && now - drag.startedAt >= 1000) {
+      drag.onboardingNodeDragEmitted = true;
+      emitOnboardingEvent("node-drag");
+    }
 
     if (drag.stage === "armed") {
       const freezeWorld = drag.freezeWorld ?? drag.startWorld;
@@ -1509,8 +1541,16 @@ function HierarchyNode({
       const clampedPointerWorld = clampWorldForDepth(pointerWorld, depth, drag.parentWorld, drag.siblingCount);
       drag.currentWorld = clampedPointerWorld;
       drag.hasMoved = true;
+      if (!drag.onboardingNodeDragEmitted && now - drag.startedAt >= 1000) {
+        drag.onboardingNodeDragEmitted = true;
+        emitOnboardingEvent("node-drag");
+      }
       applyVisualWorldPosition(clampedPointerWorld);
-      if (drag.canCreateChild && movedEnoughInRecentWindow(drag, event.clientX, event.clientY, now)) {
+      if (
+        drag.canCreateChild &&
+        !drag.suppressChildCreationForDrag &&
+        movedEnoughInRecentWindow(drag, event.clientX, event.clientY, now)
+      ) {
         const initialWorld = drag.startWorld;
         drag.stage = "armed";
         drag.torn = true;
