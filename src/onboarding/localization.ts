@@ -6,8 +6,6 @@ export type OnboardingMessageId =
   | "space.pan"
   | "space.cameraReset"
   | "space.zoom"
-  | "space.fastZoomOut"
-  | "space.fastZoomIn"
   | "space.nodeDrag"
   | "space.childNode"
   | "space.complete"
@@ -23,10 +21,8 @@ export const ONBOARDING_TEXT: Record<OnboardingLocale, Record<OnboardingMessageI
     "space.pan": "Drag the background to turn the universe.",
     "space.cameraReset": "Click the MindAtlas logo at the top left to return to the initial camera view.",
     "space.zoom": "Scroll or pinch slowly to zoom.",
-    "space.fastZoomOut": "Zoom out quickly to jump back to the parent layer.",
-    "space.fastZoomIn": "If the focused node has exactly one child, zoom in quickly to enter it.",
     "space.nodeDrag": "Drag a node slowly for a moment to move it.",
-    "space.childNode": "Quickly drag a node, then keep holding until the creation effect completes. Build a three-level chain before the fast-focus steps.",
+    "space.childNode": "Quickly drag a node, then keep holding until the creation effect completes.",
     "space.complete": "Congratulations. You have mastered every Space View action.",
     "basic.complete": "Congratulations. You have mastered the basic Mind Atlas controls.",
     "ai.unlockConfirm": "Unlock Mind Atlas AI features?",
@@ -40,10 +36,8 @@ export const ONBOARDING_TEXT: Record<OnboardingLocale, Record<OnboardingMessageI
     "space.pan": "背景をドラッグして、視点を動かしてみましょう。",
     "space.cameraReset": "左上のMindAtlasロゴをクリックして、初期カメラ配置に戻してください。",
     "space.zoom": "スクロールまたはピンチで、ゆっくりズームしてみましょう。",
-    "space.fastZoomOut": "すばやくズームアウトすると、親の階層へ戻れます。",
-    "space.fastZoomIn": "子ノードがひとつだけあれば、素早くズームインするとその子ノードへ入れます。",
     "space.nodeDrag": "ノードをゆっくりドラッグして、動かしてみましょう。",
-    "space.childNode": "ノードを素早くドラッグし、生成エフェクトが完了するまで長押しして子ノードを作りましょう。自動フォーカスの前に3階層まで作ります。",
+    "space.childNode": "ノードを素早くドラッグし、生成エフェクトが完了するまで長押しして子ノードを作りましょう。",
     "space.complete": "おめでとうございます。スペースビューの機能は全てマスターしました。",
     "basic.complete": "おめでとうございます。マインドアトラスの基本操作は全てマスターしました。",
     "ai.unlockConfirm": "マインドアトラスのAI機能を解放しますか？",

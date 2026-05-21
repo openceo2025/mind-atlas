@@ -63,15 +63,7 @@ export default function App() {
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
-  const selectedNodeForOnboarding = selectedPath.at(-1) ?? atlasRoot;
-  const onboardingSpaceContext = useMemo(
-    () => ({
-      selectedDepth: Math.max(0, selectedPath.length - 1),
-      selectedChildCount: selectedNodeForOnboarding.children.length,
-    }),
-    [selectedNodeForOnboarding.children.length, selectedPath.length],
-  );
-  const onboarding = useOnboarding(onboardingSpaceContext);
+  const onboarding = useOnboarding();
   const effectiveMobilePanelTab = onboarding.showAiFeatures ? mobilePanelTab : "editor";
   const showWorkspacePanel = onboarding.showAiFeatures || selectedNodeId !== atlasRoot.id;
   const [renderWorkspacePanel, setRenderWorkspacePanel] = useState(showWorkspacePanel);

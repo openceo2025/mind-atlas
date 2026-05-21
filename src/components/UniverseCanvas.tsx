@@ -60,6 +60,8 @@ const DRAG_BOUNDARY_TUBE_RADIUS = 0.55;
 const DRAG_BOUNDARY_INNER_TUBE_RADIUS = 0.24;
 const PINCH_WHEEL_SCALE = 3.4;
 const NOTIFICATION_PULSE_DURATION_MS = 8200;
+const NODE_VISIBILITY_CHECK_MS = 250;
+const NODE_SCREEN_MARGIN_NDC = 1.18;
 const NOTIFICATION_SNOOZE_OPTIONS = [
   { label: "半日後", delayMs: 12 * 60 * 60 * 1000 },
   { label: "1日後", delayMs: 24 * 60 * 60 * 1000 },
@@ -96,6 +98,11 @@ type NodeContextMenuState = {
   nodeId: string;
   x: number;
   y: number;
+};
+
+type NodeVisibilityState = {
+  lastCheckedAt: number;
+  allOffscreen: boolean | null;
 };
 
 type UniverseThemeColors = {
@@ -368,6 +375,7 @@ function isAutoFocusSuppressed() {
 }
 
 function NavigationController({ theme }: { theme: AtlasTheme }) {
+  const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const focusRequest = useAtlasStore((state) => state.focusRequest);
   const setViewport = useAtlasStore((state) => state.setViewport);
   const addRootNodeAt = useAtlasStore((state) => state.addRootNodeAt);
@@ -382,6 +390,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
   const onboardingFastFocusSuppressUntilRef = useRef(0);
   const backgroundClickRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const pinchRef = useRef<{ distance: number; center: { x: number; y: number } } | null>(null);
+  const nodeVisibilityRef = useRef<NodeVisibilityState>({ lastCheckedAt: 0, allOffscreen: null });
   const transitionRef = useRef<{
     startYaw: number;
     startPitch: number;
@@ -488,6 +497,8 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     if (birthEffect?.mode === "burst" && performance.now() - birthEffect.startedAt > 820) {
       setBirthEffect(null);
     }
+
+    reportNodeVisibility(atlasRoot, perspective, nodeVisibilityRef.current);
 
     const drag = dragRef.current;
     if (drag?.mode === "hold" && drag.canBirth && !drag.created) {
@@ -618,9 +629,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     const now = performance.now();
     if (now < wheelSuppressUntilRef.current) return;
     const onboardingSpaceStep = getOnboardingCurrentSpaceStep();
-    const suppressOnboardingFastFocus =
-      (onboardingSpaceStep !== null && onboardingSpaceStep !== "fastZoomOut" && onboardingSpaceStep !== "fastZoomIn") ||
-      now < onboardingFastFocusSuppressUntilRef.current;
+    const suppressOnboardingFastFocus = onboardingSpaceStep !== null || now < onboardingFastFocusSuppressUntilRef.current;
     if (onboardingSpaceStep === "zoom") {
       onboardingFastFocusSuppressUntilRef.current = now + 1800;
     }
@@ -651,15 +660,6 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     }
 
     if (deltaY > 0) {
-      const atlasState = useAtlasStore.getState();
-      const selectedPath = findNodePath(atlasState.atlasRoot, atlasState.selectedNodeId);
-      const selectedDepth = selectedPath ? selectedPath.length - 1 : 0;
-      const canClearOnboardingZoomOut = !suppressActiveSwitch && selectedDepth >= 2;
-      if (onboardingSpaceStep === "fastZoomIn" || (onboardingSpaceStep === "fastZoomOut" && !canClearOnboardingZoomOut)) {
-        zoomOutState.amount = 0;
-        zoomOutState.startedAt = 0;
-        return;
-      }
       if (now - zoomOutState.lastFiredAt < ZOOM_OUT_PARENT_COOLDOWN_MS) return;
       if (!zoomOutState.startedAt || now - zoomOutState.startedAt > ZOOM_OUT_DETECTION_WINDOW_MS) {
         zoomOutState.amount = 0;
@@ -671,9 +671,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
         zoomOutState.startedAt = 0;
         zoomOutState.lastFiredAt = now;
         wheelSuppressUntilRef.current = now + 900;
-        if (canClearOnboardingZoomOut) {
-          emitOnboardingEvent("fast-zoom-out", { fromDepth: selectedDepth, toDepth: selectedDepth - 1 });
-        }
+        const atlasState = useAtlasStore.getState();
         if (suppressActiveSwitch) {
           atlasState.focusParentLayerCameraOnly();
         } else {
@@ -685,17 +683,10 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
 
     if (deltaY < 0) {
       const atlasState = useAtlasStore.getState();
-      const selectedPath = findNodePath(atlasState.atlasRoot, atlasState.selectedNodeId);
-      const selectedDepth = selectedPath ? selectedPath.length - 1 : 0;
-      const selectedNode = selectedPath?.at(-1);
       let targetChildId: string | null = null;
-      const canClearOnboardingZoomIn = !suppressActiveSwitch && selectedDepth >= 1 && selectedNode?.children.length === 1;
-      if (onboardingSpaceStep === "fastZoomOut" || (onboardingSpaceStep === "fastZoomIn" && !canClearOnboardingZoomIn)) {
-        zoomInState.amount = 0;
-        zoomInState.startedAt = 0;
-        return;
-      }
       if (!suppressActiveSwitch) {
+        const selectedPath = findNodePath(atlasState.atlasRoot, atlasState.selectedNodeId);
+        const selectedNode = selectedPath?.at(-1);
         if (selectedNode?.children.length !== 1) {
           zoomInState.amount = 0;
           zoomInState.startedAt = 0;
@@ -715,9 +706,6 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
         zoomInState.startedAt = 0;
         zoomInState.lastFiredAt = now;
         wheelSuppressUntilRef.current = now + 900;
-        if (canClearOnboardingZoomIn) {
-          emitOnboardingEvent("fast-zoom-in", { fromDepth: selectedDepth, toDepth: selectedDepth + 1, fromChildCount: selectedNode?.children.length ?? 0 });
-        }
         if (suppressActiveSwitch) {
           atlasState.focusSingleChildCameraOnly();
         } else if (targetChildId) {
@@ -2942,6 +2930,40 @@ function applyCameraPose(camera: PerspectiveCamera, state: { yaw: number; pitch:
   camera.position.copy(direction.clone().multiplyScalar(state.offset));
   camera.lookAt(camera.position.clone().add(direction));
   camera.updateProjectionMatrix();
+}
+
+function reportNodeVisibility(root: AtlasNode, camera: PerspectiveCamera, state: NodeVisibilityState) {
+  const now = performance.now();
+  if (now - state.lastCheckedAt < NODE_VISIBILITY_CHECK_MS) return;
+  state.lastCheckedAt = now;
+
+  const allOffscreen = areAllNodesOffscreen(root, camera);
+  if (state.allOffscreen === allOffscreen) return;
+  state.allOffscreen = allOffscreen;
+  emitOnboardingEvent(allOffscreen ? "all-nodes-offscreen" : "nodes-onscreen");
+}
+
+function areAllNodesOffscreen(root: AtlasNode, camera: PerspectiveCamera) {
+  if (!root.children.length) return false;
+  camera.updateMatrixWorld();
+  return !root.children.some((child) => isNodePathOnscreen([root, child], camera));
+}
+
+function isNodePathOnscreen(path: AtlasNode[], camera: PerspectiveCamera): boolean {
+  const node = path.at(-1);
+  if (!node) return false;
+  if (isWorldPositionOnscreen(getNodeWorldPosition(path), camera)) return true;
+  return node.children.some((child) => isNodePathOnscreen([...path, child], camera));
+}
+
+function isWorldPositionOnscreen(position: Vec3Tuple, camera: PerspectiveCamera) {
+  const projected = new Vector3(...position).project(camera);
+  return (
+    projected.z >= -1 &&
+    projected.z <= 1 &&
+    Math.abs(projected.x) <= NODE_SCREEN_MARGIN_NDC &&
+    Math.abs(projected.y) <= NODE_SCREEN_MARGIN_NDC
+  );
 }
 
 function directionFromYawPitch(yaw: number, pitch: number) {
