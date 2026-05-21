@@ -6,7 +6,7 @@ import {
 } from "../attachmentStorage";
 import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme";
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
-import { getBridgeUrl, requestAiResponse } from "../ai/bridgeClient";
+import { getBridgeUrl, getBridgeUrlCandidates, requestAiResponse } from "../ai/bridgeClient";
 import { sanitizeNotebookForExport } from "../notebookExport";
 import type {
   AiAttachmentMode,
@@ -2353,19 +2353,23 @@ function createAiErrorNode(
 function describeBridgeConnectionFailure(mode: AiExecutionMode, message: string) {
   if (!isBridgeConnectionFailureMessage(message)) return null;
   const bridgeUrl = getBridgeUrl();
+  const bridgeCandidates = getBridgeUrlCandidates();
   const label = modeLabel(mode);
   const body = [
     `${label} could not reach the Mind Atlas bridge server.`,
     "",
     `Bridge URL: ${bridgeUrl}`,
+    bridgeCandidates.length > 1 ? `Fallback URLs tried: ${bridgeCandidates.slice(1).join(", ")}` : "",
     "",
     "Most likely cause:",
-    "The Mind Atlas server or bridge process is not running, crashed, or is unreachable from this browser.",
+    "The Mind Atlas server or bridge process is not running, crashed, blocked by CORS/certificate trust, or unreachable from this browser.",
     "",
     "What to check:",
     "- Start or restart the Mind Atlas server/bridge, then retry.",
     "- Open the bridge health URL in this browser: " + `${bridgeUrl}/health`,
+    "- If the app is opened over HTTPS, the bridge must also be HTTPS. Prefer `npm run dev:all` for LAN/mobile testing.",
     "- On Android or another LAN device, confirm the PC firewall allows the bridge port.",
+    "- On mobile HTTPS, install and trust `.certs/mind-atlas-dev-ca.crt`, then restart the browser.",
     "- Confirm VITE_MIND_ATLAS_BRIDGE_URL points to this PC's reachable LAN address.",
     "- Confirm MIND_ATLAS_ALLOWED_ORIGIN allows the Mind Atlas page origin.",
     "",
@@ -2383,6 +2387,7 @@ function isBridgeConnectionFailureMessage(message: string) {
   const normalized = message.trim().toLowerCase();
   return (
     normalized === "failed to fetch" ||
+    normalized.includes("failed to fetch mind atlas bridge") ||
     normalized.includes("networkerror when attempting to fetch resource") ||
     normalized.includes("load failed") ||
     normalized.includes("network request failed")

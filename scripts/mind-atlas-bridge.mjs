@@ -48,6 +48,16 @@ const realtimeTranscriptionModel = process.env.MIND_ATLAS_REALTIME_TRANSCRIPTION
 const allowMockWithoutKey = process.env.MIND_ATLAS_ALLOW_MOCK_WITHOUT_KEY !== "false";
 const cloudNotebookDir = resolve(process.env.MIND_ATLAS_CLOUD_DIR ?? join(process.cwd(), "server-data", "notebooks"));
 
+process.on("uncaughtException", (error) => {
+  console.error("[bridge] uncaught exception");
+  console.error(error);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[bridge] unhandled rejection");
+  console.error(reason);
+});
+
 function resolveCodexBin(configuredBin, useWsl) {
   const value = String(configuredBin || "codex").trim() || "codex";
   if (useWsl) return value;
@@ -224,6 +234,19 @@ const server = createBridgeServer(async (request, response) => {
       error: error instanceof Error ? error.message : "Unknown bridge error",
     });
   }
+});
+
+server.on("error", (error) => {
+  if (error?.code === "EADDRINUSE") {
+    console.error(`Mind Atlas bridge cannot start because ${host}:${port} is already in use.`);
+    console.error("Stop the existing bridge/dev server, then retry.");
+    if (process.platform === "win32") {
+      console.error(`PowerShell check: Get-NetTCPConnection -LocalPort ${port} | Select-Object LocalAddress,LocalPort,State,OwningProcess`);
+    }
+    process.exit(1);
+  }
+  console.error(error);
+  process.exit(1);
 });
 
 server.listen(port, host, () => {
@@ -1092,13 +1115,20 @@ function truncateText(value, maxLength) {
 
 function runProcess(command, args, stdin, timeoutMs, cwd) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd,
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    let child;
+    try {
+      child = spawn(command, args, {
+        cwd,
+        windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (error) {
+      reject(new BridgeError(502, `${command} failed to start: ${error instanceof Error ? error.message : String(error)}`));
+      return;
+    }
     let stdout = "";
     let stderr = "";
+    let stdinError = "";
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
@@ -1113,6 +1143,15 @@ function runProcess(command, args, stdin, timeoutMs, cwd) {
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
     });
+    child.stdout.on("error", (error) => {
+      stderr += `\nstdout stream error: ${error.message}`;
+    });
+    child.stderr.on("error", (error) => {
+      stderr += `\nstderr stream error: ${error.message}`;
+    });
+    child.stdin.on("error", (error) => {
+      stdinError = error.message;
+    });
     child.on("error", (error) => {
       if (settled) return;
       settled = true;
@@ -1123,9 +1162,14 @@ function runProcess(command, args, stdin, timeoutMs, cwd) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ exitCode: exitCode ?? 0, stdout, stderr });
+      const stdinNote = stdinError ? `\nstdin stream error: ${stdinError}` : "";
+      resolve({ exitCode: exitCode ?? 0, stdout, stderr: `${stderr}${stdinNote}` });
     });
-    child.stdin.end(stdin);
+    try {
+      child.stdin.end(stdin);
+    } catch (error) {
+      stdinError = error instanceof Error ? error.message : String(error);
+    }
   });
 }
 
@@ -1926,7 +1970,8 @@ function sendJson(response, status, payload) {
 
 function setCors(request, response) {
   const defaultOrigins = "http://127.0.0.1:5173,http://localhost:5173";
-  const allowedOrigins = (process.env.MIND_ATLAS_ALLOWED_ORIGIN ?? defaultOrigins)
+  const configuredOrigins = process.env.MIND_ATLAS_ALLOWED_ORIGIN;
+  const allowedOrigins = (configuredOrigins ?? defaultOrigins)
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
@@ -1935,10 +1980,36 @@ function setCors(request, response) {
     ? "*"
     : requestOrigin && allowedOrigins.includes(requestOrigin)
       ? requestOrigin
+      : !configuredOrigins && isDefaultAllowedDevOrigin(requestOrigin)
+        ? requestOrigin
       : allowedOrigins[0] ?? "http://127.0.0.1:5173";
   response.setHeader("Access-Control-Allow-Origin", origin);
   response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  response.setHeader("Access-Control-Allow-Private-Network", "true");
+  response.setHeader("Access-Control-Max-Age", "600");
+  response.setHeader("Vary", "Origin, Access-Control-Request-Private-Network");
+}
+
+function isDefaultAllowedDevOrigin(origin) {
+  if (!origin) return false;
+  try {
+    const url = new URL(origin);
+    const host = url.hostname.toLowerCase();
+    const port = url.port || (url.protocol === "https:" ? "443" : "80");
+    if (!["5173", "4173"].includes(port)) return false;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+    return isPrivateIpv4(host);
+  } catch {
+    return false;
+  }
+}
+
+function isPrivateIpv4(host) {
+  const parts = host.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  const [first, second] = parts;
+  return first === 10 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168);
 }
 
 function normalizeBaseUrl(value) {

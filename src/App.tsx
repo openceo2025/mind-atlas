@@ -315,8 +315,8 @@ export default function App() {
       }
     };
 
-    window.addEventListener("keydown", handleHistoryShortcut);
-    return () => window.removeEventListener("keydown", handleHistoryShortcut);
+    window.addEventListener("keydown", handleHistoryShortcut, { capture: true });
+    return () => window.removeEventListener("keydown", handleHistoryShortcut, { capture: true });
   }, [canRedo, canUndo, redo, undo]);
 
   const handleOpenVoiceLog = () => {

@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { networkInterfaces } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,18 +37,27 @@ if (useHttps) {
 }
 const protocol = useHttps ? "https" : "http";
 env.MIND_ATLAS_BRIDGE_PROTOCOL = protocol;
-env.VITE_MIND_ATLAS_BRIDGE_URL ??= `${protocol}://127.0.0.1:${env.MIND_ATLAS_BRIDGE_PORT}`;
+if (!process.env.VITE_MIND_ATLAS_BRIDGE_URL && (!env.VITE_MIND_ATLAS_BRIDGE_URL || isLoopbackUrl(env.VITE_MIND_ATLAS_BRIDGE_URL))) {
+  env.VITE_MIND_ATLAS_BRIDGE_URL = `${protocol}://127.0.0.1:${env.MIND_ATLAS_BRIDGE_PORT}`;
+}
+
+const appPort = Number(env.MIND_ATLAS_APP_PORT ?? "5173");
+const bridgePort = Number(env.MIND_ATLAS_BRIDGE_PORT);
+await assertPortsAvailable([
+  { name: "Mind Atlas bridge", host: env.MIND_ATLAS_BRIDGE_HOST, port: bridgePort },
+  { name: "Vite dev server", host: "0.0.0.0", port: appPort },
+]);
 
 const children = [
   start("bridge", ["scripts/mind-atlas-bridge.mjs"]),
-  start("vite", ["node_modules/vite/bin/vite.js", "--configLoader", "runner", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]),
+  start("vite", ["node_modules/vite/bin/vite.js", "--configLoader", "runner", "--host", "0.0.0.0", "--port", String(appPort), "--strictPort"]),
 ];
 
 console.log("");
 console.log("Mind Atlas dev stack is starting.");
-console.log(`App:    ${protocol}://127.0.0.1:5173/`);
+console.log(`App:    ${protocol}://127.0.0.1:${appPort}/`);
 console.log(`Bridge: ${env.VITE_MIND_ATLAS_BRIDGE_URL}`);
-const lanUrls = getLanUrls(5173);
+const lanUrls = getLanUrls(appPort);
 if (lanUrls.length) {
   console.log("LAN:");
   for (const url of lanUrls) console.log(`        ${url}`);
@@ -133,11 +143,58 @@ function ensureDevCertificate() {
   }
 }
 
+async function assertPortsAvailable(targets) {
+  const failures = [];
+  for (const target of targets) {
+    try {
+      await checkPortAvailable(target.host, target.port);
+    } catch (error) {
+      failures.push({ ...target, error });
+    }
+  }
+
+  if (!failures.length) return;
+
+  console.error("Mind Atlas dev stack cannot start because required port(s) are already in use.");
+  for (const failure of failures) {
+    console.error(`- ${failure.name}: ${failure.host}:${failure.port}`);
+  }
+  console.error("");
+  console.error("Stop the existing dev server, then run `npm run dev:all` again.");
+  if (isWindows) {
+    console.error("PowerShell check:");
+    console.error(`  Get-NetTCPConnection -LocalPort ${failures.map((failure) => failure.port).join(",")} | Select-Object LocalAddress,LocalPort,State,OwningProcess`);
+    console.error("Then stop the owning process with:");
+    console.error("  Stop-Process -Id <OwningProcess> -Force");
+  }
+  process.exit(1);
+}
+
+function checkPortAvailable(host, port) {
+  return new Promise((resolvePort, rejectPort) => {
+    const server = createServer();
+    server.once("error", rejectPort);
+    server.once("listening", () => {
+      server.close(() => resolvePort());
+    });
+    server.listen(port, host);
+  });
+}
+
 function getLanUrls(port) {
   return Object.values(networkInterfaces())
     .flatMap((items) => items ?? [])
     .filter((item) => item.family === "IPv4" && !item.internal)
     .map((item) => `${protocol}://${item.address}:${port}/`);
+}
+
+function isLoopbackUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.hostname === "127.0.0.1" || url.hostname === "localhost";
+  } catch {
+    return false;
+  }
 }
 
 function writePrefixed(name, chunk, isError) {
