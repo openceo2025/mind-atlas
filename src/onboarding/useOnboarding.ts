@@ -15,6 +15,11 @@ export type OnboardingEventType =
 
 export type SpaceStepId = "pan" | "cameraReset" | "zoom" | "fastZoomOut" | "fastZoomIn" | "nodeDrag" | "childNodeCreated";
 
+type OnboardingSpaceContext = {
+  selectedDepth: number;
+  selectedChildCount: number;
+};
+
 type OnboardingProgress = {
   version: 1;
   firstRun: boolean;
@@ -54,6 +59,7 @@ const ROOT_DISCOVERY_WAIT_MS = 5000;
 const ROOT_WHITE_HOLE_WAIT_MS = 2000;
 const SPACE_STEP_GRACE_MS = 10000;
 const CAMERA_RESET_GRACE_MS = 5000;
+const FAST_FOCUS_GRACE_MS = 5000;
 const NOTICE_MS = 5000;
 
 type SpacePromptDeadline = {
@@ -73,7 +79,7 @@ const SPACE_STEPS: Array<{ id: SpaceStepId; event: OnboardingEventType; messageI
 
 const KONAMI_SEQUENCE = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
 
-export function useOnboarding(): OnboardingState {
+export function useOnboarding(spaceContext: OnboardingSpaceContext = { selectedDepth: 0, selectedChildCount: 0 }): OnboardingState {
   const locale = useMemo(() => detectOnboardingLocale(), []);
   const text = ONBOARDING_TEXT[locale];
   const [progress, setProgress] = useState<OnboardingProgress>(() => loadProgress());
@@ -104,7 +110,7 @@ export function useOnboarding(): OnboardingState {
 
   useEffect(() => {
     const handleOnboardingEvent = (event: Event) => {
-      const detail = (event as CustomEvent<{ type?: unknown; childDepth?: unknown }>).detail;
+      const detail = (event as CustomEvent<{ type?: unknown; childDepth?: unknown; fromDepth?: unknown; toDepth?: unknown; fromChildCount?: unknown }>).detail;
       const type = detail?.type;
       if (!isOnboardingEventType(type)) return;
 
@@ -122,16 +128,24 @@ export function useOnboarding(): OnboardingState {
 
       if (type === "child-node-created") {
         if (typeof detail.childDepth !== "number" || detail.childDepth < 2) return;
-        persistProgress((current) =>
-          current.childNodeCreated && current.grandchildNodeCreated
-            ? current
-            : { ...current, childNodeCreated: true, grandchildNodeCreated: true },
-        );
+        const childDepth = detail.childDepth;
+        persistProgress((current) => {
+          const childNodeCreated = current.childNodeCreated || childDepth >= 2;
+          const grandchildNodeCreated = current.grandchildNodeCreated || childDepth >= 3;
+          if (current.childNodeCreated === childNodeCreated && current.grandchildNodeCreated === grandchildNodeCreated) {
+            return current;
+          }
+          return { ...current, childNodeCreated, grandchildNodeCreated };
+        });
         return;
       }
 
       const matchedStep = SPACE_STEPS.find((step) => step.event === type);
-      if (matchedStep) markSpaceStep(matchedStep.id);
+      if (matchedStep) {
+        if (matchedStep.id === "fastZoomOut" && !isFastZoomOutClearEvent(detail)) return;
+        if (matchedStep.id === "fastZoomIn" && !isFastZoomInClearEvent(detail)) return;
+        markSpaceStep(matchedStep.id);
+      }
     };
 
     window.addEventListener(ONBOARDING_EVENT, handleOnboardingEvent);
@@ -153,6 +167,7 @@ export function useOnboarding(): OnboardingState {
   }, [progress.firstRun, progress.rootNodeCreated, rootDeadlineAt, rootHelpLevel]);
 
   const firstMissingSpaceStep = useMemo(() => getFirstMissingSpaceStep(progress), [progress]);
+  const firstMissingStepPromptReady = isSpaceStepPromptReady(firstMissingSpaceStep?.id ?? null, spaceContext);
 
   useEffect(() => {
     if (!progress.firstRun || !progress.rootNodeCreated || progress.spaceBasicsCompleted) return;
@@ -167,10 +182,8 @@ export function useOnboarding(): OnboardingState {
       setSpacePromptStep(null);
       setSpacePromptDeadline(null);
       setNoticeMessageId("space.complete");
-      const basicNotice = window.setTimeout(() => setNoticeMessageId("basic.complete"), NOTICE_MS);
-      const clearNotice = window.setTimeout(() => setNoticeMessageId(null), NOTICE_MS * 2);
+      const clearNotice = window.setTimeout(() => setNoticeMessageId(null), NOTICE_MS);
       return () => {
-        window.clearTimeout(basicNotice);
         window.clearTimeout(clearNotice);
       };
     }
@@ -186,10 +199,11 @@ export function useOnboarding(): OnboardingState {
     if (!spacePromptDeadline || !firstMissingSpaceStep || progress.spaceBasicsCompleted) return;
     if (spacePromptDeadline.stepId !== firstMissingSpaceStep.id) return;
     const timeout = window.setTimeout(() => {
+      if (!isSpaceStepPromptReady(firstMissingSpaceStep.id, spaceContext)) return;
       setSpacePromptStep((current) => current ?? firstMissingSpaceStep.id);
     }, Math.max(0, spacePromptDeadline.deadlineAt - Date.now()));
     return () => window.clearTimeout(timeout);
-  }, [firstMissingSpaceStep, progress.spaceBasicsCompleted, spacePromptDeadline]);
+  }, [firstMissingSpaceStep, progress.spaceBasicsCompleted, spaceContext, spacePromptDeadline]);
 
   useEffect(() => {
     let matched = 0;
@@ -217,7 +231,8 @@ export function useOnboarding(): OnboardingState {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [persistProgress, progress.aiUnlocked, text]);
 
-  const activeMessageId = noticeMessageId ?? rootMessageId(progress, rootHelpLevel) ?? spaceMessageId(firstMissingSpaceStep, spacePromptStep);
+  const activeMessageId =
+    noticeMessageId ?? rootMessageId(progress, rootHelpLevel) ?? spaceMessageId(firstMissingSpaceStep, spacePromptStep, firstMissingStepPromptReady);
   const showMainChrome = !progress.firstRun || progress.spaceBasicsCompleted;
 
   return {
@@ -244,9 +259,9 @@ export function getOnboardingCurrentSpaceStep(): SpaceStepId | null {
   const raw = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
   if (!raw) return null;
   try {
-    const progress = JSON.parse(raw) as Partial<OnboardingProgress>;
+    const progress = normalizeProgress(JSON.parse(raw));
     if (!progress.firstRun || !progress.rootNodeCreated || progress.spaceBasicsCompleted) return null;
-    return SPACE_STEPS.find((step) => !progress[step.id])?.id ?? null;
+    return getFirstMissingSpaceStep(progress)?.id ?? null;
   } catch {
     return null;
   }
@@ -320,13 +335,14 @@ function normalizeProgress(value: unknown): OnboardingProgress {
   if (!value || typeof value !== "object") return createProgressForCurrentBrowser();
   const partial = value as Partial<OnboardingProgress>;
   const fallback = partial.firstRun ? newUserProgress() : completedProgress(false);
-  return {
+  const normalized: OnboardingProgress = {
     ...fallback,
     ...partial,
     version: 1,
     startedAt: typeof partial.startedAt === "string" ? partial.startedAt : fallback.startedAt,
     completedAt: typeof partial.completedAt === "string" ? partial.completedAt : fallback.completedAt,
   };
+  return reconcileCreatedNodeDepth(normalized);
 }
 
 function saveProgress(progress: OnboardingProgress) {
@@ -344,7 +360,48 @@ function getFirstMissingSpaceStep(progress: OnboardingProgress) {
   return null;
 }
 
+function reconcileCreatedNodeDepth(progress: OnboardingProgress): OnboardingProgress {
+  if (!progress.firstRun || progress.spaceBasicsCompleted) return progress;
+  const maxCreatedNodeDepth = getStoredNotebookMaxCreatedNodeDepth();
+  if (maxCreatedNodeDepth === null) return progress;
+
+  const childNodeCreated = maxCreatedNodeDepth >= 2;
+  const grandchildNodeCreated = maxCreatedNodeDepth >= 3;
+  const fastZoomOut = maxCreatedNodeDepth >= 3 ? progress.fastZoomOut : false;
+  const fastZoomIn = maxCreatedNodeDepth >= 3 ? progress.fastZoomIn : false;
+  if (
+    progress.childNodeCreated === childNodeCreated &&
+    progress.grandchildNodeCreated === grandchildNodeCreated &&
+    progress.fastZoomOut === fastZoomOut &&
+    progress.fastZoomIn === fastZoomIn
+  ) {
+    return progress;
+  }
+  return { ...progress, childNodeCreated, grandchildNodeCreated, fastZoomOut, fastZoomIn };
+}
+
+function getStoredNotebookMaxCreatedNodeDepth() {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(NOTEBOOK_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const root = JSON.parse(raw) as { children?: unknown };
+    return maxNotebookNodeDepth(root);
+  } catch {
+    return null;
+  }
+}
+
+function maxNotebookNodeDepth(node: { children?: unknown }, depth = 0): number {
+  const children = Array.isArray(node.children) ? node.children : [];
+  return children.reduce((maxDepth, child) => {
+    if (!child || typeof child !== "object") return maxDepth;
+    return Math.max(maxDepth, maxNotebookNodeDepth(child as { children?: unknown }, depth + 1));
+  }, depth);
+}
+
 function getSpaceStepGraceMs(stepId: SpaceStepId) {
+  if (stepId === "fastZoomOut" || stepId === "fastZoomIn") return FAST_FOCUS_GRACE_MS;
   return stepId === "cameraReset" ? CAMERA_RESET_GRACE_MS : SPACE_STEP_GRACE_MS;
 }
 
@@ -358,9 +415,36 @@ function rootMessageId(progress: OnboardingProgress, helpLevel: 0 | 1 | 2): Onbo
 function spaceMessageId(
   firstMissingStep: ReturnType<typeof getFirstMissingSpaceStep>,
   promptStep: SpaceStepId | null,
+  promptReady: boolean,
 ): OnboardingMessageId | null {
+  if (!promptReady) return null;
   if (!firstMissingStep || firstMissingStep.id !== promptStep) return null;
   return firstMissingStep.messageId;
+}
+
+function isSpaceStepPromptReady(stepId: SpaceStepId | null, context: OnboardingSpaceContext) {
+  if (stepId === "fastZoomOut") {
+    return context.selectedDepth >= 2;
+  }
+  if (stepId === "fastZoomIn") {
+    return context.selectedDepth >= 1 && context.selectedChildCount === 1;
+  }
+  return true;
+}
+
+function isFastZoomOutClearEvent(detail: { fromDepth?: unknown; toDepth?: unknown }) {
+  return typeof detail.fromDepth === "number" && typeof detail.toDepth === "number" && detail.fromDepth >= 2 && detail.toDepth >= 1;
+}
+
+function isFastZoomInClearEvent(detail: { fromDepth?: unknown; toDepth?: unknown; fromChildCount?: unknown }) {
+  return (
+    typeof detail.fromDepth === "number" &&
+    typeof detail.toDepth === "number" &&
+    typeof detail.fromChildCount === "number" &&
+    detail.fromDepth >= 1 &&
+    detail.toDepth === detail.fromDepth + 1 &&
+    detail.fromChildCount === 1
+  );
 }
 
 function isOnboardingEventType(value: unknown): value is OnboardingEventType {

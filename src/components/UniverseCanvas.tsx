@@ -651,6 +651,15 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     }
 
     if (deltaY > 0) {
+      const atlasState = useAtlasStore.getState();
+      const selectedPath = findNodePath(atlasState.atlasRoot, atlasState.selectedNodeId);
+      const selectedDepth = selectedPath ? selectedPath.length - 1 : 0;
+      const canClearOnboardingZoomOut = !suppressActiveSwitch && selectedDepth >= 2;
+      if (onboardingSpaceStep === "fastZoomIn" || (onboardingSpaceStep === "fastZoomOut" && !canClearOnboardingZoomOut)) {
+        zoomOutState.amount = 0;
+        zoomOutState.startedAt = 0;
+        return;
+      }
       if (now - zoomOutState.lastFiredAt < ZOOM_OUT_PARENT_COOLDOWN_MS) return;
       if (!zoomOutState.startedAt || now - zoomOutState.startedAt > ZOOM_OUT_DETECTION_WINDOW_MS) {
         zoomOutState.amount = 0;
@@ -662,8 +671,9 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
         zoomOutState.startedAt = 0;
         zoomOutState.lastFiredAt = now;
         wheelSuppressUntilRef.current = now + 900;
-        emitOnboardingEvent("fast-zoom-out");
-        const atlasState = useAtlasStore.getState();
+        if (canClearOnboardingZoomOut) {
+          emitOnboardingEvent("fast-zoom-out", { fromDepth: selectedDepth, toDepth: selectedDepth - 1 });
+        }
         if (suppressActiveSwitch) {
           atlasState.focusParentLayerCameraOnly();
         } else {
@@ -675,10 +685,17 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
 
     if (deltaY < 0) {
       const atlasState = useAtlasStore.getState();
+      const selectedPath = findNodePath(atlasState.atlasRoot, atlasState.selectedNodeId);
+      const selectedDepth = selectedPath ? selectedPath.length - 1 : 0;
+      const selectedNode = selectedPath?.at(-1);
       let targetChildId: string | null = null;
+      const canClearOnboardingZoomIn = !suppressActiveSwitch && selectedDepth >= 1 && selectedNode?.children.length === 1;
+      if (onboardingSpaceStep === "fastZoomOut" || (onboardingSpaceStep === "fastZoomIn" && !canClearOnboardingZoomIn)) {
+        zoomInState.amount = 0;
+        zoomInState.startedAt = 0;
+        return;
+      }
       if (!suppressActiveSwitch) {
-        const selectedPath = findNodePath(atlasState.atlasRoot, atlasState.selectedNodeId);
-        const selectedNode = selectedPath?.at(-1);
         if (selectedNode?.children.length !== 1) {
           zoomInState.amount = 0;
           zoomInState.startedAt = 0;
@@ -698,7 +715,9 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
         zoomInState.startedAt = 0;
         zoomInState.lastFiredAt = now;
         wheelSuppressUntilRef.current = now + 900;
-        emitOnboardingEvent("fast-zoom-in");
+        if (canClearOnboardingZoomIn) {
+          emitOnboardingEvent("fast-zoom-in", { fromDepth: selectedDepth, toDepth: selectedDepth + 1, fromChildCount: selectedNode?.children.length ?? 0 });
+        }
         if (suppressActiveSwitch) {
           atlasState.focusSingleChildCameraOnly();
         } else if (targetChildId) {

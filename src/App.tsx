@@ -15,6 +15,12 @@ import type { AtlasNode, CloudNotebookEntry, NotificationPulse, VoiceLogEntry, V
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const WORKSPACE_PANEL_EXIT_MS = 960;
+const DEFAULT_DATASET_TITLE = "Mind Atlas";
+const UNIVERSE_TITLE_PLACEHOLDER_ALIASES = [
+  "Name this universe.",
+  "この宇宙に名前をつけてみましょう",
+  "この宇宙に名前を付けてみましょう",
+];
 
 export default function App() {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -56,8 +62,16 @@ export default function App() {
   const [mobilePanelTab, setMobilePanelTab] = useState<"command" | "editor">("command");
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
-  const onboarding = useOnboarding();
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
+  const selectedNodeForOnboarding = selectedPath.at(-1) ?? atlasRoot;
+  const onboardingSpaceContext = useMemo(
+    () => ({
+      selectedDepth: Math.max(0, selectedPath.length - 1),
+      selectedChildCount: selectedNodeForOnboarding.children.length,
+    }),
+    [selectedNodeForOnboarding.children.length, selectedPath.length],
+  );
+  const onboarding = useOnboarding(onboardingSpaceContext);
   const effectiveMobilePanelTab = onboarding.showAiFeatures ? mobilePanelTab : "editor";
   const showWorkspacePanel = onboarding.showAiFeatures || selectedNodeId !== atlasRoot.id;
   const [renderWorkspacePanel, setRenderWorkspacePanel] = useState(showWorkspacePanel);
@@ -129,17 +143,10 @@ export default function App() {
 
   useEffect(() => {
     if (!onboarding.shouldApplyUniverseTitlePrompt) return;
-    if (atlasRoot.title === "Mind Atlas") {
-      updateNode(atlasRoot.id, { title: onboarding.titlePrompt });
-    }
     onboarding.markUniverseTitlePromptApplied();
   }, [
-    atlasRoot.id,
-    atlasRoot.title,
     onboarding.markUniverseTitlePromptApplied,
     onboarding.shouldApplyUniverseTitlePrompt,
-    onboarding.titlePrompt,
-    updateNode,
   ]);
 
   useEffect(() => {
@@ -392,7 +399,11 @@ export default function App() {
           <AtlasBreadcrumb path={onboarding.showLogoOnly ? [atlasRoot] : selectedPath} onFocus={focusNode} />
           {onboarding.showMainChrome ? (
             <>
-              <DatasetTitleInput title={atlasRoot.title} onChange={(title) => updateNode(atlasRoot.id, { title })} />
+              <DatasetTitleInput
+                title={atlasRoot.title}
+                placeholderTitle={onboarding.titlePrompt}
+                onChange={(title) => updateNode(atlasRoot.id, { title })}
+              />
               <UnreadNotificationLinks
                 items={unreadNotificationLinks}
                 voiceLogEntry={latestTextPartnerEntry}
@@ -1135,8 +1146,17 @@ function isEditableShortcutTarget(target: EventTarget | null) {
   return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
-function DatasetTitleInput({ title, onChange }: { title: string; onChange: (title: string) => void }) {
-  const storedTitle = title && title !== "Mind Atlas" ? title : "";
+function DatasetTitleInput({
+  title,
+  placeholderTitle,
+  onChange,
+}: {
+  title: string;
+  placeholderTitle: string;
+  onChange: (title: string) => void;
+}) {
+  const titleIsPlaceholder = isUniverseTitlePlaceholder(title, placeholderTitle);
+  const storedTitle = title && !titleIsPlaceholder ? title : "";
   const [draftTitle, setDraftTitle] = useState(storedTitle);
   const [editing, setEditing] = useState(false);
 
@@ -1149,8 +1169,14 @@ function DatasetTitleInput({ title, onChange }: { title: string; onChange: (titl
     <input
       className="dataset-title-input"
       value={draftTitle}
-      placeholder="Spatial Notebook"
-      onFocus={() => setEditing(true)}
+      placeholder={placeholderTitle}
+      onFocus={() => {
+        setEditing(true);
+        if (titleIsPlaceholder && title !== "") {
+          setDraftTitle("");
+          onChange("");
+        }
+      }}
       onBlur={() => setEditing(false)}
       onChange={(event) => {
         const nextTitle = event.target.value;
@@ -1160,6 +1186,10 @@ function DatasetTitleInput({ title, onChange }: { title: string; onChange: (titl
       aria-label="Dataset name"
     />
   );
+}
+
+function isUniverseTitlePlaceholder(title: string, placeholderTitle: string) {
+  return title === DEFAULT_DATASET_TITLE || title === placeholderTitle || UNIVERSE_TITLE_PLACEHOLDER_ALIASES.includes(title);
 }
 
 function AtlasBreadcrumb({ path, onFocus }: { path: AtlasNode[]; onFocus: (id: string) => void }) {
