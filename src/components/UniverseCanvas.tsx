@@ -45,6 +45,8 @@ const VISIBLE_DESCENDANT_DEPTH = 5;
 const HOLD_TO_BIRTH_MS = 1520;
 const WHITE_HOLE_CANCEL_PX = 12;
 const ROOT_BIRTH_FOCUS_MIDPOINT = 0.5;
+const ROOT_BIRTH_MAX_ZOOM_IN_OFFSET = NOTEBOOK_NODE_RADIUS * 2;
+const ROOT_BIRTH_BLOCKED_HINT_MS = 2000;
 const BIRTH_EFFECT_VISUAL_SCALE = 0.8;
 const TEAR_SAMPLE_WINDOW_MS = 100;
 const TEAR_STAGE_ONE_SCREEN_DELTA = 118;
@@ -87,6 +89,7 @@ type SpaceDragState = {
   mode: "hold" | "rotate";
   created: boolean;
   canBirth: boolean;
+  blockedBirthHintEmitted: boolean;
 };
 
 type VisualNodeHandle = {
@@ -515,6 +518,13 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
         });
       }
     }
+    if (drag?.mode === "hold" && !drag.canBirth && !drag.blockedBirthHintEmitted) {
+      const heldFor = performance.now() - drag.startedAt;
+      if (heldFor >= ROOT_BIRTH_BLOCKED_HINT_MS) {
+        drag.blockedBirthHintEmitted = true;
+        emitOnboardingEvent("root-birth-blocked-zoom");
+      }
+    }
 
     const transition = transitionRef.current;
     if (!transition) return;
@@ -552,6 +562,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
       mode: "hold",
       created: false,
       canBirth,
+      blockedBirthHintEmitted: false,
     };
     transitionRef.current = null;
 
@@ -2988,13 +2999,17 @@ function getViewportScale(distance: number) {
 }
 
 function canStartRootBirth(offset: number, viewportHeight: number, fov: number) {
+  return offset <= getRootBirthMaxOffset(viewportHeight, fov);
+}
+
+function getRootBirthMaxOffset(viewportHeight: number, fov: number) {
   const firstLayerFocusOffset = clamp(
     NOTEBOOK_FIRST_SHELL_RADIUS - getCameraDistanceForDiameter(NOTEBOOK_NODE_RADIUS * 2, viewportHeight, fov),
     MIN_CAMERA_OFFSET,
     MAX_CAMERA_OFFSET,
   );
-  const thresholdOffset = lerp(INITIAL_CAMERA_OFFSET, firstLayerFocusOffset, ROOT_BIRTH_FOCUS_MIDPOINT);
-  return firstLayerFocusOffset >= INITIAL_CAMERA_OFFSET ? offset <= thresholdOffset : offset >= thresholdOffset;
+  const responsiveThreshold = lerp(INITIAL_CAMERA_OFFSET, Math.max(firstLayerFocusOffset, INITIAL_CAMERA_OFFSET), ROOT_BIRTH_FOCUS_MIDPOINT);
+  return Math.max(ROOT_BIRTH_MAX_ZOOM_IN_OFFSET, responsiveThreshold);
 }
 
 function getRotationGain(offset: number) {

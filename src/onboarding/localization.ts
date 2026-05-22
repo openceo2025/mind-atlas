@@ -3,6 +3,7 @@ export type OnboardingLocale = "en" | "ja";
 export type OnboardingMessageId =
   | "root.hint"
   | "root.answer"
+  | "root.zoomOutForNodeCreate"
   | "space.pan"
   | "space.cameraReset"
   | "space.zoom"
@@ -18,6 +19,7 @@ export const ONBOARDING_TEXT: Record<OnboardingLocale, Record<OnboardingMessageI
   en: {
     "root.hint": "Try pressing and holding.",
     "root.answer": "Press and hold the space to create your first node.",
+    "root.zoomOutForNodeCreate": "Zoom out before creating a node.",
     "space.pan": "Drag the background to turn the universe.",
     "space.cameraReset": "Click the MindAtlas logo at the top left to return to the initial camera view.",
     "space.zoom": "Scroll or pinch slowly to zoom.",
@@ -33,6 +35,7 @@ export const ONBOARDING_TEXT: Record<OnboardingLocale, Record<OnboardingMessageI
   ja: {
     "root.hint": "長押ししてみましょう。",
     "root.answer": "画面を長押しして最初のノードを作成しましょう。",
+    "root.zoomOutForNodeCreate": "nodeの生成はズームアウトした状態で行ってください",
     "space.pan": "背景をドラッグして、視点を動かしてみましょう。",
     "space.cameraReset": "左上のMindAtlasロゴをクリックして、初期カメラ配置に戻してください。",
     "space.zoom": "スクロールまたはピンチで、ゆっくりズームしてみましょう。",

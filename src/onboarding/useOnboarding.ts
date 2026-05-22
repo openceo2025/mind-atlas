@@ -5,6 +5,7 @@ import { ONBOARDING_TEXT, detectOnboardingLocale, type OnboardingLocale, type On
 export type OnboardingEventType =
   | "root-birth-start"
   | "root-node-created"
+  | "root-birth-blocked-zoom"
   | "pan"
   | "home-logo-clicked"
   | "all-nodes-offscreen"
@@ -112,6 +113,11 @@ export function useOnboarding(): OnboardingState {
       if (type === "root-node-created") {
         persistProgress((current) => (current.rootNodeCreated ? current : { ...current, rootNodeCreated: true }));
         setRootHelpLevel(0);
+        return;
+      }
+
+      if (type === "root-birth-blocked-zoom") {
+        setNoticeMessageId("root.zoomOutForNodeCreate");
         return;
       }
 
@@ -368,6 +374,7 @@ function isOnboardingEventType(value: unknown): value is OnboardingEventType {
   return (
     value === "root-birth-start" ||
     value === "root-node-created" ||
+    value === "root-birth-blocked-zoom" ||
     value === "pan" ||
     value === "home-logo-clicked" ||
     value === "all-nodes-offscreen" ||
