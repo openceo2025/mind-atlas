@@ -1,5 +1,5 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { Bell, BellOff, CloudDownload, CloudUpload, Download, Maximize2, MessageSquareText, Moon, MoreHorizontal, PenLine, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
+import { Bell, BellOff, CloudDownload, CloudUpload, Download, Maximize2, MessageSquareText, Moon, MoreHorizontal, PenLine, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
@@ -53,6 +53,8 @@ export default function App() {
   const [mobileNotificationsEnabled, setMobileNotificationsEnabled] = useState(() => loadMobileNotificationPreference());
   const [mobileNotificationPermission, setMobileNotificationPermission] = useState<MobileNotificationPermission>(() => getMobileNotificationPermission());
   const [mobileNotificationMessage, setMobileNotificationMessage] = useState("");
+  const [vrModeEnabled, setVrModeEnabled] = useState(false);
+  const [vrModeMessage, setVrModeMessage] = useState("");
   const [cloudNotebooks, setCloudNotebooks] = useState<CloudNotebookEntry[]>([]);
   const [cloudDirectory, setCloudDirectory] = useState("");
   const [cloudLoading, setCloudLoading] = useState(false);
@@ -376,9 +378,30 @@ export default function App() {
     }
   };
 
+  const handleToggleVrMode = async () => {
+    setVrModeMessage("");
+    if (vrModeEnabled) {
+      setVrModeEnabled(false);
+      setVrModeMessage("Off");
+      return;
+    }
+    if (!isDeviceOrientationSupported()) {
+      setVrModeMessage("Unsupported on this device");
+      return;
+    }
+    const permission = await requestDeviceOrientationAccess();
+    if (permission !== "granted") {
+      setVrModeEnabled(false);
+      setVrModeMessage(permission === "denied" ? "Blocked in browser settings" : "Permission required");
+      return;
+    }
+    setVrModeEnabled(true);
+    setVrModeMessage("On");
+  };
+
   return (
     <main className={appClassName} data-theme={theme}>
-      <UniverseCanvas theme={theme} />
+      <UniverseCanvas theme={theme} vrPanEnabled={vrModeEnabled} />
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
       {onboarding.message ? (
         <div className="onboarding-message" role="status" aria-live="polite">
@@ -481,6 +504,19 @@ export default function App() {
               <span>
                 Enter fullscreen
                 <small>hide browser bars</small>
+              </span>
+            </button>
+            <button
+              className={vrModeEnabled ? "is-active" : ""}
+              type="button"
+              onClick={handleToggleVrMode}
+              aria-pressed={vrModeEnabled}
+              disabled={!vrModeEnabled && !isDeviceOrientationSupported()}
+            >
+              <Smartphone size={15} />
+              <span>
+                VR mode
+                <small>{vrModeStatusLabel(vrModeEnabled, vrModeMessage)}</small>
               </span>
             </button>
             <button type="button" onClick={handleExportLight}>
@@ -860,6 +896,10 @@ function formatBytes(bytes: number) {
 }
 
 type MobileNotificationPermission = NotificationPermission | "unsupported";
+type DeviceOrientationPermissionState = "granted" | "denied" | "prompt";
+type DeviceOrientationEventConstructorWithPermission = typeof DeviceOrientationEvent & {
+  requestPermission?: () => Promise<DeviceOrientationPermissionState>;
+};
 
 const MOBILE_NOTIFICATION_STORAGE_KEY = "mind-atlas-mobile-notifications-v1";
 
@@ -1015,6 +1055,27 @@ function mobileNotificationStatusLabel(
   if (enabled && permission === "granted") return "on";
   if (permission === "granted") return "off";
   return "tap to enable";
+}
+
+function isDeviceOrientationSupported() {
+  return typeof window !== "undefined" && "DeviceOrientationEvent" in window;
+}
+
+async function requestDeviceOrientationAccess(): Promise<DeviceOrientationPermissionState> {
+  if (!isDeviceOrientationSupported()) return "denied";
+  const orientationEvent = DeviceOrientationEvent as DeviceOrientationEventConstructorWithPermission;
+  if (typeof orientationEvent.requestPermission !== "function") return "granted";
+  try {
+    return await orientationEvent.requestPermission();
+  } catch {
+    return "denied";
+  }
+}
+
+function vrModeStatusLabel(enabled: boolean, message: string) {
+  if (message) return message;
+  if (!isDeviceOrientationSupported()) return "unsupported";
+  return enabled ? "on / tilt to pan" : "off";
 }
 
 function useVisualViewportHeight(commandInputEditing: boolean) {

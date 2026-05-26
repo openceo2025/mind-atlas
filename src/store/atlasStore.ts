@@ -811,17 +811,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const path = findNodePath(state.atlasRoot, id);
     if (!path || path.length < 2) return;
     const parent = path[path.length - 2];
-    const source = path[path.length - 1];
     const siblingDepth = path.length - 1;
-    const siblingPosition =
-      source.position && siblingDepth > 1
-        ? clampLocalOffset(
-            [source.position[0] + 0.08, source.position[1] + 0.02, 0],
-            getManualChildSpreadLimit(siblingDepth, parent.children.length + 1),
-          )
-        : source.position
-          ? clampDirection([source.position[0] + 0.08, source.position[1] + 0.02, source.position[2]], TOP_LEVEL_PLANAR_LIMIT)
-          : undefined;
+    const insertIndex = parent.children.length;
+    const siblingPosition = getPhyllotaxisStoredChildPosition(siblingDepth, parent.children.length + 1, insertIndex, parent.id);
     const sibling = createNotebookNode(parent.id, parent.children.length, "Untitled branch", "", {
       position: siblingPosition,
     });

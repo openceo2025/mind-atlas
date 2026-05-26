@@ -197,7 +197,7 @@ export function useOnboarding(): OnboardingState {
   useEffect(() => {
     let matched = 0;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isEditableTarget(event.target)) return;
+      if (event.isComposing || event.key === "Process" || event.keyCode === 229) return;
       const expected = KONAMI_SEQUENCE[matched];
       const actual = event.key.length === 1 ? event.key.toLowerCase() : event.key;
       if (actual === expected) {
@@ -214,9 +214,8 @@ export function useOnboarding(): OnboardingState {
       }
       matched = actual === KONAMI_SEQUENCE[0] ? 1 : 0;
     };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
   }, [persistProgress, progress.aiUnlocked, text]);
 
   useEffect(() => {
@@ -383,9 +382,4 @@ function isOnboardingEventType(value: unknown): value is OnboardingEventType {
     value === "node-drag" ||
     value === "child-node-created"
   );
-}
-
-function isEditableTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }

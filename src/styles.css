@@ -505,6 +505,11 @@ h1 {
   background: rgba(141, 245, 207, 0.09);
 }
 
+.context-menu button.is-active {
+  background: rgba(141, 245, 207, 0.13);
+  color: #effff8;
+}
+
 .context-menu button:disabled,
 .context-menu button:disabled:hover {
   background: transparent;
@@ -2370,6 +2375,11 @@ button:disabled,
 .app-shell[data-theme="light"] .context-menu button:hover,
 .app-shell[data-theme="light"] .context-menu label:hover {
   background: rgba(28, 112, 207, 0.1);
+}
+
+.app-shell[data-theme="light"] .context-menu button.is-active {
+  background: rgba(28, 112, 207, 0.14);
+  color: #093c73;
 }
 
 .reminder-context-menu.theme-light button:hover,

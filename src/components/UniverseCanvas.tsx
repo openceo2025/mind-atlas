@@ -41,6 +41,7 @@ const CAMERA_FOV = 45;
 const INITIAL_CAMERA_OFFSET = 0;
 const MIN_CAMERA_OFFSET = -120;
 const MAX_CAMERA_OFFSET = 90000;
+const MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER = 3;
 const VISIBLE_DESCENDANT_DEPTH = 5;
 const HOLD_TO_BIRTH_MS = 1520;
 const WHITE_HOLE_CANCEL_PX = 12;
@@ -64,6 +65,11 @@ const PINCH_WHEEL_SCALE = 3.4;
 const NOTIFICATION_PULSE_DURATION_MS = 8200;
 const NODE_VISIBILITY_CHECK_MS = 250;
 const NODE_SCREEN_MARGIN_NDC = 1.18;
+const VR_TILT_DEAD_ZONE_DEGREES = 7.2;
+const VR_TILT_MAX_DEGREES = 22;
+const VR_TILT_PAN_X_PIXELS_PER_SECOND = 220;
+const VR_TILT_PAN_Y_PIXELS_PER_SECOND = 170;
+const VR_PAN_EVENT_INTERVAL_MS = 1200;
 const NOTIFICATION_SNOOZE_OPTIONS = [
   { label: "2時間後", delayMs: 2 * 60 * 60 * 1000 },
   { label: "半日後", delayMs: 12 * 60 * 60 * 1000 },
@@ -107,6 +113,12 @@ type NodeContextMenuState = {
 type NodeVisibilityState = {
   lastCheckedAt: number;
   allOffscreen: boolean | null;
+};
+
+type VrOrientationSample = {
+  beta: number;
+  gamma: number;
+  screenAngle: number;
 };
 
 type UniverseThemeColors = {
@@ -184,7 +196,7 @@ function syncVisualNodePosition(id: string, worldPosition: Vec3Tuple, parentWorl
   requestAnimationFrame(() => syncVisualNodePosition(id, worldPosition, parentWorldOverride, attempts - 1));
 }
 
-export function UniverseCanvas({ theme }: { theme: AtlasTheme }) {
+export function UniverseCanvas({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPanEnabled: boolean }) {
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeContextMenuState | null>(null);
 
   useEffect(() => {
@@ -263,7 +275,7 @@ export function UniverseCanvas({ theme }: { theme: AtlasTheme }) {
         <pointLight position={[120, 160, 110]} intensity={theme === "light" ? 1.1 : 1.35} color={theme === "light" ? "#d8ecff" : "#f3d08a"} />
         <pointLight position={[-180, -120, 80]} intensity={theme === "light" ? 0.95 : 0.8} color={theme === "light" ? "#8fc5ff" : "#78e6c5"} />
         <BackgroundStarLayer theme={theme} />
-        <NavigationController theme={theme} />
+        <NavigationController theme={theme} vrPanEnabled={vrPanEnabled} />
         <NotebookNodes theme={theme} onOpenNodeContextMenu={setNodeContextMenu} />
         <NotificationPulseLayer theme={theme} />
       </Canvas>
@@ -473,13 +485,14 @@ function isAutoFocusSuppressed() {
   return state.commandInputEditing || state.multiSelectedNodeIds.length > 0;
 }
 
-function NavigationController({ theme }: { theme: AtlasTheme }) {
+function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPanEnabled: boolean }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const focusRequest = useAtlasStore((state) => state.focusRequest);
   const setViewport = useAtlasStore((state) => state.setViewport);
   const addRootNodeAt = useAtlasStore((state) => state.addRootNodeAt);
   const { camera, gl, size } = useThree();
   const perspective = camera as PerspectiveCamera;
+  const mobilePortraitCamera = isMobilePortraitCamera(size.width, size.height);
   const initialCenteredRef = useRef(false);
   const yawPitchRef = useRef({ yaw: 0, pitch: 0, offset: INITIAL_CAMERA_OFFSET });
   const dragRef = useRef<SpaceDragState | null>(null);
@@ -490,6 +503,10 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
   const backgroundClickRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const pinchRef = useRef<{ distance: number; center: { x: number; y: number } } | null>(null);
   const nodeVisibilityRef = useRef<NodeVisibilityState>({ lastCheckedAt: 0, allOffscreen: null });
+  const vrBaselineRef = useRef<VrOrientationSample | null>(null);
+  const vrOrientationRef = useRef<VrOrientationSample | null>(null);
+  const vrPanEventLastEmittedAtRef = useRef(0);
+  const vrManualPanPendingRef = useRef(false);
   const transitionRef = useRef<{
     startYaw: number;
     startPitch: number;
@@ -541,9 +558,13 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
       pinchRef.current.center = nextCenter;
       handleWheelDelta(-deltaDistance * PINCH_WHEEL_SCALE);
       applyPanDelta(deltaX, deltaY);
+      markVrManualPan(deltaX, deltaY);
     };
     const handleTouchEnd = (event: TouchEvent) => {
-      if (event.touches.length < 2) pinchRef.current = null;
+      if (event.touches.length < 2) {
+        if (vrManualPanPendingRef.current) recenterVrBaseline();
+        pinchRef.current = null;
+      }
     };
 
     element.addEventListener("wheel", handleDomWheel, { passive: false });
@@ -566,7 +587,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     const targetDirection = targetVector.lengthSq() > 0.001 ? targetVector.clone().normalize() : new Vector3(0, 0, -1);
     const targetAngles = directionToYawPitch(targetDirection);
     const targetDistance = getCameraDistanceForDiameter(focusRequest.diameter, size.height, perspective.fov);
-    const targetOffset = clamp(targetVector.length() - targetDistance, MIN_CAMERA_OFFSET, MAX_CAMERA_OFFSET);
+    const targetOffset = getFocusTargetOffset(targetVector.length(), targetDistance, mobilePortraitCamera);
     const current = yawPitchRef.current;
 
     transitionRef.current = {
@@ -579,18 +600,52 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
       elapsed: 0,
       nonce: focusRequest.nonce,
     };
-  }, [focusRequest, perspective.fov, size.height]);
+  }, [focusRequest, mobilePortraitCamera, perspective.fov, size.height]);
 
   useEffect(() => {
     if (initialCenteredRef.current) return;
     initialCenteredRef.current = true;
 
     requestAnimationFrame(() => {
-      yawPitchRef.current = { yaw: 0, pitch: 0, offset: INITIAL_CAMERA_OFFSET };
+      const initialOffset = getInitialCameraOffset(mobilePortraitCamera);
+      yawPitchRef.current = { yaw: 0, pitch: 0, offset: initialOffset };
       applyCameraPose(perspective, yawPitchRef.current);
-      setViewport({ x: 0, y: 0, zoom: getViewportScale(INITIAL_CAMERA_OFFSET) });
+      setViewport({ x: 0, y: 0, zoom: getViewportScale(initialOffset) });
     });
-  }, [perspective, setViewport]);
+  }, [mobilePortraitCamera, perspective, setViewport]);
+
+  useEffect(() => {
+    if (!vrPanEnabled || typeof window === "undefined") {
+      vrBaselineRef.current = null;
+      vrOrientationRef.current = null;
+      vrManualPanPendingRef.current = false;
+      return;
+    }
+
+    const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
+      if (typeof event.beta !== "number" || typeof event.gamma !== "number") return;
+      const sample: VrOrientationSample = {
+        beta: event.beta,
+        gamma: event.gamma,
+        screenAngle: getCurrentScreenAngle(),
+      };
+      const baseline = vrBaselineRef.current;
+      if (!baseline || normalizeScreenAngle(baseline.screenAngle) !== normalizeScreenAngle(sample.screenAngle)) {
+        vrBaselineRef.current = sample;
+        vrManualPanPendingRef.current = false;
+        vrPanEventLastEmittedAtRef.current = 0;
+      }
+      vrOrientationRef.current = sample;
+    };
+
+    window.addEventListener("deviceorientation", handleDeviceOrientation, true);
+    return () => {
+      window.removeEventListener("deviceorientation", handleDeviceOrientation, true);
+      vrBaselineRef.current = null;
+      vrOrientationRef.current = null;
+      vrManualPanPendingRef.current = false;
+    };
+  }, [vrPanEnabled]);
 
   useFrame((_, delta) => {
     if (birthEffect?.mode === "burst" && performance.now() - birthEffect.startedAt > 820) {
@@ -620,6 +675,10 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
         drag.blockedBirthHintEmitted = true;
         emitOnboardingEvent("root-birth-blocked-zoom");
       }
+    }
+
+    if (vrPanEnabled && !transitionRef.current && !dragRef.current && !pinchRef.current) {
+      applyVrTiltPan(delta);
     }
 
     const transition = transitionRef.current;
@@ -696,14 +755,19 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
       const deltaX = event.clientX - drag.lastScreen.x;
       const deltaY = event.clientY - drag.lastScreen.y;
       applyPanDelta(deltaX, deltaY);
+      markVrManualPan(deltaX, deltaY);
     }
 
     drag.lastScreen = { x: event.clientX, y: event.clientY };
   };
 
-  const applyPanDelta = (deltaX: number, deltaY: number) => {
+  const applyPanDelta = (
+    deltaX: number,
+    deltaY: number,
+    options: { emitOnboarding?: boolean } = {},
+  ) => {
     if (Math.abs(deltaX) < 0.01 && Math.abs(deltaY) < 0.01) return;
-    if (Math.hypot(deltaX, deltaY) > 4) emitOnboardingEvent("pan");
+    if (options.emitOnboarding !== false && Math.hypot(deltaX, deltaY) > 4) emitOnboardingEvent("pan");
     const state = yawPitchRef.current;
     const rotationGain = getRotationGain(state.offset);
     state.yaw -= deltaX * rotationGain;
@@ -711,6 +775,48 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     transitionRef.current = null;
     applyCameraPose(perspective, state);
     setViewport({ x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) });
+  };
+
+  const markVrManualPan = (deltaX: number, deltaY: number) => {
+    if (!vrPanEnabled || Math.hypot(deltaX, deltaY) <= 4) return;
+    vrManualPanPendingRef.current = true;
+  };
+
+  const recenterVrBaseline = () => {
+    if (!vrPanEnabled) return;
+    const sample = vrOrientationRef.current;
+    if (!sample) {
+      vrManualPanPendingRef.current = false;
+      return;
+    }
+    vrBaselineRef.current = { ...sample };
+    vrPanEventLastEmittedAtRef.current = 0;
+    vrManualPanPendingRef.current = false;
+  };
+
+  const applyVrTiltPan = (deltaSeconds: number) => {
+    const baseline = vrBaselineRef.current;
+    const sample = vrOrientationRef.current;
+    if (!baseline || !sample) return;
+    const offset = getVrTiltOffset(sample, baseline);
+    if (isVrTiltInsideDeadZone(offset)) {
+      return;
+    }
+    const normalizedX = normalizeVrTilt(offset.x);
+    const normalizedY = normalizeVrTilt(offset.y);
+    if (Math.abs(normalizedX) < 0.001 && Math.abs(normalizedY) < 0.001) return;
+
+    applyPanDelta(
+      normalizedX * VR_TILT_PAN_X_PIXELS_PER_SECOND * deltaSeconds,
+      normalizedY * VR_TILT_PAN_Y_PIXELS_PER_SECOND * deltaSeconds,
+      { emitOnboarding: false },
+    );
+
+    const now = performance.now();
+    if (now - vrPanEventLastEmittedAtRef.current > VR_PAN_EVENT_INTERVAL_MS) {
+      vrPanEventLastEmittedAtRef.current = now;
+      emitOnboardingEvent("pan");
+    }
   };
 
   const handlePointerUp = (event: ThreeEvent<PointerEvent>) => {
@@ -726,6 +832,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
       window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_CLICK_EVENT));
     }
     backgroundClickRef.current = null;
+    if (vrManualPanPendingRef.current) recenterVrBaseline();
     dragRef.current = null;
     if (!drag.created && drag.mode === "hold" && drag.canBirth) {
       setBirthEffect(null);
@@ -743,7 +850,7 @@ function NavigationController({ theme }: { theme: AtlasTheme }) {
     if (Math.abs(deltaY) > 0.5) emitOnboardingEvent("zoom");
 
     const state = yawPitchRef.current;
-    state.offset = clamp(state.offset - deltaY * 0.35, MIN_CAMERA_OFFSET, MAX_CAMERA_OFFSET);
+    state.offset = clamp(state.offset - deltaY * 0.35, getMinCameraOffset(mobilePortraitCamera), MAX_CAMERA_OFFSET);
     transitionRef.current = null;
     applyCameraPose(perspective, state);
     setViewport({ x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) });
@@ -3116,6 +3223,38 @@ function getCameraDistanceForDiameter(diameter: number, viewportHeight: number, 
   return Math.min(620, Math.max(42, distance * Math.max(0.72, 920 / Math.max(viewportHeight, 1))));
 }
 
+function getInitialCameraOffset(mobilePortraitCamera: boolean) {
+  if (!mobilePortraitCamera) return INITIAL_CAMERA_OFFSET;
+  const initialFirstLayerDistance = NOTEBOOK_FIRST_SHELL_RADIUS - INITIAL_CAMERA_OFFSET;
+  return NOTEBOOK_FIRST_SHELL_RADIUS - initialFirstLayerDistance * MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER;
+}
+
+function getFocusTargetOffset(targetRadius: number, targetDistance: number, mobilePortraitCamera: boolean) {
+  const baseOffset = clamp(targetRadius - targetDistance, MIN_CAMERA_OFFSET, MAX_CAMERA_OFFSET);
+  if (!mobilePortraitCamera) return baseOffset;
+  const baseVisibleDistance = targetRadius - baseOffset;
+  return clamp(
+    targetRadius - baseVisibleDistance * MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER,
+    getMinCameraOffset(true),
+    MAX_CAMERA_OFFSET,
+  );
+}
+
+function getMinCameraOffset(mobilePortraitCamera: boolean) {
+  if (!mobilePortraitCamera) return MIN_CAMERA_OFFSET;
+  const firstLayerZoomOutDistance = NOTEBOOK_FIRST_SHELL_RADIUS - MIN_CAMERA_OFFSET;
+  return NOTEBOOK_FIRST_SHELL_RADIUS - firstLayerZoomOutDistance * MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER;
+}
+
+function isMobilePortraitCamera(width: number, height: number) {
+  if (height <= width || width > 980) return false;
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const touchDevice = navigator.maxTouchPoints > 0;
+  const mobileUa = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+  return coarsePointer || touchDevice || mobileUa;
+}
+
 function getViewportScale(distance: number) {
   return Math.min(32, Math.max(0.3, 1 + distance / 360));
 }
@@ -3139,6 +3278,50 @@ function getRotationGain(offset: number) {
   return 0.0023 / (1 + distance / 900);
 }
 
+function getCurrentScreenAngle() {
+  const orientationAngle = window.screen?.orientation?.angle;
+  if (typeof orientationAngle === "number") return orientationAngle;
+  return (window as Window & { orientation?: number }).orientation ?? 0;
+}
+
+function normalizeScreenAngle(angle: number) {
+  return ((Math.round(angle / 90) * 90) % 360 + 360) % 360;
+}
+
+function getVrTiltOffset(sample: VrOrientationSample, baseline: VrOrientationSample) {
+  const beta = angleDeltaDegrees(sample.beta, baseline.beta);
+  const gamma = sample.gamma - baseline.gamma;
+  switch (normalizeScreenAngle(sample.screenAngle)) {
+    case 90:
+      return { x: beta, y: -gamma };
+    case 180:
+      return { x: -gamma, y: -beta };
+    case 270:
+      return { x: -beta, y: gamma };
+    default:
+      return { x: gamma, y: beta };
+  }
+}
+
+function isVrTiltInsideDeadZone(offset: { x: number; y: number }) {
+  return Math.abs(offset.x) <= VR_TILT_DEAD_ZONE_DEGREES && Math.abs(offset.y) <= VR_TILT_DEAD_ZONE_DEGREES;
+}
+
+function angleDeltaDegrees(value: number, baseline: number) {
+  return ((((value - baseline) % 360) + 540) % 360) - 180;
+}
+
+function normalizeVrTilt(value: number) {
+  const magnitude = Math.abs(value);
+  if (magnitude <= VR_TILT_DEAD_ZONE_DEGREES) return 0;
+  const normalized = clamp(
+    (magnitude - VR_TILT_DEAD_ZONE_DEGREES) / (VR_TILT_MAX_DEGREES - VR_TILT_DEAD_ZONE_DEGREES),
+    0,
+    1,
+  );
+  const eased = normalized * normalized * (3 - 2 * normalized);
+  return Math.sign(value) * eased;
+}
 
 function touchDistance(a: Touch, b: Touch) {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
