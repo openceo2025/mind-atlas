@@ -18,6 +18,7 @@ export type RealtimeClientEvent =
 
 export interface RealtimeVoiceSession {
   id: string;
+  updateContext: (context: AiNodeContext, summary?: VoiceSessionSummary | null, voiceLogContext?: string) => void;
   beginPushToTalk: () => void;
   endPushToTalk: () => void;
   requestSessionSummaryAndClose: () => Promise<string>;
@@ -365,6 +366,22 @@ export async function startVoicePartnerSession({
   return {
     id: sessionId,
     cancelAssistantResponse,
+    updateContext: (nextContext, nextSummary, nextVoiceLogContext) => {
+      if (stopped) return;
+      sendEvent({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: buildRealtimeContextUpdateMessage(nextContext, nextSummary, nextVoiceLogContext),
+            },
+          ],
+        },
+      });
+    },
     beginPushToTalk: () => {
       if (stopped || listening || pendingTurnCommitTimer !== null || awaitingCommitForResponse) return;
       listening = true;
@@ -558,9 +575,21 @@ function buildInitialRealtimeMessage(context: AiNodeContext, summary?: VoiceSess
     "Mind Atlas Voice Partner session started.",
     `Active node: ${context.selectedNode.title}`,
     summary?.text ? `Previous voice session summary:\n${summary.text}` : "",
-    voiceLogContext ? `Voice log context for global continuity:\n${voiceLogContext}` : "",
+    voiceLogContext ? `AI/Partner log context for global continuity:\n${voiceLogContext}` : "",
     "Wait for push-to-talk speech before taking action. Use tools when the user asks to operate Mind Atlas.",
   ].filter(Boolean).join("\n\n");
+}
+
+function buildRealtimeContextUpdateMessage(context: AiNodeContext, summary?: VoiceSessionSummary | null, voiceLogContext?: string) {
+  return [
+    "Current Mind Atlas context update for the next push-to-talk turn.",
+    `Active node: ${context.selectedNode.title}`,
+    `Context scope: ${context.scope}`,
+    summary?.text ? `Latest AI/Partner summary:\n${summary.text}` : "",
+    voiceLogContext ? `AI/Partner log context:\n${voiceLogContext}` : "",
+    "Selected context JSON:",
+    JSON.stringify(context, null, 2),
+  ].filter(Boolean).join("\n\n").slice(0, 18000);
 }
 
 function stringValue(value: unknown) {

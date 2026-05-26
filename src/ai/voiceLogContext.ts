@@ -13,11 +13,11 @@ export function buildVoiceLogContext(
   const maxEntries = options.maxEntries ?? MAX_ENTRIES;
   const recentEntries = entries.slice(-maxEntries);
   const lines = [
-    "Persistent Mind Atlas Voice log context.",
-    "This is the actual cross-session global conversation history visible in the Voice log. Use it when the user asks what was discussed before or continues a global conversation.",
-    "If the answer is not present here, say that it is not in the provided Voice log context.",
+    "Persistent Mind Atlas AI/Partner log context.",
+    "This is the actual cross-session global conversation history visible in the AI/Partner log. Use it when the user asks what was discussed before or continues a global conversation.",
+    "If the answer is not present here, say that it is not in the provided AI/Partner log context.",
     summary?.text ? `Saved session summary (${formatLogTime(summary.createdAt)}):\n${truncateText(summary.text, 1600)}` : "",
-    recentEntries.length ? "Recent Voice log entries:" : "Recent Voice log entries: none.",
+    recentEntries.length ? "Recent AI/Partner log entries:" : "Recent AI/Partner log entries: none.",
     ...recentEntries.map(formatVoiceLogEntry),
   ].filter(Boolean);
   return truncateFromStart(lines.join("\n\n"), maxChars);
@@ -50,5 +50,5 @@ function truncateText(value: string, maxChars: number) {
 
 function truncateFromStart(value: string, maxChars: number) {
   if (value.length <= maxChars) return value;
-  return `[Earlier Voice log context truncated]\n${value.slice(value.length - maxChars)}`;
+  return `[Earlier AI/Partner log context truncated]\n${value.slice(value.length - maxChars)}`;
 }

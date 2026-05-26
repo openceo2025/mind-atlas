@@ -154,21 +154,39 @@ const toolSpecs: VoiceToolSpec[] = [
   },
   {
     type: "function",
-    name: "add_child_node",
-    description: "Add a child notebook node under a parent or the active node.",
+    name: "add_child_nodes",
+    description: "Add one or more child notebook nodes under a parent or the active node. Use this for both single-node and multi-node creation.",
     parameters: objectSchema({
       parentId: { type: "string", description: "Parent node id. If omitted, active node is used." },
-      title: { type: "string" },
-      body: { type: "string" },
+      nodes: {
+        type: "array",
+        minItems: 1,
+        maxItems: 50,
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            body: { type: "string" },
+            summary: { type: "string" },
+          },
+          required: ["body"],
+          additionalProperties: false,
+        },
+      },
+      title: { type: "string", description: "Legacy single-node title. Prefer nodes[].title." },
+      body: { type: "string", description: "Legacy single-node body. Prefer nodes[].body." },
+      summary: { type: "string", description: "Legacy single-node summary. Prefer nodes[].summary." },
     }),
     handler: (args) => {
       const state = useAtlasStore.getState();
       const parentId = stringArg(args, "parentId", state.selectedNodeId);
-      const title = stringArg(args, "title", "Untitled voice note");
-      const body = stringArg(args, "body", "");
-      const id = state.addChildNode(parentId, body, { title, focus: true });
-      if (!id) return fail("Could not create child node.");
-      return ok(`Created child node ${title}.`, { nodeId: id });
+      const nodeDrafts = nodeDraftArrayArg(args, "nodes");
+      const drafts = nodeDrafts.length
+        ? nodeDrafts
+        : [{ title: stringArg(args, "title", "Untitled note"), body: stringArg(args, "body"), summary: optionalString(args, "summary") ?? "" }];
+      const ids = state.addChildNodes(parentId, drafts, { focus: true });
+      if (!ids.length) return fail("Could not create child nodes.");
+      return ok(`Created ${ids.length} child node(s).`, { nodeIds: ids });
     },
   },
   {
@@ -275,7 +293,7 @@ const toolSpecs: VoiceToolSpec[] = [
           [
             "run_ai_from_active_node was not executed because it creates AI request/result notebook nodes.",
             "Use it only when the user explicitly asks for a separate node-anchored AI run or persistent node-based AI result.",
-            "For picking up nodes, listing tasks, summarizing state, inspecting notifications, or answering the current global conversation, use search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and then answer directly in Voice log.",
+            "For picking up nodes, listing tasks, summarizing state, inspecting notifications, or answering the current AI/Partner conversation, use search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and then answer directly in AI/Partner log.",
           ].join("\n"),
         );
       }
@@ -464,6 +482,22 @@ function optionalString(args: Record<string, unknown>, key: string) {
 function stringArrayArg(args: Record<string, unknown>, key: string) {
   const value = args[key];
   return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : undefined;
+}
+
+function nodeDraftArrayArg(args: Record<string, unknown>, key: string) {
+  const value = args[key];
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const record = item as Record<string, unknown>;
+      const title = typeof record.title === "string" ? record.title.trim() : "";
+      const body = typeof record.body === "string" ? record.body.trim() : "";
+      const summary = typeof record.summary === "string" ? record.summary.trim() : "";
+      if (!title && !body && !summary) return null;
+      return { title, body, summary };
+    })
+    .filter((item): item is { title: string; body: string; summary: string } => item !== null);
 }
 
 function numberArg(args: Record<string, unknown>, key: string, fallback: number) {

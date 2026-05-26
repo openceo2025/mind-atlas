@@ -42,9 +42,9 @@ const codexModelsOverride = process.env.MIND_ATLAS_CODEX_MODELS ?? "";
 let codexOptionsCache = null;
 let codexSearchFlagSupportCache = null;
 
-const realtimeModel = process.env.MIND_ATLAS_REALTIME_MODEL ?? "gpt-realtime-2";
+const realtimeModel = process.env.MIND_ATLAS_REALTIME_MODEL ?? "gpt-realtime";
 const realtimeVoice = process.env.MIND_ATLAS_REALTIME_VOICE ?? "marin";
-const realtimeTranscriptionModel = process.env.MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL ?? "gpt-realtime-whisper";
+const realtimeTranscriptionModel = process.env.MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe";
 const allowMockWithoutKey = process.env.MIND_ATLAS_ALLOW_MOCK_WITHOUT_KEY !== "false";
 const cloudNotebookDir = resolve(process.env.MIND_ATLAS_CLOUD_DIR ?? join(process.cwd(), "server-data", "notebooks"));
 
@@ -427,7 +427,7 @@ async function createTextPartnerTurn(payload) {
   if (!openAiApiKey) {
     if (!allowMockWithoutKey) throw new BridgeError(503, "OpenAI API key is not configured");
     return {
-      text: "Mock Text Partner response because OpenAI API key is not configured.",
+      text: "Mock AI/Partner response because OpenAI API key is not configured.",
       toolCalls: [],
       provider: "mock",
       model,
@@ -1516,12 +1516,12 @@ function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summa
     "Do not use run_ai_from_active_node to answer the current global conversation, inspect existing nodes, pick up tasks, summarize state, or check notifications. That tool starts a separate node-anchored AI run and creates notebook nodes. Use it only when the user explicitly asks for a persistent node-based AI result or delegation to a specific node context.",
     "Destructive operations require approval. If a tool reports approval is required, do not claim the operation was executed.",
     "After tool use, briefly say what changed.",
-    voiceMode ? "Keep responses concise enough for voice." : "This is a text conversation. Be concise, but include enough detail to be useful in the Voice log.",
+    voiceMode ? "Keep responses concise enough for voice." : "This is a text conversation. Be concise, but include enough detail to be useful in the AI/Partner log.",
     "Do not create a celestial response node unless a tool explicitly creates or edits nodes.",
     "Write in the user's language unless the user asks otherwise.",
     extraInstructions,
     summary ? `Previous session summary:\n${summary}` : "",
-    voiceLogContext ? `Persistent Voice log context:\n${voiceLogContext}` : "",
+    voiceLogContext ? `Persistent AI/Partner log context:\n${voiceLogContext}` : "",
     contextText ? `Selected context JSON:\n${contextText}` : "",
   ].filter(Boolean).join("\n\n");
 }

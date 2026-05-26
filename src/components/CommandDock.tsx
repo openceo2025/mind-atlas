@@ -5,7 +5,7 @@ import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceS
 import { runTextPartnerTurn } from "../ai/textPartnerClient";
 import { buildVoiceLogContext } from "../ai/voiceLogContext";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
-import { buildAiNodeContextWithAttachments, findNode, findNodePath, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
+import { buildAiNodeContextWithAttachments, findNode, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
 import type { AiAttachmentMode, AiContextScope, AiExecutionMode, CodexOptionsResult, CodexReasoningEffort, CodexSandboxMode } from "../types";
 
 type CommandMode = AiExecutionMode | "note";
@@ -33,6 +33,7 @@ export function CommandDock() {
   const voiceIdleTimerRef = useRef<number | null>(null);
   const voiceSessionIdRef = useRef<string | undefined>(undefined);
   const assistantBufferRef = useRef("");
+  const voicePendingTurnRef = useRef<{ prompt: string; parentNodeId: string | null } | null>(null);
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const multiSelectedNodeIds = useAtlasStore((state) => state.multiSelectedNodeIds);
@@ -83,6 +84,7 @@ export function CommandDock() {
       clearVoiceIdleTimer();
       voiceSessionRef.current?.stop();
       voiceSessionRef.current = null;
+      voicePendingTurnRef.current = null;
       dictationRecorderRef.current?.stream.getTracks().forEach((track) => track.stop());
       dictationStreamRef.current?.getTracks().forEach((track) => track.stop());
       setCommandInputEditing(false);
@@ -142,7 +144,7 @@ export function CommandDock() {
       addQuickChildFromInput(trimmed);
       return;
     }
-    if ((mode === "openai" || mode === "local") && isGlobalTextPartnerSurface(atlasRoot, selectedNodeId)) {
+    if (mode === "openai" || mode === "local") {
       void runTextPartnerTurn(trimmed, mode, contextOptionsForRun);
       return;
     }
@@ -201,11 +203,21 @@ export function CommandDock() {
 
   const handleRealtimeEvent = (event: RealtimeClientEvent) => {
     if (event.kind === "user_transcript_done") {
+      const latest = useAtlasStore.getState();
+      const parentNodeId = latest.selectedNodeId === latest.atlasRoot.id ? null : latest.selectedNodeId;
+      voicePendingTurnRef.current = {
+        prompt: event.text,
+        parentNodeId,
+      };
       appendVoiceLogEntry({
         role: "user",
         title: "Spoken input",
         text: event.text,
         sessionId: voiceSessionIdRef.current,
+        metadata: {
+          activeNodeId: latest.selectedNodeId,
+          archiveParentNodeId: parentNodeId,
+        },
       });
       scheduleVoiceIdleTimeout();
       return;
@@ -219,12 +231,29 @@ export function CommandDock() {
     if (event.kind === "assistant_done") {
       const text = event.text || assistantBufferRef.current.trim();
       assistantBufferRef.current = "";
+      const pendingTurn = voicePendingTurnRef.current;
+      voicePendingTurnRef.current = null;
       if (text) {
+        const archive = pendingTurn
+          ? useAtlasStore.getState().archivePartnerTurn({
+              parentNodeId: pendingTurn.parentNodeId,
+              prompt: pendingTurn.prompt,
+              response: text,
+              mode: "realtime",
+              model: voicePartnerSettings.realtimeModel,
+            })
+          : undefined;
         appendVoiceLogEntry({
           role: "assistant",
           title: "Voice Partner",
           text,
           sessionId: voiceSessionIdRef.current,
+          metadata: {
+            provider: "openai",
+            model: voicePartnerSettings.realtimeModel,
+            requestNodeId: archive?.requestNodeId,
+            responseNodeId: archive?.responseNodeId,
+          },
         });
       }
       scheduleVoiceIdleTimeout();
@@ -455,6 +484,14 @@ export function CommandDock() {
   const beginVoicePartnerTurn = async () => {
     const session = await ensureVoicePartnerSession();
     if (!session) return;
+    const latest = useAtlasStore.getState();
+    const context = await buildAiNodeContextWithAttachments(latest.atlasRoot, latest.selectedNodeId, normalizeAiContextOptions({
+      ...latest.aiContextOptions,
+      selectedNodeIds: latest.multiSelectedNodeIds,
+    }));
+    if (context) {
+      session.updateContext(context, latest.voiceSessionSummary, buildVoiceLogContext(latest.voiceLogEntries, latest.voiceSessionSummary));
+    }
     session.beginPushToTalk();
     setVoiceButtonState("voice_ptt");
     if (pendingVoiceReleaseRef.current) {
@@ -478,6 +515,7 @@ export function CommandDock() {
     }
     session.cancelAssistantResponse();
     assistantBufferRef.current = "";
+    voicePendingTurnRef.current = null;
     setVoiceState("live");
     setVoiceButtonState("idle");
     appendVoiceLogEntry({
@@ -872,12 +910,6 @@ function stopRecorder(recorder: MediaRecorder, chunks: Blob[]) {
       resolve(new Blob(finalChunks, { type: mimeType }));
     }
   });
-}
-
-function isGlobalTextPartnerSurface(atlasRoot: ReturnType<typeof useAtlasStore.getState>["atlasRoot"], selectedNodeId: string) {
-  const path = findNodePath(atlasRoot, selectedNodeId);
-  if (!path) return false;
-  return path.length <= 2;
 }
 
 function voiceStatusLabel(state: VoiceButtonState) {

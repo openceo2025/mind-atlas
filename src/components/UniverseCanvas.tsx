@@ -65,6 +65,7 @@ const NOTIFICATION_PULSE_DURATION_MS = 8200;
 const NODE_VISIBILITY_CHECK_MS = 250;
 const NODE_SCREEN_MARGIN_NDC = 1.18;
 const NOTIFICATION_SNOOZE_OPTIONS = [
+  { label: "2時間後", delayMs: 2 * 60 * 60 * 1000 },
   { label: "半日後", delayMs: 12 * 60 * 60 * 1000 },
   { label: "1日後", delayMs: 24 * 60 * 60 * 1000 },
   { label: "1週間後", delayMs: 7 * 24 * 60 * 60 * 1000 },
@@ -184,30 +185,66 @@ function syncVisualNodePosition(id: string, worldPosition: Vec3Tuple, parentWorl
 }
 
 export function UniverseCanvas({ theme }: { theme: AtlasTheme }) {
-  const focusParentLayer = useAtlasStore((state) => state.focusParentLayer);
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeContextMenuState | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (nodeContextMenu) {
+      if (event.defaultPrevented || isKeyboardComposing(event) || event.altKey || event.ctrlKey || event.metaKey) return;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        resetUniverseHome(() => setNodeContextMenu(null));
+        return;
+      }
+
+      const spaceEditorNodeId = getSpaceEditorNodeIdFromTarget(event.target);
+      if (!event.shiftKey && spaceEditorNodeId && (event.key === "Enter" || event.key === "Tab")) {
+        event.preventDefault();
+        event.stopPropagation();
+        const store = useAtlasStore.getState();
+        if (event.key === "Enter") {
+          store.addSiblingNode(spaceEditorNodeId);
+        } else {
+          store.addChildNode(spaceEditorNodeId);
+        }
         setNodeContextMenu(null);
         return;
       }
-      focusParentLayer();
+
+      if ((event.key === "Backspace" || event.key === "Delete") && !isEditableShortcutTarget(event.target)) {
+        const store = useAtlasStore.getState();
+        if (store.selectedNodeId === store.atlasRoot.id) return;
+        event.preventDefault();
+        event.stopPropagation();
+        store.deleteNode(store.selectedNodeId);
+        setNodeContextMenu(null);
+        return;
+      }
+
+      if (!isArrowNavigationKey(event.key) || event.shiftKey) return;
+      if (isEditableShortcutTarget(event.target) && !spaceEditorNodeId) return;
+
+      const store = useAtlasStore.getState();
+      const targetNodeId = getKeyboardNavigationTarget(store.atlasRoot, spaceEditorNodeId ?? store.selectedNodeId, event.key);
+      if (!targetNodeId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      store.focusNode(targetNodeId);
+      setNodeContextMenu(null);
     };
     const preventBrowserZoom = (event: WheelEvent) => {
       if (!event.ctrlKey) return;
       event.preventDefault();
     };
 
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
     window.addEventListener("wheel", preventBrowserZoom, { passive: false, capture: true });
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
       window.removeEventListener("wheel", preventBrowserZoom, { capture: true });
     };
-  }, [focusParentLayer, nodeContextMenu]);
+  }, []);
 
   useEffect(() => {
     const closeMenu = () => setNodeContextMenu(null);
@@ -233,6 +270,65 @@ export function UniverseCanvas({ theme }: { theme: AtlasTheme }) {
       <NodeContextMenu menu={nodeContextMenu} onClose={() => setNodeContextMenu(null)} />
     </section>
   );
+}
+
+function resetUniverseHome(closeNodeContextMenu: () => void) {
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+  closeNodeContextMenu();
+  const store = useAtlasStore.getState();
+  store.clearMultiSelection();
+  emitOnboardingEvent("home-logo-clicked");
+  store.focusNode(store.atlasRoot.id);
+}
+
+function isKeyboardComposing(event: KeyboardEvent) {
+  return event.isComposing || event.key === "Process" || event.keyCode === 229;
+}
+
+function getSpaceEditorNodeIdFromTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return null;
+  const editor = target.closest("textarea.space-body-editor");
+  return editor instanceof HTMLTextAreaElement ? editor.dataset.nodeId ?? null : null;
+}
+
+function isEditableShortcutTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+function isArrowNavigationKey(key: string) {
+  return key === "ArrowUp" || key === "ArrowDown" || key === "ArrowLeft" || key === "ArrowRight";
+}
+
+function getKeyboardNavigationTarget(root: AtlasNode, originNodeId: string, key: string) {
+  const path = findNodePath(root, originNodeId);
+  if (!path) return null;
+  const node = path.at(-1);
+
+  if (key === "ArrowUp") {
+    return path.length > 1 ? path[path.length - 2].id : null;
+  }
+
+  if (key === "ArrowDown") {
+    return node?.children[0]?.id ?? null;
+  }
+
+  if (path.length < 2) return null;
+  const siblings = path[path.length - 2].children;
+  const currentIndex = siblings.findIndex((sibling) => sibling.id === originNodeId);
+  if (currentIndex < 0) return null;
+
+  if (key === "ArrowLeft") {
+    return siblings[currentIndex - 1]?.id ?? null;
+  }
+
+  if (key === "ArrowRight") {
+    return siblings[currentIndex + 1]?.id ?? null;
+  }
+
+  return null;
 }
 
 function NotificationPulseLayer({ theme }: { theme: AtlasTheme }) {
@@ -1799,6 +1895,8 @@ function SpaceNodeEditor({
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
+  const titleEditRequestId = useAtlasStore((state) => state.titleEditRequestId);
+  const consumeTitleEditRequest = useAtlasStore((state) => state.consumeTitleEditRequest);
   const displayBody = node.body || "";
   const [draftBody, setDraftBody] = useState(displayBody);
 
@@ -1811,10 +1909,34 @@ function SpaceNodeEditor({
     setDraftBody(displayBody);
   }, [displayBody, node.id]);
 
+  useEffect(() => {
+    if (titleEditRequestId !== node.id) return;
+
+    let cancelled = false;
+    const frame = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      onSelect();
+      textarea.focus({ preventScroll: true });
+      const cursorPosition = textarea.value.length;
+      textarea.setSelectionRange(cursorPosition, cursorPosition);
+      resizeTextarea(textarea);
+      consumeTitleEditRequest();
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [consumeTitleEditRequest, node.id, onSelect, titleEditRequestId]);
+
   return (
     <textarea
       ref={textareaRef}
       className={`node-text-card node-text-editor space-body-editor ${isSelected ? "is-selected" : ""}`}
+      data-node-id={node.id}
       value={draftBody}
       rows={1}
       placeholder="..."

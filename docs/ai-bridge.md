@@ -54,9 +54,9 @@ Copy `.env.example` values into your shell or deployment environment.
 - `MIND_ATLAS_CODEX_SANDBOX`: default sandbox. Use `workspace-write`; Full access is only used after an approval button is clicked in Mind Atlas.
 - `MIND_ATLAS_CODEX_MODELS`: optional comma-separated model override when `codex debug models` is unavailable.
 - `MIND_ATLAS_CODEX_TIMEOUT_MS`: Codex execution timeout in milliseconds. Defaults to 60 minutes.
-- `MIND_ATLAS_REALTIME_MODEL`: default Realtime model. Defaults to `gpt-realtime-2`.
+- `MIND_ATLAS_REALTIME_MODEL`: default Realtime model. Defaults to `gpt-realtime`.
 - `MIND_ATLAS_REALTIME_VOICE`: default voice.
-- `MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL`: Realtime session input transcription model. Defaults to `gpt-realtime-whisper`.
+- `MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL`: Realtime session input transcription model. Defaults to `gpt-4o-transcribe`.
 - `MIND_ATLAS_CLOUD_DIR`: server-side folder for `クラウドへ保存` / `クラウドから読み込み` notebook packages. Defaults to `server-data/notebooks`.
 - `MIND_ATLAS_DEV_HTTPS`: when running `npm run dev:all`, defaults to `true` and generates local HTTPS certificates in `.certs/`.
 - `MIND_ATLAS_BRIDGE_HOST`: bridge bind host. Defaults to `127.0.0.1`; `npm run dev:all` overrides it to `0.0.0.0` for LAN use.

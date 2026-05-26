@@ -449,7 +449,7 @@ export default function App() {
                 <button type="button" onClick={handleOpenVoiceLog}>
                   <MessageSquareText size={15} />
                   <span>
-                    Voice log
+                    AI/Partner log
                     <small>{voiceLogUnreadLabel(unreadTextPartnerEntries.length, voiceLogEntries.length)}</small>
                   </span>
                 </button>
@@ -700,7 +700,7 @@ function VoiceSettingsDialog({
             <input
               value={draft.realtimeModel}
               onChange={(event) => setDraft((current) => ({ ...current, realtimeModel: event.target.value }))}
-              placeholder="gpt-realtime-2"
+              placeholder="gpt-realtime"
             />
           </label>
           <label className="voice-settings-field">
@@ -757,24 +757,24 @@ function VoiceLogDialog({
   const displayedEntries = [...entries].reverse();
 
   const handleClear = () => {
-    const confirmed = window.confirm("Clear the local Voice Partner log?");
+    const confirmed = window.confirm("Clear the local AI/Partner log?");
     if (!confirmed) return;
     onClear();
   };
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="voice-log-dialog" role="dialog" aria-modal="true" aria-label="Voice log" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="voice-log-dialog" role="dialog" aria-modal="true" aria-label="AI/Partner log" onMouseDown={(event) => event.stopPropagation()}>
         <header className="voice-log-header">
           <div>
-            <h2>Voice log</h2>
+            <h2>AI/Partner log</h2>
             <p>{entries.length} entries</p>
           </div>
           <div className="voice-log-actions">
-            <button className="icon-button" type="button" onClick={handleClear} aria-label="Clear Voice log" disabled={entries.length === 0}>
+            <button className="icon-button" type="button" onClick={handleClear} aria-label="Clear AI/Partner log" disabled={entries.length === 0}>
               <Trash2 size={16} />
             </button>
-            <button className="icon-button" type="button" onClick={onClose} aria-label="Close Voice log">
+            <button className="icon-button" type="button" onClick={onClose} aria-label="Close AI/Partner log">
               <X size={17} />
             </button>
           </div>
@@ -800,7 +800,7 @@ function VoiceLogDialog({
               </article>
             ))
           ) : (
-            <p className="voice-log-empty">No Voice Partner log entries yet.</p>
+            <p className="voice-log-empty">No AI/Partner log entries yet.</p>
           )}
         </div>
       </section>
@@ -1240,10 +1240,10 @@ function UnreadNotificationLinks({
           className={`unread-notification-link is-voice-log ${voiceLogEntry.role === "error" ? "is-error" : ""}`}
           type="button"
           onClick={onOpenVoiceLog}
-          title={voiceLogEntry.title || "Text Partner reply"}
+          title={voiceLogEntry.title || "AI/Partner reply"}
         >
           <MessageSquareText size={12} />
-          <span>{voiceLogUnreadCount > 1 ? `${voiceLogUnreadCount} text replies` : shortNotificationTitle(voiceLogEntry.title || "Text reply")}</span>
+          <span>{voiceLogUnreadCount > 1 ? `${voiceLogUnreadCount} AI/Partner replies` : shortNotificationTitle(voiceLogEntry.title || "AI/Partner reply")}</span>
         </button>
       ) : null}
       {items.map(({ notification, node }) => (

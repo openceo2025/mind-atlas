@@ -77,7 +77,7 @@ const DEFAULT_CODEX_SETTINGS: CodexSettings = {
   timeoutMs: 60 * 60 * 1000,
 };
 const DEFAULT_VOICE_PARTNER_SETTINGS: VoicePartnerSettings = {
-  realtimeModel: "gpt-realtime-2",
+  realtimeModel: "gpt-realtime",
   realtimeVoice: "marin",
 };
 
@@ -115,6 +115,25 @@ interface HistoryEntry {
   atlasRoot: AtlasNode;
   selectedNodeId: string;
 }
+
+type ChildNodeDraft = {
+  title?: string;
+  body?: string;
+  summary?: string;
+};
+
+type PartnerArchiveMode = Extract<AiExecutionMode, "openai" | "local"> | "realtime";
+
+type PartnerTurnArchive = {
+  parentNodeId?: string | null;
+  prompt: string;
+  response: string;
+  mode: PartnerArchiveMode;
+  provider?: AiProvider;
+  model?: string;
+  usage?: AiUsage;
+  status?: WorkStatus;
+};
 
 const initialAtlasRoot = loadStoredNotebook() ?? atlasRoot;
 const initialVoiceLogEntries = loadStoredVoiceLog();
@@ -176,6 +195,8 @@ interface AtlasStore {
     initialBody?: string,
     options?: { title?: string; position?: [number, number, number]; insertIndex?: number; focus?: boolean; persist?: boolean },
   ) => string | undefined;
+  addChildNodes: (parentId: string, nodes: ChildNodeDraft[], options?: { focus?: boolean }) => string[];
+  archivePartnerTurn: (archive: PartnerTurnArchive) => { requestNodeId: string; responseNodeId: string } | undefined;
   pasteNodeSubtree: (parentId: string, copiedRoot: AtlasNode) => string | undefined;
   addSiblingNode: (id: string) => void;
   promoteNodeOneLevel: (id: string) => void;
@@ -597,6 +618,155 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       get().focusNode(child.id);
     }
     return child.id;
+  },
+
+  addChildNodes: (parentId, nodes, options = {}) => {
+    const state = get();
+    const parentPath = findNodePath(state.atlasRoot, parentId);
+    const parent = parentPath?.at(-1);
+    if (!parentPath || !parent) return [];
+
+    const drafts = nodes
+      .map((node) => ({
+        title: node.title?.trim() ?? "",
+        body: node.body?.trim() ?? "",
+        summary: node.summary?.trim() ?? "",
+      }))
+      .filter((node) => node.title || node.body || node.summary);
+    if (!drafts.length) return [];
+
+    const childDepth = parentPath.length;
+    const startIndex = parent.children.length;
+    const children = drafts.map((draft, offset) => {
+      const body = draft.body;
+      const title = draft.title || (body ? titleFromBody(body) : "Untitled node");
+      const position = getPhyllotaxisStoredChildPosition(childDepth, startIndex + offset + 1, startIndex + offset, parent.id);
+      const child = createNotebookNode(parentId, startIndex + offset, title, body, { position });
+      return draft.summary ? { ...child, summary: draft.summary } : child;
+    });
+    const ids = children.map((child) => child.id);
+
+    set((current) => {
+      const atlasRoot = updateNodeById(current.atlasRoot, parentId, (node) => ({
+        ...node,
+        children: [...node.children, ...children],
+        updatedAt: new Date().toISOString(),
+      }));
+      persistNotebook(atlasRoot);
+      return {
+        ...pushHistory(current),
+        atlasRoot,
+        birthMarks: {
+          ...current.birthMarks,
+          ...Object.fromEntries(ids.map((id) => [id, performance.now()])),
+        },
+        titleEditRequestId: options.focus === false ? current.titleEditRequestId : ids.at(-1) ?? current.titleEditRequestId,
+      };
+    });
+
+    if (options.focus !== false && ids.length) {
+      get().focusNode(ids[ids.length - 1]);
+    }
+    return ids;
+  },
+
+  archivePartnerTurn: (archive) => {
+    const prompt = archive.prompt.trim();
+    const response = archive.response.trim();
+    if (!prompt || !response) return undefined;
+
+    const state = get();
+    const parentNodeId = archive.parentNodeId || state.selectedNodeId;
+    if (!parentNodeId || parentNodeId === state.atlasRoot.id) return undefined;
+
+    const parentPath = findNodePath(state.atlasRoot, parentNodeId);
+    const parent = parentPath?.at(-1);
+    if (!parentPath || !parent) return undefined;
+
+    const runMode = partnerRunMode(archive.mode);
+    const provider = archive.provider ?? partnerProvider(archive.mode);
+    const label = partnerModeLabel(archive.mode);
+    const runId = `partner-run-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+    const requestIndex = parent.children.length;
+    const requestPosition = getPhyllotaxisStoredChildPosition(parentPath.length, requestIndex + 1, requestIndex, parent.id);
+    const requestNode = {
+      ...createAiRequestNode(parentNodeId, requestIndex, runId, runMode, prompt, {
+        position: requestPosition,
+        aiDialogSettings: createCurrentAiDialogSettings(state.aiContextOptions, state.codexSettings),
+      }),
+      title: `${label} request`,
+      status: "done" as WorkStatus,
+      nextDecision: "AI/Partner result archived below.",
+      tags: normalizeTags(["partner", archive.mode], prompt),
+      provider,
+    };
+
+    const output: AiGeneratedOutput = {
+      title: titleFromBody(response) || `${label} response`,
+      body: response,
+      summary: response.split("\n").find(Boolean)?.slice(0, 220) ?? `${label} response.`,
+      suggestedStatus: archive.status === "waiting" ? "waiting" : archive.status === "needs_review" || archive.status === "error" ? "needs_review" : "done",
+      tags: ["partner", archive.mode],
+    };
+    const responseNode = createAiResponseNode(
+      requestNode.id,
+      0,
+      runId,
+      provider,
+      runMode,
+      archive.model || label,
+      output,
+      archive.usage,
+      {
+        position: getPhyllotaxisStoredChildPosition(parentPath.length + 1, 1, 0, requestNode.id),
+        aiDialogSettings: requestNode.aiDialogSettings,
+      },
+    );
+    const archivedRequestNode: AtlasNode = {
+      ...requestNode,
+      children: [responseNode],
+    };
+    const completedAt = new Date().toISOString();
+
+    set((current) => {
+      const atlasRoot = updateNodeById(current.atlasRoot, parentNodeId, (node) => ({
+        ...node,
+        children: [...node.children, archivedRequestNode],
+        updatedAt: completedAt,
+      }));
+      persistNotebook(atlasRoot);
+      return {
+        ...pushHistory(current),
+        atlasRoot,
+        birthMarks: {
+          ...current.birthMarks,
+          [archivedRequestNode.id]: performance.now(),
+          [responseNode.id]: performance.now(),
+        },
+        aiRuns: {
+          ...current.aiRuns,
+          [runId]: {
+            id: runId,
+            nodeId: parentNodeId,
+            requestNodeId: archivedRequestNode.id,
+            responseNodeId: responseNode.id,
+            provider,
+            mode: runMode,
+            modelId: archive.model || label,
+            status: archive.status === "error" ? "error" : "done",
+            prompt,
+            startedAt: archivedRequestNode.createdAt,
+            completedAt,
+            usage: archive.usage,
+          },
+        },
+      };
+    });
+
+    return {
+      requestNodeId: archivedRequestNode.id,
+      responseNodeId: responseNode.id,
+    };
   },
 
   pasteNodeSubtree: (parentId, copiedRoot) => {
@@ -2516,6 +2686,26 @@ function providerForMode(mode: AiExecutionMode): AiProvider {
   if (mode === "local") return "local";
   if (mode === "codex") return "codex";
   return "openai";
+}
+
+function partnerProvider(mode: PartnerArchiveMode): AiProvider {
+  if (mode === "local") return "local";
+  return "openai";
+}
+
+function partnerRunMode(mode: PartnerArchiveMode): AiExecutionMode {
+  return mode === "local" ? "local" : "openai";
+}
+
+function partnerModeLabel(mode: PartnerArchiveMode) {
+  switch (mode) {
+    case "local":
+      return "Local";
+    case "realtime":
+      return "Realtime";
+    case "openai":
+      return "OpenAI";
+  }
 }
 
 function modeLabel(mode: AiExecutionMode) {
