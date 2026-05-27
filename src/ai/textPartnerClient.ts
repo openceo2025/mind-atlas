@@ -12,16 +12,14 @@ export async function runTextPartnerTurn(prompt: string, mode: Extract<AiExecuti
   if (!context) return;
 
   const sessionId = `text-partner-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
-  const archiveParentNodeId = state.selectedNodeId === state.atlasRoot.id ? null : state.selectedNodeId;
-  const voiceLogContext = buildVoiceLogContext(state.voiceLogEntries, state.voiceSessionSummary);
+  const voiceLogContext = buildVoiceLogContext(state.voiceLogEntries);
   state.appendVoiceLogEntry({
     role: "user",
-    title: `AI/Partner input (${mode})`,
+    title: `AI Partner input (${mode})`,
     text: prompt,
     sessionId,
     metadata: {
       activeNodeId: state.selectedNodeId,
-      archiveParentNodeId,
       contextStats: context.stats,
     },
   });
@@ -46,26 +44,15 @@ export async function runTextPartnerTurn(prompt: string, mode: Extract<AiExecuti
       }
 
       if (!result.toolCalls.length) {
-        const archive = useAtlasStore.getState().archivePartnerTurn({
-          parentNodeId: archiveParentNodeId,
-          prompt,
-          response: result.text.trim() || "(No text response.)",
-          mode,
-          provider: result.provider,
-          model: result.model,
-          usage: result.usage,
-        });
         useAtlasStore.getState().appendVoiceLogEntry({
           role: "assistant",
-          title: `AI/Partner (${mode})`,
+          title: `AI Partner (${mode})`,
           text: result.text.trim() || "(No text response.)",
           sessionId,
           metadata: {
             provider: result.provider,
             model: result.model,
             usage: result.usage,
-            requestNodeId: archive?.requestNodeId,
-            responseNodeId: archive?.responseNodeId,
           },
         });
         return;
@@ -87,43 +74,21 @@ export async function runTextPartnerTurn(prompt: string, mode: Extract<AiExecuti
     }
 
     const message = "Stopped after too many tool turns. Ask again with a narrower request.";
-    const archive = useAtlasStore.getState().archivePartnerTurn({
-      parentNodeId: archiveParentNodeId,
-      prompt,
-      response: message,
-      mode,
-      status: "error",
-    });
     useAtlasStore.getState().appendVoiceLogEntry({
       role: "error",
-      title: `AI/Partner error (${mode})`,
+      title: `AI Partner error (${mode})`,
       text: message,
       sessionId,
       status: "error",
-      metadata: {
-        requestNodeId: archive?.requestNodeId,
-        responseNodeId: archive?.responseNodeId,
-      },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "AI/Partner request failed.";
-    const archive = useAtlasStore.getState().archivePartnerTurn({
-      parentNodeId: archiveParentNodeId,
-      prompt,
-      response: message,
-      mode,
-      status: "error",
-    });
+    const message = error instanceof Error ? error.message : "AI Partner request failed.";
     useAtlasStore.getState().appendVoiceLogEntry({
       role: "error",
-      title: `AI/Partner error (${mode})`,
+      title: `AI Partner error (${mode})`,
       text: message,
       sessionId,
       status: "error",
-      metadata: {
-        requestNodeId: archive?.requestNodeId,
-        responseNodeId: archive?.responseNodeId,
-      },
     });
   }
 }

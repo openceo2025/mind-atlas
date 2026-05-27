@@ -1,20 +1,23 @@
 import { FocusPanel } from "./components/FocusPanel";
 import { Bell, BellOff, CloudDownload, CloudUpload, Download, Maximize2, MessageSquareText, Moon, MoreHorizontal, PenLine, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
 import { CommandDock } from "./components/CommandDock";
 import { Minimap } from "./components/Minimap";
+import { OutlineEditor } from "./components/OutlineEditor";
 import { UniverseCanvas } from "./components/UniverseCanvas";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
 import { createNotebookJsonPackage, createNotebookPackage, importNotebookPackage, type NotebookPackageResult } from "./notebookPackage";
 import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
+import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
 import type { AtlasNode, CloudNotebookEntry, NotificationPulse, VoiceLogEntry, VoicePartnerSettings } from "./types";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const WORKSPACE_PANEL_EXIT_MS = 960;
+const RENDER_QUALITY_STORAGE_KEY = "mind-atlas-render-quality";
 const DEFAULT_DATASET_TITLE = "Mind Atlas";
 const UNIVERSE_TITLE_PLACEHOLDER_ALIASES = [
   "Name this universe.",
@@ -26,10 +29,12 @@ export default function App() {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const focusNode = useAtlasStore((state) => state.focusNode);
+  const selectNodeInPlace = useAtlasStore((state) => state.selectNodeInPlace);
   const showNotificationSnoozePrompt = useAtlasStore((state) => state.showNotificationSnoozePrompt);
   const updateNode = useAtlasStore((state) => state.updateNode);
   const exportNotebook = useAtlasStore((state) => state.exportNotebook);
   const importNotebook = useAtlasStore((state) => state.importNotebook);
+  const applyOutlineSubtree = useAtlasStore((state) => state.applyOutlineSubtree);
   const resetNotebook = useAtlasStore((state) => state.resetNotebook);
   const undo = useAtlasStore((state) => state.undo);
   const redo = useAtlasStore((state) => state.redo);
@@ -46,28 +51,35 @@ export default function App() {
   const unreadNotifications = useAtlasStore((state) => state.unreadNotifications);
   const restoreAttachmentPreviews = useAtlasStore((state) => state.restoreAttachmentPreviews);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
+  const [persistedUiState] = useState<PersistedUiState | null>(() => loadPersistedUiState());
+  const [pageActive, setPageActive] = useState(() => isPageRuntimeActive());
   const [menuOpen, setMenuOpen] = useState(false);
   const [voiceLogOpen, setVoiceLogOpen] = useState(false);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
+  const [outlineEditorOpen, setOutlineEditorOpen] = useState(false);
   const [cloudLoadOpen, setCloudLoadOpen] = useState(false);
   const [mobileNotificationsEnabled, setMobileNotificationsEnabled] = useState(() => loadMobileNotificationPreference());
   const [mobileNotificationPermission, setMobileNotificationPermission] = useState<MobileNotificationPermission>(() => getMobileNotificationPermission());
   const [mobileNotificationMessage, setMobileNotificationMessage] = useState("");
-  const [vrModeEnabled, setVrModeEnabled] = useState(false);
+  const [vrModeEnabled, setVrModeEnabled] = useState(() => Boolean(persistedUiState?.vrModeEnabled && canRestoreVrModeWithoutGesture()));
   const [vrModeMessage, setVrModeMessage] = useState("");
+  const [renderQuality, setRenderQuality] = useState<RenderQuality>(() => loadRenderQualityPreference());
   const [cloudNotebooks, setCloudNotebooks] = useState<CloudNotebookEntry[]>([]);
   const [cloudDirectory, setCloudDirectory] = useState("");
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudStatus, setCloudStatus] = useState("");
   const [cloudError, setCloudError] = useState("");
   const [theme, setTheme] = useState<AtlasTheme>(() => loadStoredTheme());
-  const [mobilePanelTab, setMobilePanelTab] = useState<"command" | "editor">("command");
+  const [mobilePanelTab, setMobilePanelTab] = useState<"command" | "editor">(persistedUiState?.mobilePanelTab ?? "command");
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
+  const mobilePortraitBreadcrumb = useMobilePortraitBreadcrumbLayout();
   const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
+  const selectedNode = selectedPath[selectedPath.length - 1] ?? atlasRoot;
   const onboarding = useOnboarding();
   const effectiveMobilePanelTab = onboarding.showAiFeatures ? mobilePanelTab : "editor";
   const showWorkspacePanel = onboarding.showAiFeatures || selectedNodeId !== atlasRoot.id;
+  const focusPanelOpen = selectedNodeId !== atlasRoot.id;
   const [renderWorkspacePanel, setRenderWorkspacePanel] = useState(showWorkspacePanel);
   const appClassName = [
     "app-shell",
@@ -91,8 +103,65 @@ export default function App() {
     [voiceLogEntries, voiceLogLastSeenAt],
   );
   const latestTextPartnerEntry = unreadTextPartnerEntries.at(-1);
+  const uiPersistenceReadyRef = useRef(false);
+  const uiRestoreAppliedRef = useRef(false);
+  const latestUiStateRef = useRef<Omit<Partial<PersistedUiState>, "version" | "savedAt">>({});
 
   useVisualViewportHeight(commandInputEditing);
+
+  useEffect(() => {
+    if (uiRestoreAppliedRef.current) return;
+    uiRestoreAppliedRef.current = true;
+    if (!persistedUiState?.selectedNodeId) return;
+    if (!findNode(atlasRoot, persistedUiState.selectedNodeId)) return;
+    selectNodeInPlace(persistedUiState.selectedNodeId);
+  }, [atlasRoot, persistedUiState, selectNodeInPlace]);
+
+  useEffect(() => {
+    latestUiStateRef.current = {
+      selectedNodeId,
+      renderQuality,
+      vrModeEnabled,
+      mobilePanelTab,
+    };
+  }, [mobilePanelTab, renderQuality, selectedNodeId, vrModeEnabled]);
+
+  useEffect(() => {
+    if (!uiPersistenceReadyRef.current) {
+      uiPersistenceReadyRef.current = true;
+      return;
+    }
+    persistUiStatePatch(latestUiStateRef.current);
+  }, [mobilePanelTab, renderQuality, selectedNodeId, vrModeEnabled]);
+
+  useEffect(() => {
+    const saveUiState = () => persistUiStatePatch(latestUiStateRef.current);
+    const syncPageActive = () => {
+      const active = isPageRuntimeActive();
+      if (!active) saveUiState();
+      setPageActive(active);
+    };
+    const handlePageShow = () => setPageActive(isPageRuntimeActive());
+    const handleHiddenLifecycle = () => {
+      saveUiState();
+      setPageActive(false);
+    };
+
+    document.addEventListener("visibilitychange", syncPageActive);
+    document.addEventListener("freeze", handleHiddenLifecycle);
+    document.addEventListener("resume", syncPageActive);
+    window.addEventListener("pagehide", handleHiddenLifecycle);
+    window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("beforeunload", saveUiState);
+    return () => {
+      document.removeEventListener("visibilitychange", syncPageActive);
+      document.removeEventListener("freeze", handleHiddenLifecycle);
+      document.removeEventListener("resume", syncPageActive);
+      window.removeEventListener("pagehide", handleHiddenLifecycle);
+      window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("beforeunload", saveUiState);
+    };
+  }, []);
 
   useEffect(() => {
     const closeMenu = () => setMenuOpen(false);
@@ -103,6 +172,20 @@ export default function App() {
   useEffect(() => {
     persistTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    persistRenderQualityPreference(renderQuality);
+  }, [renderQuality]);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== RENDER_QUALITY_STORAGE_KEY) return;
+      if (!isRenderQuality(event.newValue)) return;
+      setRenderQuality(event.newValue);
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
 
   useEffect(() => {
     if (!voiceLogOpen) return;
@@ -119,9 +202,10 @@ export default function App() {
       setRenderWorkspacePanel(true);
       return;
     }
+    if (!pageActive) return;
     const timeout = window.setTimeout(() => setRenderWorkspacePanel(false), WORKSPACE_PANEL_EXIT_MS);
     return () => window.clearTimeout(timeout);
-  }, [showWorkspacePanel]);
+  }, [pageActive, showWorkspacePanel]);
 
   useEffect(() => {
     if (onboarding.showMainChrome) return;
@@ -399,9 +483,33 @@ export default function App() {
     setVrModeMessage("On");
   };
 
+  const handleRenderQualityChange = (quality: RenderQuality) => {
+    setRenderQuality(quality);
+    persistRenderQualityPreference(quality);
+  };
+
+  if (outlineEditorOpen) {
+    return (
+      <OutlineEditor
+        root={selectedNode}
+        onCancel={() => setOutlineEditorOpen(false)}
+        onSave={(rootId, outline) => {
+          applyOutlineSubtree(rootId, outline);
+          setOutlineEditorOpen(false);
+        }}
+      />
+    );
+  }
+
   return (
-    <main className={appClassName} data-theme={theme}>
-      <UniverseCanvas theme={theme} vrPanEnabled={vrModeEnabled} />
+    <main className={appClassName} data-theme={theme} data-focus-panel={focusPanelOpen ? "open" : "closed"}>
+      <UniverseCanvas
+        theme={theme}
+        vrPanEnabled={vrModeEnabled}
+        renderQuality={renderQuality}
+        pageActive={pageActive}
+        initialCameraPose={persistedUiState?.cameraPose ?? null}
+      />
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
       {onboarding.message ? (
         <div className="onboarding-message" role="status" aria-live="polite">
@@ -411,7 +519,7 @@ export default function App() {
 
       <header className="top-bar" aria-label="Mind Atlas status">
         <div className="top-title-stack">
-          <AtlasBreadcrumb path={onboarding.showLogoOnly ? [atlasRoot] : selectedPath} onFocus={focusNode} />
+          <AtlasBreadcrumb path={onboarding.showLogoOnly ? [atlasRoot] : selectedPath} mobilePortrait={mobilePortraitBreadcrumb} onFocus={focusNode} />
           {onboarding.showMainChrome ? (
             <>
               <DatasetTitleInput
@@ -472,7 +580,7 @@ export default function App() {
                 <button type="button" onClick={handleOpenVoiceLog}>
                   <MessageSquareText size={15} />
                   <span>
-                    AI/Partner log
+                    AI Partner log
                     <small>{voiceLogUnreadLabel(unreadTextPartnerEntries.length, voiceLogEntries.length)}</small>
                   </span>
                 </button>
@@ -506,6 +614,13 @@ export default function App() {
                 <small>hide browser bars</small>
               </span>
             </button>
+            <button type="button" onClick={() => { setOutlineEditorOpen(true); setMenuOpen(false); }}>
+              <PenLine size={15} />
+              <span>
+                Outline editor
+                <small>{selectedNode.title || "active subtree"}</small>
+              </span>
+            </button>
             <button
               className={vrModeEnabled ? "is-active" : ""}
               type="button"
@@ -519,6 +634,27 @@ export default function App() {
                 <small>{vrModeStatusLabel(vrModeEnabled, vrModeMessage)}</small>
               </span>
             </button>
+            <div className="context-menu-section" aria-label="Render quality">
+              <span className="context-menu-section-title">Render quality</span>
+              <div className="theme-choice-row">
+                <button
+                  className={renderQuality === "high" ? "is-active" : ""}
+                  type="button"
+                  onClick={() => handleRenderQualityChange("high")}
+                  aria-pressed={renderQuality === "high"}
+                >
+                  High
+                </button>
+                <button
+                  className={renderQuality === "low" ? "is-active" : ""}
+                  type="button"
+                  onClick={() => handleRenderQualityChange("low")}
+                  aria-pressed={renderQuality === "low"}
+                >
+                  Low
+                </button>
+              </div>
+            </div>
             <button type="button" onClick={handleExportLight}>
               <Download size={15} />
               <span>
@@ -793,24 +929,24 @@ function VoiceLogDialog({
   const displayedEntries = [...entries].reverse();
 
   const handleClear = () => {
-    const confirmed = window.confirm("Clear the local AI/Partner log?");
+    const confirmed = window.confirm("Clear the local AI Partner log?");
     if (!confirmed) return;
     onClear();
   };
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="voice-log-dialog" role="dialog" aria-modal="true" aria-label="AI/Partner log" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="voice-log-header">
+      <section className="voice-log-dialog" role="dialog" aria-modal="true" aria-label="AI Partner log" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="voice-log-header voice-log-header-with-clear">
+          <button className="icon-button" type="button" onClick={handleClear} aria-label="Clear AI Partner log" disabled={entries.length === 0}>
+            <Trash2 size={16} />
+          </button>
           <div>
-            <h2>AI/Partner log</h2>
+            <h2>AI Partner log</h2>
             <p>{entries.length} entries</p>
           </div>
           <div className="voice-log-actions">
-            <button className="icon-button" type="button" onClick={handleClear} aria-label="Clear AI/Partner log" disabled={entries.length === 0}>
-              <Trash2 size={16} />
-            </button>
-            <button className="icon-button" type="button" onClick={onClose} aria-label="Close AI/Partner log">
+            <button className="icon-button" type="button" onClick={onClose} aria-label="Close AI Partner log">
               <X size={17} />
             </button>
           </div>
@@ -836,7 +972,7 @@ function VoiceLogDialog({
               </article>
             ))
           ) : (
-            <p className="voice-log-empty">No AI/Partner log entries yet.</p>
+            <p className="voice-log-empty">No AI Partner log entries yet.</p>
           )}
         </div>
       </section>
@@ -896,6 +1032,7 @@ function formatBytes(bytes: number) {
 }
 
 type MobileNotificationPermission = NotificationPermission | "unsupported";
+type RenderQuality = "high" | "low";
 type DeviceOrientationPermissionState = "granted" | "denied" | "prompt";
 type DeviceOrientationEventConstructorWithPermission = typeof DeviceOrientationEvent & {
   requestPermission?: () => Promise<DeviceOrientationPermissionState>;
@@ -1025,6 +1162,27 @@ function persistMobileNotificationPreference(enabled: boolean) {
   window.localStorage.setItem(MOBILE_NOTIFICATION_STORAGE_KEY, String(enabled));
 }
 
+function loadRenderQualityPreference(): RenderQuality {
+  if (typeof window === "undefined") return "high";
+  const stored = window.localStorage.getItem(RENDER_QUALITY_STORAGE_KEY);
+  if (isRenderQuality(stored)) return stored;
+  return isMobileRenderQualityTarget() ? "low" : "high";
+}
+
+function persistRenderQualityPreference(quality: RenderQuality) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(RENDER_QUALITY_STORAGE_KEY, quality);
+}
+
+function isRenderQuality(value: string | null): value is RenderQuality {
+  return value === "high" || value === "low";
+}
+
+function isPageRuntimeActive() {
+  if (typeof document === "undefined") return true;
+  return document.visibilityState === "visible";
+}
+
 function getMobileNotificationPermission(): MobileNotificationPermission {
   if (!isNotificationSupported()) return "unsupported";
   return Notification.permission;
@@ -1043,6 +1201,15 @@ function isMobileNotificationTarget() {
   return mobileUa || (coarsePointer && narrowViewport);
 }
 
+function isMobileRenderQualityTarget() {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  const mobileUa = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const shortSide = Math.min(window.innerWidth, window.innerHeight);
+  const longSide = Math.max(window.innerWidth, window.innerHeight);
+  return (mobileUa || coarsePointer) && shortSide <= 620 && longSide <= 980;
+}
+
 function mobileNotificationStatusLabel(
   enabled: boolean,
   permission: MobileNotificationPermission,
@@ -1059,6 +1226,12 @@ function mobileNotificationStatusLabel(
 
 function isDeviceOrientationSupported() {
   return typeof window !== "undefined" && "DeviceOrientationEvent" in window;
+}
+
+function canRestoreVrModeWithoutGesture() {
+  if (!isDeviceOrientationSupported()) return false;
+  const orientationEvent = DeviceOrientationEvent as DeviceOrientationEventConstructorWithPermission;
+  return typeof orientationEvent.requestPermission !== "function";
 }
 
 async function requestDeviceOrientationAccess(): Promise<DeviceOrientationPermissionState> {
@@ -1101,31 +1274,60 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
       if (!(target instanceof HTMLElement)) return;
       if (!target.closest(".command-dock input, .command-dock textarea, .command-dock select")) return;
       if (!isMobileKeyboardOverlayTarget(stableHeightRef.current)) return;
-      keyboardOverlayPreparedUntilRef.current = Date.now() + 1200;
+      keyboardOverlayPreparedUntilRef.current = Date.now() + 4000;
       rememberStableHeight();
-      setVirtualKeyboardOverlay(true);
+      lockKeyboardPanelSizeForKeyboardOverlay();
+      setVirtualKeyboardOverlay(false);
       document.documentElement.setAttribute("data-keyboard-overlay-input", "true");
+      document.documentElement.setAttribute("data-keyboard-overlay-portrait", "true");
+      window.setTimeout(updateViewportHeight, 80);
+      window.setTimeout(updateViewportHeight, 240);
+      window.setTimeout(updateViewportHeight, 520);
+      window.setTimeout(updateViewportHeight, 900);
     };
 
     const updateViewportHeight = () => {
-      const height = Math.round(window.visualViewport?.height ?? window.innerHeight);
+      const visualViewport = window.visualViewport;
+      const height = Math.round(visualViewport?.height ?? window.innerHeight);
       const keyboardOverlayPrepared = Date.now() < keyboardOverlayPreparedUntilRef.current;
-      const keyboardOverlayMode = (commandInputEditing || keyboardOverlayPrepared) && isMobileKeyboardOverlayTarget(stableHeightRef.current);
+      const keyboardOverlayPortrait = isMobileKeyboardOverlayTarget(stableHeightRef.current);
+      const stableHeight = stableHeightRef.current ?? Math.max(height, window.innerHeight, document.documentElement.clientHeight);
+      const visualKeyboardTop = Math.round((visualViewport?.offsetTop ?? 0) + height);
+      const virtualKeyboardTop = getVirtualKeyboardTop(stableHeight);
+      const measuredKeyboardTop = virtualKeyboardTop === null ? visualKeyboardTop : Math.min(visualKeyboardTop, virtualKeyboardTop);
+      const keyboardLikelyOpen = Math.max(0, stableHeight - measuredKeyboardTop) >= 180;
+      const keyboardOverlayMode =
+        (commandInputEditing || isCommandKeyboardTargetActive() || keyboardOverlayPrepared || (hasKeyboardPanelSizeLock() && keyboardLikelyOpen)) &&
+        keyboardOverlayPortrait;
+      const measuredKeyboardBottomOffset = keyboardOverlayMode ? Math.max(0, stableHeight - measuredKeyboardTop) : 0;
+      const fallbackKeyboardBottomOffset =
+        keyboardOverlayMode && measuredKeyboardBottomOffset < 180 ? getFallbackKeyboardBottomOffset(stableHeight) : 0;
+      const keyboardBottomOffset = keyboardOverlayMode ? Math.max(measuredKeyboardBottomOffset, fallbackKeyboardBottomOffset) : 0;
+      const keyboardTop = Math.max(0, stableHeight - keyboardBottomOffset);
 
       if (!keyboardOverlayMode) {
         rememberStableHeight();
+        clearKeyboardPanelSizeLock();
         document.documentElement.removeAttribute("data-keyboard-overlay-input");
+        document.documentElement.removeAttribute("data-keyboard-overlay-portrait");
       } else {
-        setVirtualKeyboardOverlay(true);
+        setVirtualKeyboardOverlay(false);
         document.documentElement.setAttribute("data-keyboard-overlay-input", "true");
+        document.documentElement.setAttribute("data-keyboard-overlay-portrait", "true");
       }
 
-      const stableHeight = stableHeightRef.current ?? Math.max(height, window.innerHeight, document.documentElement.clientHeight);
       const appHeight = keyboardOverlayMode ? stableHeight : height;
       document.documentElement.style.setProperty("--app-height", `${appHeight}px`);
+      document.documentElement.style.setProperty("--keyboard-top", `${keyboardTop}px`);
+      document.documentElement.style.setProperty("--keyboard-bottom-offset", `${keyboardBottomOffset}px`);
     };
 
     const updateViewportHeightAfterOrientation = () => {
+      if (document.documentElement.getAttribute("data-keyboard-overlay-input") === "true" && hasKeyboardPanelSizeLock()) {
+        window.setTimeout(updateViewportHeight, 80);
+        window.setTimeout(updateViewportHeight, 360);
+        return;
+      }
       stableHeightRef.current = null;
       lastViewportWidthRef.current = null;
       window.setTimeout(updateViewportHeight, 80);
@@ -1135,6 +1337,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
     const handlePointerDown = (event: PointerEvent) => prepareKeyboardOverlay(event.target);
     const handleTouchStart = (event: TouchEvent) => prepareKeyboardOverlay(event.target);
     const handleFocusIn = (event: FocusEvent) => prepareKeyboardOverlay(event.target);
+    const virtualKeyboard = (navigator as NavigatorWithVirtualKeyboard).virtualKeyboard;
 
     updateViewportHeight();
     document.addEventListener("pointerdown", handlePointerDown, true);
@@ -1142,6 +1345,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
     document.addEventListener("focusin", handleFocusIn, true);
     window.visualViewport?.addEventListener("resize", updateViewportHeight);
     window.visualViewport?.addEventListener("scroll", updateViewportHeight);
+    virtualKeyboard?.addEventListener("geometrychange", updateViewportHeight);
     window.addEventListener("resize", updateViewportHeight);
     window.addEventListener("orientationchange", updateViewportHeightAfterOrientation);
     return () => {
@@ -1150,6 +1354,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
       document.removeEventListener("focusin", handleFocusIn, true);
       window.visualViewport?.removeEventListener("resize", updateViewportHeight);
       window.visualViewport?.removeEventListener("scroll", updateViewportHeight);
+      virtualKeyboard?.removeEventListener("geometrychange", updateViewportHeight);
       window.removeEventListener("resize", updateViewportHeight);
       window.removeEventListener("orientationchange", updateViewportHeightAfterOrientation);
     };
@@ -1157,13 +1362,18 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
 
   useEffect(() => {
     if (commandInputEditing && isMobileKeyboardOverlayTarget(stableHeightRef.current)) {
-      setVirtualKeyboardOverlay(true);
+      setVirtualKeyboardOverlay(false);
+      document.documentElement.setAttribute("data-keyboard-overlay-input", "true");
+      document.documentElement.setAttribute("data-keyboard-overlay-portrait", "true");
       return;
     }
 
     window.setTimeout(() => {
-      if (!useAtlasStore.getState().commandInputEditing) {
+      if (!useAtlasStore.getState().commandInputEditing && !isCommandKeyboardTargetActive() && !isKeyboardViewportLikelyOpen(stableHeightRef.current)) {
         setVirtualKeyboardOverlay(false);
+        clearKeyboardPanelSizeLock();
+        document.documentElement.removeAttribute("data-keyboard-overlay-input");
+        document.documentElement.removeAttribute("data-keyboard-overlay-portrait");
       }
     }, 300);
   }, [commandInputEditing]);
@@ -1174,8 +1384,56 @@ function isMobileKeyboardOverlayTarget(stableHeight: number | null) {
   const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
   const width = Math.round(window.visualViewport?.width ?? window.innerWidth);
   const narrowViewport = width <= 980 || window.innerWidth <= 980;
-  const portraitBeforeKeyboard = stableHeight ? stableHeight > width : (window.matchMedia?.("(orientation: portrait)").matches ?? window.innerHeight >= width);
+  const keyboardPortraitLocked = document.documentElement.getAttribute("data-keyboard-overlay-portrait") === "true" && hasKeyboardPanelSizeLock();
+  const portraitBeforeKeyboard = keyboardPortraitLocked || (stableHeight ? stableHeight > width : (window.matchMedia?.("(orientation: portrait)").matches ?? window.innerHeight >= width));
   return coarsePointer && narrowViewport && portraitBeforeKeyboard;
+}
+
+function getVirtualKeyboardTop(stableHeight: number) {
+  const virtualKeyboard = (navigator as NavigatorWithVirtualKeyboard).virtualKeyboard;
+  const rect = virtualKeyboard?.boundingRect;
+  if (!rect || rect.height <= 0) return null;
+  const fallbackTop = stableHeight - rect.height;
+  const rawTop = rect.top > 0 ? rect.top : rect.y > 0 ? rect.y : fallbackTop;
+  const top = Math.round(Math.min(stableHeight, Math.max(0, rawTop)));
+  return top <= 0 || top >= stableHeight ? null : top;
+}
+
+function getFallbackKeyboardBottomOffset(stableHeight: number) {
+  return Math.round(Math.min(380, Math.max(260, stableHeight * 0.42)));
+}
+
+function isCommandKeyboardTargetActive() {
+  const activeElement = document.activeElement;
+  return activeElement instanceof HTMLElement && Boolean(activeElement.closest(".command-dock input, .command-dock textarea, .command-dock select"));
+}
+
+function isKeyboardViewportLikelyOpen(stableHeight: number | null) {
+  if (!stableHeight) return false;
+  const visualViewport = window.visualViewport;
+  const height = Math.round(visualViewport?.height ?? window.innerHeight);
+  const visualKeyboardTop = Math.round((visualViewport?.offsetTop ?? 0) + height);
+  const virtualKeyboardTop = getVirtualKeyboardTop(stableHeight);
+  const keyboardTop = virtualKeyboardTop === null ? visualKeyboardTop : Math.min(visualKeyboardTop, virtualKeyboardTop);
+  return Math.max(0, stableHeight - keyboardTop) >= 180;
+}
+
+function lockKeyboardPanelSizeForKeyboardOverlay() {
+  const panel = document.querySelector<HTMLElement>(".mobile-workspace-panel:not(.is-closing)");
+  if (!panel) return;
+  const rect = panel.getBoundingClientRect();
+  if (rect.width < 160 || rect.height < 48) return;
+  document.documentElement.style.setProperty("--keyboard-panel-width", `${Math.round(rect.width)}px`);
+  document.documentElement.style.setProperty("--keyboard-panel-height", `${Math.round(rect.height)}px`);
+}
+
+function clearKeyboardPanelSizeLock() {
+  document.documentElement.style.removeProperty("--keyboard-panel-width");
+  document.documentElement.style.removeProperty("--keyboard-panel-height");
+}
+
+function hasKeyboardPanelSizeLock() {
+  return document.documentElement.style.getPropertyValue("--keyboard-panel-width") !== "";
 }
 
 function setVirtualKeyboardOverlay(enabled: boolean) {
@@ -1189,14 +1447,43 @@ function setVirtualKeyboardOverlay(enabled: boolean) {
 }
 
 type NavigatorWithVirtualKeyboard = Navigator & {
-  virtualKeyboard?: {
+  virtualKeyboard?: EventTarget & {
     overlaysContent: boolean;
+    boundingRect?: DOMRectReadOnly;
   };
 };
 
 function isEditableShortcutTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+function useMobilePortraitBreadcrumbLayout() {
+  const [matches, setMatches] = useState(() => isMobilePortraitBreadcrumbTarget());
+
+  useEffect(() => {
+    const update = () => setMatches(isMobilePortraitBreadcrumbTarget());
+    const query = window.matchMedia?.("(max-width: 980px) and (orientation: portrait)");
+    update();
+    query?.addEventListener?.("change", update);
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      query?.removeEventListener?.("change", update);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
+
+  return matches;
+}
+
+function isMobilePortraitBreadcrumbTarget() {
+  if (typeof window === "undefined") return false;
+  if (document.documentElement.getAttribute("data-keyboard-overlay-portrait") === "true") return true;
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const narrowPortrait = window.matchMedia?.("(max-width: 980px) and (orientation: portrait)").matches ?? false;
+  return coarsePointer && narrowPortrait;
 }
 
 function DatasetTitleInput({
@@ -1212,17 +1499,52 @@ function DatasetTitleInput({
   const storedTitle = title && !titleIsPlaceholder ? title : "";
   const [draftTitle, setDraftTitle] = useState(storedTitle);
   const [editing, setEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const touchEditTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (editing) return;
     setDraftTitle(storedTitle);
   }, [editing, storedTitle]);
 
+  useEffect(
+    () => () => {
+      if (touchEditTimerRef.current !== null) {
+        window.clearTimeout(touchEditTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const clearTouchEditTimer = () => {
+    if (touchEditTimerRef.current === null) return;
+    window.clearTimeout(touchEditTimerRef.current);
+    touchEditTimerRef.current = null;
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLInputElement>) => {
+    if (event.pointerType === "mouse" || editing) return;
+    event.preventDefault();
+    clearTouchEditTimer();
+    touchEditTimerRef.current = window.setTimeout(() => {
+      touchEditTimerRef.current = null;
+      inputRef.current?.focus({ preventScroll: true });
+    }, 520);
+  };
+
   return (
     <input
+      ref={inputRef}
       className="dataset-title-input"
       value={draftTitle}
       placeholder={placeholderTitle}
+      onPointerDown={handlePointerDown}
+      onPointerUp={clearTouchEditTimer}
+      onPointerCancel={clearTouchEditTimer}
+      onPointerLeave={clearTouchEditTimer}
+      onContextMenu={(event) => {
+        if (!editing) event.preventDefault();
+      }}
       onFocus={() => {
         setEditing(true);
         if (titleIsPlaceholder && title !== "") {
@@ -1245,15 +1567,15 @@ function isUniverseTitlePlaceholder(title: string, placeholderTitle: string) {
   return title === DEFAULT_DATASET_TITLE || title === placeholderTitle || UNIVERSE_TITLE_PLACEHOLDER_ALIASES.includes(title);
 }
 
-function AtlasBreadcrumb({ path, onFocus }: { path: AtlasNode[]; onFocus: (id: string) => void }) {
-  const crumbs = compactBreadcrumb(path);
+function AtlasBreadcrumb({ path, mobilePortrait, onFocus }: { path: AtlasNode[]; mobilePortrait: boolean; onFocus: (id: string) => void }) {
+  const crumbs = compactBreadcrumb(path, mobilePortrait);
   const handleLogoClick = () => {
     emitOnboardingEvent("home-logo-clicked");
     onFocus(path[0].id);
   };
 
   return (
-    <nav className="atlas-breadcrumb" aria-label="Atlas path">
+    <nav className={`atlas-breadcrumb ${mobilePortrait ? "is-mobile-portrait" : ""}`} aria-label="Atlas path">
       <button className="atlas-logo-crumb" type="button" onClick={handleLogoClick}>
         MindAtlas
       </button>
@@ -1301,10 +1623,10 @@ function UnreadNotificationLinks({
           className={`unread-notification-link is-voice-log ${voiceLogEntry.role === "error" ? "is-error" : ""}`}
           type="button"
           onClick={onOpenVoiceLog}
-          title={voiceLogEntry.title || "AI/Partner reply"}
+          title={voiceLogEntry.title || "AI Partner reply"}
         >
           <MessageSquareText size={12} />
-          <span>{voiceLogUnreadCount > 1 ? `${voiceLogUnreadCount} AI/Partner replies` : shortNotificationTitle(voiceLogEntry.title || "AI/Partner reply")}</span>
+          <span>{voiceLogUnreadCount > 1 ? `${voiceLogUnreadCount} AI Partner replies` : shortNotificationTitle(voiceLogEntry.title || "AI Partner reply")}</span>
         </button>
       ) : null}
       {items.map(({ notification, node }) => (
@@ -1326,6 +1648,7 @@ function UnreadNotificationLinks({
 function isUnreadTextPartnerEntry(entry: VoiceLogEntry, lastSeenAt: string) {
   if (entry.role !== "assistant" && entry.role !== "error") return false;
   if (!entry.sessionId?.startsWith("text-partner-")) return false;
+  if (typeof entry.metadata?.responseNodeId === "string" && entry.metadata.responseNodeId) return false;
   const entryTime = new Date(entry.createdAt).getTime();
   const seenTime = new Date(lastSeenAt).getTime();
   if (!Number.isFinite(entryTime)) return false;
@@ -1337,8 +1660,13 @@ function voiceLogUnreadLabel(unreadCount: number, totalCount: number) {
   return `${totalCount} entries`;
 }
 
-function compactBreadcrumb(path: AtlasNode[]) {
+function compactBreadcrumb(path: AtlasNode[], mobilePortrait = false) {
   const nodes = path.slice(1);
+  if (mobilePortrait) {
+    if (nodes.length <= 10) return nodes;
+    return [...nodes.slice(0, 5), "ellipsis" as const, ...nodes.slice(-5)];
+  }
+
   if (nodes.length <= 5) return nodes;
 
   const first = nodes.slice(0, 2);

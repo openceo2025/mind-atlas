@@ -263,6 +263,8 @@ export interface AiResponsePayload {
   provider: AiExecutionMode;
   model?: string;
   codex?: Partial<CodexSettings>;
+  // Node anchored AI runs must stay limited to the explicit node context.
+  // Do not add AI Partner log, voice summary, or other global history here.
 }
 
 export interface AiGeneratedOutput {

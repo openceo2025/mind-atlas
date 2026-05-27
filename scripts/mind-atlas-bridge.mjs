@@ -47,6 +47,7 @@ const realtimeVoice = process.env.MIND_ATLAS_REALTIME_VOICE ?? "marin";
 const realtimeTranscriptionModel = process.env.MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe";
 const allowMockWithoutKey = process.env.MIND_ATLAS_ALLOW_MOCK_WITHOUT_KEY !== "false";
 const cloudNotebookDir = resolve(process.env.MIND_ATLAS_CLOUD_DIR ?? join(process.cwd(), "server-data", "notebooks"));
+const MAX_PROCESS_OUTPUT_CHARS = readPositiveIntEnv("MIND_ATLAS_PROCESS_OUTPUT_CHAR_LIMIT", 1_500_000);
 
 process.on("uncaughtException", (error) => {
   console.error("[bridge] uncaught exception");
@@ -273,6 +274,9 @@ async function createAiResponse(payload) {
   const provider = stringOr(payload?.provider, "openai");
   const prompt = stringOr(payload?.prompt, "");
   const context = payload?.context ?? {};
+  // /api/ai/respond is for node anchored AI runs only. Keep it scoped to
+  // prompt + explicit Mind Atlas node context; AI Partner log belongs to
+  // /api/ai/text-partner-turn and Realtime endpoints.
 
   if (!prompt.trim()) {
     throw new BridgeError(400, "prompt is required");
@@ -1118,7 +1122,7 @@ function runProcess(command, args, stdin, timeoutMs, cwd) {
     let child;
     try {
       child = spawn(command, args, {
-        cwd,
+        cwd: normalizeProcessCwd(cwd),
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -1138,10 +1142,10 @@ function runProcess(command, args, stdin, timeoutMs, cwd) {
     }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
+      stdout = appendBoundedOutput(stdout, chunk.toString());
     });
     child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
+      stderr = appendBoundedOutput(stderr, chunk.toString());
     });
     child.stdout.on("error", (error) => {
       stderr += `\nstdout stream error: ${error.message}`;
@@ -1171,6 +1175,17 @@ function runProcess(command, args, stdin, timeoutMs, cwd) {
       stdinError = error instanceof Error ? error.message : String(error);
     }
   });
+}
+
+function normalizeProcessCwd(cwd) {
+  const candidate = String(cwd || "").trim();
+  return candidate && existsSync(candidate) ? candidate : process.cwd();
+}
+
+function appendBoundedOutput(current, chunk) {
+  const next = current + chunk;
+  if (next.length <= MAX_PROCESS_OUTPUT_CHARS) return next;
+  return `${next.slice(0, MAX_PROCESS_OUTPUT_CHARS)}\n[Mind Atlas bridge truncated process output at ${MAX_PROCESS_OUTPUT_CHARS} characters]`;
 }
 
 async function createRealtimeClientSecret(payload) {
@@ -1364,8 +1379,12 @@ function createCloudNotebookFileName(originalName) {
     .replace(/[\\/:*?"<>|]+/g, "-")
     .replace(/\s+/g, " ")
     .slice(0, 80) || "Mind Atlas";
-  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 17);
-  return `${base}-${stamp}-${randomUUID().slice(0, 8)}${extension}`;
+  let index = 1;
+  while (true) {
+    const candidate = `${base}-${String(index).padStart(3, "0")}${extension}`;
+    if (!existsSync(join(cloudNotebookDir, candidate))) return candidate;
+    index += 1;
+  }
 }
 
 function safeCloudNotebookPath(name) {

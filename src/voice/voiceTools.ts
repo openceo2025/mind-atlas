@@ -235,6 +235,40 @@ const toolSpecs: VoiceToolSpec[] = [
   },
   {
     type: "function",
+    name: "set_node_reminders",
+    description:
+      "Set or reschedule reminder notification deadlines for one or more nodes. Each node can receive a different reminderAt timestamp. Use ISO 8601 timestamps whenever possible.",
+    parameters: objectSchema({
+      updates: {
+        type: "array",
+        minItems: 1,
+        maxItems: 50,
+        items: {
+          type: "object",
+          properties: {
+            nodeId: { type: "string", description: "Target node id." },
+            reminderAt: {
+              type: "string",
+              description: "Reminder deadline as an ISO 8601 timestamp or another browser-parseable date string.",
+            },
+          },
+          required: ["nodeId", "reminderAt"],
+          additionalProperties: false,
+        },
+      },
+    }, ["updates"]),
+    handler: (args) => {
+      const updates = reminderUpdateArrayArg(args, "updates");
+      if (!updates.length) return fail("No reminder updates were provided.");
+      const result = useAtlasStore.getState().setNodeReminders(updates);
+      const failedText = result.failed.length
+        ? ` ${result.failed.length} failed: ${result.failed.map((item) => `${item.nodeId || "(missing)"} (${item.reason})`).join("; ")}`
+        : "";
+      return ok(`Updated ${result.updated.length} node reminder(s).${failedText}`, result);
+    },
+  },
+  {
+    type: "function",
     name: "undo",
     description: "Undo the last notebook edit.",
     parameters: objectSchema({}),
@@ -293,7 +327,7 @@ const toolSpecs: VoiceToolSpec[] = [
           [
             "run_ai_from_active_node was not executed because it creates AI request/result notebook nodes.",
             "Use it only when the user explicitly asks for a separate node-anchored AI run or persistent node-based AI result.",
-            "For picking up nodes, listing tasks, summarizing state, inspecting notifications, or answering the current AI/Partner conversation, use search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and then answer directly in AI/Partner log.",
+            "For picking up nodes, listing tasks, summarizing state, inspecting notifications, or answering the current AI Partner conversation, use search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and then answer directly in AI Partner log.",
           ].join("\n"),
         );
       }
@@ -458,6 +492,8 @@ function nodeSummary(node: AtlasNode) {
     summary: node.summary,
     nextDecision: node.nextDecision,
     tags: node.tags,
+    reminderAt: node.reminderAt,
+    reminderFiredAt: node.reminderFiredAt,
     provider: node.provider,
     runMode: node.runMode,
     childCount: node.children.length,
@@ -498,6 +534,21 @@ function nodeDraftArrayArg(args: Record<string, unknown>, key: string) {
       return { title, body, summary };
     })
     .filter((item): item is { title: string; body: string; summary: string } => item !== null);
+}
+
+function reminderUpdateArrayArg(args: Record<string, unknown>, key: string) {
+  const value = args[key];
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const record = item as Record<string, unknown>;
+      const nodeId = typeof record.nodeId === "string" ? record.nodeId.trim() : "";
+      const reminderAt = typeof record.reminderAt === "string" ? record.reminderAt.trim() : "";
+      if (!nodeId || !reminderAt) return null;
+      return { nodeId, reminderAt };
+    })
+    .filter((item): item is { nodeId: string; reminderAt: string } => item !== null);
 }
 
 function numberArg(args: Record<string, unknown>, key: string, fallback: number) {

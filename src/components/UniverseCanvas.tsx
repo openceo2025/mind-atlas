@@ -1,6 +1,6 @@
 import { Html, Line } from "@react-three/drei";
 import { Canvas, ThreeEvent, createPortal, useFrame, useThree } from "@react-three/fiber";
-import { ClipboardCopy, ClipboardPaste, Copy, MoveUp, Trash2 } from "lucide-react";
+import { ClipboardCopy, ClipboardPaste, Copy, MoveUp, Scissors, Trash2 } from "lucide-react";
 import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   AdditiveBlending,
@@ -18,6 +18,7 @@ import {
 import {
   NOTEBOOK_FIRST_SHELL_RADIUS,
   NOTEBOOK_NODE_RADIUS,
+  findNode,
   findNodeWithWorldPosition,
   findNodePath,
   getNodeHitRadius,
@@ -33,10 +34,12 @@ import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_CLICK_E
 import { createNodeClipboardText, nodeTreeHasAttachments, parseNodeClipboardText } from "../nodeClipboard";
 import { emitOnboardingEvent, getOnboardingCurrentSpaceStep } from "../onboarding/useOnboarding";
 import type { AtlasTheme } from "../theme";
-import type { AtlasNode, NotificationPulseKind } from "../types";
+import { isPersistedCameraPose, persistUiStatePatch, type PersistedCameraPose } from "../uiPersistence";
+import type { AtlasNode, NotificationPulse, NotificationPulseKind } from "../types";
 import { getStatusColor } from "../utils/status";
 
 const FOCUS_DURATION_SECONDS = 1.05;
+const FOCUS_TRANSITION_COMPLETE_EVENT = "mind-atlas-focus-transition-complete";
 const CAMERA_FOV = 45;
 const INITIAL_CAMERA_OFFSET = 0;
 const MIN_CAMERA_OFFSET = -120;
@@ -63,6 +66,7 @@ const DRAG_BOUNDARY_TUBE_RADIUS = 0.55;
 const DRAG_BOUNDARY_INNER_TUBE_RADIUS = 0.24;
 const PINCH_WHEEL_SCALE = 3.4;
 const NOTIFICATION_PULSE_DURATION_MS = 8200;
+const MAX_ANIMATED_NOTIFICATION_PULSES = 5;
 const NODE_VISIBILITY_CHECK_MS = 250;
 const NODE_SCREEN_MARGIN_NDC = 1.18;
 const VR_TILT_DEAD_ZONE_DEGREES = 7.2;
@@ -70,6 +74,12 @@ const VR_TILT_MAX_DEGREES = 22;
 const VR_TILT_PAN_X_PIXELS_PER_SECOND = 220;
 const VR_TILT_PAN_Y_PIXELS_PER_SECOND = 170;
 const VR_PAN_EVENT_INTERVAL_MS = 1200;
+const DESKTOP_CANVAS_DPR: [number, number] = [1, 1.75];
+const MOBILE_CANVAS_DPR: [number, number] = [1, 1.15];
+const LOW_QUALITY_CANVAS_DPR: [number, number] = [0.75, 1];
+const MOBILE_LANDSCAPE_FOCUS_DISTANCE_MULTIPLIER = 0.29;
+const UNIVERSE_PAN_DELTA_EVENT = "mindatlas:universe-pan-delta";
+type RenderQuality = "high" | "low";
 const NOTIFICATION_SNOOZE_OPTIONS = [
   { label: "2時間後", delayMs: 2 * 60 * 60 * 1000 },
   { label: "半日後", delayMs: 12 * 60 * 60 * 1000 },
@@ -79,6 +89,7 @@ const NOTIFICATION_SNOOZE_OPTIONS = [
 
 type Vec3Tuple = [number, number, number];
 type NotificationSnoozePromptState = ReturnType<typeof useAtlasStore.getState>["notificationSnoozePrompt"];
+type NotificationKindRecord = Record<string, { nodeId: string; kind: NotificationPulseKind; lastPulseAt?: number }>;
 
 type BirthEffect = {
   id: string;
@@ -99,6 +110,11 @@ type SpaceDragState = {
   blockedBirthHintEmitted: boolean;
 };
 
+type UniversePanDeltaDetail = {
+  deltaX: number;
+  deltaY: number;
+};
+
 type VisualNodeHandle = {
   setWorldPosition: (worldPosition: Vec3Tuple, parentWorldOverride?: Vec3Tuple) => void;
   getWorldPosition: () => Vec3Tuple;
@@ -108,6 +124,11 @@ type NodeContextMenuState = {
   nodeId: string;
   x: number;
   y: number;
+};
+
+type FocusTransitionCompleteDetail = {
+  nodeId: string;
+  nonce: number;
 };
 
 type NodeVisibilityState = {
@@ -168,11 +189,36 @@ function getUniverseThemeColors(theme: AtlasTheme) {
 const visualNodeHandles = new Map<string, VisualNodeHandle>();
 let hiddenDragEdgeNodeId: string | null = null;
 const hiddenDragEdgeListeners = new Set<() => void>();
+type MobileRaycastMode = { kind: "idle" } | { kind: "space-drag" } | { kind: "node-drag"; nodeId: string };
+let mobileRaycastMode: MobileRaycastMode = { kind: "idle" };
+let mobilePerformanceModeSnapshot = false;
 
 function setHiddenDragEdgeNodeId(id: string | null) {
   if (hiddenDragEdgeNodeId === id) return;
   hiddenDragEdgeNodeId = id;
   hiddenDragEdgeListeners.forEach((listener) => listener());
+}
+
+function setMobileRaycastMode(mode: MobileRaycastMode) {
+  mobileRaycastMode = mode;
+}
+
+function createConditionalMeshRaycast(shouldSkip: () => boolean): Mesh["raycast"] {
+  return function conditionalMeshRaycast(this: Mesh, raycaster, intersects) {
+    if (shouldSkip()) return;
+    Mesh.prototype.raycast.call(this, raycaster, intersects);
+  };
+}
+
+function shouldSkipSpaceRaycast() {
+  return mobilePerformanceModeSnapshot && mobileRaycastMode.kind === "node-drag";
+}
+
+function shouldSkipNodeRaycast(nodeId: string) {
+  if (!mobilePerformanceModeSnapshot) return false;
+  if (mobileRaycastMode.kind === "space-drag") return true;
+  if (mobileRaycastMode.kind === "node-drag") return mobileRaycastMode.nodeId !== nodeId;
+  return false;
 }
 
 function useHiddenDragEdgeNodeId() {
@@ -186,6 +232,35 @@ function useHiddenDragEdgeNodeId() {
   );
 }
 
+function useMobilePerformanceMode() {
+  const mobilePerformanceMode = useSyncExternalStore(subscribeMobilePerformanceMode, isMobilePerformanceDevice, () => false);
+  mobilePerformanceModeSnapshot = mobilePerformanceMode;
+  return mobilePerformanceMode;
+}
+
+function subscribeMobilePerformanceMode(listener: () => void) {
+  if (typeof window === "undefined") return () => undefined;
+  const coarsePointerQuery = window.matchMedia?.("(pointer: coarse)");
+  window.addEventListener("resize", listener);
+  window.addEventListener("orientationchange", listener);
+  coarsePointerQuery?.addEventListener?.("change", listener);
+  return () => {
+    window.removeEventListener("resize", listener);
+    window.removeEventListener("orientationchange", listener);
+    coarsePointerQuery?.removeEventListener?.("change", listener);
+  };
+}
+
+function isMobilePerformanceDevice() {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const touchDevice = navigator.maxTouchPoints > 0;
+  const mobileUa = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+  const shortSide = Math.min(window.innerWidth, window.innerHeight);
+  const longSide = Math.max(window.innerWidth, window.innerHeight);
+  return (coarsePointer || touchDevice || mobileUa) && shortSide <= 620 && longSide <= 980;
+}
+
 function syncVisualNodePosition(id: string, worldPosition: Vec3Tuple, parentWorldOverride?: Vec3Tuple, attempts = 4) {
   const handle = visualNodeHandles.get(id);
   if (handle) {
@@ -196,8 +271,43 @@ function syncVisualNodePosition(id: string, worldPosition: Vec3Tuple, parentWorl
   requestAnimationFrame(() => syncVisualNodePosition(id, worldPosition, parentWorldOverride, attempts - 1));
 }
 
-export function UniverseCanvas({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPanEnabled: boolean }) {
+function CanvasClearColor({ theme }: { theme: AtlasTheme }) {
+  const { gl } = useThree();
+  const backgroundColor = useMemo(() => new Color(getUniverseThemeColors(theme).background), [theme]);
+
+  useEffect(() => {
+    gl.setClearColor(backgroundColor, 1);
+  }, [backgroundColor, gl]);
+
+  return null;
+}
+
+export function UniverseCanvas({
+  theme,
+  vrPanEnabled,
+  renderQuality,
+  pageActive,
+  initialCameraPose,
+}: {
+  theme: AtlasTheme;
+  vrPanEnabled: boolean;
+  renderQuality: RenderQuality;
+  pageActive: boolean;
+  initialCameraPose: PersistedCameraPose | null;
+}) {
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeContextMenuState | null>(null);
+  const mobilePerformanceMode = useMobilePerformanceMode();
+  const lowQuality = renderQuality === "low";
+  const canvasDpr = lowQuality ? LOW_QUALITY_CANVAS_DPR : mobilePerformanceMode ? MOBILE_CANVAS_DPR : DESKTOP_CANVAS_DPR;
+  const canvasGl = useMemo(
+    () => ({
+      antialias: !lowQuality,
+      alpha: false,
+      preserveDrawingBuffer: !lowQuality,
+      powerPreference: "high-performance" as const,
+    }),
+    [lowQuality],
+  );
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -211,15 +321,26 @@ export function UniverseCanvas({ theme, vrPanEnabled }: { theme: AtlasTheme; vrP
       }
 
       const spaceEditorNodeId = getSpaceEditorNodeIdFromTarget(event.target);
-      if (!event.shiftKey && spaceEditorNodeId && (event.key === "Enter" || event.key === "Tab")) {
+      const shortcutOriginNodeId = getNodeKeyboardShortcutOriginId(event.target, spaceEditorNodeId);
+
+      if (!event.shiftKey && shortcutOriginNodeId && (event.key === "Enter" || event.key === "Tab")) {
         event.preventDefault();
         event.stopPropagation();
+        event.stopImmediatePropagation();
         const store = useAtlasStore.getState();
         if (event.key === "Enter") {
-          store.addSiblingNode(spaceEditorNodeId);
+          store.addSiblingNode(shortcutOriginNodeId);
         } else {
-          store.addChildNode(spaceEditorNodeId);
+          store.addChildNode(shortcutOriginNodeId);
         }
+        setNodeContextMenu(null);
+        return;
+      }
+
+      if (event.key === "Tab" && shortcutOriginNodeId) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
         setNodeContextMenu(null);
         return;
       }
@@ -235,13 +356,14 @@ export function UniverseCanvas({ theme, vrPanEnabled }: { theme: AtlasTheme; vrP
       }
 
       if (!isArrowNavigationKey(event.key) || event.shiftKey) return;
-      if (isEditableShortcutTarget(event.target) && !spaceEditorNodeId) return;
+      if (!shortcutOriginNodeId) return;
 
       const store = useAtlasStore.getState();
-      const targetNodeId = getKeyboardNavigationTarget(store.atlasRoot, spaceEditorNodeId ?? store.selectedNodeId, event.key);
+      const targetNodeId = getKeyboardNavigationTarget(store.atlasRoot, shortcutOriginNodeId, event.key);
       if (!targetNodeId) return;
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation();
       store.focusNode(targetNodeId);
       setNodeContextMenu(null);
     };
@@ -268,16 +390,22 @@ export function UniverseCanvas({ theme, vrPanEnabled }: { theme: AtlasTheme; vrP
     <section className="universe-shell" aria-label="Mind Atlas universe view">
       <Canvas
         camera={{ position: [0, 0, INITIAL_CAMERA_OFFSET], fov: CAMERA_FOV, near: 0.1, far: 120000 }}
-        dpr={[1, 1.75]}
-        gl={{ antialias: true, alpha: false, preserveDrawingBuffer: true }}
+        dpr={canvasDpr}
+        gl={canvasGl}
+        frameloop={pageActive ? "always" : "demand"}
       >
-        <ambientLight intensity={theme === "light" ? 1.05 : 0.7} />
-        <pointLight position={[120, 160, 110]} intensity={theme === "light" ? 1.1 : 1.35} color={theme === "light" ? "#d8ecff" : "#f3d08a"} />
-        <pointLight position={[-180, -120, 80]} intensity={theme === "light" ? 0.95 : 0.8} color={theme === "light" ? "#8fc5ff" : "#78e6c5"} />
-        <BackgroundStarLayer theme={theme} />
-        <NavigationController theme={theme} vrPanEnabled={vrPanEnabled} />
-        <NotebookNodes theme={theme} onOpenNodeContextMenu={setNodeContextMenu} />
-        <NotificationPulseLayer theme={theme} />
+        <CanvasClearColor theme={theme} />
+        <ambientLight intensity={lowQuality ? (theme === "light" ? 1.25 : 1.05) : theme === "light" ? 1.05 : 0.7} />
+        {!lowQuality ? (
+          <>
+            <pointLight position={[120, 160, 110]} intensity={theme === "light" ? 1.1 : 1.35} color={theme === "light" ? "#d8ecff" : "#f3d08a"} />
+            <pointLight position={[-180, -120, 80]} intensity={theme === "light" ? 0.95 : 0.8} color={theme === "light" ? "#8fc5ff" : "#78e6c5"} />
+            <BackgroundStarLayer theme={theme} />
+          </>
+        ) : null}
+        <NavigationController theme={theme} vrPanEnabled={vrPanEnabled} renderQuality={renderQuality} pageActive={pageActive} initialCameraPose={initialCameraPose} />
+        <NotebookNodes theme={theme} renderQuality={renderQuality} pageActive={pageActive} onOpenNodeContextMenu={setNodeContextMenu} />
+        <NotificationPulseLayer theme={theme} renderQuality={renderQuality} pageActive={pageActive} />
       </Canvas>
       <NodeContextMenu menu={nodeContextMenu} onClose={() => setNodeContextMenu(null)} />
     </section>
@@ -305,9 +433,38 @@ function getSpaceEditorNodeIdFromTarget(target: EventTarget | null) {
   return editor instanceof HTMLTextAreaElement ? editor.dataset.nodeId ?? null : null;
 }
 
+function getNodeKeyboardShortcutOriginId(target: EventTarget | null, spaceEditorNodeId: string | null) {
+  const selectedNodeId = useAtlasStore.getState().selectedNodeId;
+  if (spaceEditorNodeId) {
+    return spaceEditorNodeId === selectedNodeId ? spaceEditorNodeId : selectedNodeId;
+  }
+  if (isInteractiveShortcutTarget(target)) return null;
+  return selectedNodeId;
+}
+
 function isEditableShortcutTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+function isInteractiveShortcutTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(
+    target.closest(
+      [
+        "input",
+        "textarea",
+        "select",
+        "button",
+        "a[href]",
+        "[contenteditable='true']",
+        "[role='button']",
+        "[role='tab']",
+        "[role='menuitem']",
+        "[data-keyboard-shortcuts='off']",
+      ].join(", "),
+    ),
+  );
 }
 
 function isArrowNavigationKey(key: string) {
@@ -343,13 +500,15 @@ function getKeyboardNavigationTarget(root: AtlasNode, originNodeId: string, key:
   return null;
 }
 
-function NotificationPulseLayer({ theme }: { theme: AtlasTheme }) {
+function NotificationPulseLayer({ theme, renderQuality, pageActive }: { theme: AtlasTheme; renderQuality: RenderQuality; pageActive: boolean }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const pulses = useAtlasStore((state) => state.notificationPulses);
   const tickNotificationPulses = useAtlasStore((state) => state.tickNotificationPulses);
   const lastPruneRef = useRef(0);
+  const animatedPulses = useMemo(() => selectAnimatedNotificationPulses(pulses, renderQuality), [pulses, renderQuality]);
 
   useFrame(() => {
+    if (!pageActive) return;
     const now = performance.now();
     if (now - lastPruneRef.current < 900) return;
     lastPruneRef.current = now;
@@ -358,7 +517,7 @@ function NotificationPulseLayer({ theme }: { theme: AtlasTheme }) {
 
   return (
     <>
-      {pulses.map((pulse) => {
+      {animatedPulses.map((pulse) => {
         const located = findNodeWithWorldPosition(atlasRoot, pulse.nodeId);
         if (!located) return null;
         return (
@@ -368,6 +527,8 @@ function NotificationPulseLayer({ theme }: { theme: AtlasTheme }) {
             kind={pulse.kind}
             createdAt={pulse.createdAt}
             theme={theme}
+            renderQuality={renderQuality}
+            pageActive={pageActive}
           />
         );
       })}
@@ -375,21 +536,35 @@ function NotificationPulseLayer({ theme }: { theme: AtlasTheme }) {
   );
 }
 
+function selectAnimatedNotificationPulses(pulses: NotificationPulse[], renderQuality: RenderQuality) {
+  const maxPulses = renderQuality === "low" ? 2 : MAX_ANIMATED_NOTIFICATION_PULSES;
+  if (pulses.length <= maxPulses) return pulses;
+  return [...pulses]
+    .sort((a, b) => notificationPriority(b.kind) - notificationPriority(a.kind) || b.createdAt - a.createdAt)
+    .slice(0, maxPulses);
+}
+
 function GlobalNotificationPulse({
   position,
   kind,
   createdAt,
   theme,
+  renderQuality,
+  pageActive,
 }: {
   position: [number, number, number];
   kind: NotificationPulseKind;
   createdAt: number;
   theme: AtlasTheme;
+  renderQuality: RenderQuality;
+  pageActive: boolean;
 }) {
   const [age, setAge] = useState(0);
   const color = getNotificationPulseColor(kind, theme);
+  const lowQuality = renderQuality === "low";
 
   useFrame(() => {
+    if (!pageActive) return;
     setAge(performance.now() - createdAt);
   });
 
@@ -404,15 +579,17 @@ function GlobalNotificationPulse({
     <group position={position}>
       <CameraFacingGroup>
         <mesh>
-          <torusGeometry args={[radius, 1.4 + wave * 2.4, 18, 220]} />
+          <torusGeometry args={[radius, 1.4 + wave * 2.4, lowQuality ? 8 : 18, lowQuality ? 48 : 220]} />
           <meshBasicMaterial color={color} transparent opacity={opacity} blending={AdditiveBlending} depthWrite={false} depthTest={false} />
         </mesh>
+        {!lowQuality ? (
+          <mesh>
+            <torusGeometry args={[radius * 0.58, 0.9 + wave * 1.4, 14, 180]} />
+            <meshBasicMaterial color={color} transparent opacity={opacity * 0.58} blending={AdditiveBlending} depthWrite={false} depthTest={false} />
+          </mesh>
+        ) : null}
         <mesh>
-          <torusGeometry args={[radius * 0.58, 0.9 + wave * 1.4, 14, 180]} />
-          <meshBasicMaterial color={color} transparent opacity={opacity * 0.58} blending={AdditiveBlending} depthWrite={false} depthTest={false} />
-        </mesh>
-        <mesh>
-          <sphereGeometry args={[4.5 + wave * 3.5, 18, 10]} />
+          <sphereGeometry args={[4.5 + wave * 3.5, lowQuality ? 8 : 18, lowQuality ? 6 : 10]} />
           <meshBasicMaterial color={color} transparent opacity={0.36 + wave * 0.36} blending={AdditiveBlending} depthWrite={false} depthTest={false} />
         </mesh>
       </CameraFacingGroup>
@@ -430,16 +607,26 @@ function getNotificationPulseColor(kind: NotificationPulseKind, theme: AtlasThem
 
 function buildNotificationPathKinds(
   root: AtlasNode,
-  unreadNotifications: Record<string, { nodeId: string; kind: NotificationPulseKind }>,
+  unreadNotifications: NotificationKindRecord,
 ) {
   const kinds = new Map<string, NotificationPulseKind>();
-  for (const unread of Object.values(unreadNotifications)) {
+  for (const unread of Object.values(selectAnimatedNotificationKindSources(unreadNotifications))) {
     const path = findNodePath(root, unread.nodeId);
     if (!path) continue;
     markNotificationPath(kinds, path, unread.kind);
   }
   markStatusNotificationPaths(root, [root], kinds);
   return kinds;
+}
+
+function selectAnimatedNotificationKindSources(unreadNotifications: NotificationKindRecord): NotificationKindRecord {
+  const entries = Object.entries(unreadNotifications);
+  if (entries.length <= MAX_ANIMATED_NOTIFICATION_PULSES) return unreadNotifications;
+  return Object.fromEntries(
+    entries
+      .sort(([, a], [, b]) => notificationPriority(b.kind) - notificationPriority(a.kind) || (b.lastPulseAt ?? 0) - (a.lastPulseAt ?? 0))
+      .slice(0, MAX_ANIMATED_NOTIFICATION_PULSES),
+  );
 }
 
 function markStatusNotificationPaths(
@@ -485,14 +672,30 @@ function isAutoFocusSuppressed() {
   return state.commandInputEditing || state.multiSelectedNodeIds.length > 0;
 }
 
-function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPanEnabled: boolean }) {
+function NavigationController({
+  theme,
+  vrPanEnabled,
+  renderQuality,
+  pageActive,
+  initialCameraPose,
+}: {
+  theme: AtlasTheme;
+  vrPanEnabled: boolean;
+  renderQuality: RenderQuality;
+  pageActive: boolean;
+  initialCameraPose: PersistedCameraPose | null;
+}) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const focusRequest = useAtlasStore((state) => state.focusRequest);
   const setViewport = useAtlasStore((state) => state.setViewport);
   const addRootNodeAt = useAtlasStore((state) => state.addRootNodeAt);
+  const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
   const { camera, gl, size } = useThree();
   const perspective = camera as PerspectiveCamera;
-  const mobilePortraitCamera = isMobilePortraitCamera(size.width, size.height);
+  const keyboardPortraitLock = commandInputEditing && isKeyboardOverlayPortraitActive();
+  const mobilePortraitCamera = isMobilePortraitCamera(size.width, size.height, keyboardPortraitLock);
+  const mobileCamera = isMobileCamera(size.width, size.height);
+  const mobileLandscapeCamera = isMobileLandscapeCamera(size.width, size.height, keyboardPortraitLock);
   const initialCenteredRef = useRef(false);
   const yawPitchRef = useRef({ yaw: 0, pitch: 0, offset: INITIAL_CAMERA_OFFSET });
   const dragRef = useRef<SpaceDragState | null>(null);
@@ -507,6 +710,9 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
   const vrOrientationRef = useRef<VrOrientationSample | null>(null);
   const vrPanEventLastEmittedAtRef = useRef(0);
   const vrManualPanPendingRef = useRef(false);
+  const cameraPosePersistedAtRef = useRef(0);
+  const initialCameraPoseRef = useRef(initialCameraPose);
+  const spaceRaycast = useMemo(() => createConditionalMeshRaycast(shouldSkipSpaceRaycast), []);
   const transitionRef = useRef<{
     startYaw: number;
     startPitch: number;
@@ -516,8 +722,50 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
     targetOffset: number;
     elapsed: number;
     nonce: number;
+    nodeId: string;
   } | null>(null);
   const [birthEffect, setBirthEffect] = useState<BirthEffect | null>(null);
+  const inputSphereSegments: [number, number] = renderQuality === "low" ? [32, 16] : [64, 32];
+
+  const setViewportFromCameraState = (state: { yaw: number; pitch: number; offset: number }, forcePersist = false) => {
+    const viewport = { x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) };
+    setViewport(viewport);
+    const now = performance.now();
+    if (!forcePersist && now - cameraPosePersistedAtRef.current < 900) return;
+    cameraPosePersistedAtRef.current = now;
+    persistUiStatePatch({
+      viewport,
+      cameraPose: {
+        yaw: state.yaw,
+        pitch: state.pitch,
+        offset: state.offset,
+      },
+    });
+  };
+
+  useEffect(
+    () => () => {
+      if (mobileRaycastMode.kind === "space-drag") setMobileRaycastMode({ kind: "idle" });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const persistCurrentCameraPose = () => setViewportFromCameraState(yawPitchRef.current, true);
+    const persistWhenHidden = () => {
+      if (document.visibilityState === "hidden") persistCurrentCameraPose();
+    };
+    document.addEventListener("visibilitychange", persistWhenHidden);
+    document.addEventListener("freeze", persistCurrentCameraPose);
+    window.addEventListener("pagehide", persistCurrentCameraPose);
+    window.addEventListener("beforeunload", persistCurrentCameraPose);
+    return () => {
+      document.removeEventListener("visibilitychange", persistWhenHidden);
+      document.removeEventListener("freeze", persistCurrentCameraPose);
+      window.removeEventListener("pagehide", persistCurrentCameraPose);
+      window.removeEventListener("beforeunload", persistCurrentCameraPose);
+    };
+  }, []);
 
   useEffect(() => {
     const element = gl.domElement;
@@ -527,6 +775,7 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
   }, [gl.domElement]);
 
   useEffect(() => {
+    if (!pageActive) return;
     const element = gl.domElement;
     const handleDomWheel = (event: WheelEvent) => {
       if (event.target instanceof HTMLElement && event.target.closest("textarea, input, select")) return;
@@ -587,7 +836,15 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
     const targetDirection = targetVector.lengthSq() > 0.001 ? targetVector.clone().normalize() : new Vector3(0, 0, -1);
     const targetAngles = directionToYawPitch(targetDirection);
     const targetDistance = getCameraDistanceForDiameter(focusRequest.diameter, size.height, perspective.fov);
-    const targetOffset = getFocusTargetOffset(targetVector.length(), targetDistance, mobilePortraitCamera);
+    const targetIsRoot = focusRequest.nodeId === atlasRoot.id;
+    const targetOffset =
+      targetIsRoot && mobileCamera
+        ? getInitialCameraOffset(mobilePortraitCamera)
+        : getFocusTargetOffset(
+            targetVector.length(),
+            targetDistance * (mobileLandscapeCamera ? MOBILE_LANDSCAPE_FOCUS_DISTANCE_MULTIPLIER : 1),
+            false,
+          );
     const current = yawPitchRef.current;
 
     transitionRef.current = {
@@ -599,8 +856,9 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
       targetOffset,
       elapsed: 0,
       nonce: focusRequest.nonce,
+      nodeId: focusRequest.nodeId ?? "",
     };
-  }, [focusRequest, mobilePortraitCamera, perspective.fov, size.height]);
+  }, [atlasRoot.id, focusRequest, mobileCamera, mobileLandscapeCamera, mobilePortraitCamera, perspective.fov, size.height]);
 
   useEffect(() => {
     if (initialCenteredRef.current) return;
@@ -608,14 +866,21 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
 
     requestAnimationFrame(() => {
       const initialOffset = getInitialCameraOffset(mobilePortraitCamera);
-      yawPitchRef.current = { yaw: 0, pitch: 0, offset: initialOffset };
+      const restoredPose = initialCameraPoseRef.current;
+      yawPitchRef.current = isPersistedCameraPose(restoredPose)
+        ? {
+            yaw: restoredPose.yaw,
+            pitch: clamp(restoredPose.pitch, -1.22, 1.22),
+            offset: clamp(restoredPose.offset, getMinCameraOffset(mobilePortraitCamera), MAX_CAMERA_OFFSET),
+          }
+        : { yaw: 0, pitch: 0, offset: initialOffset };
       applyCameraPose(perspective, yawPitchRef.current);
-      setViewport({ x: 0, y: 0, zoom: getViewportScale(initialOffset) });
+      setViewportFromCameraState(yawPitchRef.current, true);
     });
-  }, [mobilePortraitCamera, perspective, setViewport]);
+  }, [mobilePortraitCamera, perspective]);
 
   useEffect(() => {
-    if (!vrPanEnabled || typeof window === "undefined") {
+    if (!pageActive || !vrPanEnabled || typeof window === "undefined") {
       vrBaselineRef.current = null;
       vrOrientationRef.current = null;
       vrManualPanPendingRef.current = false;
@@ -645,9 +910,10 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
       vrOrientationRef.current = null;
       vrManualPanPendingRef.current = false;
     };
-  }, [vrPanEnabled]);
+  }, [pageActive, vrPanEnabled]);
 
   useFrame((_, delta) => {
+    if (!pageActive) return;
     if (birthEffect?.mode === "burst" && performance.now() - birthEffect.startedAt > 820) {
       setBirthEffect(null);
     }
@@ -692,10 +958,15 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
     state.pitch = lerp(transition.startPitch, transition.targetPitch, eased);
     state.offset = lerp(transition.startOffset, transition.targetOffset, eased);
     applyCameraPose(perspective, state);
-    setViewport({ x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) });
+    setViewportFromCameraState(state);
 
     if (progress >= 1) {
       transitionRef.current = null;
+      window.dispatchEvent(
+        new CustomEvent<FocusTransitionCompleteDetail>(FOCUS_TRANSITION_COMPLETE_EVENT, {
+          detail: { nodeId: transition.nodeId, nonce: transition.nonce },
+        }),
+      );
     }
   });
 
@@ -707,6 +978,7 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
     backgroundClickRef.current = event.button === 0 ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY } : null;
     const canBirth = canStartRootBirth(yawPitchRef.current.offset, size.height, perspective.fov);
     const direction = directionFromRay(event.ray, NOTEBOOK_FIRST_SHELL_RADIUS);
+    setMobileRaycastMode({ kind: "space-drag" });
 
     dragRef.current = {
       pointerId: event.pointerId,
@@ -774,8 +1046,21 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
     state.pitch = clamp(state.pitch + deltaY * rotationGain, -1.22, 1.22);
     transitionRef.current = null;
     applyCameraPose(perspective, state);
-    setViewport({ x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) });
+    setViewportFromCameraState(state);
   };
+
+  useEffect(() => {
+    if (!pageActive) return;
+    const handleUniversePanDelta = (event: Event) => {
+      const detail = (event as CustomEvent<UniversePanDeltaDetail>).detail;
+      if (typeof detail?.deltaX !== "number" || typeof detail.deltaY !== "number") return;
+      applyPanDelta(detail.deltaX, detail.deltaY);
+      markVrManualPan(detail.deltaX, detail.deltaY);
+    };
+
+    window.addEventListener(UNIVERSE_PAN_DELTA_EVENT, handleUniversePanDelta);
+    return () => window.removeEventListener(UNIVERSE_PAN_DELTA_EVENT, handleUniversePanDelta);
+  });
 
   const markVrManualPan = (deltaX: number, deltaY: number) => {
     if (!vrPanEnabled || Math.hypot(deltaX, deltaY) <= 4) return;
@@ -834,6 +1119,7 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
     backgroundClickRef.current = null;
     if (vrManualPanPendingRef.current) recenterVrBaseline();
     dragRef.current = null;
+    setMobileRaycastMode({ kind: "idle" });
     if (!drag.created && drag.mode === "hold" && drag.canBirth) {
       setBirthEffect(null);
     }
@@ -853,7 +1139,7 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
     state.offset = clamp(state.offset - deltaY * 0.35, getMinCameraOffset(mobilePortraitCamera), MAX_CAMERA_OFFSET);
     transitionRef.current = null;
     applyCameraPose(perspective, state);
-    setViewport({ x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) });
+    setViewportFromCameraState(state);
 
     const zoomOutState = wheelZoomOutRef.current;
     const zoomInState = wheelZoomInRef.current;
@@ -930,6 +1216,7 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
   };
 
   useEffect(() => {
+    if (!pageActive) return;
     const handleMinimapNavigate = (event: Event) => {
       const detail = (event as CustomEvent<{ yaw?: unknown; pitch?: unknown }>).detail;
       if (typeof detail?.yaw !== "number" || typeof detail.pitch !== "number") return;
@@ -940,7 +1227,7 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
       wheelZoomOutRef.current.amount = 0;
       wheelZoomInRef.current.amount = 0;
       applyCameraPose(perspective, state);
-      setViewport({ x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) });
+      setViewportFromCameraState(state);
     };
 
     const handleMinimapZoom = (event: Event) => {
@@ -960,12 +1247,13 @@ function NavigationController({ theme, vrPanEnabled }: { theme: AtlasTheme; vrPa
   return (
     <>
       <mesh
+        raycast={spaceRaycast}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       >
-        <sphereGeometry args={[INPUT_EVENT_SPHERE_RADIUS, 64, 32]} />
+        <sphereGeometry args={[INPUT_EVENT_SPHERE_RADIUS, inputSphereSegments[0], inputSphereSegments[1]]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} side={BackSide} />
       </mesh>
       {birthEffect ? <WhiteHoleEffect key={birthEffect.id} effect={birthEffect} theme={theme} /> : null}
@@ -1054,6 +1342,20 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
     }
   };
 
+  const handleCutObject = async () => {
+    try {
+      const hasAttachments = nodeTreeHasAttachments(node);
+      await writeClipboardText(createNodeClipboardText(node));
+      if (hasAttachments) {
+        window.alert("画像・動画などの添付ファイルが含まれています。クリップボードにはファイル本体ではなくメタデータのみコピーされます。");
+      }
+      deleteNode(node.id);
+      onClose();
+    } catch (error) {
+      console.error("Failed to cut Mind Atlas node object", error);
+    }
+  };
+
   const handlePasteObject = async () => {
     let copiedNode = clipboardNode;
     try {
@@ -1094,6 +1396,9 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
     >
       <button type="button" onClick={handleCopyObject}>
         <ClipboardCopy size={15} /> オブジェクトコピー
+      </button>
+      <button type="button" onClick={handleCutObject}>
+        <Scissors size={15} /> 切り取り
       </button>
       <button
         type="button"
@@ -1295,9 +1600,13 @@ function formatUsageForExport(usage: NonNullable<AtlasNode["usage"]>) {
 
 function NotebookNodes({
   theme,
+  renderQuality,
+  pageActive,
   onOpenNodeContextMenu,
 }: {
   theme: AtlasTheme;
+  renderQuality: RenderQuality;
+  pageActive: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -1308,16 +1617,20 @@ function NotebookNodes({
   const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
   const activeCommandMode = useAtlasStore((state) => state.activeCommandMode);
   const unreadNotifications = useAtlasStore((state) => state.unreadNotifications);
+  const notificationPulses = useAtlasStore((state) => state.notificationPulses);
   const notificationSnoozePrompt = useAtlasStore((state) => state.notificationSnoozePrompt);
   const dismissNotificationSnoozePrompt = useAtlasStore((state) => state.dismissNotificationSnoozePrompt);
-  const focusNonce = useAtlasStore((state) => state.focusRequest?.nonce ?? 0);
+  const focusRequest = useAtlasStore((state) => state.focusRequest);
+  const focusNonce = focusRequest?.nonce ?? 0;
+  const mobileLabelScope = useMobilePerformanceMode();
   const [focusWaveStartedAt, setFocusWaveStartedAt] = useState(() => performance.now());
-  const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
+  const [renderSelectedNodeId, setRenderSelectedNodeId] = useState(selectedNodeId);
+  const selectedPath = findNodePath(atlasRoot, renderSelectedNodeId) ?? findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
   const cameraFocusPath = cameraFocusNodeId ? findNodePath(atlasRoot, cameraFocusNodeId) : null;
   const renderFocusPath = cameraFocusPath ?? selectedPath;
-  const rootIsSelected = selectedNodeId === atlasRoot.id;
-  const effectiveSelectedNodeId = rootIsSelected ? atlasRoot.id : selectedNodeId;
-  const highlightSelectedNodeId = rootIsSelected ? "" : selectedNodeId;
+  const rootIsSelected = renderSelectedNodeId === atlasRoot.id;
+  const effectiveSelectedNodeId = rootIsSelected ? atlasRoot.id : renderSelectedNodeId;
+  const highlightSelectedNodeId = rootIsSelected ? "" : renderSelectedNodeId;
   const selectedParentId = selectedPath.length > 1 ? selectedPath[selectedPath.length - 2].id : null;
   const focusBaseIndex = cameraFocusPath ? Math.max(0, renderFocusPath.length - 1) : selectedPath.length > 2 ? selectedPath.length - 2 : 0;
   const focusParent = renderFocusPath[focusBaseIndex];
@@ -1335,20 +1648,94 @@ function NotebookNodes({
   }, [activeCommandMode, aiContextOptions, atlasRoot, commandInputEditing, multiSelectedNodeIds, selectedNodeId]);
 
   useEffect(() => {
+    if (findNode(atlasRoot, renderSelectedNodeId)) return;
+    setRenderSelectedNodeId(selectedNodeId);
+  }, [atlasRoot, renderSelectedNodeId, selectedNodeId]);
+
+  useEffect(() => {
+    if (!focusRequest || focusRequest.nodeId !== selectedNodeId) {
+      setRenderSelectedNodeId(selectedNodeId);
+      return;
+    }
+
+    let active = true;
+    const completeRenderSelection = () => {
+      if (!active) return;
+      setRenderSelectedNodeId(selectedNodeId);
+    };
+    const handleFocusTransitionComplete = (event: Event) => {
+      const detail = (event as CustomEvent<FocusTransitionCompleteDetail>).detail;
+      if (detail?.nodeId !== selectedNodeId || detail.nonce !== focusRequest.nonce) return;
+      completeRenderSelection();
+    };
+    const timeout = window.setTimeout(completeRenderSelection, FOCUS_DURATION_SECONDS * 1000 + 160);
+
+    window.addEventListener(FOCUS_TRANSITION_COMPLETE_EVENT, handleFocusTransitionComplete);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+      window.removeEventListener(FOCUS_TRANSITION_COMPLETE_EVENT, handleFocusTransitionComplete);
+    };
+  }, [focusRequest, selectedNodeId]);
+
+  useEffect(() => {
     setFocusWaveStartedAt(performance.now());
   }, [focusNonce, selectedNodeId]);
 
   useEffect(() => {
+    if (!pageActive) return;
     if (!notificationSnoozePrompt) return;
     const remainingMs = Math.max(0, notificationSnoozePrompt.expiresAt - Date.now());
     const timeout = window.setTimeout(() => {
       dismissNotificationSnoozePrompt(notificationSnoozePrompt.nodeId);
     }, remainingMs);
     return () => window.clearTimeout(timeout);
-  }, [dismissNotificationSnoozePrompt, notificationSnoozePrompt]);
+  }, [dismissNotificationSnoozePrompt, notificationSnoozePrompt, pageActive]);
 
   if (!atlasRoot.children.length) {
     return <EmptyAtlasPulse theme={theme} />;
+  }
+
+  if (renderQuality === "low") {
+    const lowRenderPaths = buildLowQualityRenderPaths(atlasRoot, selectedNodeId, notificationPulses);
+    return (
+      <group>
+        {lowRenderPaths.map(({ path, visibleDepthRemaining, suppressParentEdge }) => {
+          const node = path[path.length - 1];
+          const position = getNodeWorldPosition(path);
+          const parentId = path.length > 1 ? path[path.length - 2].id : null;
+          return (
+            <HierarchyNode
+              key={`low-${node.id}`}
+              node={node}
+              path={path}
+              worldPosition={position}
+              localPosition={position}
+              depth={Math.max(1, path.length - 1)}
+              visibleDepthRemaining={visibleDepthRemaining}
+              visibleDepthIndex={0}
+              selectedNodeId={effectiveSelectedNodeId}
+              highlightSelectedNodeId={highlightSelectedNodeId}
+              multiSelectedNodeIds={multiSelectedNodeIdSet}
+              aiContextPreviewNodeIds={aiContextPreviewNodeIds}
+              selectedPathIndexByNodeId={selectedPathIndexByNodeId}
+              selectedPathLength={selectedPath.length}
+              selectedParentId={rootIsSelected ? null : selectedParentId}
+              focusWaveStartedAt={focusWaveStartedAt}
+              notificationKind={notificationKindsByNodeId.get(node.id) ?? null}
+              notificationKindsByNodeId={notificationKindsByNodeId}
+              notificationSnoozePrompt={activeNotificationSnoozePrompt}
+              mobileLabelScope={mobileLabelScope}
+              suppressParentEdge={suppressParentEdge || parentId !== atlasRoot.id}
+              renderQuality={renderQuality}
+              theme={theme}
+              rootOverviewActive={rootIsSelected}
+              onOpenNodeContextMenu={onOpenNodeContextMenu}
+            />
+          );
+        })}
+      </group>
+    );
   }
 
   if (focusBaseIndex > 0) {
@@ -1375,7 +1762,11 @@ function NotebookNodes({
           notificationKind={notificationKindsByNodeId.get(focusParent.id) ?? null}
           notificationKindsByNodeId={notificationKindsByNodeId}
           notificationSnoozePrompt={activeNotificationSnoozePrompt}
+          mobileLabelScope={mobileLabelScope}
+          suppressParentEdge={false}
+          renderQuality={renderQuality}
           theme={theme}
+          rootOverviewActive={rootIsSelected}
           onOpenNodeContextMenu={onOpenNodeContextMenu}
         />
       </group>
@@ -1408,13 +1799,54 @@ function NotebookNodes({
             notificationKind={notificationKindsByNodeId.get(node.id) ?? null}
             notificationKindsByNodeId={notificationKindsByNodeId}
             notificationSnoozePrompt={activeNotificationSnoozePrompt}
+            mobileLabelScope={mobileLabelScope}
+            suppressParentEdge={false}
+            renderQuality={renderQuality}
             theme={theme}
+            rootOverviewActive={rootIsSelected}
             onOpenNodeContextMenu={onOpenNodeContextMenu}
           />
         );
       })}
     </group>
   );
+}
+
+function buildLowQualityRenderPaths(root: AtlasNode, selectedNodeId: string, notificationPulses: NotificationPulse[]) {
+  const entries: Array<{ path: AtlasNode[]; visibleDepthRemaining: number; suppressParentEdge: boolean }> = [];
+  const added = new Set<string>();
+  const selectedPath = findNodePath(root, selectedNodeId) ?? [root];
+  const selectedNode = selectedPath[selectedPath.length - 1];
+
+  const addPath = (path: AtlasNode[], visibleDepthRemaining: number, suppressParentEdge: boolean) => {
+    const node = path[path.length - 1];
+    if (!node || node.id === root.id || added.has(node.id)) return;
+    added.add(node.id);
+    markLowQualityRenderedDescendants(node, visibleDepthRemaining, added);
+    entries.push({ path, visibleDepthRemaining, suppressParentEdge });
+  };
+
+  if (selectedNode.id === root.id) {
+    root.children.forEach((child) => addPath([root, child], 1, false));
+  } else {
+    addPath(selectedPath, 2, selectedPath.length > 2);
+  }
+
+  for (const pulse of notificationPulses) {
+    const path = findNodePath(root, pulse.nodeId);
+    if (!path) continue;
+    addPath(path, 0, path.length > 2);
+  }
+
+  return entries;
+}
+
+function markLowQualityRenderedDescendants(node: AtlasNode, visibleDepthRemaining: number, added: Set<string>) {
+  if (visibleDepthRemaining <= 0) return;
+  for (const child of node.children) {
+    added.add(child.id);
+    markLowQualityRenderedDescendants(child, visibleDepthRemaining - 1, added);
+  }
 }
 
 function HierarchyNode({
@@ -1436,7 +1868,11 @@ function HierarchyNode({
   notificationKind,
   notificationKindsByNodeId,
   notificationSnoozePrompt,
+  mobileLabelScope,
+  suppressParentEdge,
+  renderQuality,
   theme,
+  rootOverviewActive,
   onOpenNodeContextMenu,
 }: {
   node: AtlasNode;
@@ -1457,7 +1893,11 @@ function HierarchyNode({
   notificationKind: NotificationPulseKind | null;
   notificationKindsByNodeId: Map<string, NotificationPulseKind>;
   notificationSnoozePrompt: NotificationSnoozePromptState;
+  mobileLabelScope: boolean;
+  suppressParentEdge: boolean;
+  renderQuality: RenderQuality;
   theme: AtlasTheme;
+  rootOverviewActive: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
   const selectNodeInPlace = useAtlasStore((state) => state.selectNodeInPlace);
@@ -1479,6 +1919,8 @@ function HierarchyNode({
   const effectiveNotificationKind = notificationKind === "error" ? notificationKind : previewNotificationKind ?? notificationKind;
   const parentId = path.length > 1 ? path[path.length - 2].id : null;
   const selectedIndexInPath = path.findIndex((item) => item.id === selectedNodeId);
+  const canDragNodeInRootOverview = !rootOverviewActive || depth === 1;
+  const dragFallsThroughToSpace = rootOverviewActive && !canDragNodeInRootOverview;
   const activeDescendantDistance =
     selectedIndexInPath >= 0 ? path.length - 1 - selectedIndexInPath : null;
   const activePathIndex = selectedPathIndexByNodeId.get(node.id);
@@ -1510,8 +1952,24 @@ function HierarchyNode({
     (isActiveAncestor ||
       (activeDescendantDistance !== null && activeDescendantDistance < VISIBLE_DESCENDANT_DEPTH));
   const isLocalContextNode = isSelected || isMultiSelected || aiContextPreviewNodeIds.has(node.id) || isActiveAncestor || isActiveSibling || isDirectChildOfSelected;
-  const labelVisible = isLocalContextNode || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
-  const parentEdgeVisible = path.length > 2 && hiddenDragEdgeNodeId !== node.id;
+  const mobileLabelVisible = isSelected || isDirectChildOfSelected;
+  const lowQualityLabelVisible = isSelected || isDirectChildOfSelected;
+  const labelVisible = renderQuality === "low"
+    ? lowQualityLabelVisible
+    : mobileLabelScope
+    ? mobileLabelVisible
+    : isLocalContextNode || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
+  const parentEdgeVisible = !suppressParentEdge && path.length > 2 && hiddenDragEdgeNodeId !== node.id;
+  const lowQuality = renderQuality === "low";
+  const rootActiveDirectChild = selectedNodeId === path[0]?.id && depth === 1;
+  const hitSphereSegments: [number, number] = lowQuality ? [10, 6] : [20, 12];
+  const planetSphereSegments: [number, number] = lowQuality
+    ? depth <= 1
+      ? [20, 12]
+      : [14, 8]
+    : depth <= 1
+      ? [38, 20]
+      : [28, 16];
   const showNotificationSnoozeActions = notificationSnoozePrompt?.nodeId === node.id && notificationSnoozePrompt.expiresAt > Date.now();
   const focusWaveDepth =
     activeDescendantDistance === 1
@@ -1530,6 +1988,7 @@ function HierarchyNode({
     lastAt: number;
     startedAt: number;
     startWorld: Vec3Tuple;
+    startPointerWorld: Vec3Tuple;
     currentWorld: Vec3Tuple;
     parentWorld?: Vec3Tuple;
     siblingCount: number;
@@ -1551,9 +2010,17 @@ function HierarchyNode({
     torn: boolean;
     shiftKey: boolean;
   } | null>(null);
+  const passThroughPanRef = useRef<{
+    pointerId: number;
+    startScreen: { x: number; y: number };
+    lastScreen: { x: number; y: number };
+    shiftKey: boolean;
+    hasPanned: boolean;
+  } | null>(null);
   const groupRef = useRef<Group>(null);
   const parentWorldRef = useRef<Vec3Tuple>(subtractPosition(worldPosition, localPosition));
   const visualWorldRef = useRef<Vec3Tuple>(worldPosition);
+  const nodeHitRaycast = useMemo(() => createConditionalMeshRaycast(() => shouldSkipNodeRaycast(node.id)), [node.id]);
   const applyVisualWorldPositionRef = useRef<(nextWorld: Vec3Tuple, parentWorldOverride?: Vec3Tuple) => void>(() => undefined);
   const birthStartedAt = birthMarks[node.id];
 
@@ -1590,6 +2057,16 @@ function HierarchyNode({
       }
     };
   }, [node.id]);
+
+  useEffect(
+    () => () => {
+      if (mobileRaycastMode.kind === "node-drag" && mobileRaycastMode.nodeId === node.id) {
+        setMobileRaycastMode({ kind: "idle" });
+      }
+      passThroughPanRef.current = null;
+    },
+    [node.id],
+  );
 
   const completeBirthingDrag = (
     drag: NonNullable<typeof dragRef.current>,
@@ -1639,6 +2116,18 @@ function HierarchyNode({
     if (event.button !== 0) return;
     event.stopPropagation();
     (event.target as Element | null)?.setPointerCapture?.(event.pointerId);
+    if (dragFallsThroughToSpace) {
+      passThroughPanRef.current = {
+        pointerId: event.pointerId,
+        startScreen: { x: event.clientX, y: event.clientY },
+        lastScreen: { x: event.clientX, y: event.clientY },
+        shiftKey: event.nativeEvent.shiftKey,
+        hasPanned: false,
+      };
+      return;
+    }
+    const layerRadius = vectorLength(worldPosition);
+    setMobileRaycastMode({ kind: "node-drag", nodeId: node.id });
     dragRef.current = {
       pointerId: event.pointerId,
       startScreen: { x: event.clientX, y: event.clientY },
@@ -1646,10 +2135,11 @@ function HierarchyNode({
       lastAt: performance.now(),
       startedAt: performance.now(),
       startWorld: worldPosition,
+      startPointerWorld: intersectRaySphere(event.ray, layerRadius),
       currentWorld: worldPosition,
       parentWorld: path.length > 2 ? getNodeWorldPosition(path.slice(0, -1)) : undefined,
       siblingCount: path.length > 2 ? path[path.length - 2].children.length : 1,
-      layerRadius: vectorLength(worldPosition),
+      layerRadius,
       stage: "moving",
       canCreateChild: true,
       samples: [{ t: performance.now(), x: event.clientX, y: event.clientY }],
@@ -1667,6 +2157,20 @@ function HierarchyNode({
   };
 
   const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
+    const passThroughPan = passThroughPanRef.current;
+    if (passThroughPan?.pointerId === event.pointerId) {
+      event.stopPropagation();
+      const deltaX = event.clientX - passThroughPan.lastScreen.x;
+      const deltaY = event.clientY - passThroughPan.lastScreen.y;
+      const screenDistance = Math.hypot(event.clientX - passThroughPan.startScreen.x, event.clientY - passThroughPan.startScreen.y);
+      if (screenDistance > 3 && (Math.abs(deltaX) >= 0.01 || Math.abs(deltaY) >= 0.01)) {
+        passThroughPan.hasPanned = true;
+        window.dispatchEvent(new CustomEvent<UniversePanDeltaDetail>(UNIVERSE_PAN_DELTA_EVENT, { detail: { deltaX, deltaY } }));
+      }
+      passThroughPan.lastScreen = { x: event.clientX, y: event.clientY };
+      return;
+    }
+
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.stopPropagation();
@@ -1685,7 +2189,8 @@ function HierarchyNode({
       return;
     }
 
-    const pointerWorld = intersectRaySphere(event.ray, drag.layerRadius);
+    const rawPointerWorld = intersectRaySphere(event.ray, drag.layerRadius);
+    const pointerWorld = addTuple(drag.startWorld, subtractPosition(rawPointerWorld, drag.startPointerWorld));
     const now = performance.now();
     const screenDistance = Math.hypot(event.clientX - drag.startScreen.x, event.clientY - drag.startScreen.y);
     if (!drag.onboardingNodeDragEmitted && drag.hasMoved && now - drag.startedAt >= 1000) {
@@ -1790,6 +2295,21 @@ function HierarchyNode({
   };
 
   const handlePointerUp = (event: ThreeEvent<PointerEvent>) => {
+    const passThroughPan = passThroughPanRef.current;
+    if (passThroughPan?.pointerId === event.pointerId) {
+      event.stopPropagation();
+      const screenDistance = Math.hypot(event.clientX - passThroughPan.startScreen.x, event.clientY - passThroughPan.startScreen.y);
+      passThroughPanRef.current = null;
+      if (!passThroughPan.hasPanned && screenDistance <= 6) {
+        if (passThroughPan.shiftKey || event.nativeEvent.shiftKey) {
+          toggleMultiSelectedNode(node.id);
+        } else {
+          focusNode(node.id);
+        }
+      }
+      return;
+    }
+
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.stopPropagation();
@@ -1802,6 +2322,7 @@ function HierarchyNode({
       }
     }
     dragRef.current = null;
+    setMobileRaycastMode({ kind: "idle" });
     if (drag.hasMoved || drag.torn) {
       moveNode(node.id, drag.currentWorld);
     }
@@ -1862,12 +2383,14 @@ function HierarchyNode({
           waveDepth={focusWaveDepth}
           waveStartedAt={focusWaveStartedAt}
           notificationKind={effectiveNotificationKind}
+          renderQuality={renderQuality}
           theme={theme}
         />
         {birthStartedAt ? <BirthRing startedAt={birthStartedAt} radius={radius} color={structuralColor} /> : null}
       </CameraFacingGroup>
 
       <mesh
+        raycast={nodeHitRaycast}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -1883,7 +2406,7 @@ function HierarchyNode({
           focusNode(node.id);
         }}
       >
-        <sphereGeometry args={[hitRadius, 20, 12]} />
+        <sphereGeometry args={[hitRadius, hitSphereSegments[0], hitSphereSegments[1]]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
@@ -1891,14 +2414,20 @@ function HierarchyNode({
         <mesh
           scale={[1 + stretch, 1 - stretch * 0.34, 1 + stretch * 0.08]}
         >
-          <sphereGeometry args={[radius, depth <= 1 ? 38 : 28, depth <= 1 ? 20 : 16]} />
-          <PlanetMaterial node={node} depthFade={depthFade} theme={theme} />
+          <sphereGeometry args={[radius, planetSphereSegments[0], planetSphereSegments[1]]} />
+          {lowQuality ? (
+            <LowQualityPlanetMaterial node={node} depthFade={depthFade} rootActiveDirectChild={rootActiveDirectChild} theme={theme} />
+          ) : (
+            <PlanetMaterial node={node} depthFade={depthFade} theme={theme} />
+          )}
         </mesh>
       </group>
-      <mesh position={[-radius * 0.28, radius * 0.32, radius * 0.72]}>
-        <sphereGeometry args={[Math.max(1.8, radius * 0.18), 16, 10]} />
-        <meshBasicMaterial color={themeColors.specular} transparent opacity={(theme === "light" ? 0.56 : 0.7) * depthFade.opacity} />
-      </mesh>
+      {!lowQuality ? (
+        <mesh position={[-radius * 0.28, radius * 0.32, radius * 0.72]}>
+          <sphereGeometry args={[Math.max(1.8, radius * 0.18), 16, 10]} />
+          <meshBasicMaterial color={themeColors.specular} transparent opacity={(theme === "light" ? 0.56 : 0.7) * depthFade.opacity} />
+        </mesh>
+      ) : null}
 
       {node.action && node.id === selectedNodeId ? (
         <Html center position={[0, 0, radius + 22]} transform={false} zIndexRange={[5, 1]}>
@@ -1963,7 +2492,11 @@ function HierarchyNode({
                 notificationKind={notificationKindsByNodeId.get(child.id) ?? null}
                 notificationKindsByNodeId={notificationKindsByNodeId}
                 notificationSnoozePrompt={notificationSnoozePrompt}
+                mobileLabelScope={mobileLabelScope}
+                suppressParentEdge={suppressParentEdge}
+                renderQuality={renderQuality}
                 theme={theme}
+                rootOverviewActive={rootOverviewActive}
                 onOpenNodeContextMenu={onOpenNodeContextMenu}
               />
             );
@@ -2100,6 +2633,67 @@ function getTextareaMaxHeight(textarea: HTMLTextAreaElement) {
   const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
   const maxLines = Number.parseInt(styles.getPropertyValue("--space-label-max-lines"), 10) || 4;
   return lineHeight * maxLines + paddingTop + paddingBottom;
+}
+
+function LowQualityPlanetMaterial({
+  node,
+  depthFade,
+  rootActiveDirectChild,
+  theme,
+}: {
+  node: AtlasNode;
+  depthFade: ReturnType<typeof getDepthFade>;
+  rootActiveDirectChild: boolean;
+  theme: AtlasTheme;
+}) {
+  const materialColor = useMemo(() => {
+    const lightDepthIndex = rootActiveDirectChild ? 0 : depthFade.index;
+    const color = theme === "light"
+      ? getLowQualityLightThemeBaseColor(new Color(node.color), lightDepthIndex, rootActiveDirectChild)
+      : new Color(node.color);
+    const backgroundColor = new Color(getUniverseThemeColors(theme).background);
+    const depthBlend = rootActiveDirectChild && theme === "light"
+      ? 0.02
+      : getLowQualityDepthBlend(depthFade.index, theme);
+    return color.lerp(backgroundColor, depthBlend);
+  }, [depthFade.index, node.color, rootActiveDirectChild, theme]);
+
+  return <meshBasicMaterial color={materialColor} />;
+}
+
+function getLowQualityLightThemeBaseColor(color: Color, index: number, rootActiveDirectChild = false) {
+  const capped = Math.min(2, Math.max(0, index));
+  const whiteRemoval = rootActiveDirectChild ? 0.78 : capped <= 1 ? 0.58 : 0.42;
+  const sharedWhite = Math.min(color.r, color.g, color.b) * whiteRemoval;
+
+  if (sharedWhite > 0.001 && sharedWhite < 0.98) {
+    const scale = 1 / (1 - sharedWhite);
+    color.setRGB(
+      clamp01((color.r - sharedWhite) * scale),
+      clamp01((color.g - sharedWhite) * scale),
+      clamp01((color.b - sharedWhite) * scale),
+    );
+  }
+
+  const luminance = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
+  const targetLuminance = rootActiveDirectChild ? 0.5 : capped <= 1 ? 0.54 : 0.62;
+  if (luminance > targetLuminance) {
+    color.multiplyScalar(targetLuminance / luminance);
+  }
+  return color;
+}
+
+function clamp01(value: number) {
+  return Math.min(1, Math.max(0, value));
+}
+
+function getLowQualityDepthBlend(index: number, theme: AtlasTheme) {
+  if (index <= 0) return 0;
+  const capped = Math.min(2, index);
+  if (theme === "light") {
+    return capped === 1 ? 0.16 : 0.38;
+  }
+  return capped === 1 ? 0.76 : 0.92;
 }
 
 function PlanetMaterial({
@@ -2575,17 +3169,7 @@ function blendHex(from: string, to: string, amount: number) {
   return `#${color.getHexString()}`;
 }
 
-function NodeFocusRing({
-  radius,
-  baseColor,
-  isSelected,
-  status,
-  depthFade,
-  waveDepth,
-  waveStartedAt,
-  notificationKind,
-  theme,
-}: {
+type NodeFocusRingProps = {
   radius: number;
   baseColor: string;
   isSelected: boolean;
@@ -2594,13 +3178,52 @@ function NodeFocusRing({
   waveDepth: number | null;
   waveStartedAt: number;
   notificationKind: NotificationPulseKind | null;
+  renderQuality: RenderQuality;
   theme: AtlasTheme;
+};
+
+function NodeFocusRing(props: NodeFocusRingProps) {
+  const lowQuality = props.renderQuality === "low";
+  const shouldAnimate =
+    !lowQuality ||
+    props.isSelected ||
+    Boolean(props.notificationKind) ||
+    props.status === "running" ||
+    props.status === "needs_review" ||
+    props.status === "error";
+
+  if (lowQuality && !shouldAnimate) return null;
+
+  return <AnimatedNodeFocusRing {...props} lowQuality={lowQuality} shouldAnimate={shouldAnimate} />;
+}
+
+function AnimatedNodeFocusRing({
+  radius,
+  baseColor,
+  isSelected,
+  status,
+  depthFade,
+  waveDepth,
+  waveStartedAt,
+  notificationKind,
+  lowQuality,
+  shouldAnimate,
+  theme,
+}: NodeFocusRingProps & {
+  lowQuality: boolean;
+  shouldAnimate: boolean;
 }) {
   const themeColors = getUniverseThemeColors(theme);
   const [waveGlow, setWaveGlow] = useState(0);
   const [statusPulse, setStatusPulse] = useState(0);
 
   useFrame(({ clock }) => {
+    if (!shouldAnimate) {
+      setWaveGlow((current) => (current > 0 ? 0 : current));
+      setStatusPulse((current) => (current > 0 ? 0 : current));
+      return;
+    }
+
     if (!waveDepth) {
       setWaveGlow((current) => (current > 0 ? 0 : current));
     } else {
@@ -2641,16 +3264,16 @@ function NodeFocusRing({
   return (
     <>
       <mesh>
-        <torusGeometry args={[radius * 1.34, Math.max(0.18, radius * 0.025), 16, 96]} />
+        <torusGeometry args={[radius * 1.34, Math.max(0.18, radius * 0.025), lowQuality ? 8 : 16, lowQuality ? 36 : 96]} />
         <meshBasicMaterial color={baseColor} transparent opacity={(theme === "light" ? 0.22 : 0.12) * normalFade} depthWrite={false} />
       </mesh>
       {pulseOpacity > 0.01 ? (
         <mesh>
-          <torusGeometry args={[pulseRadius, pulseTube, 16, 132]} />
+          <torusGeometry args={[pulseRadius, pulseTube, lowQuality ? 8 : 16, lowQuality ? 44 : 132]} />
           <meshBasicMaterial color={activeColor} transparent opacity={pulseOpacity} depthWrite={false} depthTest={!notificationKind} />
         </mesh>
       ) : null}
-      {notificationKind ? (
+      {notificationKind && !lowQuality ? (
         <mesh>
           <torusGeometry args={[radius * (1.92 + statusPulse * 0.18), Math.max(0.18, radius * 0.018), 14, 132]} />
           <meshBasicMaterial color={activeColor} transparent opacity={(0.34 + statusPulse * 0.32) * notificationFade} depthWrite={false} depthTest={false} />
@@ -2658,7 +3281,7 @@ function NodeFocusRing({
       ) : null}
       {highlightOpacity > 0.01 ? (
         <mesh>
-          <torusGeometry args={[highlightRadius, Math.max(0.22, radius * 0.028), 16, 116]} />
+          <torusGeometry args={[highlightRadius, Math.max(0.22, radius * 0.028), lowQuality ? 8 : 16, lowQuality ? 40 : 116]} />
           <meshBasicMaterial color={themeColors.ringHighlight} transparent opacity={highlightOpacity} depthWrite={false} />
         </mesh>
       ) : null}
@@ -3246,13 +3869,32 @@ function getMinCameraOffset(mobilePortraitCamera: boolean) {
   return NOTEBOOK_FIRST_SHELL_RADIUS - firstLayerZoomOutDistance * MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER;
 }
 
-function isMobilePortraitCamera(width: number, height: number) {
+function isMobilePortraitCamera(width: number, height: number, keyboardPortraitLock = false) {
+  if (keyboardPortraitLock) return isMobileCamera(width, Math.max(width + 1, height));
   if (height <= width || width > 980) return false;
   if (typeof window === "undefined" || typeof navigator === "undefined") return false;
   const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
   const touchDevice = navigator.maxTouchPoints > 0;
   const mobileUa = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
   return coarsePointer || touchDevice || mobileUa;
+}
+
+function isMobileCamera(width: number, height: number) {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const touchDevice = navigator.maxTouchPoints > 0;
+  const mobileUa = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+  return (coarsePointer || touchDevice || mobileUa) && Math.min(width, height) <= 620 && Math.max(width, height) <= 980;
+}
+
+function isMobileLandscapeCamera(width: number, height: number, keyboardPortraitLock = false) {
+  if (keyboardPortraitLock) return false;
+  return width > height && isMobileCamera(width, height);
+}
+
+function isKeyboardOverlayPortraitActive() {
+  if (typeof document === "undefined") return false;
+  return document.documentElement.getAttribute("data-keyboard-overlay-portrait") === "true";
 }
 
 function getViewportScale(distance: number) {

@@ -6,6 +6,7 @@ import { runTextPartnerTurn } from "../ai/textPartnerClient";
 import { buildVoiceLogContext } from "../ai/voiceLogContext";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
 import { buildAiNodeContextWithAttachments, findNode, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
+import { loadPersistedUiState, persistUiStatePatch } from "../uiPersistence";
 import type { AiAttachmentMode, AiContextScope, AiExecutionMode, CodexOptionsResult, CodexReasoningEffort, CodexSandboxMode } from "../types";
 
 type CommandMode = AiExecutionMode | "note";
@@ -15,8 +16,9 @@ const VOICE_LONG_PRESS_MS = 460;
 const VOICE_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 
 export function CommandDock() {
-  const [value, setValue] = useState("");
-  const [mode, setMode] = useState<CommandMode>("openai");
+  const [persistedCommandDraft] = useState(() => loadPersistedUiState()?.commandDraft ?? null);
+  const [value, setValue] = useState(() => persistedCommandDraft?.value ?? "");
+  const [mode, setMode] = useState<CommandMode>(() => isCommandMode(persistedCommandDraft?.mode) ? persistedCommandDraft.mode : "openai");
   const [voiceButtonState, setVoiceButtonState] = useState<VoiceButtonState>("idle");
   const [voiceState, setVoiceState] = useState<RealtimeSessionState>("closed");
   const [voiceError, setVoiceError] = useState("");
@@ -31,9 +33,12 @@ export function CommandDock() {
   const activeMicPointerIdRef = useRef<number | null>(null);
   const touchFallbackActiveRef = useRef(false);
   const voiceIdleTimerRef = useRef<number | null>(null);
+  const voiceIdleDeadlineAtRef = useRef<number | null>(null);
+  const commandDraftPersistTimerRef = useRef<number | null>(null);
+  const latestCommandDraftRef = useRef({ value, mode });
   const voiceSessionIdRef = useRef<string | undefined>(undefined);
   const assistantBufferRef = useRef("");
-  const voicePendingTurnRef = useRef<{ prompt: string; parentNodeId: string | null } | null>(null);
+  const voicePendingTurnRef = useRef<{ prompt: string } | null>(null);
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const multiSelectedNodeIds = useAtlasStore((state) => state.multiSelectedNodeIds);
@@ -81,7 +86,8 @@ export function CommandDock() {
   useEffect(() => {
     return () => {
       clearLongPressTimer();
-      clearVoiceIdleTimer();
+      clearVoiceIdleSchedule();
+      clearCommandDraftPersistTimer();
       voiceSessionRef.current?.stop();
       voiceSessionRef.current = null;
       voicePendingTurnRef.current = null;
@@ -108,6 +114,65 @@ export function CommandDock() {
   useEffect(() => {
     setActiveCommandMode(mode);
   }, [mode, setActiveCommandMode]);
+
+  useEffect(() => {
+    latestCommandDraftRef.current = { value, mode };
+    clearCommandDraftPersistTimer();
+    commandDraftPersistTimerRef.current = window.setTimeout(() => {
+      commandDraftPersistTimerRef.current = null;
+      persistLatestCommandDraft();
+    }, 260);
+    return clearCommandDraftPersistTimer;
+  }, [mode, value]);
+
+  useEffect(() => {
+    const persistLatestDraftBeforeSuspend = () => {
+      clearCommandDraftPersistTimer();
+      persistLatestCommandDraft();
+    };
+
+    const suspendTransientInputTimers = () => {
+      persistLatestDraftBeforeSuspend();
+      clearLongPressTimer();
+      clearVoiceIdleTimer();
+      pendingVoiceReleaseRef.current = false;
+      activeMicPointerIdRef.current = null;
+      touchFallbackActiveRef.current = false;
+    };
+
+    const resumeTransientInputTimers = () => {
+      if (!voiceSessionRef.current || voiceIdleDeadlineAtRef.current === null) return;
+      const remainingMs = voiceIdleDeadlineAtRef.current - Date.now();
+      if (remainingMs <= 0) {
+        void closeIdleVoiceSession();
+        return;
+      }
+      armVoiceIdleTimer(remainingMs);
+    };
+
+    const syncTransientInputTimers = () => {
+      if (document.visibilityState === "hidden") {
+        suspendTransientInputTimers();
+        return;
+      }
+      resumeTransientInputTimers();
+    };
+
+    document.addEventListener("visibilitychange", syncTransientInputTimers);
+    document.addEventListener("freeze", suspendTransientInputTimers);
+    document.addEventListener("resume", resumeTransientInputTimers);
+    window.addEventListener("pagehide", suspendTransientInputTimers);
+    window.addEventListener("pageshow", resumeTransientInputTimers);
+    window.addEventListener("beforeunload", persistLatestDraftBeforeSuspend);
+    return () => {
+      document.removeEventListener("visibilitychange", syncTransientInputTimers);
+      document.removeEventListener("freeze", suspendTransientInputTimers);
+      document.removeEventListener("resume", resumeTransientInputTimers);
+      window.removeEventListener("pagehide", suspendTransientInputTimers);
+      window.removeEventListener("pageshow", resumeTransientInputTimers);
+      window.removeEventListener("beforeunload", persistLatestDraftBeforeSuspend);
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -144,10 +209,12 @@ export function CommandDock() {
       addQuickChildFromInput(trimmed);
       return;
     }
-    if (mode === "openai" || mode === "local") {
+    if ((mode === "openai" || mode === "local") && isGlobalAiPartnerSurface(atlasRoot, selectedNodeId)) {
       void runTextPartnerTurn(trimmed, mode, contextOptionsForRun);
       return;
     }
+    // Node anchored AI requests must create normal request/result nodes with notification pulses.
+    // The global AI Partner log path is limited to the root surface to avoid stealing node runs.
     void runAiOnSelectedNode(trimmed, mode, contextOptionsForRun);
   };
 
@@ -164,7 +231,7 @@ export function CommandDock() {
         model: voicePartnerSettings.realtimeModel,
         voice: voicePartnerSettings.realtimeVoice,
         summary: voiceSessionSummary,
-        voiceLogContext: buildVoiceLogContext(voiceLogEntries, voiceSessionSummary),
+        voiceLogContext: buildVoiceLogContext(voiceLogEntries),
         onStateChange: (state) => {
           setVoiceState(state);
           setVoiceButtonState((current) => {
@@ -204,10 +271,8 @@ export function CommandDock() {
   const handleRealtimeEvent = (event: RealtimeClientEvent) => {
     if (event.kind === "user_transcript_done") {
       const latest = useAtlasStore.getState();
-      const parentNodeId = latest.selectedNodeId === latest.atlasRoot.id ? null : latest.selectedNodeId;
       voicePendingTurnRef.current = {
         prompt: event.text,
-        parentNodeId,
       };
       appendVoiceLogEntry({
         role: "user",
@@ -216,7 +281,6 @@ export function CommandDock() {
         sessionId: voiceSessionIdRef.current,
         metadata: {
           activeNodeId: latest.selectedNodeId,
-          archiveParentNodeId: parentNodeId,
         },
       });
       scheduleVoiceIdleTimeout();
@@ -234,15 +298,6 @@ export function CommandDock() {
       const pendingTurn = voicePendingTurnRef.current;
       voicePendingTurnRef.current = null;
       if (text) {
-        const archive = pendingTurn
-          ? useAtlasStore.getState().archivePartnerTurn({
-              parentNodeId: pendingTurn.parentNodeId,
-              prompt: pendingTurn.prompt,
-              response: text,
-              mode: "realtime",
-              model: voicePartnerSettings.realtimeModel,
-            })
-          : undefined;
         appendVoiceLogEntry({
           role: "assistant",
           title: "Voice Partner",
@@ -251,8 +306,7 @@ export function CommandDock() {
           metadata: {
             provider: "openai",
             model: voicePartnerSettings.realtimeModel,
-            requestNodeId: archive?.requestNodeId,
-            responseNodeId: archive?.responseNodeId,
+            prompt: pendingTurn?.prompt,
           },
         });
       }
@@ -490,7 +544,7 @@ export function CommandDock() {
       selectedNodeIds: latest.multiSelectedNodeIds,
     }));
     if (context) {
-      session.updateContext(context, latest.voiceSessionSummary, buildVoiceLogContext(latest.voiceLogEntries, latest.voiceSessionSummary));
+      session.updateContext(context, latest.voiceSessionSummary, buildVoiceLogContext(latest.voiceLogEntries));
     }
     session.beginPushToTalk();
     setVoiceButtonState("voice_ptt");
@@ -528,11 +582,17 @@ export function CommandDock() {
   };
 
   const scheduleVoiceIdleTimeout = () => {
+    if (!voiceSessionRef.current) return;
+    voiceIdleDeadlineAtRef.current = Date.now() + VOICE_IDLE_TIMEOUT_MS;
+    armVoiceIdleTimer(VOICE_IDLE_TIMEOUT_MS);
+  };
+
+  const armVoiceIdleTimer = (delayMs: number) => {
     clearVoiceIdleTimer();
     if (!voiceSessionRef.current) return;
     voiceIdleTimerRef.current = window.setTimeout(() => {
       void closeIdleVoiceSession();
-    }, VOICE_IDLE_TIMEOUT_MS);
+    }, Math.max(0, delayMs));
   };
 
   const closeIdleVoiceSession = async () => {
@@ -551,6 +611,7 @@ export function CommandDock() {
       appendVoiceLogEntry({ role: "error", title: "Voice summary error", text: message, sessionId: session.id });
       session.stop();
     } finally {
+      clearVoiceIdleSchedule();
       voiceSessionRef.current = null;
       voiceSessionIdRef.current = undefined;
       setVoiceButtonState("idle");
@@ -563,16 +624,31 @@ export function CommandDock() {
     longPressTimerRef.current = null;
   };
 
+  const clearCommandDraftPersistTimer = () => {
+    if (commandDraftPersistTimerRef.current === null) return;
+    window.clearTimeout(commandDraftPersistTimerRef.current);
+    commandDraftPersistTimerRef.current = null;
+  };
+
+  const persistLatestCommandDraft = () => {
+    persistUiStatePatch({ commandDraft: latestCommandDraftRef.current });
+  };
+
   const clearVoiceIdleTimer = () => {
     if (voiceIdleTimerRef.current === null) return;
     window.clearTimeout(voiceIdleTimerRef.current);
     voiceIdleTimerRef.current = null;
   };
 
+  const clearVoiceIdleSchedule = () => {
+    clearVoiceIdleTimer();
+    voiceIdleDeadlineAtRef.current = null;
+  };
+
   useEffect(() => {
     const handleRestart = () => {
       clearLongPressTimer();
-      clearVoiceIdleTimer();
+      clearVoiceIdleSchedule();
       pendingVoiceReleaseRef.current = false;
       longPressTriggeredRef.current = false;
       stopResponsePressRef.current = false;
@@ -965,6 +1041,14 @@ function modeLabel(mode: CommandMode) {
     case "note":
       return "Note";
   }
+}
+
+function isCommandMode(value: unknown): value is CommandMode {
+  return value === "openai" || value === "local" || value === "codex" || value === "note";
+}
+
+function isGlobalAiPartnerSurface(atlasRoot: ReturnType<typeof useAtlasStore.getState>["atlasRoot"], selectedNodeId: string) {
+  return selectedNodeId === atlasRoot.id;
 }
 
 function scopeLabel(scope: AiContextScope) {

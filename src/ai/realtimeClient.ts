@@ -575,7 +575,7 @@ function buildInitialRealtimeMessage(context: AiNodeContext, summary?: VoiceSess
     "Mind Atlas Voice Partner session started.",
     `Active node: ${context.selectedNode.title}`,
     summary?.text ? `Previous voice session summary:\n${summary.text}` : "",
-    voiceLogContext ? `AI/Partner log context for global continuity:\n${voiceLogContext}` : "",
+    voiceLogContext ? `AI Partner log context for global continuity:\n${voiceLogContext}` : "",
     "Wait for push-to-talk speech before taking action. Use tools when the user asks to operate Mind Atlas.",
   ].filter(Boolean).join("\n\n");
 }
@@ -585,8 +585,8 @@ function buildRealtimeContextUpdateMessage(context: AiNodeContext, summary?: Voi
     "Current Mind Atlas context update for the next push-to-talk turn.",
     `Active node: ${context.selectedNode.title}`,
     `Context scope: ${context.scope}`,
-    summary?.text ? `Latest AI/Partner summary:\n${summary.text}` : "",
-    voiceLogContext ? `AI/Partner log context:\n${voiceLogContext}` : "",
+    summary?.text ? `Latest AI Partner summary:\n${summary.text}` : "",
+    voiceLogContext ? `AI Partner log context:\n${voiceLogContext}` : "",
     "Selected context JSON:",
     JSON.stringify(context, null, 2),
   ].filter(Boolean).join("\n\n").slice(0, 18000);
