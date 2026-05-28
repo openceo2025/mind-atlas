@@ -1,4 +1,20 @@
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, ListTree, Plus, Save, Trash2, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ChevronsDown,
+  ChevronsUp,
+  GitBranchPlus,
+  ListPlus,
+  ListTree,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
 import { CSSProperties, KeyboardEvent, useMemo, useRef, useState } from "react";
 import {
   createOutlineDraftFromAtlas,
@@ -74,6 +90,12 @@ export function OutlineEditor({ root, onCancel, onSave }: OutlineEditorProps) {
           <button type="button" onClick={onCancel}>
             <X size={17} /> Cancel
           </button>
+          <button type="button" onClick={() => setDraftRoot((current) => setOutlineCollapsed(current, false))}>
+            <ChevronsDown size={17} /> Expand all
+          </button>
+          <button type="button" onClick={() => setDraftRoot((current) => setOutlineCollapsed(current, true))}>
+            <ChevronsUp size={17} /> Collapse all
+          </button>
           <button className="is-primary" type="button" onClick={() => onSave(root.id, outlineDraftToInput(draftRoot))} aria-label="Save outline">
             <Save size={17} /> Save
           </button>
@@ -108,10 +130,10 @@ export function OutlineEditor({ root, onCancel, onSave }: OutlineEditorProps) {
           <ArrowDown size={18} />
         </button>
         <button type="button" onClick={() => run((current, key) => insertOutlineSiblingAfter(current, key))} disabled={activeDepth === 0} aria-label="Add sibling node">
-          <Plus size={18} />
+          <ListPlus size={18} />
         </button>
         <button type="button" onClick={() => run((current, key) => insertOutlineChild(current, key))} aria-label="Add child node">
-          <Plus size={18} className="outline-toolbar-child-plus" />
+          <GitBranchPlus size={18} />
         </button>
         <button className="is-primary" type="button" onClick={() => onSave(root.id, outlineDraftToInput(draftRoot))} aria-label="Save outline">
           <Check size={18} />
@@ -174,10 +196,10 @@ function OutlineNodeEditor({
             <ArrowDown size={14} />
           </button>
           <button type="button" onClick={() => onCommand("sibling", node.key)} disabled={depth === 0} aria-label="Add sibling">
-            <Plus size={14} />
+            <ListPlus size={14} />
           </button>
           <button type="button" onClick={() => onCommand("child", node.key)} aria-label="Add child">
-            <Plus size={14} />
+            <GitBranchPlus size={14} />
           </button>
           <button type="button" onClick={() => onCommand("delete", node.key)} disabled={depth === 0} aria-label="Delete node">
             <Trash2 size={14} />
@@ -247,6 +269,14 @@ function runOutlineCommand(root: OutlineDraftNode, key: string, command: Outline
 
 function countDraftDescendants(node: OutlineDraftNode): number {
   return node.children.reduce((count, child) => count + 1 + countDraftDescendants(child), 0);
+}
+
+function setOutlineCollapsed(node: OutlineDraftNode, collapsed: boolean): OutlineDraftNode {
+  return {
+    ...node,
+    collapsed,
+    children: node.children.map((child) => setOutlineCollapsed(child, collapsed)),
+  };
 }
 
 function autoSizeTextarea(element: HTMLTextAreaElement | null) {

@@ -397,10 +397,6 @@ button {
   border-radius: 6px;
 }
 
-.outline-toolbar-child-plus {
-  transform: translateY(3px) scale(0.92);
-}
-
 .universe-shell {
   position: absolute;
   inset: 0;

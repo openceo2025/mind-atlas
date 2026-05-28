@@ -40,6 +40,7 @@ import { getStatusColor } from "../utils/status";
 
 const FOCUS_DURATION_SECONDS = 1.05;
 const FOCUS_TRANSITION_COMPLETE_EVENT = "mind-atlas-focus-transition-complete";
+const keyboardLastChildByParentId = new Map<string, string>();
 const CAMERA_FOV = 45;
 const INITIAL_CAMERA_OFFSET = 0;
 const MIN_CAMERA_OFFSET = -120;
@@ -477,11 +478,16 @@ function getKeyboardNavigationTarget(root: AtlasNode, originNodeId: string, key:
   const node = path.at(-1);
 
   if (key === "ArrowUp") {
-    return path.length > 1 ? path[path.length - 2].id : null;
+    const rememberedChildId = keyboardLastChildByParentId.get(originNodeId);
+    if (rememberedChildId && node?.children.some((child) => child.id === rememberedChildId)) return rememberedChildId;
+    return node?.children[0]?.id ?? null;
   }
 
   if (key === "ArrowDown") {
-    return node?.children[0]?.id ?? null;
+    if (path.length <= 1) return null;
+    const parentId = path[path.length - 2].id;
+    keyboardLastChildByParentId.set(parentId, originNodeId);
+    return parentId;
   }
 
   if (path.length < 2) return null;
@@ -1658,6 +1664,13 @@ function NotebookNodes({
       return;
     }
 
+    const currentPath = findNodePath(atlasRoot, renderSelectedNodeId);
+    const nextPath = findNodePath(atlasRoot, selectedNodeId);
+    if (isStrictAncestorPath(nextPath, currentPath)) {
+      setRenderSelectedNodeId(selectedNodeId);
+      return;
+    }
+
     let active = true;
     const completeRenderSelection = () => {
       if (!active) return;
@@ -1676,7 +1689,7 @@ function NotebookNodes({
       window.clearTimeout(timeout);
       window.removeEventListener(FOCUS_TRANSITION_COMPLETE_EVENT, handleFocusTransitionComplete);
     };
-  }, [focusRequest, selectedNodeId]);
+  }, [atlasRoot, focusRequest, renderSelectedNodeId, selectedNodeId]);
 
   useEffect(() => {
     setFocusWaveStartedAt(performance.now());
@@ -1697,7 +1710,7 @@ function NotebookNodes({
   }
 
   if (renderQuality === "low") {
-    const lowRenderPaths = buildLowQualityRenderPaths(atlasRoot, selectedNodeId, notificationPulses);
+    const lowRenderPaths = buildLowQualityRenderPaths(atlasRoot, selectedNodeId, notificationPulses, aiContextPreviewNodeIds);
     return (
       <group>
         {lowRenderPaths.map(({ path, visibleDepthRemaining, suppressParentEdge }) => {
@@ -1812,7 +1825,7 @@ function NotebookNodes({
   );
 }
 
-function buildLowQualityRenderPaths(root: AtlasNode, selectedNodeId: string, notificationPulses: NotificationPulse[]) {
+function buildLowQualityRenderPaths(root: AtlasNode, selectedNodeId: string, notificationPulses: NotificationPulse[], aiContextPreviewNodeIds: Set<string>) {
   const entries: Array<{ path: AtlasNode[]; visibleDepthRemaining: number; suppressParentEdge: boolean }> = [];
   const added = new Set<string>();
   const selectedPath = findNodePath(root, selectedNodeId) ?? [root];
@@ -1838,7 +1851,19 @@ function buildLowQualityRenderPaths(root: AtlasNode, selectedNodeId: string, not
     addPath(path, 0, path.length > 2);
   }
 
+  for (const nodeId of aiContextPreviewNodeIds) {
+    const path = findNodePath(root, nodeId);
+    if (!path) continue;
+    addPath(path, 0, path.length > 2);
+  }
+
   return entries;
+}
+
+function hasAiContextPreviewNode(node: AtlasNode, aiContextPreviewNodeIds: Set<string>): boolean {
+  if (!aiContextPreviewNodeIds.size) return false;
+  if (aiContextPreviewNodeIds.has(node.id)) return true;
+  return node.children.some((child) => hasAiContextPreviewNode(child, aiContextPreviewNodeIds));
 }
 
 function markLowQualityRenderedDescendants(node: AtlasNode, visibleDepthRemaining: number, added: Set<string>) {
@@ -1847,6 +1872,11 @@ function markLowQualityRenderedDescendants(node: AtlasNode, visibleDepthRemainin
     added.add(child.id);
     markLowQualityRenderedDescendants(child, visibleDepthRemaining - 1, added);
   }
+}
+
+function isStrictAncestorPath(ancestorPath: AtlasNode[] | null, descendantPath: AtlasNode[] | null) {
+  if (!ancestorPath || !descendantPath || ancestorPath.length >= descendantPath.length) return false;
+  return ancestorPath.every((node, index) => descendantPath[index]?.id === node.id);
 }
 
 function HierarchyNode({
@@ -1915,7 +1945,8 @@ function HierarchyNode({
   const perspective = camera as PerspectiveCamera;
   const isSelected = highlightSelectedNodeId === node.id;
   const isMultiSelected = multiSelectedNodeIds.has(node.id);
-  const previewNotificationKind = aiContextPreviewNodeIds.has(node.id) ? "codex" : null;
+  const isAiContextPreviewNode = aiContextPreviewNodeIds.has(node.id);
+  const previewNotificationKind = isAiContextPreviewNode ? "codex" : null;
   const effectiveNotificationKind = notificationKind === "error" ? notificationKind : previewNotificationKind ?? notificationKind;
   const parentId = path.length > 1 ? path[path.length - 2].id : null;
   const selectedIndexInPath = path.findIndex((item) => item.id === selectedNodeId);
@@ -1950,7 +1981,8 @@ function HierarchyNode({
     visibleDepthRemaining > 0 &&
     node.children.length > 0 &&
     (isActiveAncestor ||
-      (activeDescendantDistance !== null && activeDescendantDistance < VISIBLE_DESCENDANT_DEPTH));
+      (activeDescendantDistance !== null && activeDescendantDistance < VISIBLE_DESCENDANT_DEPTH) ||
+      node.children.some((child) => hasAiContextPreviewNode(child, aiContextPreviewNodeIds)));
   const isLocalContextNode = isSelected || isMultiSelected || aiContextPreviewNodeIds.has(node.id) || isActiveAncestor || isActiveSibling || isDirectChildOfSelected;
   const mobileLabelVisible = isSelected || isDirectChildOfSelected;
   const lowQualityLabelVisible = isSelected || isDirectChildOfSelected;
@@ -2377,7 +2409,7 @@ function HierarchyNode({
         <NodeFocusRing
           radius={radius}
           baseColor={ringColor}
-          isSelected={isSelected || isMultiSelected}
+          isSelected={isSelected || isMultiSelected || isAiContextPreviewNode}
           status={node.status}
           depthFade={depthFade}
           waveDepth={focusWaveDepth}

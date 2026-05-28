@@ -1894,9 +1894,10 @@ export function buildAiNodeContext(root: AtlasNode, selectedNodeId: string, opti
   const selectedNode = path[path.length - 1];
   const parent = path.length > 1 ? path[path.length - 2] : null;
   const selectedDepth = getSelectedSnapshotDepth(options);
+  const selectedSnapshotOptions = options.scope === "subtree" ? { childLimit: Number.MAX_SAFE_INTEGER } : undefined;
   const siblingDepth = options.scope === "neighborhood" ? 1 : 0;
   const includeSiblings = options.scope === "neighborhood";
-  const selectedSnapshot = nodeToAiSnapshot(selectedNode, selectedDepth);
+  const selectedSnapshot = nodeToAiSnapshot(selectedNode, selectedDepth, selectedSnapshotOptions);
   const pathSnapshots = getContextPathNodes(path, options).map((node) => nodeToAiSnapshot(node, 0));
   const siblingSnapshots =
     options.scope === "custom"
@@ -3384,7 +3385,8 @@ function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCou
   };
 }
 
-function nodeToAiSnapshot(node: AtlasNode, depthRemaining: number): AiNodeSnapshot {
+function nodeToAiSnapshot(node: AtlasNode, depthRemaining: number, options: { childLimit?: number } = {}): AiNodeSnapshot {
+  const childLimit = options.childLimit ?? 8;
   return {
     id: node.id,
     title: node.title,
@@ -3401,7 +3403,7 @@ function nodeToAiSnapshot(node: AtlasNode, depthRemaining: number): AiNodeSnapsh
       mimeType: attachment.mimeType,
       size: attachment.size,
     })),
-    children: depthRemaining > 0 ? node.children.slice(0, 8).map((child) => nodeToAiSnapshot(child, depthRemaining - 1)) : [],
+    children: depthRemaining > 0 ? node.children.slice(0, childLimit).map((child) => nodeToAiSnapshot(child, depthRemaining - 1, options)) : [],
   };
 }
 
@@ -3432,7 +3434,7 @@ function getSelectedSnapshotDepth(options: AiContextOptions) {
     case "focused":
       return 1;
     case "subtree":
-      return 4;
+      return Number.MAX_SAFE_INTEGER;
     case "neighborhood":
       return 2;
     case "selected":
