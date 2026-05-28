@@ -138,7 +138,6 @@ function OutlineNodeEditor({
 }) {
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
   const isActive = activeKey === node.key;
-  const hasChildren = node.children.length > 0;
   const hiddenCount = node.collapsed ? countDraftDescendants(node) : 0;
   const bodyHidden = node.collapsed;
 
@@ -150,10 +149,9 @@ function OutlineNodeEditor({
           className="outline-fold-button"
           type="button"
           onClick={() => onUpdate(node.key, { collapsed: !node.collapsed })}
-          disabled={!hasChildren}
-          aria-label={node.collapsed ? "Expand node section" : "Collapse node section"}
+          aria-label={node.collapsed ? "Show node body" : "Hide node body"}
         >
-          {hasChildren ? node.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} /> : <span />}
+          {node.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
         </button>
         <span className="outline-title-marker">#</span>
         <input
