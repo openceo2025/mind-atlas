@@ -218,6 +218,7 @@ interface AtlasStore {
   addAttachment: (nodeId: string, attachment: NodeAttachment, previewUrl?: string) => void;
   removeAttachment: (nodeId: string, attachmentId: string) => void;
   updateNodeAppearance: (id: string, patch: Pick<Partial<AtlasNode>, "color" | "texture">) => void;
+  requestTitleEdit: (id?: string) => void;
   consumeTitleEditRequest: () => void;
   restoreAttachmentPreviews: () => Promise<void>;
   exportNotebook: () => string;
@@ -1110,6 +1111,13 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       persistNotebook(atlasRoot);
       return { ...pushHistory(state), atlasRoot };
     });
+  },
+
+  requestTitleEdit: (id) => {
+    const state = get();
+    const nodeId = id ?? state.selectedNodeId;
+    if (nodeId === state.atlasRoot.id || !findNode(state.atlasRoot, nodeId)) return;
+    set({ titleEditRequestId: nodeId });
   },
 
   consumeTitleEditRequest: () => set({ titleEditRequestId: null }),

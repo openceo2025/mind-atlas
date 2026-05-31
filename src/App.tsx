@@ -1,6 +1,6 @@
 import { FocusPanel } from "./components/FocusPanel";
 import { Bell, BellOff, CloudDownload, CloudUpload, Download, Maximize2, MessageSquareText, Moon, MoreHorizontal, PenLine, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
-import { ChangeEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
 import { CommandDock } from "./components/CommandDock";
@@ -107,7 +107,17 @@ export default function App() {
   const uiRestoreAppliedRef = useRef(false);
   const latestUiStateRef = useRef<Omit<Partial<PersistedUiState>, "version" | "savedAt">>({});
 
+  const closeMobileBackOverlays = useCallback(() => {
+    setMenuOpen(false);
+    setVoiceLogOpen(false);
+    setVoiceSettingsOpen(false);
+    setCloudLoadOpen(false);
+    setOutlineEditorOpen(false);
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  }, []);
+
   useVisualViewportHeight(commandInputEditing);
+  useMobileBackButtonGuard({ closeOverlays: closeMobileBackOverlays });
 
   useEffect(() => {
     if (uiRestoreAppliedRef.current) return;
@@ -1251,6 +1261,31 @@ function vrModeStatusLabel(enabled: boolean, message: string) {
   return enabled ? "on / tilt to pan" : "off";
 }
 
+function useMobileBackButtonGuard({ closeOverlays }: { closeOverlays: () => void }) {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!isMobileBackButtonGuardTarget()) return;
+
+    const state = window.history.state;
+    if (!state?.mindAtlasBackGuard) {
+      window.history.pushState({ ...(state && typeof state === "object" ? state : {}), mindAtlasBackGuard: true }, "", window.location.href);
+    }
+
+    const handlePopState = () => {
+      closeOverlays();
+      window.history.pushState({ mindAtlasBackGuard: true }, "", window.location.href);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [closeOverlays]);
+}
+
+function isMobileBackButtonGuardTarget() {
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  return coarsePointer && window.innerWidth <= 980;
+}
+
 function useVisualViewportHeight(commandInputEditing: boolean) {
   const stableHeightRef = useRef<number | null>(null);
   const lastViewportWidthRef = useRef<number | null>(null);
@@ -1272,7 +1307,8 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
 
     const prepareKeyboardOverlay = (target: EventTarget | null) => {
       if (!(target instanceof HTMLElement)) return;
-      if (!target.closest(".command-dock input, .command-dock textarea, .command-dock select")) return;
+      const spaceLabelTarget = target.closest(".space-body-editor");
+      if (!target.closest(".command-dock input, .command-dock textarea, .command-dock select, .space-body-editor")) return;
       if (!isMobileKeyboardOverlayTarget(stableHeightRef.current)) return;
       keyboardOverlayPreparedUntilRef.current = Date.now() + 4000;
       rememberStableHeight();
@@ -1280,6 +1316,11 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
       setVirtualKeyboardOverlay(false);
       document.documentElement.setAttribute("data-keyboard-overlay-input", "true");
       document.documentElement.setAttribute("data-keyboard-overlay-portrait", "true");
+      if (spaceLabelTarget) {
+        document.documentElement.setAttribute("data-keyboard-overlay-space-label", "true");
+      } else {
+        document.documentElement.removeAttribute("data-keyboard-overlay-space-label");
+      }
       window.setTimeout(updateViewportHeight, 80);
       window.setTimeout(updateViewportHeight, 240);
       window.setTimeout(updateViewportHeight, 520);
@@ -1297,7 +1338,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
       const measuredKeyboardTop = virtualKeyboardTop === null ? visualKeyboardTop : Math.min(visualKeyboardTop, virtualKeyboardTop);
       const keyboardLikelyOpen = Math.max(0, stableHeight - measuredKeyboardTop) >= 180;
       const keyboardOverlayMode =
-        (commandInputEditing || isCommandKeyboardTargetActive() || keyboardOverlayPrepared || (hasKeyboardPanelSizeLock() && keyboardLikelyOpen)) &&
+        (commandInputEditing || isKeyboardOverlayTextTargetActive() || keyboardOverlayPrepared || (hasKeyboardPanelSizeLock() && keyboardLikelyOpen)) &&
         keyboardOverlayPortrait;
       const measuredKeyboardBottomOffset = keyboardOverlayMode ? Math.max(0, stableHeight - measuredKeyboardTop) : 0;
       const fallbackKeyboardBottomOffset =
@@ -1310,10 +1351,14 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
         clearKeyboardPanelSizeLock();
         document.documentElement.removeAttribute("data-keyboard-overlay-input");
         document.documentElement.removeAttribute("data-keyboard-overlay-portrait");
+        document.documentElement.removeAttribute("data-keyboard-overlay-space-label");
       } else {
         setVirtualKeyboardOverlay(false);
         document.documentElement.setAttribute("data-keyboard-overlay-input", "true");
         document.documentElement.setAttribute("data-keyboard-overlay-portrait", "true");
+        if (isSpaceLabelKeyboardTargetActive()) {
+          document.documentElement.setAttribute("data-keyboard-overlay-space-label", "true");
+        }
       }
 
       const appHeight = keyboardOverlayMode ? stableHeight : height;
@@ -1357,6 +1402,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
       virtualKeyboard?.removeEventListener("geometrychange", updateViewportHeight);
       window.removeEventListener("resize", updateViewportHeight);
       window.removeEventListener("orientationchange", updateViewportHeightAfterOrientation);
+      document.documentElement.removeAttribute("data-keyboard-overlay-space-label");
     };
   }, [commandInputEditing]);
 
@@ -1369,11 +1415,12 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
     }
 
     window.setTimeout(() => {
-      if (!useAtlasStore.getState().commandInputEditing && !isCommandKeyboardTargetActive() && !isKeyboardViewportLikelyOpen(stableHeightRef.current)) {
+      if (!useAtlasStore.getState().commandInputEditing && !isKeyboardOverlayTextTargetActive() && !isKeyboardViewportLikelyOpen(stableHeightRef.current)) {
         setVirtualKeyboardOverlay(false);
         clearKeyboardPanelSizeLock();
         document.documentElement.removeAttribute("data-keyboard-overlay-input");
         document.documentElement.removeAttribute("data-keyboard-overlay-portrait");
+        document.documentElement.removeAttribute("data-keyboard-overlay-space-label");
       }
     }, 300);
   }, [commandInputEditing]);
@@ -1403,9 +1450,19 @@ function getFallbackKeyboardBottomOffset(stableHeight: number) {
   return Math.round(Math.min(380, Math.max(260, stableHeight * 0.42)));
 }
 
+function isKeyboardOverlayTextTargetActive() {
+  const activeElement = document.activeElement;
+  return activeElement instanceof HTMLElement && Boolean(activeElement.closest(".command-dock input, .command-dock textarea, .command-dock select, .space-body-editor"));
+}
+
 function isCommandKeyboardTargetActive() {
   const activeElement = document.activeElement;
   return activeElement instanceof HTMLElement && Boolean(activeElement.closest(".command-dock input, .command-dock textarea, .command-dock select"));
+}
+
+function isSpaceLabelKeyboardTargetActive() {
+  const activeElement = document.activeElement;
+  return activeElement instanceof HTMLElement && Boolean(activeElement.closest(".space-body-editor"));
 }
 
 function isKeyboardViewportLikelyOpen(stableHeight: number | null) {

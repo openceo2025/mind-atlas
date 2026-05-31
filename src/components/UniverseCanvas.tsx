@@ -314,6 +314,8 @@ export function UniverseCanvas({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isKeyboardComposing(event) || event.altKey || event.ctrlKey || event.metaKey) return;
 
+      if (isSpaceEditorShortcutTarget(event.target)) return;
+
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
@@ -323,6 +325,15 @@ export function UniverseCanvas({
 
       const spaceEditorNodeId = getSpaceEditorNodeIdFromTarget(event.target);
       const shortcutOriginNodeId = getNodeKeyboardShortcutOriginId(event.target, spaceEditorNodeId);
+
+      if ((event.key === "F2" || event.key === " ") && shortcutOriginNodeId && !isInteractiveShortcutTarget(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        useAtlasStore.getState().requestTitleEdit(shortcutOriginNodeId);
+        setNodeContextMenu(null);
+        return;
+      }
 
       if (!event.shiftKey && shortcutOriginNodeId && (event.key === "Enter" || event.key === "Tab")) {
         event.preventDefault();
@@ -432,6 +443,10 @@ function getSpaceEditorNodeIdFromTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return null;
   const editor = target.closest("textarea.space-body-editor");
   return editor instanceof HTMLTextAreaElement ? editor.dataset.nodeId ?? null : null;
+}
+
+function isSpaceEditorShortcutTarget(target: EventTarget | null) {
+  return Boolean(getSpaceEditorNodeIdFromTarget(target));
 }
 
 function getNodeKeyboardShortcutOriginId(target: EventTarget | null, spaceEditorNodeId: string | null) {
@@ -2623,6 +2638,35 @@ function SpaceNodeEditor({
       onDoubleClick={(event) => event.stopPropagation()}
       onWheel={(event) => {
         event.stopPropagation();
+      }}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (composingRef.current || event.nativeEvent.isComposing) return;
+        if (event.key === "Tab") {
+          event.preventDefault();
+          const textarea = event.currentTarget;
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          const nextBody = `${draftBody.slice(0, start)}\t${draftBody.slice(end)}`;
+          setDraftBody(nextBody);
+          onChange(nextBody);
+          window.requestAnimationFrame(() => {
+            textarea.setSelectionRange(start + 1, start + 1);
+            resizeTextarea(textarea);
+          });
+          return;
+        }
+        if (event.key === "Enter" && !event.shiftKey && !event.altKey) {
+          event.preventDefault();
+          onChange(event.currentTarget.value);
+          event.currentTarget.blur();
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onChange(event.currentTarget.value);
+          event.currentTarget.blur();
+        }
       }}
       onCompositionStart={() => {
         composingRef.current = true;

@@ -20,7 +20,10 @@ const openAiMode = process.env.MIND_ATLAS_OPENAI_MODE ?? "responses";
 const defaultModel = process.env.MIND_ATLAS_OPENAI_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5.5";
 const defaultMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_MAX_OUTPUT_TOKENS", 8192);
 const openAiMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_OPENAI_MAX_OUTPUT_TOKENS", defaultMaxOutputTokens);
-const localMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_LOCAL_MAX_OUTPUT_TOKENS", defaultMaxOutputTokens);
+const localMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_LOCAL_MAX_OUTPUT_TOKENS", Math.min(defaultMaxOutputTokens, 2048));
+const localPromptContextCharLimit = readPositiveIntEnv("MIND_ATLAS_LOCAL_CONTEXT_CHAR_LIMIT", 5500);
+const localPartnerLogCharLimit = readPositiveIntEnv("MIND_ATLAS_LOCAL_PARTNER_LOG_CHAR_LIMIT", 1600);
+const localPartnerSummaryCharLimit = readPositiveIntEnv("MIND_ATLAS_LOCAL_PARTNER_SUMMARY_CHAR_LIMIT", 900);
 const webSearchMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_WEB_SEARCH_MAX_OUTPUT_TOKENS", 2048);
 const openAiImageModel = process.env.MIND_ATLAS_OPENAI_IMAGE_MODEL ?? "gpt-image-1";
 const openAiImageSize = process.env.MIND_ATLAS_OPENAI_IMAGE_SIZE ?? "1024x1024";
@@ -353,7 +356,7 @@ async function createAiResponse(payload) {
 
 async function createOpenAiCompatibleResponse({ baseUrl, apiKey, model, prompt, context, provider, startedAt }) {
   const system = buildSystemInstruction();
-  const user = buildUserInstruction(prompt, context);
+  const user = provider === "local" ? buildLocalUserInstruction(prompt, context) : buildUserInstruction(prompt, context);
   const maxOutputTokens = provider === "local" ? localMaxOutputTokens : openAiMaxOutputTokens;
   const data = await callChatCompletions(baseUrl, apiKey, model, system, user, maxOutputTokens);
   const rawText = extractModelText(data);
@@ -477,18 +480,21 @@ async function callResponsesToolTurn(baseUrl, apiKey, model, context, messages, 
 }
 
 async function callChatToolTurn(baseUrl, apiKey, model, provider, context, messages, tools, summary, voiceLogContext) {
+  const local = provider === "local";
   const body = {
     messages: [
       {
         role: "system",
         content: buildMindAtlasPartnerInstructions({
           mode: "text",
-          summary,
-          voiceLogContext,
-          context,
+          summary: local ? truncateText(summary, localPartnerSummaryCharLimit) : summary,
+          voiceLogContext: local ? truncateFromStart(voiceLogContext, localPartnerLogCharLimit) : voiceLogContext,
+          context: local ? compactAiContextForLocal(context) : context,
+          contextCharLimit: local ? localPromptContextCharLimit : 8000,
+          compactedForLocal: local,
         }),
       },
-      ...buildChatPartnerMessages(messages),
+      ...buildChatPartnerMessages(local ? compactPartnerMessagesForLocal(messages) : messages),
     ],
     tools: normalizeChatTools(tools),
     tool_choice: "auto",
@@ -1117,6 +1123,11 @@ function truncateText(value, maxLength) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}\n...truncated` : text;
 }
 
+function truncateFromStart(value, maxLength) {
+  const text = String(value);
+  return text.length > maxLength ? `[Earlier context truncated]\n${text.slice(text.length - maxLength)}` : text;
+}
+
 function runProcess(command, args, stdin, timeoutMs, cwd) {
   return new Promise((resolve, reject) => {
     let child;
@@ -1495,6 +1506,17 @@ function buildUserInstruction(prompt, context) {
   ].join("\n");
 }
 
+function buildLocalUserInstruction(prompt, context) {
+  return [
+    "User prompt:",
+    truncateText(prompt, 1800),
+    "",
+    "Mind Atlas compact context JSON:",
+    "The context was compacted for a local model with a smaller context window. Prefer the selected node, path, and explicit selected nodes over omitted descendants.",
+    JSON.stringify(compactAiContextForLocal(context), null, 2).slice(0, localPromptContextCharLimit),
+  ].join("\n");
+}
+
 function buildCodexPrompt(prompt, context, settings) {
   return [
     "You are Codex CLI being invoked from Mind Atlas.",
@@ -1524,8 +1546,8 @@ function buildCodexPrompt(prompt, context, settings) {
   ].join("\n");
 }
 
-function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summary = "", voiceLogContext = "", context = null }) {
-  const contextText = context ? JSON.stringify(context, null, 2).slice(0, 8000) : "";
+function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summary = "", voiceLogContext = "", context = null, contextCharLimit = 8000, compactedForLocal = false }) {
+  const contextText = context ? JSON.stringify(context, null, 2).slice(0, contextCharLimit) : "";
   const voiceMode = mode === "voice";
   return [
     "You are operating inside Mind Atlas, a spatial tree notebook made of celestial nodes.",
@@ -1538,6 +1560,7 @@ function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summa
     voiceMode ? "Keep responses concise enough for voice." : "This is a text conversation. Be concise, but include enough detail to be useful in the AI/Partner log.",
     "Do not create a celestial response node unless a tool explicitly creates or edits nodes.",
     "Write in the user's language unless the user asks otherwise.",
+    compactedForLocal ? "The context below is compacted for a local model with a smaller context window. If detail is missing, ask for a narrower node scope instead of failing." : "",
     extraInstructions,
     summary ? `Previous session summary:\n${summary}` : "",
     voiceLogContext ? `Persistent AI/Partner log context:\n${voiceLogContext}` : "",
@@ -1574,6 +1597,75 @@ function buildRealtimeSessionConfig(payload) {
       },
     },
   };
+}
+
+function compactAiContextForLocal(context) {
+  if (!context || typeof context !== "object") return context ?? null;
+  return {
+    scope: context.scope,
+    options: context.options
+      ? {
+          scope: context.options.scope,
+          ancestorDepth: context.options.ancestorDepth,
+          descendantDepth: context.options.descendantDepth,
+          lateralRadius: context.options.lateralRadius,
+          attachmentMode: context.options.attachmentMode,
+        }
+      : undefined,
+    stats: context.stats,
+    selectedNode: compactAiNodeSnapshot(context.selectedNode, 2, 1600, 12),
+    selectedNodes: Array.isArray(context.selectedNodes)
+      ? context.selectedNodes.slice(0, 8).map((node) => compactAiNodeSnapshot(node, 1, 900, 8))
+      : undefined,
+    path: Array.isArray(context.path) ? context.path.slice(-6).map((node) => compactAiNodeSnapshot(node, 0, 500, 0)) : [],
+    siblingNodes: Array.isArray(context.siblingNodes)
+      ? context.siblingNodes.slice(0, 12).map((node) => compactAiNodeSnapshot(node, 1, 450, 6))
+      : [],
+    descendantCount: context.descendantCount,
+    compactedFor: "local-llm",
+  };
+}
+
+function compactAiNodeSnapshot(node, depthRemaining, bodyLimit, childLimit) {
+  if (!node || typeof node !== "object") return null;
+  const children = Array.isArray(node.children) ? node.children : [];
+  return {
+    id: stringOr(node.id, ""),
+    title: stringOr(node.title, ""),
+    body: truncateText(stringOr(node.body, ""), bodyLimit),
+    summary: truncateText(stringOr(node.summary, ""), 320),
+    status: stringOr(node.status, ""),
+    author: stringOr(node.author, ""),
+    nodeType: stringOr(node.nodeType, ""),
+    tags: Array.isArray(node.tags) ? node.tags.slice(0, 12) : [],
+    attachments: Array.isArray(node.attachments)
+      ? node.attachments.slice(0, 6).map((attachment) => ({
+          name: stringOr(attachment?.name, ""),
+          kind: stringOr(attachment?.kind, ""),
+          mimeType: stringOr(attachment?.mimeType, ""),
+          size: Number.isFinite(Number(attachment?.size)) ? Number(attachment.size) : undefined,
+        }))
+      : [],
+    children:
+      depthRemaining > 0
+        ? children.slice(0, childLimit).map((child) => compactAiNodeSnapshot(child, depthRemaining - 1, Math.max(260, Math.floor(bodyLimit * 0.45)), Math.max(4, Math.floor(childLimit * 0.7))))
+        : children.length
+          ? children.slice(0, childLimit || 10).map((child) => ({
+              id: stringOr(child?.id, ""),
+              title: stringOr(child?.title, ""),
+              summary: truncateText(stringOr(child?.summary, ""), 180),
+              childCount: Array.isArray(child?.children) ? child.children.length : 0,
+            }))
+          : [],
+    omittedChildren: Math.max(0, children.length - (depthRemaining > 0 ? childLimit : childLimit || 10)),
+  };
+}
+
+function compactPartnerMessagesForLocal(messages) {
+  return messages.slice(-6).map((message) => ({
+    ...message,
+    content: truncateText(stringOr(message?.content, ""), 1200),
+  }));
 }
 
 function buildTextPartnerInput(messages) {
