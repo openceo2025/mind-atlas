@@ -3,7 +3,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
-import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
@@ -21,9 +21,10 @@ const defaultModel = process.env.MIND_ATLAS_OPENAI_MODEL ?? process.env.OPENAI_M
 const defaultMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_MAX_OUTPUT_TOKENS", 8192);
 const openAiMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_OPENAI_MAX_OUTPUT_TOKENS", defaultMaxOutputTokens);
 const localMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_LOCAL_MAX_OUTPUT_TOKENS", Math.min(defaultMaxOutputTokens, 2048));
-const localPromptContextCharLimit = readPositiveIntEnv("MIND_ATLAS_LOCAL_CONTEXT_CHAR_LIMIT", 5500);
-const localPartnerLogCharLimit = readPositiveIntEnv("MIND_ATLAS_LOCAL_PARTNER_LOG_CHAR_LIMIT", 1600);
-const localPartnerSummaryCharLimit = readPositiveIntEnv("MIND_ATLAS_LOCAL_PARTNER_SUMMARY_CHAR_LIMIT", 900);
+const localPromptContextCharLimit = readPositiveIntEnv("MIND_ATLAS_LOCAL_CONTEXT_CHAR_LIMIT", 2400);
+const localPartnerLogCharLimit = readPositiveIntEnv("MIND_ATLAS_LOCAL_PARTNER_LOG_CHAR_LIMIT", 700);
+const localPartnerSummaryCharLimit = readPositiveIntEnv("MIND_ATLAS_LOCAL_PARTNER_SUMMARY_CHAR_LIMIT", 450);
+const localPartnerSystemCharLimit = readPositiveIntEnv("MIND_ATLAS_LOCAL_PARTNER_SYSTEM_CHAR_LIMIT", 3600);
 const webSearchMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_WEB_SEARCH_MAX_OUTPUT_TOKENS", 2048);
 const openAiImageModel = process.env.MIND_ATLAS_OPENAI_IMAGE_MODEL ?? "gpt-image-1";
 const openAiImageSize = process.env.MIND_ATLAS_OPENAI_IMAGE_SIZE ?? "1024x1024";
@@ -42,6 +43,7 @@ const codexSandbox = normalizeCodexSandbox(process.env.MIND_ATLAS_CODEX_SANDBOX 
 const codexTimeoutMs = Number(process.env.MIND_ATLAS_CODEX_TIMEOUT_MS ?? 60 * 60 * 1000);
 const codexDisabled = process.env.MIND_ATLAS_CODEX_DISABLED === "true";
 const codexModelsOverride = process.env.MIND_ATLAS_CODEX_MODELS ?? "";
+const codexLogDir = resolve(process.env.MIND_ATLAS_CODEX_LOG_DIR ?? join(process.cwd(), "server-data", "codex-runs"));
 let codexOptionsCache = null;
 let codexSearchFlagSupportCache = null;
 
@@ -168,6 +170,20 @@ const server = createBridgeServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/codex/options") {
       const result = await createCodexOptionsResponse();
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/codex/runs/recover") {
+      const payload = await readJson(request);
+      const result = await createCodexRunRecoveryResponse(payload);
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/git/push") {
+      const payload = await readJson(request);
+      const result = await createGitPushResponse(payload);
       sendJson(response, 200, result);
       return;
     }
@@ -424,10 +440,7 @@ async function createTextPartnerTurn(payload) {
   if (provider === "local") {
     const model = await resolveLoadedLocalModel();
     const data = await callChatToolTurn(localBaseUrl, localApiKey, model, "local", context, messages, tools, summary, voiceLogContext);
-    return {
-      ...data,
-      usage: normalizeUsage(data.raw?.usage, "local", Date.now() - startedAt, data.raw, localMaxOutputTokens),
-    };
+    return textPartnerResultWithoutRaw(data, "local", startedAt, localMaxOutputTokens);
   }
 
   const model = stringOr(payload?.model, defaultModel);
@@ -445,9 +458,16 @@ async function createTextPartnerTurn(payload) {
   const data = openAiMode === "chat-completions"
     ? await callChatToolTurn(openAiBaseUrl, openAiApiKey, model, "openai", context, messages, tools, summary, voiceLogContext)
     : await callResponsesToolTurn(openAiBaseUrl, openAiApiKey, model, context, messages, tools, summary, voiceLogContext);
+  return textPartnerResultWithoutRaw(data, "openai", startedAt, openAiMaxOutputTokens);
+}
+
+function textPartnerResultWithoutRaw(data, provider, startedAt, maxOutputTokens) {
   return {
-    ...data,
-    usage: normalizeUsage(data.raw?.usage, "openai", Date.now() - startedAt, data.raw, openAiMaxOutputTokens),
+    text: stringOr(data?.text, ""),
+    toolCalls: Array.isArray(data?.toolCalls) ? data.toolCalls : [],
+    provider: stringOr(data?.provider, provider),
+    model: stringOr(data?.model, ""),
+    usage: normalizeUsage(data?.raw?.usage, provider, Date.now() - startedAt, data?.raw, maxOutputTokens),
   };
 }
 
@@ -481,22 +501,23 @@ async function callResponsesToolTurn(baseUrl, apiKey, model, context, messages, 
 
 async function callChatToolTurn(baseUrl, apiKey, model, provider, context, messages, tools, summary, voiceLogContext) {
   const local = provider === "local";
+  const systemContent = buildMindAtlasPartnerInstructions({
+    mode: "text",
+    summary: local ? truncateText(summary, localPartnerSummaryCharLimit) : summary,
+    voiceLogContext: local ? truncateFromStart(voiceLogContext, localPartnerLogCharLimit) : voiceLogContext,
+    context: local ? compactAiContextForLocal(context) : context,
+    contextCharLimit: local ? localPromptContextCharLimit : 8000,
+    compactedForLocal: local,
+  });
   const body = {
     messages: [
       {
         role: "system",
-        content: buildMindAtlasPartnerInstructions({
-          mode: "text",
-          summary: local ? truncateText(summary, localPartnerSummaryCharLimit) : summary,
-          voiceLogContext: local ? truncateFromStart(voiceLogContext, localPartnerLogCharLimit) : voiceLogContext,
-          context: local ? compactAiContextForLocal(context) : context,
-          contextCharLimit: local ? localPromptContextCharLimit : 8000,
-          compactedForLocal: local,
-        }),
+        content: local ? fitLocalPartnerSystemPrompt(systemContent) : systemContent,
       },
       ...buildChatPartnerMessages(local ? compactPartnerMessagesForLocal(messages) : messages),
     ],
-    tools: normalizeChatTools(tools),
+    tools: normalizeChatTools(tools, { compact: local }),
     tool_choice: "auto",
     max_tokens: provider === "local" ? localMaxOutputTokens : openAiMaxOutputTokens,
   };
@@ -602,6 +623,132 @@ function createFallbackCodexOptions() {
   };
 }
 
+async function createCodexRunRecoveryResponse(payload) {
+  const candidate = await findRecoverableCodexRun(payload);
+  if (!candidate) return { found: false };
+
+  const responsePath = join(candidate.directory, "response.json");
+  if (existsSync(responsePath)) {
+    const cached = parseJsonText(await readFile(responsePath, "utf8"));
+    if (cached && typeof cached === "object") {
+      return {
+        found: true,
+        result: {
+          ...cached,
+          codexLogPath: cached.codexLogPath || candidate.directory,
+        },
+        logPath: candidate.directory,
+        metadata: candidate.metadata,
+      };
+    }
+  }
+
+  const prompt = await readOptionalText(join(candidate.directory, "prompt.txt"));
+  const stdout = await readOptionalText(join(candidate.directory, "stdout.jsonl"));
+  const stderr = await readOptionalText(join(candidate.directory, "stderr.txt"));
+  const lastMessage = await readOptionalText(join(candidate.directory, "last-message.md"));
+  const events = parseJsonText(await readOptionalText(join(candidate.directory, "events.json"))) || parseCodexJsonl(stdout);
+  const startedAt = Date.parse(stringOr(candidate.metadata.startedAt, ""));
+  const completedAt = Date.parse(stringOr(candidate.metadata.completedAt, ""));
+  const durationMs = Number.isFinite(startedAt) && Number.isFinite(completedAt) ? Math.max(0, completedAt - startedAt) : 0;
+  const settings = normalizeCodexSettings({
+    model: candidate.metadata.model,
+    reasoningEffort: candidate.metadata.reasoningEffort,
+    sandbox: candidate.metadata.sandbox,
+    workspace: candidate.metadata.workspace,
+    webSearch: candidate.metadata.webSearch === true,
+    skipGitRepoCheck: candidate.metadata.skipGitRepoCheck === true,
+    fullAccessApproved: candidate.metadata.sandbox === "danger-full-access",
+    continueMode: candidate.metadata.continueMode,
+    resumeThreadId: candidate.metadata.resumeThreadId,
+    clientRunId: candidate.metadata.clientRunId,
+    requestNodeId: candidate.metadata.requestNodeId,
+    sourceNodeId: candidate.metadata.sourceNodeId,
+  }, candidate.metadata.model, {});
+  const result = {
+    stdout,
+    stderr,
+    exitCode: Number.isFinite(Number(candidate.metadata.exitCode)) ? Number(candidate.metadata.exitCode) : 0,
+    lastMessage,
+    events: Array.isArray(events) ? events : [],
+    usage: extractCodexUsage(stdout),
+    codexThreadId: stringOr(candidate.metadata.codexThreadId, ""),
+    codexLogPath: candidate.directory,
+  };
+  const response = buildCodexResponseFromRun({
+    prompt,
+    context: {},
+    settings,
+    result,
+    gitStatus: stringOr(candidate.metadata.gitStatus, ""),
+    durationMs,
+  });
+  await saveCodexResponseLog(candidate.directory, response);
+  return { found: true, result: response, logPath: candidate.directory, metadata: candidate.metadata };
+}
+
+async function findRecoverableCodexRun(payload) {
+  const metadataFiles = await listCodexMetadataFiles(codexLogDir);
+  const candidates = [];
+  for (const filePath of metadataFiles) {
+    const metadata = parseJsonText(await readOptionalText(filePath));
+    if (!metadata || typeof metadata !== "object") continue;
+    if (!matchesCodexRecoveryRequest(metadata, payload)) continue;
+    candidates.push({ metadata, directory: resolve(filePath, "..") });
+  }
+  candidates.sort((left, right) => Date.parse(stringOr(right.metadata.startedAt, "")) - Date.parse(stringOr(left.metadata.startedAt, "")));
+  return candidates[0] ?? null;
+}
+
+async function listCodexMetadataFiles(directory) {
+  if (!existsSync(directory)) return [];
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const entryPath = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listCodexMetadataFiles(entryPath));
+    } else if (entry.isFile() && entry.name === "metadata.json") {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}
+
+function matchesCodexRecoveryRequest(metadata, payload) {
+  const runId = stringOr(payload?.runId, "");
+  const requestNodeId = stringOr(payload?.requestNodeId, "");
+  const sourceNodeId = stringOr(payload?.sourceNodeId, "");
+  const threadId = stringOr(payload?.threadId, "");
+  const workspace = normalizeWorkspaceForMatch(payload?.workspace);
+  const metadataWorkspace = normalizeWorkspaceForMatch(metadata?.workspace);
+  if (runId && metadata?.clientRunId && metadata.clientRunId !== runId) return false;
+  if (requestNodeId && metadata?.requestNodeId && metadata.requestNodeId !== requestNodeId) return false;
+  if (sourceNodeId && metadata?.sourceNodeId && metadata.sourceNodeId !== sourceNodeId) return false;
+  const exactMatch = (runId && metadata?.clientRunId === runId) || (requestNodeId && metadata?.requestNodeId === requestNodeId);
+  if (!exactMatch) {
+    if (threadId && metadata?.codexThreadId !== threadId && metadata?.resumeThreadId !== threadId) return false;
+    if (!threadId && workspace && metadataWorkspace !== workspace) return false;
+  }
+  if (workspace && metadataWorkspace && metadataWorkspace !== workspace && !threadId && !runId && !requestNodeId) return false;
+  const startedAfter = Date.parse(stringOr(payload?.startedAfter, ""));
+  const startedAt = Date.parse(stringOr(metadata?.startedAt, ""));
+  if (Number.isFinite(startedAfter) && Number.isFinite(startedAt) && startedAt < startedAfter - 2 * 60 * 1000) return false;
+  return Boolean(exactMatch || threadId || workspace);
+}
+
+function normalizeWorkspaceForMatch(value) {
+  return stringOr(value, "").replace(/[\\\/]+$/, "").toLowerCase();
+}
+
+async function readOptionalText(filePath) {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 function parseCodexModelOverride(value) {
   return String(value)
     .split(",")
@@ -639,6 +786,12 @@ async function createCodexResponse({ prompt, context, model, codex, startedAt })
   const durationMs = Date.now() - startedAt;
   const afterGitStatus = await collectGitStatus(settings.workspace);
   const gitStatus = diffGitStatus(beforeGitStatus, afterGitStatus);
+  const response = buildCodexResponseFromRun({ prompt, context, settings, result, gitStatus, durationMs });
+  await saveCodexResponseLog(result.codexLogPath, response);
+  return response;
+}
+
+function buildCodexResponseFromRun({ prompt, context, settings, result, gitStatus = "", durationMs }) {
   const body = [
     result.lastMessage || result.stdout || "Codex did not produce a final message.",
     result.exitCode !== 0 && result.stderr.trim() ? `\n\nstderr:\n${result.stderr.trim()}` : "",
@@ -663,6 +816,8 @@ async function createCodexResponse({ prompt, context, model, codex, startedAt })
       gitStatus,
       durationMs,
     }),
+    codexThreadId: result.codexThreadId,
+    codexLogPath: result.codexLogPath,
     rawText: result.stdout,
     usage: {
       ...normalizeCodexUsage(result.usage),
@@ -671,37 +826,61 @@ async function createCodexResponse({ prompt, context, model, codex, startedAt })
   };
 }
 
+async function saveCodexResponseLog(logPath, response) {
+  if (!logPath) return;
+  try {
+    await writeFile(join(logPath, "response.json"), JSON.stringify(response, null, 2), "utf8");
+  } catch (error) {
+    console.warn(`[bridge] failed to save Codex response log: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
 async function runCodex(prompt, settings) {
+  const startedAt = new Date().toISOString();
   const outputFile = join(tmpdir(), `mind-atlas-codex-${Date.now()}-${randomUUID()}.txt`);
   const workspace = codexUseWsl ? toWslPath(settings.workspace) : settings.workspace;
   const sandbox = settings.sandbox === "danger-full-access" && !settings.fullAccessApproved ? "workspace-write" : settings.sandbox;
   const searchFlagSupported = settings.webSearch ? await codexSupportsSearchFlag() : false;
+  const resumeThreadId = stringOr(settings.resumeThreadId, "");
   const codexArgs = [
     "--ask-for-approval",
     "never",
     "exec",
-    "--json",
   ];
-  if (searchFlagSupported) codexArgs.push("--search");
-  codexArgs.push(
-    "--sandbox",
-    sandbox,
-    "--cd",
-    workspace,
-    "--color",
-    "never",
-    "--output-last-message",
-    codexUseWsl ? toWslPath(outputFile) : outputFile,
-    "-c",
-    `model_reasoning_effort="${settings.reasoningEffort}"`,
-  );
-  if (settings.skipGitRepoCheck) codexArgs.push("--skip-git-repo-check");
-  if (settings.model) codexArgs.push("--model", settings.model);
-  codexArgs.push("-");
+  if (resumeThreadId) {
+    codexArgs.push("resume", "--json", "--output-last-message", codexUseWsl ? toWslPath(outputFile) : outputFile);
+    codexArgs.push("-c", `model_reasoning_effort="${settings.reasoningEffort}"`);
+    if (sandbox === "danger-full-access") codexArgs.push("--dangerously-bypass-approvals-and-sandbox");
+    if (settings.model) codexArgs.push("--model", settings.model);
+    if (settings.skipGitRepoCheck) codexArgs.push("--skip-git-repo-check");
+    codexArgs.push(resumeThreadId, "-");
+  } else {
+    codexArgs.push("--json");
+    if (searchFlagSupported) codexArgs.push("--search");
+    if (sandbox === "danger-full-access") {
+      codexArgs.push("--dangerously-bypass-approvals-and-sandbox");
+    } else {
+      codexArgs.push("--sandbox", sandbox);
+    }
+    codexArgs.push(
+      "--cd",
+      workspace,
+      "--color",
+      "never",
+      "--output-last-message",
+      codexUseWsl ? toWslPath(outputFile) : outputFile,
+      "-c",
+      `model_reasoning_effort="${settings.reasoningEffort}"`,
+    );
+    if (settings.skipGitRepoCheck) codexArgs.push("--skip-git-repo-check");
+    if (settings.model) codexArgs.push("--model", settings.model);
+    codexArgs.push("-");
+  }
 
   const command = codexUseWsl ? "wsl" : codexBin;
   const args = codexUseWsl ? [codexBin, ...codexArgs] : codexArgs;
   const result = await runProcess(command, args, prompt, settings.timeoutMs, settings.workspace);
+  const completedAt = new Date().toISOString();
   const lastMessage = existsSync(outputFile) ? readFileSync(outputFile, "utf8") : "";
   try {
     if (existsSync(outputFile)) unlinkSync(outputFile);
@@ -712,7 +891,70 @@ async function runCodex(prompt, settings) {
   if (result.exitCode !== 0 && !lastMessage.trim() && !result.stdout.trim()) {
     throw new BridgeError(502, result.stderr.trim() || `Codex CLI exited with ${result.exitCode}`);
   }
-  return { ...result, lastMessage, events: parseCodexJsonl(result.stdout), usage: extractCodexUsage(result.stdout) };
+  const events = parseCodexJsonl(result.stdout);
+  const codexThreadId = extractCodexThreadId(events) || resumeThreadId;
+  const codexLogPath = await saveCodexRunLog({
+    settings,
+    prompt,
+    result,
+    lastMessage,
+    events,
+    codexThreadId,
+    command,
+    args,
+    startedAt,
+    completedAt,
+    resumeThreadId,
+  });
+  return { ...result, lastMessage, events, usage: extractCodexUsage(result.stdout), codexThreadId, codexLogPath };
+}
+
+function extractCodexThreadId(events) {
+  const threadEvent = events.find((event) => event?.type === "thread.started" && typeof event.thread_id === "string");
+  return stringOr(threadEvent?.thread_id, "");
+}
+
+async function saveCodexRunLog({ settings, prompt, result, lastMessage, events, codexThreadId, command, args, startedAt, completedAt, resumeThreadId }) {
+  const workspaceName = toSafeFilePart(basename(resolve(stringOr(settings.workspace, "workspace"))) || "workspace");
+  const threadName = toSafeFilePart(codexThreadId || "no-thread");
+  const runName = `${startedAt.replace(/[-:.TZ]/g, "").slice(0, 14)}-${toSafeFilePart(randomUUID()).slice(0, 8)}`;
+  const directory = join(codexLogDir, workspaceName, threadName, runName);
+  await mkdir(directory, { recursive: true });
+  await Promise.all([
+    writeFile(join(directory, "prompt.txt"), prompt, "utf8"),
+    writeFile(join(directory, "stdout.jsonl"), result.stdout, "utf8"),
+    writeFile(join(directory, "stderr.txt"), result.stderr, "utf8"),
+    writeFile(join(directory, "last-message.md"), lastMessage, "utf8"),
+    writeFile(join(directory, "events.json"), JSON.stringify(events, null, 2), "utf8"),
+    writeFile(join(directory, "metadata.json"), JSON.stringify({
+      startedAt,
+      completedAt,
+      workspace: settings.workspace,
+      model: settings.model,
+      reasoningEffort: settings.reasoningEffort,
+      sandbox: settings.sandbox,
+      webSearch: settings.webSearch,
+      skipGitRepoCheck: settings.skipGitRepoCheck,
+      continueMode: settings.continueMode,
+      resumeThreadId,
+      codexThreadId,
+      clientRunId: settings.clientRunId,
+      requestNodeId: settings.requestNodeId,
+      sourceNodeId: settings.sourceNodeId,
+      command,
+      args,
+      exitCode: result.exitCode,
+    }, null, 2), "utf8"),
+  ]);
+  return directory;
+}
+
+function toSafeFilePart(value) {
+  return String(value || "item")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "item";
 }
 
 async function codexSupportsSearchFlag() {
@@ -739,6 +981,7 @@ function normalizeCodexSettings(input, model, context) {
   const requestedSandbox = normalizeCodexSandbox(input?.sandbox ?? codexSandbox);
   const fullAccessApproved = input?.fullAccessApproved === true;
   const sandbox = requestedSandbox === "danger-full-access" && !fullAccessApproved ? "workspace-write" : requestedSandbox;
+  const continueMode = input?.continueMode === "new" ? "new" : "auto";
   return {
     model: stringOr(input?.model, model || codexModel || "gpt-5.5"),
     reasoningEffort: normalizeReasoningEffort(input?.reasoningEffort ?? codexReasoningEffort),
@@ -748,6 +991,11 @@ function normalizeCodexSettings(input, model, context) {
     skipGitRepoCheck: input?.skipGitRepoCheck === true,
     timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input.timeoutMs) : codexTimeoutMs,
     fullAccessApproved,
+    continueMode,
+    resumeThreadId: continueMode === "new" ? "" : stringOr(input?.resumeThreadId, ""),
+    clientRunId: stringOr(input?.clientRunId, ""),
+    requestNodeId: stringOr(input?.requestNodeId, ""),
+    sourceNodeId: stringOr(input?.sourceNodeId, ""),
   };
 }
 
@@ -809,6 +1057,21 @@ async function collectGitStatus(workspace) {
   }
 }
 
+async function createGitPushResponse(payload) {
+  const workspaceInput = stringOr(payload?.workspace, "");
+  if (!workspaceInput) throw new BridgeError(400, "Valid workspace is required for git push.");
+  const workspace = resolve(workspaceInput);
+  if (!existsSync(workspace)) throw new BridgeError(400, "Valid workspace is required for git push.");
+  const result = await runProcess("git", ["-C", workspace, "push"], "", 10 * 60 * 1000, workspace);
+  return {
+    ok: result.exitCode === 0,
+    workspace,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+  };
+}
+
 function diffGitStatus(before, after) {
   const beforeLines = new Set(String(before).split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
   return String(after)
@@ -839,7 +1102,8 @@ function buildCodexNodes({ prompt, context, settings, result, gitStatus, duratio
     gitStatus,
     settings,
     statusLabel,
-    threadId: threadEvent?.thread_id,
+    threadId: result.codexThreadId || threadEvent?.thread_id,
+    logPath: result.codexLogPath,
   });
   const nodes = [{
     kind: result.exitCode === 0 ? "final" : "error",
@@ -858,6 +1122,10 @@ function buildCodexNodes({ prompt, context, settings, result, gitStatus, duratio
     nodes.push(createFullAccessApprovalNode({ prompt, context, settings }));
   }
 
+  if (gitStatus && settings.workspace) {
+    nodes.push(createGitPushActionNode({ settings, result }));
+  }
+
   if (detailBody) {
     nodes.push({
       kind: "summary",
@@ -873,7 +1141,7 @@ function buildCodexNodes({ prompt, context, settings, result, gitStatus, duratio
   return nodes;
 }
 
-function buildCodexDetailsBody({ commandEvents, durationMs, gitStatus, settings, statusLabel, threadId }) {
+function buildCodexDetailsBody({ commandEvents, durationMs, gitStatus, settings, statusLabel, threadId, logPath }) {
   const sections = [
     [
       "# Run",
@@ -884,6 +1152,7 @@ function buildCodexDetailsBody({ commandEvents, durationMs, gitStatus, settings,
       `Sandbox: ${settings.sandbox}`,
       `Workspace: ${settings.workspace}`,
       threadId ? `Thread: ${threadId}` : "",
+      logPath ? `Log path: ${logPath}` : "",
       `Web search: ${settings.webSearch ? "on" : "off"}`,
       `Skip git repo check: ${settings.skipGitRepoCheck ? "on" : "off"}`,
     ].filter(Boolean).join("\n"),
@@ -1108,6 +1377,28 @@ function createFullAccessApprovalNode({ prompt, context, settings }) {
         },
       },
     ],
+  };
+}
+
+function createGitPushActionNode({ settings, result }) {
+  return {
+    kind: "approval_option",
+    nodeType: "approval_request",
+    title: "Push changes",
+    body: [
+      "Push the current workspace branch to its configured remote.",
+      `Workspace: ${settings.workspace}`,
+      result.codexThreadId ? `Codex thread: ${result.codexThreadId}` : "",
+    ].filter(Boolean).join("\n"),
+    summary: "Push Codex changes to the remote repository.",
+    suggestedStatus: "waiting",
+    tags: ["codex", "git", "push"],
+    action: {
+      kind: "git_push",
+      label: "Push",
+      workspace: settings.workspace,
+      runId: `git-push-${Date.now()}-${randomUUID()}`,
+    },
   };
 }
 
@@ -1568,6 +1859,16 @@ function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summa
   ].filter(Boolean).join("\n\n");
 }
 
+function fitLocalPartnerSystemPrompt(value) {
+  if (value.length <= localPartnerSystemCharLimit) return value;
+  const marker = "Selected context JSON:\n";
+  const markerIndex = value.indexOf(marker);
+  if (markerIndex < 0) return truncateText(value, localPartnerSystemCharLimit);
+  const prefix = value.slice(0, markerIndex + marker.length);
+  const remaining = Math.max(400, localPartnerSystemCharLimit - prefix.length - 38);
+  return `${prefix}[Context truncated for local model]\n${value.slice(value.length - remaining)}`;
+}
+
 function buildRealtimeSessionConfig(payload) {
   const extraInstructions = stringOr(payload?.instructions, "");
   const summary = payload?.summary?.text ? String(payload.summary.text).slice(0, 4000) : "";
@@ -1692,19 +1993,21 @@ function textPartnerMessageContent(message) {
   ].filter(Boolean).join("\n");
 }
 
-function normalizeRealtimeTools(tools) {
+function normalizeRealtimeTools(tools, { compact = false } = {}) {
   return tools
     .filter((tool) => tool?.type === "function" && tool?.name)
     .map((tool) => ({
       type: "function",
       name: String(tool.name),
-      description: stringOr(tool.description, ""),
-      parameters: tool.parameters && typeof tool.parameters === "object" ? tool.parameters : { type: "object", properties: {} },
+      description: compact ? truncateText(stringOr(tool.description, ""), 120) : stringOr(tool.description, ""),
+      parameters: compact
+        ? compactJsonSchema(tool.parameters && typeof tool.parameters === "object" ? tool.parameters : { type: "object", properties: {} })
+        : tool.parameters && typeof tool.parameters === "object" ? tool.parameters : { type: "object", properties: {} },
     }));
 }
 
-function normalizeChatTools(tools) {
-  return normalizeRealtimeTools(tools).map((tool) => ({
+function normalizeChatTools(tools, options = {}) {
+  return normalizeRealtimeTools(tools, options).map((tool) => ({
     type: "function",
     function: {
       name: tool.name,
@@ -1712,6 +2015,15 @@ function normalizeChatTools(tools) {
       parameters: tool.parameters,
     },
   }));
+}
+
+function compactJsonSchema(value) {
+  if (Array.isArray(value)) return value.map(compactJsonSchema);
+  if (!value || typeof value !== "object") return value;
+  const entries = Object.entries(value)
+    .filter(([key]) => !["description", "title", "examples", "default", "$comment"].includes(key))
+    .map(([key, child]) => [key, compactJsonSchema(child)]);
+  return Object.fromEntries(entries);
 }
 
 function extractResponsesToolCalls(raw) {

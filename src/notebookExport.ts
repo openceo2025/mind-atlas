@@ -71,6 +71,8 @@ export function sanitizeNotebookForExport(node: AtlasNode, options: NotebookExpo
   assignOptionalString(sanitized, "propagatedErrorSourceId", source.propagatedErrorSourceId);
   assignOptionalString(sanitized, "aiRunId", source.aiRunId);
   assignOptionalString(sanitized, "modelId", source.modelId);
+  assignOptionalString(sanitized, "codexThreadId", source.codexThreadId);
+  assignOptionalString(sanitized, "codexLogPath", source.codexLogPath);
   assignOptionalString(sanitized, "reminderAt", source.reminderAt);
   assignOptionalString(sanitized, "reminderFiredAt", source.reminderFiredAt);
 
@@ -140,7 +142,16 @@ function safeSize(value: unknown) {
 
 function assignOptionalString(
   target: AtlasNode,
-  key: "sourceParentId" | "sourceId" | "propagatedErrorSourceId" | "aiRunId" | "modelId" | "reminderAt" | "reminderFiredAt",
+  key:
+    | "sourceParentId"
+    | "sourceId"
+    | "propagatedErrorSourceId"
+    | "aiRunId"
+    | "modelId"
+    | "codexThreadId"
+    | "codexLogPath"
+    | "reminderAt"
+    | "reminderFiredAt",
   value: unknown,
 ) {
   if (typeof value === "string" && value.trim()) {
@@ -177,7 +188,16 @@ function assignOptionalUsageString(target: AiUsage, key: "finishReason", value: 
 }
 
 function sanitizeNodeAction(value: unknown): AtlasNodeAction | undefined {
-  if (!isRecord(value) || value.kind !== "codex_full_access") return undefined;
+  if (!isRecord(value)) return undefined;
+  if (value.kind === "git_push") {
+    return {
+      kind: "git_push",
+      label: safeString(value.label, "Push"),
+      workspace: safeString(value.workspace, ""),
+      runId: safeString(value.runId, ""),
+    };
+  }
+  if (value.kind !== "codex_full_access") return undefined;
   const contextOptions = sanitizeAiContextOptions(value.contextOptions);
   const settings = sanitizeCodexSettings(value.settings);
   if (!contextOptions || !settings) return undefined;
@@ -240,6 +260,8 @@ function sanitizeCodexSettings(value: unknown): CodexSettings | undefined {
     skipGitRepoCheck: value.skipGitRepoCheck === true,
     timeoutMs: safeInteger(value.timeoutMs, 60 * 60 * 1000),
     ...(typeof value.fullAccessApproved === "boolean" ? { fullAccessApproved: value.fullAccessApproved } : {}),
+    continueMode: value.continueMode === "new" ? "new" : "auto",
+    resumeThreadId: typeof value.resumeThreadId === "string" ? value.resumeThreadId.slice(0, 160) : "",
   };
 }
 

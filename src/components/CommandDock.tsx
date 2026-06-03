@@ -5,9 +5,9 @@ import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceS
 import { runTextPartnerTurn } from "../ai/textPartnerClient";
 import { buildVoiceLogContext } from "../ai/voiceLogContext";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
-import { buildAiNodeContextWithAttachments, findNode, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
+import { buildAiNodeContextWithAttachments, findInheritedAiDialogSettings, findNode, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
 import { loadPersistedUiState, persistUiStatePatch } from "../uiPersistence";
-import type { AiAttachmentMode, AiContextScope, AiExecutionMode, CodexOptionsResult, CodexReasoningEffort, CodexSandboxMode } from "../types";
+import type { AiAttachmentMode, AiContextScope, AiExecutionMode, CodexContinueMode, CodexOptionsResult, CodexReasoningEffort, CodexSandboxMode } from "../types";
 
 type CommandMode = AiExecutionMode | "note";
 type VoiceButtonState = "idle" | "dictation_recording" | "dictation_transcribing" | "voice_connecting" | "voice_ptt" | "voice_responding";
@@ -181,12 +181,12 @@ export function CommandDock() {
         if (!alive) return;
         setCodexOptions(options);
         const current = useAtlasStore.getState();
-        const currentNode = findNode(current.atlasRoot, current.selectedNodeId);
-        if (currentNode?.aiDialogSettings?.codexSettings) return;
+        if (findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId)?.codexSettings) return;
         setCodexSettings({
           model: options.defaultModel,
           reasoningEffort: options.defaultReasoningEffort,
           sandbox: options.defaultSandbox,
+          fullAccessApproved: options.defaultSandbox === "danger-full-access",
           workspace: options.defaultWorkspace,
           timeoutMs: options.defaultTimeoutMs,
         });
@@ -203,6 +203,10 @@ export function CommandDock() {
     event.preventDefault();
     const trimmed = value.trim();
     if (!trimmed) return;
+    if (mode === "codex" && !codexSettings.workspace.trim()) {
+      setVoiceError("Set Codex Work root before sending.");
+      return;
+    }
     setVoiceError("");
     setValue("");
     if (mode === "note") {
@@ -680,7 +684,11 @@ export function CommandDock() {
     mode === "note"
       ? "Note mode / no API"
       : `${scopeLabel(scope)} / ${selectedCount} selected / ${attachmentModeLabel(aiContextOptions.attachmentMode)}`;
-  const statusText = voiceError || (voiceButtonState !== "idle" ? voiceStatusLabel(voiceButtonState) : micLive ? `Voice Partner ${voiceState}` : `${modeLabel(mode)} / ${selectedNode?.status ?? "waiting"}`);
+  const codexWorkRootMissing = mode === "codex" && !codexSettings.workspace.trim();
+  const statusText =
+    codexWorkRootMissing
+      ? "Codex Work root required"
+      : voiceError || (voiceButtonState !== "idle" ? voiceStatusLabel(voiceButtonState) : micLive ? `Voice Partner ${voiceState}` : `${modeLabel(mode)} / ${selectedNode?.status ?? "waiting"}`);
 
   return (
     <form className="command-dock" onSubmit={handleSubmit} aria-label="Re-instruction input">
@@ -737,7 +745,7 @@ export function CommandDock() {
           placeholder={mode === "note" ? "Create a child node here" : mode === "codex" ? "Ask Codex from this location" : "Ask AI from this location"}
         />
       </label>
-      <button className="send-button" type="submit" aria-label="Send instruction" disabled={!value.trim()}>
+      <button className="send-button" type="submit" aria-label="Send instruction" disabled={!value.trim() || codexWorkRootMissing}>
         <SendHorizonal size={18} />
       </button>
       {editableContextControls ? (
@@ -844,13 +852,17 @@ export function CommandDock() {
           <label className="context-option-field">
             <span>Sandbox</span>
             <select
-              value={codexSettings.sandbox === "danger-full-access" ? "workspace-write" : codexSettings.sandbox}
+              value={codexSettings.sandbox}
               onFocus={() => setCommandInputEditing(true)}
               onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setCodexSettings({ sandbox: event.target.value as CodexSandboxMode, fullAccessApproved: false })}
+              onChange={(event) => {
+                const sandbox = event.target.value as CodexSandboxMode;
+                setCodexSettings({ sandbox, fullAccessApproved: sandbox === "danger-full-access" });
+              }}
             >
               <option value="workspace-write">workspace</option>
               <option value="read-only">read only</option>
+              <option value="danger-full-access">trusted</option>
             </select>
           </label>
           <label className="context-option-field codex-workspace-field">
@@ -859,7 +871,10 @@ export function CommandDock() {
               value={codexSettings.workspace}
               onFocus={() => setCommandInputEditing(true)}
               onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setCodexSettings({ workspace: event.target.value })}
+              onChange={(event) => {
+                setVoiceError("");
+                setCodexSettings({ workspace: event.target.value });
+              }}
               placeholder="workspace: from selected node or bridge"
             />
           </label>
@@ -873,6 +888,19 @@ export function CommandDock() {
             >
               <option value="off">off</option>
               <option value="on">on</option>
+            </select>
+          </label>
+          <label className="context-option-field">
+            <span>Thread</span>
+            <select
+              value={codexSettings.continueMode ?? "auto"}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setCodexSettings({ continueMode: event.target.value as CodexContinueMode, resumeThreadId: "" })}
+              title="Auto resumes a Codex thread found on the active node path. New always starts a fresh Codex session."
+            >
+              <option value="auto">auto</option>
+              <option value="new">new</option>
             </select>
           </label>
           <label className="context-option-field codex-check-field" title="Pass --skip-git-repo-check for a non-Git or not-yet-trusted work root. Default is off.">

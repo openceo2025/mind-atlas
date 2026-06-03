@@ -6,6 +6,9 @@ import type {
   CloudNotebookListResult,
   CloudNotebookSaveResult,
   CodexOptionsResult,
+  CodexRunRecoveryRequest,
+  CodexRunRecoveryResult,
+  GitPushResult,
   RealtimeSessionConfig,
   TextPartnerTurnPayload,
   TextPartnerTurnResult,
@@ -95,6 +98,24 @@ export async function requestTextPartnerTurn(payload: TextPartnerTurnPayload): P
 export async function getCodexOptions(): Promise<CodexOptionsResult> {
   const response = await fetchBridgeGet("/api/codex/options");
   return await readJsonResponse<CodexOptionsResult>(response);
+}
+
+export async function recoverCodexRun(payload: CodexRunRecoveryRequest): Promise<CodexRunRecoveryResult> {
+  const response = await fetchBridge("/api/codex/runs/recover", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return await readJsonResponse<CodexRunRecoveryResult>(response);
+}
+
+export async function requestGitPush(workspace: string): Promise<GitPushResult> {
+  const response = await fetchBridge("/api/git/push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspace }),
+  });
+  return await readJsonResponse<GitPushResult>(response);
 }
 
 export async function createRealtimeClientSecret(payload: RealtimeSessionConfig) {
@@ -254,7 +275,20 @@ async function probeBridgeHealthForDiagnostics(candidates: string[]) {
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
+  let data: Record<string, unknown>;
+  try {
+    data = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? "Unknown JSON parse error");
+    const preview = text.trim().slice(0, 600);
+    throw new Error(
+      [
+        `Bridge returned malformed JSON with ${response.status}.`,
+        `Reason: ${reason}`,
+        preview ? `Preview: ${preview}` : "",
+      ].filter(Boolean).join("\n"),
+    );
+  }
   if (!response.ok) {
     const message = typeof data.error === "string" ? data.error : `Bridge request failed with ${response.status}`;
     throw new Error(message);

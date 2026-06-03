@@ -39,6 +39,7 @@ import type { AtlasNode, NotificationPulse, NotificationPulseKind } from "../typ
 import { getStatusColor } from "../utils/status";
 
 const FOCUS_DURATION_SECONDS = 1.05;
+const FOCUS_PITCH_LIMIT = Math.PI / 2 - 0.04;
 const FOCUS_TRANSITION_COMPLETE_EVENT = "mind-atlas-focus-transition-complete";
 const keyboardLastChildByParentId = new Map<string, string>();
 const CAMERA_FOV = 45;
@@ -873,7 +874,7 @@ function NavigationController({
       startPitch: current.pitch,
       startOffset: current.offset,
       targetYaw: closestAngle(current.yaw, targetAngles.yaw),
-      targetPitch: clamp(targetAngles.pitch, -1.22, 1.22),
+      targetPitch: clamp(targetAngles.pitch, -FOCUS_PITCH_LIMIT, FOCUS_PITCH_LIMIT),
       targetOffset,
       elapsed: 0,
       nonce: focusRequest.nonce,
@@ -2160,6 +2161,19 @@ function HierarchyNode({
   });
 
   const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
+    if (event.button === 2) {
+      event.stopPropagation();
+      if (node.id === "atlas-root") return;
+      selectNodeInPlace(node.id);
+      setMobileRaycastMode({ kind: "idle" });
+      dragRef.current = null;
+      passThroughPanRef.current = null;
+      setDragVisual(null);
+      setDragBoundary(null);
+      setHiddenDragEdgeNodeId(null);
+      onOpenNodeContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
+      return;
+    }
     if (event.button !== 0) return;
     event.stopPropagation();
     (event.target as Element | null)?.setPointerCapture?.(event.pointerId);
@@ -2445,7 +2459,8 @@ function HierarchyNode({
         onContextMenu={(event) => {
           event.stopPropagation();
           event.nativeEvent.preventDefault();
-          if (!isSelected || node.id === "atlas-root") return;
+          if (node.id === "atlas-root") return;
+          if (!isSelected) selectNodeInPlace(node.id);
           onOpenNodeContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
         }}
         onDoubleClick={(event) => {
@@ -2479,7 +2494,7 @@ function HierarchyNode({
       {node.action && node.id === selectedNodeId ? (
         <Html center position={[0, 0, radius + 22]} transform={false} zIndexRange={[5, 1]}>
           <button
-            className={`node-action-button ${node.action.decision === "approve" ? "is-approve" : "is-deny"}`}
+            className={`node-action-button ${node.action.kind === "codex_full_access" && node.action.decision === "deny" ? "is-deny" : "is-approve"}`}
             type="button"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {

@@ -288,7 +288,7 @@ function collectPackageDiagnosticStats(
     addTextFieldStat(largestTextFields, path, "body", node.body);
     addTextFieldStat(largestTextFields, path, "summary", node.summary);
     addTextFieldStat(largestTextFields, path, "nextDecision", node.nextDecision);
-    if (node.action) addTextFieldStat(largestTextFields, path, "action.prompt", node.action.prompt);
+    if (node.action?.kind === "codex_full_access") addTextFieldStat(largestTextFields, path, "action.prompt", node.action.prompt);
     node.children.forEach((child, index) => visit(child, `${path}/${index}:${child.title || child.id}`));
   };
   visit(manifest.notebook, manifest.notebook.title || manifest.notebook.id);

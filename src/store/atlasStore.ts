@@ -6,7 +6,7 @@ import {
 } from "../attachmentStorage";
 import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme";
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
-import { getBridgeUrl, getBridgeUrlCandidates, requestAiResponse } from "../ai/bridgeClient";
+import { getBridgeUrl, getBridgeUrlCandidates, recoverCodexRun, requestAiResponse, requestGitPush } from "../ai/bridgeClient";
 import { sanitizeNotebookForExport } from "../notebookExport";
 import type { OutlineNodeInput } from "../outline/atlasOutline";
 import type {
@@ -27,6 +27,7 @@ import type {
   AtlasNodeAction,
   AtlasNode,
   CodexGeneratedNode,
+  CodexRunRecoveryRequest,
   CodexSettings,
   NotificationPulse,
   NotificationPulseKind,
@@ -76,6 +77,8 @@ const DEFAULT_CODEX_SETTINGS: CodexSettings = {
   webSearch: false,
   skipGitRepoCheck: false,
   timeoutMs: 60 * 60 * 1000,
+  continueMode: "auto",
+  resumeThreadId: "",
 };
 const DEFAULT_VOICE_PARTNER_SETTINGS: VoicePartnerSettings = {
   realtimeModel: "gpt-realtime",
@@ -242,6 +245,7 @@ interface AtlasStore {
   addQuickChildFromInput: (prompt: string) => string | undefined;
   runAiOnSelectedNode: (prompt: string, mode: AiExecutionMode, options?: AiContextScope | Partial<AiContextOptions>) => Promise<void>;
   runNodeAction: (nodeId: string) => Promise<void>;
+  recoverCompletedCodexRuns: () => Promise<void>;
   tickNotificationPulses: () => void;
 }
 
@@ -371,8 +375,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   },
 
   loadAiDialogSettingsForNode: (id) => {
-    const node = findNode(get().atlasRoot, id);
-    const settings = node?.aiDialogSettings;
+    const path = findNodePath(get().atlasRoot, id);
+    const settings = path ? findAiDialogSettingsInPath(path) : undefined;
     set((state) => ({
       aiContextOptions: normalizeAiContextOptions(settings?.contextOptions ?? DEFAULT_AI_CONTEXT_OPTIONS),
       codexSettings: normalizeCodexSettings(settings?.codexSettings ?? DEFAULT_CODEX_SETTINGS),
@@ -654,8 +658,12 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   addRootNodeAt: (position, title = "Untitled node") => {
     const state = get();
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
+    const aiDialogSettings = createInheritedAiDialogSettings([state.atlasRoot], state.aiContextOptions, state.codexSettings);
     const child = createNotebookNode("atlas-root", state.atlasRoot.children.length, title, "", {
       position: clampDirection(position, TOP_LEVEL_DRAG_PLANAR_LIMIT),
+      aiDialogSettings,
+      codexThreadId: inferCodexThreadIdFromNodePath([state.atlasRoot]),
+      codexLogPath: inferCodexLogPathFromNodePath([state.atlasRoot]),
       usedNodeIds,
     });
     set((state) => {
@@ -681,6 +689,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!parent) return;
     const parentPath = findNodePath(state.atlasRoot, parentId);
     const childDepth = parentPath?.length ?? 1;
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(parentPath ?? [parent], state.aiContextOptions, state.codexSettings);
     const insertIndex = typeof options.insertIndex === "number" ? options.insertIndex : parent.children.length;
     const childPosition = options.position
       ? getStoredPositionForWorldDirection(parentPath ?? [state.atlasRoot], options.position, childDepth, parent.children.length + 1)
@@ -691,7 +700,13 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       parent.children.length,
       options.title ?? (initialBody ? titleFromBody(initialBody) : "Untitled node"),
       initialBody,
-      { position: childPosition, usedNodeIds },
+      {
+        position: childPosition,
+        aiDialogSettings: inheritedAiDialogSettings,
+        codexThreadId: inferCodexThreadIdFromNodePath(parentPath ?? [parent]),
+        codexLogPath: inferCodexLogPathFromNodePath(parentPath ?? [parent]),
+        usedNodeIds,
+      },
     );
     set((state) => {
       const atlasRoot = updateNodeById(state.atlasRoot, parentId, (node) => ({
@@ -736,11 +751,20 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const childDepth = parentPath.length;
     const startIndex = parent.children.length;
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings);
+    const inheritedCodexThreadId = inferCodexThreadIdFromNodePath(parentPath);
+    const inheritedCodexLogPath = inferCodexLogPathFromNodePath(parentPath);
     const children = drafts.map((draft, offset) => {
       const body = draft.body;
       const title = draft.title || (body ? titleFromBody(body) : "Untitled node");
       const position = getPhyllotaxisStoredChildPosition(childDepth, startIndex + offset + 1, startIndex + offset, parent.id);
-      const child = createNotebookNode(parentId, startIndex + offset, title, body, { position, usedNodeIds });
+      const child = createNotebookNode(parentId, startIndex + offset, title, body, {
+        position,
+        aiDialogSettings: inheritedAiDialogSettings,
+        codexThreadId: inheritedCodexThreadId,
+        codexLogPath: inheritedCodexLogPath,
+        usedNodeIds,
+      });
       return draft.summary ? { ...child, summary: draft.summary } : child;
     });
     const ids = children.map((child) => child.id);
@@ -789,10 +813,13 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const requestIndex = parent.children.length;
     const requestPosition = getPhyllotaxisStoredChildPosition(parentPath.length, requestIndex + 1, requestIndex, parent.id);
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
+    const requestAiDialogSettings = createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings);
     const requestNode = {
       ...createAiRequestNode(parentNodeId, requestIndex, runId, runMode, prompt, {
         position: requestPosition,
-        aiDialogSettings: createCurrentAiDialogSettings(state.aiContextOptions, state.codexSettings),
+        aiDialogSettings: requestAiDialogSettings,
+        codexThreadId: inferCodexThreadIdFromNodePath(parentPath),
+        codexLogPath: inferCodexLogPathFromNodePath(parentPath),
         usedNodeIds,
       }),
       title: `${label} request`,
@@ -821,6 +848,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       {
         position: getPhyllotaxisStoredChildPosition(parentPath.length + 1, 1, 0, requestNode.id),
         aiDialogSettings: requestNode.aiDialogSettings,
+        codexThreadId: requestNode.codexThreadId,
+        codexLogPath: requestNode.codexLogPath,
         usedNodeIds,
       },
     );
@@ -893,10 +922,21 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const insertIndex = parent.children.length;
     const rootPosition = getPhyllotaxisStoredChildPosition(childDepth, parent.children.length + 1, insertIndex, parent.id);
     const now = new Date().toISOString();
-    const inheritedAiDialogSettings =
-      copiedRoot.aiDialogSettings ?? parent.aiDialogSettings ?? createCurrentAiDialogSettings(state.aiContextOptions, state.codexSettings);
+    const inheritedAiDialogSettings = copiedRoot.aiDialogSettings ?? createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings);
+    const inheritedCodexThreadId = copiedRoot.codexThreadId ?? inferCodexThreadIdFromNodePath(parentPath);
+    const inheritedCodexLogPath = copiedRoot.codexLogPath ?? inferCodexLogPathFromNodePath(parentPath);
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
-    const pastedRoot = cloneNodeSubtreeForPaste(copiedRoot, parent.id, now, rootPosition, true, inheritedAiDialogSettings, usedNodeIds);
+    const pastedRoot = cloneNodeSubtreeForPaste(
+      copiedRoot,
+      parent.id,
+      now,
+      rootPosition,
+      true,
+      inheritedAiDialogSettings,
+      inheritedCodexThreadId,
+      inheritedCodexLogPath,
+      usedNodeIds,
+    );
     const pastedNodeIds = collectNodeIds(pastedRoot);
     const birthStartedAt = performance.now();
 
@@ -930,8 +970,12 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const insertIndex = parent.children.length;
     const siblingPosition = getPhyllotaxisStoredChildPosition(siblingDepth, parent.children.length + 1, insertIndex, parent.id);
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(path.slice(0, -1), state.aiContextOptions, state.codexSettings);
     const sibling = createNotebookNode(parent.id, parent.children.length, "Untitled branch", "", {
       position: siblingPosition,
+      aiDialogSettings: inheritedAiDialogSettings,
+      codexThreadId: inferCodexThreadIdFromNodePath(path.slice(0, -1)),
+      codexLogPath: inferCodexLogPathFromNodePath(path.slice(0, -1)),
       usedNodeIds,
     });
     set((current) => {
@@ -1182,7 +1226,20 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const now = new Date().toISOString();
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
     const parentId = path.length > 1 ? path[path.length - 2].id : undefined;
-    const nextSubtree = buildAtlasNodeFromOutline(outline, target, parentId, Math.max(0, path.length - 1), 0, 1, usedNodeIds, now);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(path, state.aiContextOptions, state.codexSettings);
+    const nextSubtree = buildAtlasNodeFromOutline(
+      outline,
+      target,
+      parentId,
+      Math.max(0, path.length - 1),
+      0,
+      1,
+      usedNodeIds,
+      now,
+      inheritedAiDialogSettings,
+      inferCodexThreadIdFromNodePath(path),
+      inferCodexLogPathFromNodePath(path),
+    );
     const atlasRoot = rootId === state.atlasRoot.id ? nextSubtree : replaceNodeById(state.atlasRoot, rootId, nextSubtree);
     const repair = repairDuplicateNodeIds(atlasRoot);
     if (repair.repairedIds.length) {
@@ -1421,9 +1478,16 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       sourceParent.id,
     );
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(sourcePath, state.aiContextOptions, state.codexSettings);
+    const requestAiDialogSettings = createCurrentAiDialogSettings(contextOptions, inheritedAiDialogSettings.codexSettings);
+    if (mode === "codex" && !requestAiDialogSettings.codexSettings.workspace.trim()) {
+      return;
+    }
     const requestNode = createAiRequestNode(sourceNodeId, sourceParent.children.length, runId, mode, trimmed, {
       position: requestPosition,
-      aiDialogSettings: createCurrentAiDialogSettings(state.aiContextOptions, state.codexSettings),
+      aiDialogSettings: requestAiDialogSettings,
+      codexThreadId: getCodexThreadIdForNewChild(sourcePath, requestAiDialogSettings),
+      codexLogPath: inferCodexLogPathFromNodePath(sourcePath),
       usedNodeIds,
     });
 
@@ -1433,7 +1497,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       requestNodeId: requestNode.id,
       provider: providerForMode(mode),
       mode,
-      modelId: mode === "codex" ? state.codexSettings.model : "",
+      modelId: mode === "codex" ? requestAiDialogSettings.codexSettings.model : "",
       status: "running",
       prompt: trimmed,
       startedAt,
@@ -1460,11 +1524,19 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     try {
       const context = await buildAiNodeContextWithAttachments(state.atlasRoot, sourceNodeId, contextOptions);
       if (!context) throw new Error("AI context could not be built.");
-      const codexSettingsForRun = mode === "codex" ? buildCodexSettingsForRun(state.codexSettings, context) : undefined;
+      const codexSettingsForRun = mode === "codex" ? buildCodexSettingsForRun(requestAiDialogSettings.codexSettings, context) : undefined;
+      if (mode === "codex" && codexSettingsForRun) {
+        const conflict = findActiveCodexRunForWorkspace(get().aiRuns, codexSettingsForRun.workspace, runId);
+        if (conflict) {
+          throw new Error(`Codex is already running for this work root: ${codexSettingsForRun.workspace || "(default workspace)"}\nActive run: ${conflict.id}`);
+        }
+      }
       activeRun = {
         ...activeRun,
         modelId: codexSettingsForRun?.model ?? activeRun.modelId,
         contextStats: context.stats,
+        workspace: codexSettingsForRun?.workspace,
+        codexThreadId: codexSettingsForRun?.resumeThreadId,
       };
       set((current) => ({
         aiRuns: { ...current.aiRuns, [runId]: activeRun },
@@ -1475,7 +1547,14 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         context,
         provider: mode,
         model: codexSettingsForRun?.model,
-        codex: codexSettingsForRun,
+        codex: codexSettingsForRun
+          ? {
+              ...codexSettingsForRun,
+              clientRunId: runId,
+              requestNodeId: requestNode.id,
+              sourceNodeId,
+            }
+          : undefined,
       });
       let responseNodeId = "";
       let generatedAttachmentBlobs: Array<{ attachment: NodeAttachment; blob: Blob }> = [];
@@ -1492,6 +1571,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
               result.model,
               result.codexNodes,
               result.usage,
+              result.codexThreadId,
+              result.codexLogPath,
               sourcePath.length + 1,
               parent.id,
               parent.aiDialogSettings,
@@ -1510,6 +1591,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
                 {
                   position: getPhyllotaxisStoredChildPosition(sourcePath.length + 1, parent.children.length + 1, parent.children.length, parent.id),
                   aiDialogSettings: parent.aiDialogSettings,
+                  codexThreadId: result.codexThreadId ?? parent.codexThreadId,
+                  codexLogPath: result.codexLogPath ?? parent.codexLogPath,
                   usedNodeIds: collectNodeIdSet(current.atlasRoot),
                 },
               ),
@@ -1543,6 +1626,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           status: result.output.suggestedStatus === "done" ? "needs_review" : result.output.suggestedStatus,
           nextDecision: "Review the AI result, then keep, edit, or branch from it.",
           updatedAt: completedAt,
+          codexThreadId: result.codexThreadId ?? node.codexThreadId,
+          codexLogPath: result.codexLogPath ?? node.codexLogPath,
           children: [...node.children, ...children],
           }),
         );
@@ -1575,6 +1660,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
               completedAt,
               responseNodeId,
               usage: result.usage,
+              workspace: codexSettingsForRun?.workspace,
+              codexThreadId: result.codexThreadId,
+              codexLogPath: result.codexLogPath,
             },
           },
         };
@@ -1596,6 +1684,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             requestNode.id,
           ),
           aiDialogSettings: requestNode.aiDialogSettings,
+          codexThreadId: requestNode.codexThreadId,
+          codexLogPath: requestNode.codexLogPath,
           usedNodeIds,
         });
         const atlasRoot = updateNodeById(
@@ -1647,7 +1737,75 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const state = get();
     const actionNode = findNode(state.atlasRoot, nodeId);
     const action = actionNode?.action;
-    if (!action || action.kind !== "codex_full_access") return;
+    if (!action) return;
+
+    if (action.kind === "git_push") {
+      const startedAt = new Date().toISOString();
+      set((current) => {
+        const atlasRoot = updateNodeById(current.atlasRoot, nodeId, (node) => ({
+          ...node,
+          status: "running",
+          nextDecision: "Pushing changes to the remote repository.",
+          updatedAt: startedAt,
+        }));
+        persistNotebook(atlasRoot);
+        return { ...pushHistory(current), atlasRoot };
+      });
+      try {
+        const result = await requestGitPush(action.workspace);
+        const completedAt = new Date().toISOString();
+        set((current) => {
+          const atlasRoot = updateNodeById(current.atlasRoot, nodeId, (node) => {
+            const { action: _action, ...rest } = node;
+            return {
+              ...rest,
+              status: result.ok ? "done" : "error",
+              body: [
+                node.body,
+                "",
+                "# Git push",
+                `Exit code: ${result.exitCode}`,
+                result.stdout ? `\nstdout:\n${result.stdout}` : "",
+                result.stderr ? `\nstderr:\n${result.stderr}` : "",
+              ].filter(Boolean).join("\n"),
+              summary: result.ok ? "Git push completed." : "Git push failed.",
+              nextDecision: result.ok ? "Remote repository has the latest pushed changes." : "Review the git push output.",
+              updatedAt: completedAt,
+            };
+          });
+          persistNotebook(atlasRoot);
+          return {
+            ...pushHistory(current),
+            atlasRoot,
+            notificationPulses: [...current.notificationPulses, createNotificationPulse(nodeId, result.ok ? "done" : "error", result.ok ? "Git push completed" : "Git push failed")],
+            unreadNotifications: markUnreadNotification(current.unreadNotifications, nodeId, result.ok ? "done" : "error", result.ok ? "Git push completed" : "Git push failed"),
+          };
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Git push failed.";
+        const completedAt = new Date().toISOString();
+        set((current) => {
+          const atlasRoot = updateNodeById(current.atlasRoot, nodeId, (node) => ({
+            ...node,
+            status: "error",
+            body: `${node.body}\n\n# Git push\n${message}`,
+            summary: "Git push failed.",
+            nextDecision: message,
+            updatedAt: completedAt,
+          }));
+          persistNotebook(atlasRoot);
+          return {
+            ...pushHistory(current),
+            atlasRoot,
+            notificationPulses: [...current.notificationPulses, createNotificationPulse(nodeId, "error", "Git push failed")],
+            unreadNotifications: markUnreadNotification(current.unreadNotifications, nodeId, "error", "Git push failed"),
+          };
+        });
+      }
+      return;
+    }
+
+    if (action.kind !== "codex_full_access") return;
 
     if (action.decision === "deny") {
       const completedAt = new Date().toISOString();
@@ -1687,6 +1845,21 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       sandbox: "danger-full-access",
       fullAccessApproved: true,
     });
+    const conflict = findActiveCodexRunForWorkspace(get().aiRuns, codexSettings.workspace, runId);
+    if (conflict) {
+      const completedAt = new Date().toISOString();
+      set((current) => {
+        const atlasRoot = updateNodeById(current.atlasRoot, nodeId, (node) => ({
+          ...node,
+          status: "blocked",
+          nextDecision: `Codex is already running for this work root: ${codexSettings.workspace || "(default workspace)"}`,
+          updatedAt: completedAt,
+        }));
+        persistNotebook(atlasRoot);
+        return { ...pushHistory(current), atlasRoot };
+      });
+      return;
+    }
 
     set((current) => {
       const atlasRoot = updateNodeById(
@@ -1728,6 +1901,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       prompt: action.prompt,
       startedAt,
       contextStats: context.stats,
+      workspace: codexSettings.workspace,
+      codexThreadId: codexSettings.resumeThreadId,
     };
     set((current) => ({
       aiRuns: { ...current.aiRuns, [runId]: initialRun },
@@ -1739,7 +1914,12 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         context,
         provider: "codex",
         model: codexSettings.model,
-        codex: codexSettings,
+        codex: {
+          ...codexSettings,
+          clientRunId: runId,
+          requestNodeId: retryParentId,
+          sourceNodeId: action.sourceNodeId,
+        },
       });
       set((current) => {
         const parent = findNode(current.atlasRoot, retryParentId);
@@ -1754,6 +1934,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
               result.model,
               result.codexNodes,
               result.usage,
+              result.codexThreadId,
+              result.codexLogPath,
               retryParentPath.length,
               retryParentId,
               parent.aiDialogSettings,
@@ -1763,6 +1945,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
               createAiResponseNode(retryParentId, parent.children.length, runId, "codex", "codex", result.model, result.output, result.usage, {
                 position: getPhyllotaxisStoredChildPosition(retryParentPath.length, parent.children.length + 1, parent.children.length, retryParentId),
                 aiDialogSettings: parent.aiDialogSettings,
+                codexThreadId: result.codexThreadId ?? parent.codexThreadId,
+                codexLogPath: result.codexLogPath ?? parent.codexLogPath,
                 usedNodeIds: collectNodeIdSet(current.atlasRoot),
               }),
             ];
@@ -1772,6 +1956,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             status: "needs_review",
             nextDecision: "Review the Full access Codex retry output.",
             updatedAt: completedAt,
+            codexThreadId: result.codexThreadId ?? node.codexThreadId,
+            codexLogPath: result.codexLogPath ?? node.codexLogPath,
             children: [...removeCodexRetryResultChildren(node.children), ...children],
         }));
         persistNotebook(atlasRoot);
@@ -1797,6 +1983,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
               completedAt,
               responseNodeId: children.at(-1)?.id ?? children[0]?.id,
               usage: result.usage,
+              workspace: codexSettings.workspace,
+              codexThreadId: result.codexThreadId,
+              codexLogPath: result.codexLogPath,
             },
           },
         };
@@ -1810,6 +1999,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         const errorNode = createAiErrorNode(retryParentId, runId, "codex", message, {
           position: getPhyllotaxisStoredChildPosition(retryParentPath.length, (parent?.children.length ?? 0) + 1, parent?.children.length ?? 0, retryParentId),
           aiDialogSettings: parent?.aiDialogSettings,
+          codexThreadId: parent?.codexThreadId,
+          codexLogPath: parent?.codexLogPath,
           usedNodeIds,
         });
         const atlasRoot = updateNodeById(current.atlasRoot, retryParentId, (node) => ({
@@ -1838,6 +2029,116 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           },
         };
       });
+    }
+  },
+
+  recoverCompletedCodexRuns: async () => {
+    const candidates = collectRecoverableCodexRequests(get().atlasRoot);
+    for (const candidate of candidates) {
+      try {
+        const recovery = await recoverCodexRun(candidate);
+        if (!recovery.found || !recovery.result) continue;
+        const recoveredResult = recovery.result;
+        set((current) => {
+          const requestPath = findNodePath(current.atlasRoot, candidate.requestNodeId ?? "");
+          const requestNode = requestPath?.at(-1);
+          if (!requestPath || !requestNode || requestNode.status !== "running" || requestNode.children.length) return current;
+
+          const runId = requestNode.aiRunId ?? requestNode.sourceId ?? candidate.runId ?? `codex-recovered-${Date.now()}`;
+          const completedAt = typeof recovery.metadata?.completedAt === "string" ? recovery.metadata.completedAt : new Date().toISOString();
+          const usedNodeIds = collectNodeIdSet(current.atlasRoot);
+          const children = recoveredResult.codexNodes?.length
+            ? createCodexGeneratedNodeTrees(
+                requestNode.id,
+                requestNode.children.length,
+                runId,
+                "codex",
+                recoveredResult.model,
+                recoveredResult.codexNodes,
+                recoveredResult.usage,
+                recoveredResult.codexThreadId,
+                recoveredResult.codexLogPath ?? recovery.logPath,
+                requestPath.length,
+                requestNode.id,
+                requestNode.aiDialogSettings,
+                usedNodeIds,
+              )
+            : [
+                createAiResponseNode(
+                  requestNode.id,
+                  requestNode.children.length,
+                  runId,
+                  recoveredResult.provider,
+                  "codex",
+                  recoveredResult.model,
+                  recoveredResult.output,
+                  recoveredResult.usage,
+                  {
+                    position: getPhyllotaxisStoredChildPosition(requestPath.length, requestNode.children.length + 1, requestNode.children.length, requestNode.id),
+                    aiDialogSettings: requestNode.aiDialogSettings,
+                    codexThreadId: recoveredResult.codexThreadId ?? requestNode.codexThreadId,
+                    codexLogPath: recoveredResult.codexLogPath ?? recovery.logPath ?? requestNode.codexLogPath,
+                    usedNodeIds,
+                  },
+                ),
+              ];
+          const pulseTargets = getCodexPulseTargetIds(children);
+          const sourceNodeId = requestNode.sourceParentId || candidate.sourceNodeId || requestPath.at(-2)?.id || requestNode.id;
+          const withSourceUpdated = sourceNodeId
+            ? updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
+                ...node,
+                status: recoveredResult.output.suggestedStatus === "done" ? "needs_review" : recoveredResult.output.suggestedStatus,
+                nextDecision: "Recovered completed Codex result from the local run log.",
+                updatedAt: completedAt,
+              }))
+            : current.atlasRoot;
+          const atlasRoot = updateNodeById(withSourceUpdated, requestNode.id, (node) => ({
+            ...node,
+            status: recoveredResult.output.suggestedStatus === "done" ? "needs_review" : recoveredResult.output.suggestedStatus,
+            nextDecision: "Recovered completed Codex result from the local run log.",
+            updatedAt: completedAt,
+            codexThreadId: recoveredResult.codexThreadId ?? node.codexThreadId,
+            codexLogPath: recoveredResult.codexLogPath ?? recovery.logPath ?? node.codexLogPath,
+            children: [...node.children, ...children],
+          }));
+          persistNotebook(atlasRoot);
+          return {
+            ...pushHistory(current),
+            atlasRoot,
+            birthMarks: {
+              ...current.birthMarks,
+              ...Object.fromEntries(collectNodeIdsFromMany(children).map((id) => [id, performance.now()])),
+            },
+            notificationPulses: [
+              ...current.notificationPulses,
+              ...pulseTargets.map((id) => createNotificationPulse(id, "codex", "Recovered Codex result ready")),
+            ],
+            unreadNotifications: markUnreadNotifications(current.unreadNotifications, pulseTargets, "codex", "Recovered Codex result ready"),
+            aiRuns: {
+              ...current.aiRuns,
+              [runId]: {
+                id: runId,
+                nodeId: sourceNodeId,
+                requestNodeId: requestNode.id,
+                provider: recoveredResult.provider,
+                mode: "codex",
+                modelId: recoveredResult.model,
+                status: "needs_review",
+                prompt: requestNode.body,
+                startedAt: requestNode.createdAt,
+                completedAt,
+                responseNodeId: children.at(-1)?.id ?? children[0]?.id,
+                usage: recoveredResult.usage,
+                workspace: candidate.workspace,
+                codexThreadId: recoveredResult.codexThreadId,
+                codexLogPath: recoveredResult.codexLogPath ?? recovery.logPath,
+              },
+            },
+          };
+        });
+      } catch (error) {
+        console.warn("Codex run recovery failed", error);
+      }
     }
   },
 
@@ -1893,6 +2194,11 @@ export function findNodePath(root: AtlasNode, id: string): AtlasNode[] | null {
 
 export function findNode(root: AtlasNode, id: string): AtlasNode | undefined {
   return findNodePath(root, id)?.at(-1);
+}
+
+export function findInheritedAiDialogSettings(root: AtlasNode, id: string): AiDialogSettings | undefined {
+  const path = findNodePath(root, id);
+  return path ? findAiDialogSettingsInPath(path) : undefined;
 }
 
 export function buildAiNodeContext(root: AtlasNode, selectedNodeId: string, optionsInput: AiContextScope | Partial<AiContextOptions> = "focused"): AiNodeContext | null {
@@ -2347,14 +2653,38 @@ function buildAtlasNodeFromOutline(
   siblingCount: number,
   usedNodeIds: Set<string>,
   updatedAt: string,
+  inheritedAiDialogSettings?: AiDialogSettings,
+  inheritedCodexThreadId?: string,
+  inheritedCodexLogPath?: string,
 ): AtlasNode {
   const existingNode = outline.id ? findNode(useAtlasStore.getState().atlasRoot, outline.id) : undefined;
+  const fallbackAiDialogSettings = fallbackNode.aiDialogSettings ?? inheritedAiDialogSettings;
+  const fallbackCodexThreadId = fallbackNode.codexThreadId ?? inheritedCodexThreadId;
+  const fallbackCodexLogPath = fallbackNode.codexLogPath ?? inheritedCodexLogPath;
   const base = existingNode ?? createNotebookNode(parentId ?? fallbackNode.sourceParentId ?? "atlas-root", childIndex, outline.title, outline.body, {
     position: getPhyllotaxisStoredChildPosition(depth, siblingCount, childIndex, parentId ?? fallbackNode.id),
+    aiDialogSettings: fallbackAiDialogSettings,
+    codexThreadId: fallbackCodexThreadId,
+    codexLogPath: fallbackCodexLogPath,
     usedNodeIds,
   });
+  const aiDialogSettings = base.aiDialogSettings ?? fallbackAiDialogSettings;
+  const codexThreadId = base.codexThreadId ?? fallbackCodexThreadId;
+  const codexLogPath = base.codexLogPath ?? fallbackCodexLogPath;
   const children = outline.children.map((child, index) =>
-    buildAtlasNodeFromOutline(child, base.children[index] ?? base, base.id, depth + 1, index, outline.children.length, usedNodeIds, updatedAt),
+    buildAtlasNodeFromOutline(
+      child,
+      base.children[index] ?? base,
+      base.id,
+      depth + 1,
+      index,
+      outline.children.length,
+      usedNodeIds,
+      updatedAt,
+      aiDialogSettings,
+      codexThreadId,
+      codexLogPath,
+    ),
   );
   return {
     ...base,
@@ -2363,6 +2693,9 @@ function buildAtlasNodeFromOutline(
     summary: outline.body.split("\n").find(Boolean) ?? base.summary,
     updatedAt,
     ...(parentId ? { sourceParentId: parentId } : {}),
+    aiDialogSettings,
+    codexThreadId,
+    codexLogPath,
     children,
   };
 }
@@ -2552,6 +2885,8 @@ function cloneNodeSubtreeForPaste(
   position: [number, number, number] | undefined,
   isRoot = false,
   inheritedAiDialogSettings?: AiDialogSettings,
+  inheritedCodexThreadId?: string,
+  inheritedCodexLogPath?: string,
   usedNodeIds?: Set<string>,
 ): AtlasNode {
   const id = createPastedNodeId(parentId, { usedNodeIds });
@@ -2560,12 +2895,16 @@ function cloneNodeSubtreeForPaste(
     sourceId: _sourceId,
     aiRunId: _aiRunId,
     aiDialogSettings: _aiDialogSettings,
+    codexThreadId: _codexThreadId,
+    codexLogPath: _codexLogPath,
     attachments,
     children,
     position: _position,
     ...rest
   } = source;
   const aiDialogSettings = source.aiDialogSettings ?? inheritedAiDialogSettings;
+  const codexThreadId = source.codexThreadId ?? inheritedCodexThreadId;
+  const codexLogPath = source.codexLogPath ?? inheritedCodexLogPath;
   return {
     ...rest,
     id,
@@ -2575,8 +2914,12 @@ function cloneNodeSubtreeForPaste(
     sourceParentId: parentId,
     position: isRoot ? position : source.position,
     aiDialogSettings,
+    codexThreadId,
+    codexLogPath,
     attachments: attachments.map((attachment, index) => cloneAttachmentMetadataForPaste(attachment, id, index, now)),
-    children: children.map((child) => cloneNodeSubtreeForPaste(child, id, now, child.position, false, aiDialogSettings, usedNodeIds)),
+    children: children.map((child) =>
+      cloneNodeSubtreeForPaste(child, id, now, child.position, false, aiDialogSettings, codexThreadId, codexLogPath, usedNodeIds),
+    ),
   };
 }
 
@@ -2636,7 +2979,13 @@ function createNotebookNode(
   index: number,
   title: string,
   body = "",
-  options: { position?: [number, number, number]; usedNodeIds?: Set<string> } = {},
+  options: {
+    position?: [number, number, number];
+    aiDialogSettings?: AiDialogSettings;
+    codexThreadId?: string;
+    codexLogPath?: string;
+    usedNodeIds?: Set<string>;
+  } = {},
 ): AtlasNode {
   const now = new Date().toISOString();
   const seed = `${parentId}-${index}-${now}`;
@@ -2660,6 +3009,9 @@ function createNotebookNode(
     updatedAt: now,
     sourceParentId: parentId,
     position: options.position,
+    aiDialogSettings: options.aiDialogSettings,
+    codexThreadId: options.codexThreadId,
+    codexLogPath: options.codexLogPath,
     children: [],
   };
 }
@@ -2670,7 +3022,13 @@ function createAiRequestNode(
   runId: string,
   mode: AiExecutionMode,
   prompt: string,
-  options: { position?: [number, number, number]; aiDialogSettings?: AiDialogSettings; usedNodeIds?: Set<string> } = {},
+  options: {
+    position?: [number, number, number];
+    aiDialogSettings?: AiDialogSettings;
+    codexThreadId?: string;
+    codexLogPath?: string;
+    usedNodeIds?: Set<string>;
+  } = {},
 ): AtlasNode {
   const now = new Date().toISOString();
   const seed = `${parentId}-${runId}-${mode}-${index}`;
@@ -2698,6 +3056,8 @@ function createAiRequestNode(
     provider: providerForMode(mode),
     runMode: mode,
     aiDialogSettings: options.aiDialogSettings,
+    codexThreadId: options.codexThreadId,
+    codexLogPath: options.codexLogPath,
     position: options.position,
     children: [],
   };
@@ -2712,7 +3072,13 @@ function createAiResponseNode(
   modelId: string,
   output: AiGeneratedOutput,
   usage?: AiUsage,
-  options: { position?: [number, number, number]; aiDialogSettings?: AiDialogSettings; usedNodeIds?: Set<string> } = {},
+  options: {
+    position?: [number, number, number];
+    aiDialogSettings?: AiDialogSettings;
+    codexThreadId?: string;
+    codexLogPath?: string;
+    usedNodeIds?: Set<string>;
+  } = {},
 ): AtlasNode {
   const now = new Date().toISOString();
   const seed = `${parentId}-${runId}-${index}`;
@@ -2743,6 +3109,8 @@ function createAiResponseNode(
     runMode: mode,
     usage,
     aiDialogSettings: options.aiDialogSettings,
+    codexThreadId: options.codexThreadId,
+    codexLogPath: options.codexLogPath,
     position: options.position,
     children: [],
   };
@@ -2753,7 +3121,13 @@ function createAiErrorNode(
   runId: string,
   mode: AiExecutionMode,
   message: string,
-  options: { position?: [number, number, number]; aiDialogSettings?: AiDialogSettings; usedNodeIds?: Set<string> } = {},
+  options: {
+    position?: [number, number, number];
+    aiDialogSettings?: AiDialogSettings;
+    codexThreadId?: string;
+    codexLogPath?: string;
+    usedNodeIds?: Set<string>;
+  } = {},
 ): AtlasNode {
   const now = new Date().toISOString();
   const seed = `${parentId}-${runId}-error`;
@@ -2793,6 +3167,8 @@ function createAiErrorNode(
     provider: providerForMode(mode),
     runMode: mode,
     aiDialogSettings: options.aiDialogSettings,
+    codexThreadId: options.codexThreadId,
+    codexLogPath: options.codexLogPath,
     position: options.position,
     children: [],
   };
@@ -3156,6 +3532,33 @@ function withAiDialogSettingsSaved(
   };
 }
 
+function createInheritedAiDialogSettings(path: AtlasNode[], fallbackContextOptions: AiContextOptions, fallbackCodexSettings: CodexSettings): AiDialogSettings {
+  const inherited = findAiDialogSettingsInPath(path);
+  return createCurrentAiDialogSettings(
+    inherited?.contextOptions ?? fallbackContextOptions,
+    inherited?.codexSettings ?? fallbackCodexSettings,
+  );
+}
+
+function findAiDialogSettingsInPath(path: AtlasNode[]) {
+  for (const node of path.slice().reverse()) {
+    if (node.aiDialogSettings) return node.aiDialogSettings;
+  }
+  return undefined;
+}
+
+function inferCodexLogPathFromNodePath(path: AtlasNode[]) {
+  for (const node of path.slice().reverse()) {
+    if (node.codexLogPath) return node.codexLogPath;
+  }
+  return undefined;
+}
+
+function getCodexThreadIdForNewChild(path: AtlasNode[], aiDialogSettings?: AiDialogSettings) {
+  if (aiDialogSettings?.codexSettings.continueMode === "new") return undefined;
+  return aiDialogSettings?.codexSettings.resumeThreadId || inferCodexThreadIdFromNodePath(path) || undefined;
+}
+
 function sanitizeStoredAiContextOptions(options: AiContextOptions) {
   return normalizeAiContextOptions({
     ...options,
@@ -3164,10 +3567,17 @@ function sanitizeStoredAiContextOptions(options: AiContextOptions) {
 }
 
 function sanitizeStoredCodexSettings(settings: CodexSettings) {
-  const { fullAccessApproved: _fullAccessApproved, ...rest } = settings;
+  const {
+    fullAccessApproved: _fullAccessApproved,
+    clientRunId: _clientRunId,
+    requestNodeId: _requestNodeId,
+    sourceNodeId: _sourceNodeId,
+    ...rest
+  } = settings;
+  const keepTrusted = settings.sandbox === "danger-full-access" && settings.fullAccessApproved === true;
   return normalizeCodexSettings({
     ...rest,
-    fullAccessApproved: false,
+    fullAccessApproved: keepTrusted,
   });
 }
 
@@ -3184,14 +3594,97 @@ function removeCodexRetryResultChildren(children: AtlasNode[]) {
 
 function buildCodexSettingsForRun(settings: CodexSettings, context: AiNodeContext) {
   const workspaceFromContext = inferCodexWorkspaceFromContext(context);
+  const continueMode = settings.continueMode ?? "auto";
   return normalizeCodexSettings({
     ...settings,
     workspace: workspaceFromContext || settings.workspace.trim(),
+    continueMode,
+    resumeThreadId: continueMode === "auto" ? settings.resumeThreadId || inferCodexThreadIdFromContext(context) : "",
   });
+}
+
+function collectRecoverableCodexRequests(root: AtlasNode): CodexRunRecoveryRequest[] {
+  const requests: CodexRunRecoveryRequest[] = [];
+  const visit = (node: AtlasNode, path: AtlasNode[]) => {
+    const nextPath = [...path, node];
+    if (
+      node.runMode === "codex" &&
+      node.nodeType === "human_prompt" &&
+      node.status === "running" &&
+      node.children.length === 0
+    ) {
+      const settings = findCodexSettingsInPath(nextPath);
+      requests.push({
+        runId: node.aiRunId ?? node.sourceId,
+        requestNodeId: node.id,
+        sourceNodeId: node.sourceParentId,
+        threadId: inferCodexThreadIdFromNodePath(nextPath),
+        workspace: settings?.workspace || inferCodexWorkspaceFromNodePath(nextPath),
+        startedAfter: node.createdAt,
+      });
+    }
+    node.children.forEach((child) => visit(child, nextPath));
+  };
+  visit(root, []);
+  return requests;
+}
+
+function inferCodexThreadIdFromNodePath(path: AtlasNode[]) {
+  for (const node of path.slice().reverse()) {
+    if (node.codexThreadId) return node.codexThreadId;
+    const resumeThreadId = node.aiDialogSettings?.codexSettings.resumeThreadId;
+    if (resumeThreadId) return resumeThreadId;
+  }
+  return "";
+}
+
+function findCodexSettingsInPath(path: AtlasNode[]) {
+  for (const node of path.slice().reverse()) {
+    if (node.aiDialogSettings?.codexSettings) return node.aiDialogSettings.codexSettings;
+  }
+  return undefined;
+}
+
+function inferCodexWorkspaceFromNodePath(path: AtlasNode[]) {
+  const settings = findCodexSettingsInPath(path);
+  if (settings?.workspace) return settings.workspace;
+  for (const node of path.slice().reverse()) {
+    const value = extractWorkspaceFromText([node.title, node.summary, node.body, ...node.tags].join("\n"));
+    if (value) return value;
+  }
+  return "";
+}
+
+function inferCodexThreadIdFromContext(context: AiNodeContext) {
+  const nodes = [
+    context.selectedNode,
+    ...(context.selectedNodes ?? []),
+    ...context.path.slice().reverse(),
+    ...context.siblingNodes,
+  ];
+  for (const node of nodes) {
+    if (node.codexThreadId) return node.codexThreadId;
+  }
+  return "";
+}
+
+function findActiveCodexRunForWorkspace(aiRuns: Record<string, AiRun>, workspace: string, excludeRunId?: string) {
+  const normalizedWorkspace = normalizeWorkspaceKey(workspace);
+  return Object.values(aiRuns).find((run) =>
+    run.id !== excludeRunId &&
+    run.mode === "codex" &&
+    run.status === "running" &&
+    normalizeWorkspaceKey(run.workspace ?? "") === normalizedWorkspace
+  );
+}
+
+function normalizeWorkspaceKey(workspace: string) {
+  return (workspace || "").trim().replace(/[\\\/]+$/, "").toLowerCase();
 }
 
 function normalizeCodexSettings(settings: Partial<CodexSettings>): CodexSettings {
   const sandbox = normalizeCodexSandbox(settings.sandbox, settings.fullAccessApproved);
+  const continueMode = settings.continueMode === "new" ? "new" : "auto";
   return {
     ...DEFAULT_CODEX_SETTINGS,
     ...settings,
@@ -3203,6 +3696,11 @@ function normalizeCodexSettings(settings: Partial<CodexSettings>): CodexSettings
     skipGitRepoCheck: settings.skipGitRepoCheck === true,
     timeoutMs: clampInteger(settings.timeoutMs ?? DEFAULT_CODEX_SETTINGS.timeoutMs, 30_000, 120 * 60_000),
     fullAccessApproved: settings.fullAccessApproved === true,
+    continueMode,
+    resumeThreadId: continueMode === "new" ? "" : (settings.resumeThreadId ?? "").trim(),
+    clientRunId: (settings.clientRunId ?? "").trim(),
+    requestNodeId: (settings.requestNodeId ?? "").trim(),
+    sourceNodeId: (settings.sourceNodeId ?? "").trim(),
   };
 }
 
@@ -3243,6 +3741,8 @@ function createCodexGeneratedNodeTrees(
   modelId: string,
   nodes: CodexGeneratedNode[],
   usage: AiUsage | undefined,
+  codexThreadId: string | undefined,
+  codexLogPath: string | undefined,
   parentDepth: number,
   layoutSeed: string,
   aiDialogSettings?: AiDialogSettings,
@@ -3257,6 +3757,8 @@ function createCodexGeneratedNodeTrees(
       modelId,
       node,
       index === 0 ? usage : undefined,
+      codexThreadId,
+      codexLogPath,
       parentDepth,
       startIndex + nodes.length,
       layoutSeed,
@@ -3274,6 +3776,8 @@ function createCodexGeneratedNodeTree(
   modelId: string,
   spec: CodexGeneratedNode,
   usage: AiUsage | undefined,
+  codexThreadId: string | undefined,
+  codexLogPath: string | undefined,
   parentDepth: number,
   siblingCount: number,
   layoutSeed: string,
@@ -3286,6 +3790,8 @@ function createCodexGeneratedNodeTree(
   const nodeType = spec.nodeType ?? codexNodeTypeForKind(spec.kind);
   const childSpecs = spec.children ?? [];
   const childDepth = parentDepth + 1;
+  const inheritedCodexThreadId = codexThreadId ?? aiDialogSettings?.codexSettings.resumeThreadId;
+  const inheritedCodexLogPath = codexLogPath;
   return {
     id,
     kind: spec.kind === "command" || spec.kind === "approval_request" || spec.kind === "approval_option" ? "event" : "thread",
@@ -3310,6 +3816,8 @@ function createCodexGeneratedNodeTree(
     modelId,
     provider: "codex",
     runMode: mode,
+    codexThreadId: inheritedCodexThreadId,
+    codexLogPath: inheritedCodexLogPath,
     usage,
     action: spec.action,
     aiDialogSettings,
@@ -3323,6 +3831,8 @@ function createCodexGeneratedNodeTree(
         modelId,
         child,
         undefined,
+        inheritedCodexThreadId,
+        inheritedCodexLogPath,
         childDepth,
         childSpecs.length,
         id,
@@ -3404,6 +3914,11 @@ function nodeToAiSnapshot(node: AtlasNode, depthRemaining: number, options: { ch
     author: node.author,
     nodeType: node.nodeType,
     tags: node.tags,
+    provider: node.provider,
+    runMode: node.runMode,
+    aiRunId: node.aiRunId,
+    codexThreadId: node.codexThreadId,
+    codexLogPath: node.codexLogPath,
     attachments: node.attachments.map((attachment) => ({
       id: attachment.id,
       name: attachment.name,

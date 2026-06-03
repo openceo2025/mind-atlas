@@ -7,7 +7,7 @@ import { CommandDock } from "./components/CommandDock";
 import { Minimap } from "./components/Minimap";
 import { OutlineEditor } from "./components/OutlineEditor";
 import { UniverseCanvas } from "./components/UniverseCanvas";
-import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
+import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
 import { createNotebookJsonPackage, createNotebookPackage, importNotebookPackage, type NotebookPackageResult } from "./notebookPackage";
 import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
@@ -50,6 +50,7 @@ export default function App() {
   const notificationPulses = useAtlasStore((state) => state.notificationPulses);
   const unreadNotifications = useAtlasStore((state) => state.unreadNotifications);
   const restoreAttachmentPreviews = useAtlasStore((state) => state.restoreAttachmentPreviews);
+  const recoverCompletedCodexRuns = useAtlasStore((state) => state.recoverCompletedCodexRuns);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
   const [persistedUiState] = useState<PersistedUiState | null>(() => loadPersistedUiState());
   const [pageActive, setPageActive] = useState(() => isPageRuntimeActive());
@@ -71,6 +72,7 @@ export default function App() {
   const [cloudError, setCloudError] = useState("");
   const [theme, setTheme] = useState<AtlasTheme>(() => loadStoredTheme());
   const [mobilePanelTab, setMobilePanelTab] = useState<"command" | "editor">(persistedUiState?.mobilePanelTab ?? "command");
+  const [mobileWorkspacePanelRevealed, setMobileWorkspacePanelRevealed] = useState(false);
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const mobilePortraitBreadcrumb = useMobilePortraitBreadcrumbLayout();
   const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
@@ -78,7 +80,7 @@ export default function App() {
   const selectedNode = selectedPath[selectedPath.length - 1] ?? atlasRoot;
   const onboarding = useOnboarding();
   const effectiveMobilePanelTab = onboarding.showAiFeatures ? mobilePanelTab : "editor";
-  const showWorkspacePanel = onboarding.showAiFeatures || selectedNodeId !== atlasRoot.id;
+  const showWorkspacePanel = onboarding.showAiFeatures || selectedNodeId !== atlasRoot.id || (onboarding.showMainChrome && mobileWorkspacePanelRevealed);
   const focusPanelOpen = selectedNodeId !== atlasRoot.id;
   const [renderWorkspacePanel, setRenderWorkspacePanel] = useState(showWorkspacePanel);
   const appClassName = [
@@ -180,6 +182,23 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const revealMobileWorkspacePanel = () => {
+      if (!isMobileWorkspacePanelRevealTarget()) return;
+      setMobileWorkspacePanelRevealed(true);
+      if (onboarding.showAiFeatures) setMobilePanelTab("command");
+      setRenderWorkspacePanel(true);
+    };
+    window.addEventListener(UNIVERSE_BACKGROUND_CLICK_EVENT, revealMobileWorkspacePanel);
+    return () => window.removeEventListener(UNIVERSE_BACKGROUND_CLICK_EVENT, revealMobileWorkspacePanel);
+  }, [onboarding.showAiFeatures]);
+
+  useEffect(() => {
+    if (selectedNodeId !== atlasRoot.id) {
+      setMobileWorkspacePanelRevealed(false);
+    }
+  }, [atlasRoot.id, selectedNodeId]);
+
+  useEffect(() => {
     persistTheme(theme);
   }, [theme]);
 
@@ -248,6 +267,31 @@ export default function App() {
       console.error("Attachment preview restore failed", error);
     });
   }, [restoreAttachmentPreviews]);
+
+  useEffect(() => {
+    let recoveryRunning = false;
+    const recover = () => {
+      if (recoveryRunning) return;
+      recoveryRunning = true;
+      void recoverCompletedCodexRuns()
+        .catch((error) => console.error("Codex run recovery failed", error))
+        .finally(() => {
+          recoveryRunning = false;
+        });
+    };
+    const handleVisibility = () => {
+      if (!document.hidden) recover();
+    };
+    recover();
+    const interval = window.setInterval(recover, 60_000);
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("pageshow", recover);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("pageshow", recover);
+    };
+  }, [recoverCompletedCodexRuns]);
 
   const handleExportLight = () => {
     try {
@@ -1541,6 +1585,13 @@ function isMobilePortraitBreadcrumbTarget() {
   const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
   const narrowPortrait = window.matchMedia?.("(max-width: 980px) and (orientation: portrait)").matches ?? false;
   return coarsePointer && narrowPortrait;
+}
+
+function isMobileWorkspacePanelRevealTarget() {
+  if (typeof window === "undefined") return false;
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const mobileViewport = window.matchMedia?.("(max-width: 980px)").matches ?? false;
+  return coarsePointer && mobileViewport;
 }
 
 function DatasetTitleInput({

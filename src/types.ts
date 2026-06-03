@@ -113,6 +113,8 @@ export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
+export type CodexContinueMode = "auto" | "new";
+
 export interface CodexSettings {
   model: string;
   reasoningEffort: CodexReasoningEffort;
@@ -122,6 +124,11 @@ export interface CodexSettings {
   skipGitRepoCheck: boolean;
   timeoutMs: number;
   fullAccessApproved?: boolean;
+  continueMode?: CodexContinueMode;
+  resumeThreadId?: string;
+  clientRunId?: string;
+  requestNodeId?: string;
+  sourceNodeId?: string;
 }
 
 export interface CodexModelOption {
@@ -150,7 +157,9 @@ export type CodexGeneratedNodeKind =
   | "final"
   | "error";
 
-export interface AtlasNodeAction {
+export type AtlasNodeAction = CodexFullAccessAction | GitPushAction;
+
+export interface CodexFullAccessAction {
   kind: "codex_full_access";
   label: string;
   decision: "approve" | "deny";
@@ -159,6 +168,13 @@ export interface AtlasNodeAction {
   runId: string;
   contextOptions: AiContextOptions;
   settings: CodexSettings;
+}
+
+export interface GitPushAction {
+  kind: "git_push";
+  label: string;
+  workspace: string;
+  runId: string;
 }
 
 export interface CodexGeneratedNode {
@@ -205,6 +221,9 @@ export interface AiRun {
   error?: string;
   usage?: AiUsage;
   contextStats?: AiContextStats;
+  workspace?: string;
+  codexThreadId?: string;
+  codexLogPath?: string;
 }
 
 export interface AiNodeSnapshot {
@@ -216,6 +235,11 @@ export interface AiNodeSnapshot {
   author: AtlasNode["author"];
   nodeType: NotebookNodeType;
   tags: string[];
+  provider?: AiProvider;
+  runMode?: AiExecutionMode;
+  aiRunId?: string;
+  codexThreadId?: string;
+  codexLogPath?: string;
   attachments: AiAttachmentSnapshot[];
   children: AiNodeSnapshot[];
 }
@@ -291,8 +315,34 @@ export interface AiResponseResult {
   output: AiGeneratedOutput;
   codexNodes?: CodexGeneratedNode[];
   generatedAttachments?: AiGeneratedAttachment[];
+  codexThreadId?: string;
+  codexLogPath?: string;
   rawText: string;
   usage?: AiUsage;
+}
+
+export interface CodexRunRecoveryRequest {
+  runId?: string;
+  requestNodeId?: string;
+  sourceNodeId?: string;
+  threadId?: string;
+  workspace?: string;
+  startedAfter?: string;
+}
+
+export interface CodexRunRecoveryResult {
+  found: boolean;
+  result?: AiResponseResult;
+  logPath?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface GitPushResult {
+  ok: boolean;
+  workspace: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number;
 }
 
 export interface AiBridgeHealth {
@@ -474,6 +524,8 @@ export interface AtlasNode {
   modelId?: string;
   provider?: AiProvider;
   runMode?: AiExecutionMode;
+  codexThreadId?: string;
+  codexLogPath?: string;
   usage?: AiUsage;
   action?: AtlasNodeAction;
   aiDialogSettings?: AiDialogSettings;
