@@ -204,6 +204,27 @@ export function useOnboarding(): OnboardingState {
         matched += 1;
         if (matched === KONAMI_SEQUENCE.length) {
           matched = 0;
+          if (progress.firstRun && !progress.basicCompleted) {
+            const completedAt = new Date().toISOString();
+            persistProgress((current) => ({
+              ...current,
+              rootNodeCreated: true,
+              pan: true,
+              zoom: true,
+              nodeDrag: true,
+              childNodeCreated: true,
+              spaceBasicsCompleted: true,
+              basicCompleted: true,
+              completedAt: current.completedAt ?? completedAt,
+            }));
+            setRootHelpLevel(0);
+            setSpacePromptStep(null);
+            setSpacePromptDeadline(null);
+            setAllNodesOffscreen(false);
+            setCameraResetHintVisible(false);
+            setNoticeMessageId("basic.complete");
+            return;
+          }
           if (progress.aiUnlocked) return;
           const confirmed = window.confirm(text["ai.unlockConfirm"]);
           if (!confirmed) return;

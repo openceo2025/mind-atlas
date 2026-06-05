@@ -377,7 +377,7 @@ export default function App() {
       const file = new File([blob], entry.name, { type: "application/x-mindatlas-package" });
       const { root, attachmentPreviewUrls, attachmentBlobs } = await importNotebookPackage(file);
       await replaceStoredAttachmentBlobs(root, attachmentBlobs);
-      importNotebook(root, datasetNameFromFile(entry.name), attachmentPreviewUrls);
+      importNotebook(root, undefined, attachmentPreviewUrls);
       setCloudLoadOpen(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Cloud notebook load failed.";

@@ -836,6 +836,31 @@ async function saveCodexResponseLog(logPath, response) {
 }
 
 async function runCodex(prompt, settings) {
+  const result = await runCodexOnce(prompt, settings);
+  if (!shouldRetryWindowsSandboxSetupFailure(result, settings)) {
+    return {
+      ...result,
+      effectiveSandbox: settings.sandbox,
+    };
+  }
+
+  console.warn(`[bridge] Codex Windows sandbox failed to initialize for ${settings.workspace}; retrying with policy-preserving full access.`);
+  const fallbackSettings = {
+    ...settings,
+    sandbox: "danger-full-access",
+    fullAccessApproved: true,
+    sandboxFallbackFrom: settings.sandbox,
+  };
+  const fallbackResult = await runCodexOnce(buildWindowsSandboxFallbackPrompt(prompt, settings.sandbox), fallbackSettings);
+  return {
+    ...fallbackResult,
+    requestedSandbox: settings.sandbox,
+    effectiveSandbox: "danger-full-access",
+    sandboxFallbackFrom: settings.sandbox,
+  };
+}
+
+async function runCodexOnce(prompt, settings) {
   const startedAt = new Date().toISOString();
   const outputFile = join(tmpdir(), `mind-atlas-codex-${Date.now()}-${randomUUID()}.txt`);
   const workspace = codexUseWsl ? toWslPath(settings.workspace) : settings.workspace;
@@ -909,6 +934,27 @@ async function runCodex(prompt, settings) {
   return { ...result, lastMessage, events, usage: extractCodexUsage(result.stdout), codexThreadId, codexLogPath };
 }
 
+function shouldRetryWindowsSandboxSetupFailure(result, settings) {
+  if (process.platform !== "win32" || codexUseWsl || settings.sandbox === "danger-full-access") return false;
+  const text = `${result.lastMessage}\n${result.stderr}\n${result.stdout}`.toLowerCase();
+  return text.includes("windows sandbox: spawn setup refresh");
+}
+
+function buildWindowsSandboxFallbackPrompt(prompt, requestedSandbox) {
+  const policy = requestedSandbox === "read-only"
+    ? "This remains a read-only run. Do not create, edit, delete, move, rename, or format any file."
+    : "This remains a workspace-write run. Only modify files inside the configured workspace, and do not write outside it.";
+  return [
+    "Mind Atlas Windows sandbox recovery notice:",
+    `The requested sandbox policy is ${requestedSandbox}, but the Codex Windows sandbox failed to initialize with "windows sandbox: spawn setup refresh".`,
+    "This retry runs without the broken OS sandbox only so shell commands and file reads can work.",
+    policy,
+    "Do not treat this recovery as permission to broaden the task or access unrelated locations.",
+    "",
+    prompt,
+  ].join("\n");
+}
+
 function extractCodexThreadId(events) {
   const threadEvent = events.find((event) => event?.type === "thread.started" && typeof event.thread_id === "string");
   return stringOr(threadEvent?.thread_id, "");
@@ -941,6 +987,7 @@ async function saveCodexRunLog({ settings, prompt, result, lastMessage, events, 
       clientRunId: settings.clientRunId,
       requestNodeId: settings.requestNodeId,
       sourceNodeId: settings.sourceNodeId,
+      sandboxFallbackFrom: settings.sandboxFallbackFrom,
       command,
       args,
       exitCode: result.exitCode,
@@ -1100,6 +1147,7 @@ function buildCodexNodes({ prompt, context, settings, result, gitStatus, duratio
     commandEvents,
     durationMs,
     gitStatus,
+    result,
     settings,
     statusLabel,
     threadId: result.codexThreadId || threadEvent?.thread_id,
@@ -1141,7 +1189,7 @@ function buildCodexNodes({ prompt, context, settings, result, gitStatus, duratio
   return nodes;
 }
 
-function buildCodexDetailsBody({ commandEvents, durationMs, gitStatus, settings, statusLabel, threadId, logPath }) {
+function buildCodexDetailsBody({ commandEvents, durationMs, gitStatus, result, settings, statusLabel, threadId, logPath }) {
   const sections = [
     [
       "# Run",
@@ -1150,6 +1198,7 @@ function buildCodexDetailsBody({ commandEvents, durationMs, gitStatus, settings,
       `Model: ${settings.model}`,
       `Reasoning: ${settings.reasoningEffort}`,
       `Sandbox: ${settings.sandbox}`,
+      result.sandboxFallbackFrom ? `Sandbox recovery: ${result.sandboxFallbackFrom} -> danger-full-access after Windows sandbox setup failure` : "",
       `Workspace: ${settings.workspace}`,
       threadId ? `Thread: ${threadId}` : "",
       logPath ? `Log path: ${logPath}` : "",
@@ -1295,7 +1344,7 @@ function formatResetDate(date) {
 }
 
 function shouldOfferFullAccessApproval(result, finalText, settings) {
-  if (settings.sandbox === "danger-full-access") return false;
+  if (settings.sandbox === "danger-full-access" || result.sandboxFallbackFrom) return false;
   const text = `${finalText}\n${result.stderr}\n${result.stdout}`.toLowerCase();
   return [
     "read-only",
@@ -1676,17 +1725,30 @@ async function sendCloudNotebookPackage(rawName, response) {
 
 function createCloudNotebookFileName(originalName) {
   const extension = extname(originalName).toLowerCase() === ".mindatlaspkg" ? ".mindatlaspkg" : ".mindatlaspkg";
-  const base = basename(originalName, extname(originalName))
+  const sanitizedBase = basename(originalName, extname(originalName))
     .trim()
     .replace(/[\\/:*?"<>|]+/g, "-")
     .replace(/\s+/g, " ")
     .slice(0, 80) || "Mind Atlas";
+  const base = stripExistingCloudNotebookSequence(sanitizedBase, extension);
   let index = 1;
   while (true) {
     const candidate = `${base}-${String(index).padStart(3, "0")}${extension}`;
     if (!existsSync(join(cloudNotebookDir, candidate))) return candidate;
     index += 1;
   }
+}
+
+function stripExistingCloudNotebookSequence(name, extension) {
+  let base = String(name);
+  while (/-\d{3}$/.test(base)) {
+    const prefix = base.replace(/-\d{3}$/, "");
+    const currentExists = existsSync(join(cloudNotebookDir, `${base}${extension}`));
+    const prefixExists = existsSync(join(cloudNotebookDir, `${prefix}${extension}`));
+    if (!currentExists && !prefixExists) break;
+    base = prefix;
+  }
+  return base || "Mind Atlas";
 }
 
 function safeCloudNotebookPath(name) {

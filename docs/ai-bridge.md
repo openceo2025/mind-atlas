@@ -51,9 +51,16 @@ Copy `.env.example` values into your shell or deployment environment.
 - `MIND_ATLAS_CODEX_WORKSPACE`: workspace passed to `codex exec --cd`.
 - `MIND_ATLAS_CODEX_MODEL`: default Codex model. The UI also reads `codex debug models` through the bridge.
 - `MIND_ATLAS_CODEX_REASONING_EFFORT`: default effort (`low`, `medium`, `high`, or `xhigh`).
-- `MIND_ATLAS_CODEX_SANDBOX`: default sandbox. Use `workspace-write`; Full access is only used after an approval button is clicked in Mind Atlas.
+- `MIND_ATLAS_CODEX_SANDBOX`: default sandbox. Use `workspace-write`; Full access normally requires an approval button in Mind Atlas.
 - `MIND_ATLAS_CODEX_MODELS`: optional comma-separated model override when `codex debug models` is unavailable.
 - `MIND_ATLAS_CODEX_TIMEOUT_MS`: Codex execution timeout in milliseconds. Defaults to 60 minutes.
+
+On Windows, Codex can occasionally fail before command execution with
+`windows sandbox: spawn setup refresh`. When this exact sandbox initialization
+error occurs, the bridge automatically retries the run without the broken OS
+sandbox while preserving the requested `read-only` or `workspace-write` policy
+in the Codex instructions. The Codex details node records this as
+`Sandbox recovery`.
 - `MIND_ATLAS_REALTIME_MODEL`: default Realtime model. Defaults to `gpt-realtime`.
 - `MIND_ATLAS_REALTIME_VOICE`: default voice.
 - `MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL`: Realtime session input transcription model. Defaults to `gpt-4o-transcribe`.
