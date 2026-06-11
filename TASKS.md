@@ -79,6 +79,8 @@ Implementation result:
 - Verification on 2026-06-11: `npm run typecheck` passed; `npm run build`
   passed with the existing Vite large chunk warning; `npm run verify:ui`
   passed after starting Vite on `127.0.0.1:5173`.
+- Follow-up polish on 2026-06-11: IndexedDB saves are now queued and coalesced
+  so rapid edits cannot complete out of order and overwrite a newer notebook.
 
 ### T2. Derived Coordinate Layout Refactor
 
@@ -137,6 +139,9 @@ Implementation result:
 - Verification on 2026-06-11: `npm run typecheck` passed; `npm run build`
   passed with the existing Vite large chunk warning; `npm run verify:ui`
   passed after restarting Vite on `127.0.0.1:5173`.
+- Follow-up polish on 2026-06-11: added `npm run verify:layout` to compare a
+  fixed logical tree against legacy baked phyllotaxis positions and to verify
+  manual override behavior.
 
 ### T3. Context Assembly Module
 
@@ -186,6 +191,10 @@ Implementation result:
 - Verification on 2026-06-11: `npm run verify:context` passed;
   `npm run typecheck` passed; `npm run build` passed with the existing Vite
   large chunk warning.
+- Follow-up polish on 2026-06-11: context assembly now builds removable context
+  blocks before rendering Markdown, removes deepest blocks for overflow instead
+  of using regex on rendered Markdown, and makes metadata options observable in
+  output and verification.
 
 ## Phase 0-B: Core Experience, Parallel After Foundations
 

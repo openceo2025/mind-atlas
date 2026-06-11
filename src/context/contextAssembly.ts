@@ -28,6 +28,16 @@ export interface ContextAssemblyStats {
   };
 }
 
+type ContextSection = "ancestorChain" | "siblingTitles" | "subtree" | "selectedNodes";
+
+interface ContextBlock {
+  section: ContextSection;
+  lines: string[];
+  depth: number;
+  nodeId?: string;
+  removable: boolean;
+}
+
 interface ContextNode {
   node: AtlasNode;
   depth: number;
@@ -66,53 +76,34 @@ export function assembleAtlasContextMarkdown(
         .filter((node): node is AtlasNode => Boolean(node))
     : [];
 
-  const sections: string[] = [
-    "# Mind Atlas Context",
-    "",
-    `scope: ${options.scope}`,
-    `selected: ${selectedNode.title || selectedNode.id}`,
-    "",
-    "## Ancestor Chain",
-    ...formatAncestorChain(ancestorChain),
-    "",
-    "## Sibling Titles",
-    ...formatSiblingGroups(siblingGroups),
-    "",
-    "## Target Subtree",
-    ...formatSubtree(subtreeNodes),
-  ];
-
-  if (selectedNodes.length) {
-    sections.push("", "## Additional Selected Nodes", ...selectedNodes.flatMap((node) => formatNodeBlock(node, 0)));
-  }
-
-  const includedNodeIds = uniqueIds([
-    ...ancestorChain.map((node) => node.id),
-    ...siblingGroups.flatMap((group) => group.siblings.map((node) => node.id)),
-    ...subtreeNodes.map((entry) => entry.node.id),
-    ...selectedNodes.map((node) => node.id),
-  ]);
-  const fullMarkdown = sections.join("\n").trimEnd();
-  const limited = applyCharacterLimit(fullMarkdown, includedNodeIds, options.maxCharacters);
-  const omittedNodeIds = limited.omittedNodeIds;
-  const markdown = limited.markdown;
+  const blocks = buildContextBlocks({
+    options,
+    selectedNode,
+    ancestorChain,
+    siblingGroups,
+    subtreeNodes,
+    selectedNodes,
+  });
+  const limited = applyCharacterLimit(blocks, options.maxCharacters);
+  const markdown = renderMarkdown(limited.blocks, options.scope, selectedNode, limited.omittedNodeIds.length > 0);
+  const includedNodeIds = uniqueIds(limited.blocks.map((block) => block.nodeId).filter((id): id is string => Boolean(id)));
 
   return {
     markdown,
-    includedNodeIds: includedNodeIds.filter((id) => !omittedNodeIds.includes(id)),
-    omittedNodeIds,
+    includedNodeIds,
+    omittedNodeIds: limited.omittedNodeIds,
     stats: {
       scope: options.scope,
       characterCount: markdown.length,
       estimatedTokens: estimateTokens(markdown),
-      includedNodeCount: includedNodeIds.length - omittedNodeIds.length,
-      omittedNodeCount: omittedNodeIds.length,
-      truncated: omittedNodeIds.length > 0 || markdown.length < fullMarkdown.length,
+      includedNodeCount: includedNodeIds.length,
+      omittedNodeCount: limited.omittedNodeIds.length,
+      truncated: limited.omittedNodeIds.length > 0,
       sections: {
-        ancestorChain: ancestorChain.length,
-        siblingTitles: siblingGroups.reduce((count, group) => count + group.siblings.length, 0),
-        subtree: subtreeNodes.length,
-        selectedNodes: selectedNodes.length,
+        ancestorChain: countSectionBlocks(limited.blocks, "ancestorChain"),
+        siblingTitles: countSectionBlocks(limited.blocks, "siblingTitles"),
+        subtree: countSectionBlocks(limited.blocks, "subtree"),
+        selectedNodes: countSectionBlocks(limited.blocks, "selectedNodes"),
       },
     },
   };
@@ -134,6 +125,117 @@ export function normalizeContextAssemblyOptions(optionsInput: AiContextScope | C
     maxCharacters: clampInteger(input.maxCharacters ?? DEFAULT_CONTEXT_OPTIONS.maxCharacters, 200, 200000),
     includeMetadata: input.includeMetadata ?? DEFAULT_CONTEXT_OPTIONS.includeMetadata,
   };
+}
+
+function buildContextBlocks({
+  options,
+  ancestorChain,
+  siblingGroups,
+  subtreeNodes,
+  selectedNodes,
+}: {
+  options: Required<ContextAssemblyOptions>;
+  selectedNode: AtlasNode;
+  ancestorChain: AtlasNode[];
+  siblingGroups: Array<{ parent: AtlasNode; siblings: AtlasNode[] }>;
+  subtreeNodes: ContextNode[];
+  selectedNodes: AtlasNode[];
+}): ContextBlock[] {
+  return [
+    ...ancestorChain.map((node, index) => nodeBlock("ancestorChain", node, index, options, false)),
+    ...siblingGroups.flatMap((group) => [
+      {
+        section: "siblingTitles" as const,
+        lines: [`- under ${formatTitle(group.parent)}:`],
+        depth: 0,
+        removable: false,
+      },
+      ...group.siblings.map((node) => nodeBlock("siblingTitles", node, 1, options, true)),
+    ]),
+    ...subtreeNodes.map(({ node, depth }) => nodeBlock("subtree", node, depth, options, depth > 0)),
+    ...selectedNodes.map((node) => nodeBlock("selectedNodes", node, 0, options, true)),
+  ];
+}
+
+function nodeBlock(section: ContextSection, node: AtlasNode, depth: number, options: Required<ContextAssemblyOptions>, removable: boolean): ContextBlock {
+  const indent = "  ".repeat(depth);
+  const lines = [`${indent}- ${formatTitle(node)}`];
+  const metadata = formatNodeMetadata(node, options);
+  const summary = node.summary?.trim();
+  const body = node.body?.trim();
+  if (metadata) lines.push(`${indent}  meta: ${metadata}`);
+  if (summary) lines.push(`${indent}  summary: ${singleLine(summary)}`);
+  if (body && body !== summary) lines.push(`${indent}  body: ${singleLine(body)}`);
+  return { section, lines, depth, nodeId: node.id, removable };
+}
+
+function renderMarkdown(blocks: ContextBlock[], scope: AiContextScope, selectedNode: AtlasNode, truncated: boolean) {
+  const lines = [
+    "# Mind Atlas Context",
+    "",
+    `scope: ${scope}`,
+    `selected: ${selectedNode.title || selectedNode.id}`,
+    "",
+    "## Ancestor Chain",
+    ...sectionLines(blocks, "ancestorChain"),
+    "",
+    "## Sibling Titles",
+    ...sectionLines(blocks, "siblingTitles"),
+    "",
+    "## Target Subtree",
+    ...sectionLines(blocks, "subtree"),
+  ];
+
+  if (blocks.some((block) => block.section === "selectedNodes")) {
+    lines.push("", "## Additional Selected Nodes", ...sectionLines(blocks, "selectedNodes"));
+  }
+  if (truncated) {
+    lines.push("", "## Overflow", "Deepest context was omitted to stay within the character budget.");
+  }
+  return lines.join("\n").trimEnd();
+}
+
+function applyCharacterLimit(blocks: ContextBlock[], maxCharacters: number) {
+  let nextBlocks = [...blocks];
+  const omittedNodeIds: string[] = [];
+  while (renderBlocksLength(nextBlocks, omittedNodeIds.length > 0) > maxCharacters) {
+    const removableIndex = findDeepestRemovableBlockIndex(nextBlocks);
+    if (removableIndex < 0) break;
+    const [removed] = nextBlocks.splice(removableIndex, 1);
+    if (removed.nodeId) omittedNodeIds.push(removed.nodeId);
+  }
+  if (renderBlocksLength(nextBlocks, omittedNodeIds.length > 0) > maxCharacters) {
+    let removableIndex = -1;
+    for (let index = nextBlocks.length - 1; index >= 0; index -= 1) {
+      if (nextBlocks[index].removable || nextBlocks[index].section === "subtree") {
+        removableIndex = index;
+        break;
+      }
+    }
+    if (removableIndex >= 0) {
+      const removed = nextBlocks.splice(removableIndex, 1)[0];
+      if (removed.nodeId) omittedNodeIds.push(removed.nodeId);
+    }
+  }
+  return { blocks: nextBlocks, omittedNodeIds: uniqueIds(omittedNodeIds) };
+}
+
+function renderBlocksLength(blocks: ContextBlock[], truncated: boolean) {
+  return blocks.reduce((total, block) => total + block.lines.join("\n").length + 1, 120) + (truncated ? 78 : 0);
+}
+
+function findDeepestRemovableBlockIndex(blocks: ContextBlock[]) {
+  let bestIndex = -1;
+  let bestDepth = -1;
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    if (!block.removable) continue;
+    if (block.depth >= bestDepth) {
+      bestIndex = index;
+      bestDepth = block.depth;
+    }
+  }
+  return bestIndex;
 }
 
 function selectAncestorChain(path: AtlasNode[], options: Required<ContextAssemblyOptions>) {
@@ -185,48 +287,26 @@ function visitSubtree(node: AtlasNode, depth: number, maxDepth: number, nodes: C
   node.children.forEach((child) => visitSubtree(child, depth + 1, maxDepth, nodes));
 }
 
-function formatAncestorChain(nodes: AtlasNode[]) {
-  if (!nodes.length) return ["- none"];
-  return nodes.map((node, index) => `${"  ".repeat(index)}- ${formatTitle(node)}`);
+function sectionLines(blocks: ContextBlock[], section: ContextSection) {
+  const lines = blocks.filter((block) => block.section === section).flatMap((block) => block.lines);
+  return lines.length ? lines : ["- none"];
 }
 
-function formatSiblingGroups(groups: Array<{ parent: AtlasNode; siblings: AtlasNode[] }>) {
-  if (!groups.length) return ["- none"];
-  return groups.flatMap((group) => [
-    `- under ${formatTitle(group.parent)}:`,
-    ...group.siblings.map((node) => `  - ${formatTitle(node)}`),
-  ]);
+function countSectionBlocks(blocks: ContextBlock[], section: ContextSection) {
+  return blocks.filter((block) => block.section === section && block.nodeId).length;
 }
 
-function formatSubtree(nodes: ContextNode[]) {
-  if (!nodes.length) return ["- none"];
-  return nodes.flatMap(({ node, depth }) => formatNodeBlock(node, depth));
-}
-
-function formatNodeBlock(node: AtlasNode, depth: number) {
-  const indent = "  ".repeat(depth);
-  const lines = [`${indent}- ${formatTitle(node)}`];
-  const summary = node.summary?.trim();
-  const body = node.body?.trim();
-  if (summary) lines.push(`${indent}  summary: ${singleLine(summary)}`);
-  if (body && body !== summary) lines.push(`${indent}  body: ${singleLine(body)}`);
-  return lines;
-}
-
-function applyCharacterLimit(markdown: string, includedNodeIds: string[], maxCharacters: number) {
-  if (markdown.length <= maxCharacters) return { markdown, omittedNodeIds: [] as string[] };
-  const omittedNodeIds: string[] = [];
-  const marker = "\n\n## Overflow\nDeepest context was omitted to stay within the character budget.";
-  let next = markdown;
-  for (let index = includedNodeIds.length - 1; index >= 0 && next.length + marker.length > maxCharacters; index -= 1) {
-    omittedNodeIds.push(includedNodeIds[index]);
-    const escaped = escapeRegExp(includedNodeIds[index]);
-    next = next.replace(new RegExp(`\\n?[^\\n]*\\(${escaped}\\)[\\s\\S]*?(?=\\n\\s*- |\\n## |$)`, "g"), "");
+function formatNodeMetadata(node: AtlasNode, options: Required<ContextAssemblyOptions>) {
+  if (!options.includeMetadata) return "";
+  const values = [`status=${node.status}`, `type=${node.nodeType}`];
+  if (node.tags.length) values.push(`tags=${node.tags.join(",")}`);
+  const attachments = node.attachments
+    .filter((attachment) => attachment.size <= options.maxAttachmentBytes)
+    .slice(0, options.maxAttachmentCount);
+  if (options.attachmentMode === "metadata" && attachments.length) {
+    values.push(`attachments=${attachments.map((attachment) => `${attachment.name}:${attachment.kind}`).join(",")}`);
   }
-  if (next.length + marker.length > maxCharacters) {
-    next = `${next.slice(0, Math.max(0, maxCharacters - marker.length - 16)).trimEnd()}\n[truncated]`;
-  }
-  return { markdown: `${next.trimEnd()}${marker}`, omittedNodeIds };
+  return values.join("; ");
 }
 
 function findNodePath(root: AtlasNode, id: string): AtlasNode[] | null {
@@ -270,8 +350,4 @@ function clampInteger(value: number, min: number, max: number) {
 
 function uniqueIds(ids: string[]) {
   return [...new Set(ids.filter(Boolean))];
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

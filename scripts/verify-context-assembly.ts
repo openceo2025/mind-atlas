@@ -20,6 +20,7 @@ const root = node("root", "Book", "Novel planning notebook.", [
 const focused = assembleAtlasContextMarkdown(root, "chapter-1", "focused");
 assert.ok(focused);
 assert.match(focused.markdown, /## Ancestor Chain/);
+assert.match(focused.markdown, /meta: status=waiting; type=note/);
 assert.match(focused.markdown, /- Book \(root\)/);
 assert.match(focused.markdown, /  - Act 1 \(act-1\)/);
 assert.match(focused.markdown, /    - Chapter 1 \(chapter-1\)/);
@@ -32,6 +33,10 @@ assert.equal(focused.stats.scope, "focused");
 assert.equal(focused.stats.sections.subtree, 3);
 assert.ok(focused.stats.characterCount > 0);
 assert.ok(focused.stats.estimatedTokens > 0);
+
+const noMetadata = assembleAtlasContextMarkdown(root, "chapter-1", { scope: "focused", includeMetadata: false });
+assert.ok(noMetadata);
+assert.doesNotMatch(noMetadata.markdown, /meta: status=/);
 
 const neighborhood = assembleAtlasContextMarkdown(root, "chapter-1", "neighborhood");
 assert.ok(neighborhood);

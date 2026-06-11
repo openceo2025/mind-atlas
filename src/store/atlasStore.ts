@@ -2570,16 +2570,35 @@ function createInitialNotebook() {
 
 function persistNotebook(root: AtlasNode) {
   if (typeof window === "undefined") return;
-  void savePersistedNotebook(root)
-    .then(() => {
-      useAtlasStore.setState({ notebookPersistenceStatus: "ready", notebookPersistenceError: "" });
-      return useAtlasStore.getState().refreshNotebookSnapshots();
-    })
-    .catch((error) => {
-      const message = notebookPersistenceErrorMessage("Notebook could not be saved to IndexedDB.", error);
-      console.error(message, error);
-      useAtlasStore.setState({ notebookPersistenceStatus: "error", notebookPersistenceError: message });
-    });
+  queuedNotebookSaveRoot = root;
+  if (notebookSaveRunning) return;
+  notebookSaveRunning = true;
+  void flushQueuedNotebookSave();
+}
+
+let queuedNotebookSaveRoot: AtlasNode | null = null;
+let notebookSaveRunning = false;
+
+async function flushQueuedNotebookSave() {
+  try {
+    while (queuedNotebookSaveRoot) {
+      const root = queuedNotebookSaveRoot;
+      queuedNotebookSaveRoot = null;
+      await savePersistedNotebook(root);
+    }
+    useAtlasStore.setState({ notebookPersistenceStatus: "ready", notebookPersistenceError: "" });
+    await useAtlasStore.getState().refreshNotebookSnapshots();
+  } catch (error) {
+    const message = notebookPersistenceErrorMessage("Notebook could not be saved to IndexedDB.", error);
+    console.error(message, error);
+    useAtlasStore.setState({ notebookPersistenceStatus: "error", notebookPersistenceError: message });
+  } finally {
+    notebookSaveRunning = false;
+    if (queuedNotebookSaveRoot) {
+      notebookSaveRunning = true;
+      void flushQueuedNotebookSave();
+    }
+  }
 }
 
 function persistUnreadNotifications(unreadNotifications: Record<string, UnreadNotification>) {

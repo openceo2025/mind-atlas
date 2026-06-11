@@ -1,0 +1,171 @@
+import assert from "node:assert/strict";
+import { deriveAtlasLayout, getStoredPositionForWorldDirection, type Vec3 } from "../src/layout/atlasLayout.ts";
+import type { AtlasNode } from "../src/types.ts";
+
+const root = node("atlas-root", "Atlas", [
+  node("alpha", "Alpha", [
+    node("alpha-1", "Alpha 1"),
+    node("alpha-2", "Alpha 2", [node("alpha-2-a", "Alpha 2 A")]),
+  ]),
+  node("beta", "Beta"),
+  node("gamma", "Gamma", [node("gamma-1", "Gamma 1")]),
+]);
+
+const legacyRoot = bakeLegacyAutoPositions(root);
+const derivedFromLogical = deriveAtlasLayout(root);
+const derivedFromLegacyOverrides = deriveAtlasLayout(legacyRoot);
+
+for (const id of collectNodeIds(root)) {
+  assertVecClose(
+    derivedFromLogical.get(id),
+    derivedFromLegacyOverrides.get(id),
+    `layout parity failed for ${id}`,
+  );
+}
+
+const draggedRoot = cloneTree(root);
+const draggedAlpha = findNode(draggedRoot, "alpha");
+assert.ok(draggedAlpha);
+draggedAlpha.position = [0.25, -0.1, -0.96];
+const draggedLayout = deriveAtlasLayout(draggedRoot);
+assert.notDeepEqual(draggedLayout.get("alpha"), derivedFromLogical.get("alpha"));
+
+const parentPath = [draggedRoot, draggedAlpha];
+const childOverride = getStoredPositionForWorldDirection(parentPath, [220, 140, -650], 2, draggedAlpha.children.length);
+const draggedChild = findNode(draggedRoot, "alpha-2");
+assert.ok(draggedChild);
+draggedChild.position = childOverride;
+const childLayout = deriveAtlasLayout(draggedRoot);
+assert.notDeepEqual(childLayout.get("alpha-2"), draggedLayout.get("alpha-2"));
+
+console.log("Layout verification passed");
+
+function bakeLegacyAutoPositions(tree: AtlasNode): AtlasNode {
+  const rootCopy = cloneTree(tree);
+  const visit = (parent: AtlasNode, depth: number) => {
+    parent.children = parent.children.map((child, index) => {
+      const next = {
+        ...child,
+        position: getLegacyStoredChildPosition(depth, parent.children.length, index, parent.id),
+      };
+      visit(next, depth + 1);
+      return next;
+    });
+  };
+  visit(rootCopy, 1);
+  return rootCopy;
+}
+
+function getLegacyStoredChildPosition(depth: number, siblingCount: number, childIndex: number, parentId: string): Vec3 {
+  const i = childIndex + 1;
+  const angle = seededAngle(parentId) + i * Math.PI * (3 - Math.sqrt(5));
+  if (depth <= 1) {
+    const planarRadius = Math.min(1 * 0.92, 0.22 + 0.12 * Math.sqrt(i));
+    return clampDirection([Math.cos(angle) * planarRadius, Math.sin(angle) * planarRadius, -1], 1);
+  }
+
+  const limit = getLegacyManualChildSpreadLimit(depth, siblingCount);
+  const amount = Math.min(limit * 0.94, limit * (0.38 + 0.12 * Math.sqrt(i)));
+  return clampLocalOffset([Math.cos(angle) * amount, Math.sin(angle) * amount, 0], limit);
+}
+
+function getLegacyManualChildSpreadLimit(depth: number, siblingCount: number) {
+  if (depth <= 1) return Math.asin(0.5);
+  const parentRadius = getLegacyShellRadius(Math.max(1, depth - 1));
+  const childRadius = getLegacyShellRadius(depth);
+  const siblingSpread = siblingCount <= 1 ? 0 : Math.min(2.2, siblingCount * 0.22);
+  const targetRadii = 3.4 + siblingSpread;
+  const focusedDistance = 300;
+  const visibleDepth = Math.max(focusedDistance * 0.65, childRadius - parentRadius + focusedDistance);
+  const requiredScreenRatio = (28 * targetRadii) / focusedDistance;
+  return Math.atan((requiredScreenRatio * visibleDepth) / childRadius);
+}
+
+function getLegacyShellRadius(depth: number) {
+  if (depth <= 1) return 360;
+  return 360 + 340 * (depth - 1);
+}
+
+function seededAngle(seed: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ((hash >>> 0) / 4294967295) * Math.PI * 2;
+}
+
+function clampDirection(vector: Vec3, planarLimit: number): Vec3 {
+  const normalized = normalize(vector);
+  const x = normalized[0];
+  const y = normalized[1];
+  const planar = Math.hypot(x, y);
+  const limitedPlanar = Math.min(planar, planarLimit);
+  const scaleToLimit = planar > 0 ? limitedPlanar / planar : 0;
+  return normalize([
+    x * scaleToLimit,
+    y * scaleToLimit,
+    -Math.sqrt(Math.max(0.0001, 1 - limitedPlanar * limitedPlanar)),
+  ]);
+}
+
+function clampLocalOffset(position: Vec3, limit: number): Vec3 {
+  const amount = Math.hypot(position[0], position[1]);
+  if (amount <= limit) return [position[0], position[1], 0];
+  const scaleToLimit = amount > 0 ? limit / amount : 0;
+  return [position[0] * scaleToLimit, position[1] * scaleToLimit, 0];
+}
+
+function normalize(vector: Vec3): Vec3 {
+  const length = Math.hypot(vector[0], vector[1], vector[2]) || 1;
+  return [vector[0] / length, vector[1] / length, vector[2] / length];
+}
+
+function assertVecClose(actual: Vec3 | undefined, expected: Vec3 | undefined, message: string) {
+  assert.ok(actual, `${message}: missing actual`);
+  assert.ok(expected, `${message}: missing expected`);
+  for (let index = 0; index < 3; index += 1) {
+    assert.ok(Math.abs(actual[index] - expected[index]) < 0.000001, `${message}: axis ${index}`);
+  }
+}
+
+function collectNodeIds(tree: AtlasNode): string[] {
+  return [tree.id, ...tree.children.flatMap((child) => collectNodeIds(child))];
+}
+
+function findNode(tree: AtlasNode, id: string): AtlasNode | null {
+  if (tree.id === id) return tree;
+  for (const child of tree.children) {
+    const match = findNode(child, id);
+    if (match) return match;
+  }
+  return null;
+}
+
+function cloneTree(tree: AtlasNode): AtlasNode {
+  return JSON.parse(JSON.stringify(tree)) as AtlasNode;
+}
+
+function node(id: string, title: string, children: AtlasNode[] = []): AtlasNode {
+  const now = "2026-06-11T00:00:00.000Z";
+  return {
+    id,
+    kind: id === "atlas-root" ? "root" : "thread",
+    nodeType: "note",
+    title,
+    subtitle: "",
+    body: `${title} body.`,
+    author: "human",
+    status: "waiting",
+    color: "#88aaff",
+    texture: "speckled",
+    radius: id === "atlas-root" ? 80 : 28,
+    summary: `${title} summary.`,
+    nextDecision: "",
+    tags: [],
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    children,
+  };
+}
