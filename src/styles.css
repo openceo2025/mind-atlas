@@ -572,6 +572,11 @@ h1 {
   color: #d3e4ff;
 }
 
+.unread-notification-link.is-openclaw {
+  border-color: rgba(98, 230, 184, 0.34);
+  color: #c8f8e8;
+}
+
 .unread-notification-link.is-done {
   border-color: rgba(141, 245, 207, 0.32);
   color: #cdfbe9;
@@ -2214,6 +2219,10 @@ button:disabled,
   grid-template-columns: minmax(116px, 1.1fr) minmax(88px, 0.8fr) minmax(96px, 0.8fr) minmax(210px, 2fr) minmax(72px, 0.6fr) minmax(78px, 0.6fr) minmax(72px, 0.6fr);
 }
 
+.openclaw-options-row {
+  grid-template-columns: minmax(116px, 1.1fr) minmax(96px, 0.8fr) minmax(210px, 2fr) minmax(78px, 0.6fr) minmax(72px, 0.6fr);
+}
+
 .codex-workspace-field {
   min-width: 180px;
 }
@@ -2598,6 +2607,11 @@ button:disabled,
 .app-shell[data-theme="light"] .unread-notification-link.is-codex {
   border-color: rgba(11, 99, 206, 0.28);
   color: #0b63ce;
+}
+
+.app-shell[data-theme="light"] .unread-notification-link.is-openclaw {
+  border-color: rgba(8, 127, 91, 0.28);
+  color: #087f5b;
 }
 
 .app-shell[data-theme="light"] .unread-notification-link.is-done {
@@ -3371,7 +3385,8 @@ button:disabled,
   }
 
   .command-dock:has(.context-options-row),
-  .command-dock:has(.codex-options-row) {
+  .command-dock:has(.codex-options-row),
+  .command-dock:has(.openclaw-options-row) {
     max-height: 100%;
   }
 
@@ -4011,7 +4026,8 @@ button:disabled,
   }
 
   :root[data-keyboard-overlay-input="true"] .context-options-row,
-  :root[data-keyboard-overlay-input="true"] .codex-options-row {
+  :root[data-keyboard-overlay-input="true"] .codex-options-row,
+  :root[data-keyboard-overlay-input="true"] .openclaw-options-row {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -4030,7 +4046,8 @@ button:disabled,
   }
 
   :root[data-keyboard-overlay-input="true"] .command-dock:has(.context-options-row),
-  :root[data-keyboard-overlay-input="true"] .command-dock:has(.codex-options-row) {
+  :root[data-keyboard-overlay-input="true"] .command-dock:has(.codex-options-row),
+  :root[data-keyboard-overlay-input="true"] .command-dock:has(.openclaw-options-row) {
     max-height: 100%;
   }
 

@@ -88,7 +88,7 @@ export type AtlasNodeKind = "root" | "workArea" | "artifact" | "event" | "concep
 
 export type PlanetTexture = "speckled" | "bands" | "freckles" | "craters" | "mist" | "cell";
 
-export type AiExecutionMode = "openai" | "local" | "codex";
+export type AiExecutionMode = "openai" | "local" | "codex" | "openclaw";
 
 export type AiContextScope = "minimal" | "focused" | "subtree" | "neighborhood" | "selected" | "custom";
 
@@ -105,7 +105,7 @@ export interface AiContextOptions {
   selectedNodeIds: string[];
 }
 
-export type AiProvider = "openai" | "openai-compatible" | "local" | "codex" | "mock";
+export type AiProvider = "openai" | "openai-compatible" | "local" | "codex" | "openclaw" | "mock";
 
 export type AiRunStatus = "running" | "needs_review" | "error" | "done";
 
@@ -114,6 +114,8 @@ export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
 export type CodexContinueMode = "auto" | "new";
+
+export type OpenClawThinkingLevel = "off";
 
 export interface CodexSettings {
   model: string;
@@ -126,6 +128,20 @@ export interface CodexSettings {
   fullAccessApproved?: boolean;
   continueMode?: CodexContinueMode;
   resumeThreadId?: string;
+  clientRunId?: string;
+  requestNodeId?: string;
+  sourceNodeId?: string;
+}
+
+export interface OpenClawSettings {
+  model: string;
+  thinking: OpenClawThinkingLevel;
+  agent: string;
+  workspace: string;
+  timeoutMs: number;
+  continueMode?: CodexContinueMode;
+  resumeSessionKey?: string;
+  sessionKey?: string;
   clientRunId?: string;
   requestNodeId?: string;
   sourceNodeId?: string;
@@ -193,6 +209,7 @@ export interface CodexGeneratedNode {
 export interface AiDialogSettings {
   contextOptions: AiContextOptions;
   codexSettings: CodexSettings;
+  openClawSettings: OpenClawSettings;
 }
 
 export interface AiUsage {
@@ -224,6 +241,8 @@ export interface AiRun {
   workspace?: string;
   codexThreadId?: string;
   codexLogPath?: string;
+  openClawSessionKey?: string;
+  openClawLogPath?: string;
 }
 
 export interface AiNodeSnapshot {
@@ -240,6 +259,8 @@ export interface AiNodeSnapshot {
   aiRunId?: string;
   codexThreadId?: string;
   codexLogPath?: string;
+  openClawSessionKey?: string;
+  openClawLogPath?: string;
   attachments: AiAttachmentSnapshot[];
   children: AiNodeSnapshot[];
 }
@@ -287,6 +308,7 @@ export interface AiResponsePayload {
   provider: AiExecutionMode;
   model?: string;
   codex?: Partial<CodexSettings>;
+  openclaw?: Partial<OpenClawSettings>;
   // Node anchored AI runs must stay limited to the explicit node context.
   // Do not add AI Partner log, voice summary, or other global history here.
 }
@@ -317,6 +339,8 @@ export interface AiResponseResult {
   generatedAttachments?: AiGeneratedAttachment[];
   codexThreadId?: string;
   codexLogPath?: string;
+  openClawSessionKey?: string;
+  openClawLogPath?: string;
   rawText: string;
   usage?: AiUsage;
 }
@@ -368,7 +392,7 @@ export interface AiBridgeProvider {
   detail?: string;
 }
 
-export type NotificationPulseKind = "done" | "needs_review" | "error" | "codex" | "cost";
+export type NotificationPulseKind = "done" | "needs_review" | "error" | "codex" | "openclaw" | "cost";
 
 export interface NotificationPulse {
   id: string;
@@ -526,6 +550,8 @@ export interface AtlasNode {
   runMode?: AiExecutionMode;
   codexThreadId?: string;
   codexLogPath?: string;
+  openClawSessionKey?: string;
+  openClawLogPath?: string;
   usage?: AiUsage;
   action?: AtlasNodeAction;
   aiDialogSettings?: AiDialogSettings;

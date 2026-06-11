@@ -25,9 +25,10 @@ Current version: `0.1.1`
 - Provides appearance controls for node color and texture.
 - Sends the focused node context to a local AI bridge and saves each user request plus provider result as child notebook nodes.
 - Saves OpenAI-generated images as attachments on the provider result node.
-- Supports OpenAI, LM Studio/OpenAI-compatible local models, and Codex CLI execution through the local bridge.
+- Supports OpenAI, LM Studio/OpenAI-compatible local models, Codex CLI, and OpenClaw CLI execution through the local bridge.
 - Saves and loads rich `.mindatlaspkg` notebook packages through the local bridge's server-side notebook folder.
 - Expands Codex runs into spatial child nodes for summaries, commands, changed files, approval prompts, and final output.
+- Sends OpenClaw requests through the local bridge and stores the OpenClaw result, session key, and log path on the request branch.
 - Emits wider notification pulses when AI work completes or fails away from the user's current focus.
 - Uses the microphone button for short-click dictation with `gpt-4o-transcribe`.
 - Uses long-press push-to-talk for a Realtime Voice Partner that can inspect and operate the atlas through guarded tools.

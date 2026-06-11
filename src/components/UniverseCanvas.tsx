@@ -622,6 +622,7 @@ function GlobalNotificationPulse({
 function getNotificationPulseColor(kind: NotificationPulseKind, theme: AtlasTheme) {
   if (kind === "error") return "#ff6b6b";
   if (kind === "codex") return theme === "light" ? "#0b63ce" : "#86b7ff";
+  if (kind === "openclaw") return theme === "light" ? "#087f5b" : "#62e6b8";
   if (kind === "cost") return "#f59f48";
   if (kind === "done") return "#8bd8d2";
   return "#f7d765";
@@ -683,7 +684,7 @@ function markNotificationPath(kinds: Map<string, NotificationPulseKind>, path: A
 
 function notificationPriority(kind: NotificationPulseKind) {
   if (kind === "error") return 5;
-  if (kind === "codex") return 4;
+  if (kind === "codex" || kind === "openclaw") return 4;
   if (kind === "needs_review") return 3;
   if (kind === "cost") return 2;
   return 1;

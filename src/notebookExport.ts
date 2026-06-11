@@ -13,6 +13,7 @@ import type {
   CodexSettings,
   NodeAttachment,
   NotebookNodeType,
+  OpenClawSettings,
   PlanetTexture,
   WorkStatus,
 } from "./types";
@@ -30,8 +31,8 @@ const NOTEBOOK_NODE_TYPES: NotebookNodeType[] = [
 ];
 const WORK_STATUSES: WorkStatus[] = ["running", "needs_review", "waiting", "blocked", "error", "done"];
 const PLANET_TEXTURES: PlanetTexture[] = ["speckled", "bands", "freckles", "craters", "mist", "cell"];
-const AI_PROVIDERS: AiProvider[] = ["openai", "openai-compatible", "local", "codex", "mock"];
-const AI_EXECUTION_MODES: AiExecutionMode[] = ["openai", "local", "codex"];
+const AI_PROVIDERS: AiProvider[] = ["openai", "openai-compatible", "local", "codex", "openclaw", "mock"];
+const AI_EXECUTION_MODES: AiExecutionMode[] = ["openai", "local", "codex", "openclaw"];
 const CODEX_REASONING_EFFORTS: CodexReasoningEffort[] = ["low", "medium", "high", "xhigh"];
 const CODEX_SANDBOX_MODES: CodexSandboxMode[] = ["read-only", "workspace-write", "danger-full-access"];
 
@@ -73,6 +74,8 @@ export function sanitizeNotebookForExport(node: AtlasNode, options: NotebookExpo
   assignOptionalString(sanitized, "modelId", source.modelId);
   assignOptionalString(sanitized, "codexThreadId", source.codexThreadId);
   assignOptionalString(sanitized, "codexLogPath", source.codexLogPath);
+  assignOptionalString(sanitized, "openClawSessionKey", source.openClawSessionKey);
+  assignOptionalString(sanitized, "openClawLogPath", source.openClawLogPath);
   assignOptionalString(sanitized, "reminderAt", source.reminderAt);
   assignOptionalString(sanitized, "reminderFiredAt", source.reminderFiredAt);
 
@@ -150,6 +153,8 @@ function assignOptionalString(
     | "modelId"
     | "codexThreadId"
     | "codexLogPath"
+    | "openClawSessionKey"
+    | "openClawLogPath"
     | "reminderAt"
     | "reminderFiredAt",
   value: unknown,
@@ -217,8 +222,9 @@ function sanitizeAiDialogSettings(value: unknown): AiDialogSettings | undefined 
   if (!isRecord(value)) return undefined;
   const contextOptions = sanitizeAiContextOptions(value.contextOptions);
   const codexSettings = sanitizeCodexSettings(value.codexSettings);
-  if (!contextOptions || !codexSettings) return undefined;
-  return { contextOptions, codexSettings };
+  const openClawSettings = sanitizeOpenClawSettings(value.openClawSettings ?? {});
+  if (!contextOptions || !codexSettings || !openClawSettings) return undefined;
+  return { contextOptions, codexSettings, openClawSettings };
 }
 
 function sanitizeAiContextOptions(value: unknown): AiContextOptions | undefined {
@@ -262,6 +268,19 @@ function sanitizeCodexSettings(value: unknown): CodexSettings | undefined {
     ...(typeof value.fullAccessApproved === "boolean" ? { fullAccessApproved: value.fullAccessApproved } : {}),
     continueMode: value.continueMode === "new" ? "new" : "auto",
     resumeThreadId: typeof value.resumeThreadId === "string" ? value.resumeThreadId.slice(0, 160) : "",
+  };
+}
+
+function sanitizeOpenClawSettings(value: unknown): OpenClawSettings | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    model: safeString(value.model, ""),
+    thinking: "off",
+    agent: safeString(value.agent, ""),
+    workspace: safeString(value.workspace, ""),
+    timeoutMs: safeInteger(value.timeoutMs, 10 * 60 * 1000),
+    continueMode: value.continueMode === "new" ? "new" : "auto",
+    resumeSessionKey: typeof value.resumeSessionKey === "string" ? value.resumeSessionKey.slice(0, 220) : "",
   };
 }
 

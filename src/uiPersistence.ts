@@ -82,5 +82,5 @@ function isPersistedCommandDraft(value: unknown): value is NonNullable<Persisted
 }
 
 function isPersistedCommandMode(value: unknown): value is PersistedCommandMode {
-  return value === "openai" || value === "local" || value === "codex" || value === "note";
+  return value === "openai" || value === "local" || value === "codex" || value === "openclaw" || value === "note";
 }

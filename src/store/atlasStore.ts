@@ -32,6 +32,7 @@ import type {
   NotificationPulse,
   NotificationPulseKind,
   NodeAttachment,
+  OpenClawSettings,
   Selection,
   ViewportState,
   VoiceLogEntry,
@@ -79,6 +80,15 @@ const DEFAULT_CODEX_SETTINGS: CodexSettings = {
   timeoutMs: 60 * 60 * 1000,
   continueMode: "auto",
   resumeThreadId: "",
+};
+const DEFAULT_OPENCLAW_SETTINGS: OpenClawSettings = {
+  model: "",
+  thinking: "off",
+  agent: "",
+  workspace: "",
+  timeoutMs: 10 * 60 * 1000,
+  continueMode: "auto",
+  resumeSessionKey: "",
 };
 const DEFAULT_VOICE_PARTNER_SETTINGS: VoicePartnerSettings = {
   realtimeModel: "gpt-realtime",
@@ -172,6 +182,7 @@ interface AtlasStore {
   multiSelectedNodeIds: string[];
   aiContextOptions: AiContextOptions;
   codexSettings: CodexSettings;
+  openClawSettings: OpenClawSettings;
   commandInputEditing: boolean;
   activeCommandMode: AiExecutionMode | "note";
   viewport: ViewportState;
@@ -187,6 +198,7 @@ interface AtlasStore {
   clearMultiSelection: () => void;
   setAiContextOptions: (patch: Partial<AiContextOptions>) => void;
   setCodexSettings: (patch: Partial<CodexSettings>) => void;
+  setOpenClawSettings: (patch: Partial<OpenClawSettings>) => void;
   loadAiDialogSettingsForNode: (id: string) => void;
   resetAiDialogSettingsToDefaults: () => void;
   setCommandInputEditing: (editing: boolean) => void;
@@ -267,6 +279,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   multiSelectedNodeIds: [],
   aiContextOptions: DEFAULT_AI_CONTEXT_OPTIONS,
   codexSettings: DEFAULT_CODEX_SETTINGS,
+  openClawSettings: DEFAULT_OPENCLAW_SETTINGS,
   commandInputEditing: false,
   activeCommandMode: "openai",
   viewport: { x: 0, y: 0, zoom: 0.92 },
@@ -374,12 +387,24 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     }));
   },
 
+  setOpenClawSettings: (patch) => {
+    set((state) => ({
+      ...withAiDialogSettingsSaved(state, {
+        openClawSettings: normalizeOpenClawSettings({
+          ...state.openClawSettings,
+          ...patch,
+        }),
+      }),
+    }));
+  },
+
   loadAiDialogSettingsForNode: (id) => {
     const path = findNodePath(get().atlasRoot, id);
     const settings = path ? findAiDialogSettingsInPath(path) : undefined;
     set((state) => ({
       aiContextOptions: normalizeAiContextOptions(settings?.contextOptions ?? DEFAULT_AI_CONTEXT_OPTIONS),
       codexSettings: normalizeCodexSettings(settings?.codexSettings ?? DEFAULT_CODEX_SETTINGS),
+      openClawSettings: normalizeOpenClawSettings(settings?.openClawSettings ?? DEFAULT_OPENCLAW_SETTINGS),
     }));
   },
 
@@ -387,6 +412,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     set({
       aiContextOptions: normalizeAiContextOptions(DEFAULT_AI_CONTEXT_OPTIONS),
       codexSettings: normalizeCodexSettings(DEFAULT_CODEX_SETTINGS),
+      openClawSettings: normalizeOpenClawSettings(DEFAULT_OPENCLAW_SETTINGS),
     });
   },
 
@@ -658,7 +684,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   addRootNodeAt: (position, title = "Untitled node") => {
     const state = get();
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
-    const aiDialogSettings = createInheritedAiDialogSettings([state.atlasRoot], state.aiContextOptions, state.codexSettings);
+    const aiDialogSettings = createInheritedAiDialogSettings([state.atlasRoot], state.aiContextOptions, state.codexSettings, state.openClawSettings);
     const child = createNotebookNode("atlas-root", state.atlasRoot.children.length, title, "", {
       position: clampDirection(position, TOP_LEVEL_DRAG_PLANAR_LIMIT),
       aiDialogSettings,
@@ -689,7 +715,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!parent) return;
     const parentPath = findNodePath(state.atlasRoot, parentId);
     const childDepth = parentPath?.length ?? 1;
-    const inheritedAiDialogSettings = createInheritedAiDialogSettings(parentPath ?? [parent], state.aiContextOptions, state.codexSettings);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(parentPath ?? [parent], state.aiContextOptions, state.codexSettings, state.openClawSettings);
     const insertIndex = typeof options.insertIndex === "number" ? options.insertIndex : parent.children.length;
     const childPosition = options.position
       ? getStoredPositionForWorldDirection(parentPath ?? [state.atlasRoot], options.position, childDepth, parent.children.length + 1)
@@ -751,7 +777,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const childDepth = parentPath.length;
     const startIndex = parent.children.length;
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
-    const inheritedAiDialogSettings = createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings, state.openClawSettings);
     const inheritedCodexThreadId = inferCodexThreadIdFromNodePath(parentPath);
     const inheritedCodexLogPath = inferCodexLogPathFromNodePath(parentPath);
     const children = drafts.map((draft, offset) => {
@@ -813,7 +839,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const requestIndex = parent.children.length;
     const requestPosition = getPhyllotaxisStoredChildPosition(parentPath.length, requestIndex + 1, requestIndex, parent.id);
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
-    const requestAiDialogSettings = createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings);
+    const requestAiDialogSettings = createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings, state.openClawSettings);
     const requestNode = {
       ...createAiRequestNode(parentNodeId, requestIndex, runId, runMode, prompt, {
         position: requestPosition,
@@ -922,9 +948,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const insertIndex = parent.children.length;
     const rootPosition = getPhyllotaxisStoredChildPosition(childDepth, parent.children.length + 1, insertIndex, parent.id);
     const now = new Date().toISOString();
-    const inheritedAiDialogSettings = copiedRoot.aiDialogSettings ?? createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings);
+    const inheritedAiDialogSettings = copiedRoot.aiDialogSettings ?? createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings, state.openClawSettings);
     const inheritedCodexThreadId = copiedRoot.codexThreadId ?? inferCodexThreadIdFromNodePath(parentPath);
     const inheritedCodexLogPath = copiedRoot.codexLogPath ?? inferCodexLogPathFromNodePath(parentPath);
+    const inheritedOpenClawSessionKey = copiedRoot.openClawSessionKey ?? inferOpenClawSessionKeyFromNodePath(parentPath);
+    const inheritedOpenClawLogPath = copiedRoot.openClawLogPath ?? inferOpenClawLogPathFromNodePath(parentPath);
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
     const pastedRoot = cloneNodeSubtreeForPaste(
       copiedRoot,
@@ -935,6 +963,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       inheritedAiDialogSettings,
       inheritedCodexThreadId,
       inheritedCodexLogPath,
+      inheritedOpenClawSessionKey,
+      inheritedOpenClawLogPath,
       usedNodeIds,
     );
     const pastedNodeIds = collectNodeIds(pastedRoot);
@@ -970,7 +1000,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const insertIndex = parent.children.length;
     const siblingPosition = getPhyllotaxisStoredChildPosition(siblingDepth, parent.children.length + 1, insertIndex, parent.id);
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
-    const inheritedAiDialogSettings = createInheritedAiDialogSettings(path.slice(0, -1), state.aiContextOptions, state.codexSettings);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(path.slice(0, -1), state.aiContextOptions, state.codexSettings, state.openClawSettings);
     const sibling = createNotebookNode(parent.id, parent.children.length, "Untitled branch", "", {
       position: siblingPosition,
       aiDialogSettings: inheritedAiDialogSettings,
@@ -1226,7 +1256,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const now = new Date().toISOString();
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
     const parentId = path.length > 1 ? path[path.length - 2].id : undefined;
-    const inheritedAiDialogSettings = createInheritedAiDialogSettings(path, state.aiContextOptions, state.codexSettings);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(path, state.aiContextOptions, state.codexSettings, state.openClawSettings);
     const nextSubtree = buildAtlasNodeFromOutline(
       outline,
       target,
@@ -1478,8 +1508,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       sourceParent.id,
     );
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
-    const inheritedAiDialogSettings = createInheritedAiDialogSettings(sourcePath, state.aiContextOptions, state.codexSettings);
-    const requestAiDialogSettings = createCurrentAiDialogSettings(contextOptions, inheritedAiDialogSettings.codexSettings);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(sourcePath, state.aiContextOptions, state.codexSettings, state.openClawSettings);
+    const requestAiDialogSettings = createCurrentAiDialogSettings(contextOptions, inheritedAiDialogSettings.codexSettings, inheritedAiDialogSettings.openClawSettings);
     if (mode === "codex" && !requestAiDialogSettings.codexSettings.workspace.trim()) {
       return;
     }
@@ -1488,6 +1518,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       aiDialogSettings: requestAiDialogSettings,
       codexThreadId: getCodexThreadIdForNewChild(sourcePath, requestAiDialogSettings),
       codexLogPath: inferCodexLogPathFromNodePath(sourcePath),
+      openClawSessionKey: getOpenClawSessionKeyForNewChild(sourcePath, requestAiDialogSettings),
+      openClawLogPath: inferOpenClawLogPathFromNodePath(sourcePath),
       usedNodeIds,
     });
 
@@ -1497,7 +1529,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       requestNodeId: requestNode.id,
       provider: providerForMode(mode),
       mode,
-      modelId: mode === "codex" ? requestAiDialogSettings.codexSettings.model : "",
+      modelId: mode === "codex" ? requestAiDialogSettings.codexSettings.model : mode === "openclaw" ? requestAiDialogSettings.openClawSettings.model || "openclaw-default" : "",
       status: "running",
       prompt: trimmed,
       startedAt,
@@ -1525,18 +1557,26 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       const context = await buildAiNodeContextWithAttachments(state.atlasRoot, sourceNodeId, contextOptions);
       if (!context) throw new Error("AI context could not be built.");
       const codexSettingsForRun = mode === "codex" ? buildCodexSettingsForRun(requestAiDialogSettings.codexSettings, context) : undefined;
+      const openClawSettingsForRun = mode === "openclaw" ? buildOpenClawSettingsForRun(requestAiDialogSettings.openClawSettings, context) : undefined;
       if (mode === "codex" && codexSettingsForRun) {
         const conflict = findActiveCodexRunForWorkspace(get().aiRuns, codexSettingsForRun.workspace, runId);
         if (conflict) {
           throw new Error(`Codex is already running for this work root: ${codexSettingsForRun.workspace || "(default workspace)"}\nActive run: ${conflict.id}`);
         }
       }
+      if (mode === "openclaw" && openClawSettingsForRun) {
+        const conflict = findActiveOpenClawRunForWorkspace(get().aiRuns, openClawSettingsForRun.workspace, runId);
+        if (conflict) {
+          throw new Error(`OpenClaw is already running for this work root: ${openClawSettingsForRun.workspace || "(default OpenClaw workspace)"}\nActive run: ${conflict.id}`);
+        }
+      }
       activeRun = {
         ...activeRun,
-        modelId: codexSettingsForRun?.model ?? activeRun.modelId,
+        modelId: codexSettingsForRun?.model ?? openClawSettingsForRun?.model ?? activeRun.modelId,
         contextStats: context.stats,
-        workspace: codexSettingsForRun?.workspace,
+        workspace: codexSettingsForRun?.workspace ?? openClawSettingsForRun?.workspace,
         codexThreadId: codexSettingsForRun?.resumeThreadId,
+        openClawSessionKey: openClawSettingsForRun?.resumeSessionKey || openClawSettingsForRun?.sessionKey,
       };
       set((current) => ({
         aiRuns: { ...current.aiRuns, [runId]: activeRun },
@@ -1546,10 +1586,18 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         prompt: trimmed,
         context,
         provider: mode,
-        model: codexSettingsForRun?.model,
+        model: codexSettingsForRun?.model ?? openClawSettingsForRun?.model,
         codex: codexSettingsForRun
           ? {
               ...codexSettingsForRun,
+              clientRunId: runId,
+              requestNodeId: requestNode.id,
+              sourceNodeId,
+            }
+          : undefined,
+        openclaw: openClawSettingsForRun
+          ? {
+              ...openClawSettingsForRun,
               clientRunId: runId,
               requestNodeId: requestNode.id,
               sourceNodeId,
@@ -1593,6 +1641,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
                   aiDialogSettings: parent.aiDialogSettings,
                   codexThreadId: result.codexThreadId ?? parent.codexThreadId,
                   codexLogPath: result.codexLogPath ?? parent.codexLogPath,
+                  openClawSessionKey: result.openClawSessionKey ?? parent.openClawSessionKey,
+                  openClawLogPath: result.openClawLogPath ?? parent.openClawLogPath,
                   usedNodeIds: collectNodeIdSet(current.atlasRoot),
                 },
               ),
@@ -1613,6 +1663,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           ...generatedAttachments.previewUrls,
         };
         const pulseTargets = getCodexPulseTargetIds(children);
+        const resultNotificationKind = aiResultNotificationKind(mode);
         const atlasRoot = updateNodeById(
           updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
             ...node,
@@ -1628,6 +1679,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           updatedAt: completedAt,
           codexThreadId: result.codexThreadId ?? node.codexThreadId,
           codexLogPath: result.codexLogPath ?? node.codexLogPath,
+          openClawSessionKey: result.openClawSessionKey ?? node.openClawSessionKey,
+          openClawLogPath: result.openClawLogPath ?? node.openClawLogPath,
           children: [...node.children, ...children],
           }),
         );
@@ -1642,12 +1695,12 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           },
           notificationPulses: [
             ...current.notificationPulses,
-            ...pulseTargets.map((id) => createNotificationPulse(id, mode === "codex" ? "codex" : "needs_review", `${modeLabel(mode)} result ready`)),
+            ...pulseTargets.map((id) => createNotificationPulse(id, resultNotificationKind, `${modeLabel(mode)} result ready`)),
           ],
           unreadNotifications: markUnreadNotifications(
             current.unreadNotifications,
             pulseTargets,
-            mode === "codex" ? "codex" : "needs_review",
+            resultNotificationKind,
             `${modeLabel(mode)} result ready`,
           ),
           aiRuns: {
@@ -1660,9 +1713,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
               completedAt,
               responseNodeId,
               usage: result.usage,
-              workspace: codexSettingsForRun?.workspace,
+              workspace: codexSettingsForRun?.workspace ?? openClawSettingsForRun?.workspace,
               codexThreadId: result.codexThreadId,
               codexLogPath: result.codexLogPath,
+              openClawSessionKey: result.openClawSessionKey,
+              openClawLogPath: result.openClawLogPath,
             },
           },
         };
@@ -1686,6 +1741,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           aiDialogSettings: requestNode.aiDialogSettings,
           codexThreadId: requestNode.codexThreadId,
           codexLogPath: requestNode.codexLogPath,
+          openClawSessionKey: requestNode.openClawSessionKey,
+          openClawLogPath: requestNode.openClawLogPath,
           usedNodeIds,
         });
         const atlasRoot = updateNodeById(
@@ -2552,7 +2609,7 @@ function isStoredUnreadNotification(value: unknown): value is UnreadNotification
 }
 
 function isNotificationPulseKind(value: unknown): value is NotificationPulseKind {
-  return value === "done" || value === "needs_review" || value === "error" || value === "codex" || value === "cost";
+  return value === "done" || value === "needs_review" || value === "error" || value === "codex" || value === "openclaw" || value === "cost";
 }
 
 function focusRootCameraOnly(setState: typeof useAtlasStore.setState, nodeId: string) {
@@ -2656,21 +2713,29 @@ function buildAtlasNodeFromOutline(
   inheritedAiDialogSettings?: AiDialogSettings,
   inheritedCodexThreadId?: string,
   inheritedCodexLogPath?: string,
+  inheritedOpenClawSessionKey?: string,
+  inheritedOpenClawLogPath?: string,
 ): AtlasNode {
   const existingNode = outline.id ? findNode(useAtlasStore.getState().atlasRoot, outline.id) : undefined;
   const fallbackAiDialogSettings = fallbackNode.aiDialogSettings ?? inheritedAiDialogSettings;
   const fallbackCodexThreadId = fallbackNode.codexThreadId ?? inheritedCodexThreadId;
   const fallbackCodexLogPath = fallbackNode.codexLogPath ?? inheritedCodexLogPath;
+  const fallbackOpenClawSessionKey = fallbackNode.openClawSessionKey ?? inheritedOpenClawSessionKey;
+  const fallbackOpenClawLogPath = fallbackNode.openClawLogPath ?? inheritedOpenClawLogPath;
   const base = existingNode ?? createNotebookNode(parentId ?? fallbackNode.sourceParentId ?? "atlas-root", childIndex, outline.title, outline.body, {
     position: getPhyllotaxisStoredChildPosition(depth, siblingCount, childIndex, parentId ?? fallbackNode.id),
     aiDialogSettings: fallbackAiDialogSettings,
     codexThreadId: fallbackCodexThreadId,
     codexLogPath: fallbackCodexLogPath,
+    openClawSessionKey: fallbackOpenClawSessionKey,
+    openClawLogPath: fallbackOpenClawLogPath,
     usedNodeIds,
   });
   const aiDialogSettings = base.aiDialogSettings ?? fallbackAiDialogSettings;
   const codexThreadId = base.codexThreadId ?? fallbackCodexThreadId;
   const codexLogPath = base.codexLogPath ?? fallbackCodexLogPath;
+  const openClawSessionKey = base.openClawSessionKey ?? fallbackOpenClawSessionKey;
+  const openClawLogPath = base.openClawLogPath ?? fallbackOpenClawLogPath;
   const children = outline.children.map((child, index) =>
     buildAtlasNodeFromOutline(
       child,
@@ -2684,6 +2749,8 @@ function buildAtlasNodeFromOutline(
       aiDialogSettings,
       codexThreadId,
       codexLogPath,
+      openClawSessionKey,
+      openClawLogPath,
     ),
   );
   return {
@@ -2696,6 +2763,8 @@ function buildAtlasNodeFromOutline(
     aiDialogSettings,
     codexThreadId,
     codexLogPath,
+    openClawSessionKey,
+    openClawLogPath,
     children,
   };
 }
@@ -2887,6 +2956,8 @@ function cloneNodeSubtreeForPaste(
   inheritedAiDialogSettings?: AiDialogSettings,
   inheritedCodexThreadId?: string,
   inheritedCodexLogPath?: string,
+  inheritedOpenClawSessionKey?: string,
+  inheritedOpenClawLogPath?: string,
   usedNodeIds?: Set<string>,
 ): AtlasNode {
   const id = createPastedNodeId(parentId, { usedNodeIds });
@@ -2897,6 +2968,8 @@ function cloneNodeSubtreeForPaste(
     aiDialogSettings: _aiDialogSettings,
     codexThreadId: _codexThreadId,
     codexLogPath: _codexLogPath,
+    openClawSessionKey: _openClawSessionKey,
+    openClawLogPath: _openClawLogPath,
     attachments,
     children,
     position: _position,
@@ -2905,6 +2978,8 @@ function cloneNodeSubtreeForPaste(
   const aiDialogSettings = source.aiDialogSettings ?? inheritedAiDialogSettings;
   const codexThreadId = source.codexThreadId ?? inheritedCodexThreadId;
   const codexLogPath = source.codexLogPath ?? inheritedCodexLogPath;
+  const openClawSessionKey = source.openClawSessionKey ?? inheritedOpenClawSessionKey;
+  const openClawLogPath = source.openClawLogPath ?? inheritedOpenClawLogPath;
   return {
     ...rest,
     id,
@@ -2916,9 +2991,11 @@ function cloneNodeSubtreeForPaste(
     aiDialogSettings,
     codexThreadId,
     codexLogPath,
+    openClawSessionKey,
+    openClawLogPath,
     attachments: attachments.map((attachment, index) => cloneAttachmentMetadataForPaste(attachment, id, index, now)),
     children: children.map((child) =>
-      cloneNodeSubtreeForPaste(child, id, now, child.position, false, aiDialogSettings, codexThreadId, codexLogPath, usedNodeIds),
+      cloneNodeSubtreeForPaste(child, id, now, child.position, false, aiDialogSettings, codexThreadId, codexLogPath, openClawSessionKey, openClawLogPath, usedNodeIds),
     ),
   };
 }
@@ -2984,6 +3061,8 @@ function createNotebookNode(
     aiDialogSettings?: AiDialogSettings;
     codexThreadId?: string;
     codexLogPath?: string;
+    openClawSessionKey?: string;
+    openClawLogPath?: string;
     usedNodeIds?: Set<string>;
   } = {},
 ): AtlasNode {
@@ -3012,6 +3091,8 @@ function createNotebookNode(
     aiDialogSettings: options.aiDialogSettings,
     codexThreadId: options.codexThreadId,
     codexLogPath: options.codexLogPath,
+    openClawSessionKey: options.openClawSessionKey,
+    openClawLogPath: options.openClawLogPath,
     children: [],
   };
 }
@@ -3027,6 +3108,8 @@ function createAiRequestNode(
     aiDialogSettings?: AiDialogSettings;
     codexThreadId?: string;
     codexLogPath?: string;
+    openClawSessionKey?: string;
+    openClawLogPath?: string;
     usedNodeIds?: Set<string>;
   } = {},
 ): AtlasNode {
@@ -3058,6 +3141,8 @@ function createAiRequestNode(
     aiDialogSettings: options.aiDialogSettings,
     codexThreadId: options.codexThreadId,
     codexLogPath: options.codexLogPath,
+    openClawSessionKey: options.openClawSessionKey,
+    openClawLogPath: options.openClawLogPath,
     position: options.position,
     children: [],
   };
@@ -3077,6 +3162,8 @@ function createAiResponseNode(
     aiDialogSettings?: AiDialogSettings;
     codexThreadId?: string;
     codexLogPath?: string;
+    openClawSessionKey?: string;
+    openClawLogPath?: string;
     usedNodeIds?: Set<string>;
   } = {},
 ): AtlasNode {
@@ -3086,11 +3173,11 @@ function createAiResponseNode(
   return {
     id: createUniqueNodeId("ai", options),
     kind: "thread",
-    nodeType: provider === "codex" ? "tool_result" : "ai_reply",
+    nodeType: provider === "codex" || provider === "openclaw" ? "tool_result" : "ai_reply",
     title: output.title,
     subtitle: `${provider} / ${modelId}`,
     body: output.body,
-    author: provider === "codex" ? "tool" : "ai",
+    author: provider === "codex" || provider === "openclaw" ? "tool" : "ai",
     status: output.suggestedStatus,
     color: planetColorForSeed(seed),
     texture: randomTexture(seed),
@@ -3111,6 +3198,8 @@ function createAiResponseNode(
     aiDialogSettings: options.aiDialogSettings,
     codexThreadId: options.codexThreadId,
     codexLogPath: options.codexLogPath,
+    openClawSessionKey: options.openClawSessionKey,
+    openClawLogPath: options.openClawLogPath,
     position: options.position,
     children: [],
   };
@@ -3126,6 +3215,8 @@ function createAiErrorNode(
     aiDialogSettings?: AiDialogSettings;
     codexThreadId?: string;
     codexLogPath?: string;
+    openClawSessionKey?: string;
+    openClawLogPath?: string;
     usedNodeIds?: Set<string>;
   } = {},
 ): AtlasNode {
@@ -3169,6 +3260,8 @@ function createAiErrorNode(
     aiDialogSettings: options.aiDialogSettings,
     codexThreadId: options.codexThreadId,
     codexLogPath: options.codexLogPath,
+    openClawSessionKey: options.openClawSessionKey,
+    openClawLogPath: options.openClawLogPath,
     position: options.position,
     children: [],
   };
@@ -3339,6 +3432,7 @@ function normalizeTags(tags: string[], ...textParts: string[]) {
 function providerForMode(mode: AiExecutionMode): AiProvider {
   if (mode === "local") return "local";
   if (mode === "codex") return "codex";
+  if (mode === "openclaw") return "openclaw";
   return "openai";
 }
 
@@ -3370,7 +3464,15 @@ function modeLabel(mode: AiExecutionMode) {
       return "Local";
     case "codex":
       return "Codex";
+    case "openclaw":
+      return "OpenClaw";
   }
+}
+
+function aiResultNotificationKind(mode: AiExecutionMode): NotificationPulseKind {
+  if (mode === "codex") return "codex";
+  if (mode === "openclaw") return "openclaw";
+  return "needs_review";
 }
 
 function createNotificationPulse(nodeId: string, kind: NotificationPulseKind, title: string): NotificationPulse {
@@ -3510,14 +3612,16 @@ function markReminderNodesFired(root: AtlasNode, ids: Set<string>, firedAt: stri
 }
 
 function withAiDialogSettingsSaved(
-  state: Pick<AtlasStore, "atlasRoot" | "selectedNodeId" | "aiContextOptions" | "codexSettings">,
+  state: Pick<AtlasStore, "atlasRoot" | "selectedNodeId" | "aiContextOptions" | "codexSettings" | "openClawSettings">,
   patch: Partial<AiDialogSettings>,
 ) {
   const nextContextOptions = normalizeAiContextOptions(patch.contextOptions ?? state.aiContextOptions);
   const nextCodexSettings = normalizeCodexSettings(patch.codexSettings ?? state.codexSettings);
+  const nextOpenClawSettings = normalizeOpenClawSettings(patch.openClawSettings ?? state.openClawSettings);
   const aiDialogSettings: AiDialogSettings = {
     contextOptions: sanitizeStoredAiContextOptions(nextContextOptions),
     codexSettings: sanitizeStoredCodexSettings(nextCodexSettings),
+    openClawSettings: sanitizeStoredOpenClawSettings(nextOpenClawSettings),
   };
   const atlasRoot = updateNodeById(state.atlasRoot, state.selectedNodeId, (node) => ({
     ...node,
@@ -3529,14 +3633,21 @@ function withAiDialogSettingsSaved(
     atlasRoot,
     aiContextOptions: nextContextOptions,
     codexSettings: nextCodexSettings,
+    openClawSettings: nextOpenClawSettings,
   };
 }
 
-function createInheritedAiDialogSettings(path: AtlasNode[], fallbackContextOptions: AiContextOptions, fallbackCodexSettings: CodexSettings): AiDialogSettings {
+function createInheritedAiDialogSettings(
+  path: AtlasNode[],
+  fallbackContextOptions: AiContextOptions,
+  fallbackCodexSettings: CodexSettings,
+  fallbackOpenClawSettings: OpenClawSettings,
+): AiDialogSettings {
   const inherited = findAiDialogSettingsInPath(path);
   return createCurrentAiDialogSettings(
     inherited?.contextOptions ?? fallbackContextOptions,
     inherited?.codexSettings ?? fallbackCodexSettings,
+    inherited?.openClawSettings ?? fallbackOpenClawSettings,
   );
 }
 
@@ -3557,6 +3668,18 @@ function inferCodexLogPathFromNodePath(path: AtlasNode[]) {
 function getCodexThreadIdForNewChild(path: AtlasNode[], aiDialogSettings?: AiDialogSettings) {
   if (aiDialogSettings?.codexSettings.continueMode === "new") return undefined;
   return aiDialogSettings?.codexSettings.resumeThreadId || inferCodexThreadIdFromNodePath(path) || undefined;
+}
+
+function inferOpenClawLogPathFromNodePath(path: AtlasNode[]) {
+  for (const node of path.slice().reverse()) {
+    if (node.openClawLogPath) return node.openClawLogPath;
+  }
+  return undefined;
+}
+
+function getOpenClawSessionKeyForNewChild(path: AtlasNode[], aiDialogSettings?: AiDialogSettings) {
+  if (aiDialogSettings?.openClawSettings.continueMode === "new") return undefined;
+  return aiDialogSettings?.openClawSettings.resumeSessionKey || inferOpenClawSessionKeyFromNodePath(path) || undefined;
 }
 
 function sanitizeStoredAiContextOptions(options: AiContextOptions) {
@@ -3581,10 +3704,26 @@ function sanitizeStoredCodexSettings(settings: CodexSettings) {
   });
 }
 
-function createCurrentAiDialogSettings(contextOptions: AiContextOptions, codexSettings: CodexSettings): AiDialogSettings {
+function sanitizeStoredOpenClawSettings(settings: OpenClawSettings) {
+  const {
+    clientRunId: _clientRunId,
+    requestNodeId: _requestNodeId,
+    sourceNodeId: _sourceNodeId,
+    sessionKey: _sessionKey,
+    ...rest
+  } = settings;
+  return normalizeOpenClawSettings(rest);
+}
+
+function createCurrentAiDialogSettings(
+  contextOptions: AiContextOptions,
+  codexSettings: CodexSettings,
+  openClawSettings: OpenClawSettings,
+): AiDialogSettings {
   return {
     contextOptions: sanitizeStoredAiContextOptions(contextOptions),
     codexSettings: sanitizeStoredCodexSettings(codexSettings),
+    openClawSettings: sanitizeStoredOpenClawSettings(openClawSettings),
   };
 }
 
@@ -3597,9 +3736,20 @@ function buildCodexSettingsForRun(settings: CodexSettings, context: AiNodeContex
   const continueMode = settings.continueMode ?? "auto";
   return normalizeCodexSettings({
     ...settings,
-    workspace: workspaceFromContext || settings.workspace.trim(),
+    workspace: settings.workspace.trim() || workspaceFromContext,
     continueMode,
     resumeThreadId: continueMode === "auto" ? settings.resumeThreadId || inferCodexThreadIdFromContext(context) : "",
+  });
+}
+
+function buildOpenClawSettingsForRun(settings: OpenClawSettings, context: AiNodeContext) {
+  const workspaceFromContext = inferCodexWorkspaceFromContext(context);
+  const continueMode = settings.continueMode ?? "auto";
+  return normalizeOpenClawSettings({
+    ...settings,
+    workspace: settings.workspace.trim() || workspaceFromContext,
+    continueMode,
+    resumeSessionKey: continueMode === "auto" ? settings.resumeSessionKey || inferOpenClawSessionKeyFromContext(context) : "",
   });
 }
 
@@ -3638,6 +3788,15 @@ function inferCodexThreadIdFromNodePath(path: AtlasNode[]) {
   return "";
 }
 
+function inferOpenClawSessionKeyFromNodePath(path: AtlasNode[]) {
+  for (const node of path.slice().reverse()) {
+    if (node.openClawSessionKey) return node.openClawSessionKey;
+    const resumeSessionKey = node.aiDialogSettings?.openClawSettings.resumeSessionKey;
+    if (resumeSessionKey) return resumeSessionKey;
+  }
+  return "";
+}
+
 function findCodexSettingsInPath(path: AtlasNode[]) {
   for (const node of path.slice().reverse()) {
     if (node.aiDialogSettings?.codexSettings) return node.aiDialogSettings.codexSettings;
@@ -3668,11 +3827,34 @@ function inferCodexThreadIdFromContext(context: AiNodeContext) {
   return "";
 }
 
+function inferOpenClawSessionKeyFromContext(context: AiNodeContext) {
+  const nodes = [
+    context.selectedNode,
+    ...(context.selectedNodes ?? []),
+    ...context.path.slice().reverse(),
+    ...context.siblingNodes,
+  ];
+  for (const node of nodes) {
+    if (node.openClawSessionKey) return node.openClawSessionKey;
+  }
+  return "";
+}
+
 function findActiveCodexRunForWorkspace(aiRuns: Record<string, AiRun>, workspace: string, excludeRunId?: string) {
   const normalizedWorkspace = normalizeWorkspaceKey(workspace);
   return Object.values(aiRuns).find((run) =>
     run.id !== excludeRunId &&
     run.mode === "codex" &&
+    run.status === "running" &&
+    normalizeWorkspaceKey(run.workspace ?? "") === normalizedWorkspace
+  );
+}
+
+function findActiveOpenClawRunForWorkspace(aiRuns: Record<string, AiRun>, workspace: string, excludeRunId?: string) {
+  const normalizedWorkspace = normalizeWorkspaceKey(workspace);
+  return Object.values(aiRuns).find((run) =>
+    run.id !== excludeRunId &&
+    run.mode === "openclaw" &&
     run.status === "running" &&
     normalizeWorkspaceKey(run.workspace ?? "") === normalizedWorkspace
   );
@@ -3698,6 +3880,25 @@ function normalizeCodexSettings(settings: Partial<CodexSettings>): CodexSettings
     fullAccessApproved: settings.fullAccessApproved === true,
     continueMode,
     resumeThreadId: continueMode === "new" ? "" : (settings.resumeThreadId ?? "").trim(),
+    clientRunId: (settings.clientRunId ?? "").trim(),
+    requestNodeId: (settings.requestNodeId ?? "").trim(),
+    sourceNodeId: (settings.sourceNodeId ?? "").trim(),
+  };
+}
+
+function normalizeOpenClawSettings(settings: Partial<OpenClawSettings>): OpenClawSettings {
+  const continueMode = settings.continueMode === "new" ? "new" : "auto";
+  return {
+    ...DEFAULT_OPENCLAW_SETTINGS,
+    ...settings,
+    model: (settings.model ?? "").trim(),
+    thinking: "off",
+    agent: (settings.agent ?? "").trim(),
+    workspace: (settings.workspace ?? "").trim(),
+    timeoutMs: clampInteger(settings.timeoutMs ?? DEFAULT_OPENCLAW_SETTINGS.timeoutMs, 30_000, 120 * 60_000),
+    continueMode,
+    resumeSessionKey: continueMode === "new" ? "" : (settings.resumeSessionKey ?? "").trim(),
+    sessionKey: (settings.sessionKey ?? "").trim(),
     clientRunId: (settings.clientRunId ?? "").trim(),
     requestNodeId: (settings.requestNodeId ?? "").trim(),
     sourceNodeId: (settings.sourceNodeId ?? "").trim(),
@@ -3919,6 +4120,8 @@ function nodeToAiSnapshot(node: AtlasNode, depthRemaining: number, options: { ch
     aiRunId: node.aiRunId,
     codexThreadId: node.codexThreadId,
     codexLogPath: node.codexLogPath,
+    openClawSessionKey: node.openClawSessionKey,
+    openClawLogPath: node.openClawLogPath,
     attachments: node.attachments.map((attachment) => ({
       id: attachment.id,
       name: attachment.name,

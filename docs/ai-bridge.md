@@ -54,6 +54,11 @@ Copy `.env.example` values into your shell or deployment environment.
 - `MIND_ATLAS_CODEX_SANDBOX`: default sandbox. Use `workspace-write`; Full access normally requires an approval button in Mind Atlas.
 - `MIND_ATLAS_CODEX_MODELS`: optional comma-separated model override when `codex debug models` is unavailable.
 - `MIND_ATLAS_CODEX_TIMEOUT_MS`: Codex execution timeout in milliseconds. Defaults to 60 minutes.
+- `MIND_ATLAS_OPENCLAW_BIN`: OpenClaw executable. Defaults to `openclaw`; on Windows the bridge also auto-detects the user npm OpenClaw entrypoint.
+- `MIND_ATLAS_OPENCLAW_MODEL`: optional OpenClaw model override. Leave blank to use the OpenClaw default, such as the model already configured for LM Studio.
+- `MIND_ATLAS_OPENCLAW_AGENT`: optional OpenClaw agent id. Leave blank to use the OpenClaw default agent.
+- `MIND_ATLAS_OPENCLAW_WORKSPACE`: optional work root hint passed into the OpenClaw prompt. The bridge does not modify OpenClaw workspace configuration.
+- `MIND_ATLAS_OPENCLAW_TIMEOUT_MS`: OpenClaw execution timeout in milliseconds. Defaults to 10 minutes.
 
 On Windows, Codex can occasionally fail before command execution with
 `windows sandbox: spawn setup refresh`. When this exact sandbox initialization
@@ -84,12 +89,14 @@ Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that ne
 
 ## Current AI Surface
 
-- The command dock supports OpenAI, Local, and Codex modes.
+- The command dock supports OpenAI, Local, Codex, and OpenClaw modes.
 - A user request is saved as a child notebook node first. The provider result is saved as a child of that request.
 - OpenAI uses the Responses API by default.
 - OpenAI image-generation prompts are routed through the Image API and saved as image attachments on the result node.
 - Local mode uses an OpenAI-compatible `/chat/completions` endpoint such as LM Studio.
 - Codex mode runs `codex exec --json` in `workspace-write` sandbox by default. The user-facing answer becomes `Codex final`; run metadata, command logs, and changed-file details are collected into one sibling `Codex details` node.
+- OpenClaw mode runs `openclaw agent --local --json --thinking off` through the bridge. The result is saved as a child notebook node, and the OpenClaw session key plus run log path are stored on the request/result branch.
+- OpenClaw `Session: auto` resumes an OpenClaw session key found on the active node path. `Session: new` starts a fresh key for that request.
 - Command failures inside a normal Codex run are treated as ordinary diagnostic detail, not Mind Atlas error nodes. Error pulses are reserved for Codex invocation failures or explicit approval/error nodes.
 - The Codex settings row has a `Skip Git` checkbox. It is off by default; when enabled, the bridge passes `--skip-git-repo-check` for first runs in a non-Git or not-yet-trusted work root.
 - If Codex appears blocked by permissions, Mind Atlas creates a pulsing approval request node. Its child option nodes have centered buttons for approving or denying a retry with `danger-full-access`.

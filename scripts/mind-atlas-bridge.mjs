@@ -47,6 +47,16 @@ const codexLogDir = resolve(process.env.MIND_ATLAS_CODEX_LOG_DIR ?? join(process
 let codexOptionsCache = null;
 let codexSearchFlagSupportCache = null;
 
+const openClawBin = resolveOpenClawBin(process.env.MIND_ATLAS_OPENCLAW_BIN ?? "openclaw");
+const openClawModel = process.env.MIND_ATLAS_OPENCLAW_MODEL ?? "";
+const openClawThinking = "off";
+const openClawAgent = process.env.MIND_ATLAS_OPENCLAW_AGENT ?? "";
+const openClawWorkspace = process.env.MIND_ATLAS_OPENCLAW_WORKSPACE ?? "";
+const openClawTimeoutMs = Number(process.env.MIND_ATLAS_OPENCLAW_TIMEOUT_MS ?? 10 * 60 * 1000);
+const openClawPromptCharLimit = readPositiveIntEnv("MIND_ATLAS_OPENCLAW_PROMPT_CHAR_LIMIT", 24_000);
+const openClawDisabled = process.env.MIND_ATLAS_OPENCLAW_DISABLED === "true";
+const openClawLogDir = resolve(process.env.MIND_ATLAS_OPENCLAW_LOG_DIR ?? join(process.cwd(), "server-data", "openclaw-runs"));
+
 const realtimeModel = process.env.MIND_ATLAS_REALTIME_MODEL ?? "gpt-realtime";
 const realtimeVoice = process.env.MIND_ATLAS_REALTIME_VOICE ?? "marin";
 const realtimeTranscriptionModel = process.env.MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe";
@@ -111,6 +121,19 @@ function findVsCodeCodexBin() {
   return "";
 }
 
+function resolveOpenClawBin(configuredBin) {
+  const value = String(configuredBin || "openclaw").trim() || "openclaw";
+  if (looksLikePath(value)) return existsSync(value) ? value : value;
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA;
+    const npmEntrypoint = appData ? join(appData, "npm", "node_modules", "openclaw", "openclaw.mjs") : "";
+    if (npmEntrypoint && existsSync(npmEntrypoint)) return npmEntrypoint;
+    const npmShim = appData ? join(appData, "npm", "openclaw.cmd") : "";
+    if (npmShim && existsSync(npmShim)) return npmShim;
+  }
+  return value;
+}
+
 const server = createBridgeServer(async (request, response) => {
   setCors(request, response);
 
@@ -162,6 +185,13 @@ const server = createBridgeServer(async (request, response) => {
             configured: !codexDisabled,
             model: codexModel || "codex-default",
             detail: `${codexUseWsl ? `wsl ${codexBin}` : codexBin}; ${codexSandbox}; ${codexWorkspace}`,
+          },
+          {
+            id: "openclaw",
+            label: "OpenClaw CLI",
+            configured: !openClawDisabled,
+            model: openClawModel || "openclaw-default",
+            detail: `${openClawBin}; ${openClawThinking}; ${openClawAgent || "default-agent"}`,
           },
         ],
       });
@@ -274,6 +304,7 @@ server.listen(port, host, () => {
   console.log(openAiApiKey ? `OpenAI upstream: ${openAiBaseUrl}` : "OpenAI key not set; mock text responses are enabled.");
   console.log(`Local upstream: ${localBaseUrl}`);
   console.log(`Codex command: ${codexUseWsl ? "wsl " : ""}${codexBin}`);
+  console.log(`OpenClaw command: ${openClawBin}`);
 });
 
 function createBridgeServer(handler) {
@@ -321,6 +352,16 @@ async function createAiResponse(payload) {
       context,
       model: stringOr(payload?.model, codexModel),
       codex: payload?.codex ?? {},
+      startedAt,
+    });
+  }
+
+  if (provider === "openclaw") {
+    return await createOpenClawResponse({
+      prompt,
+      context,
+      model: stringOr(payload?.model, openClawModel),
+      openclaw: payload?.openclaw ?? {},
       startedAt,
     });
   }
@@ -835,7 +876,264 @@ async function saveCodexResponseLog(logPath, response) {
   }
 }
 
+async function createOpenClawResponse({ prompt, context, model, openclaw, startedAt }) {
+  if (openClawDisabled) throw new BridgeError(503, "OpenClaw CLI is disabled");
+  const settings = normalizeOpenClawSettings(openclaw, model, context);
+  const openClawPrompt = buildOpenClawPrompt(prompt, context, settings);
+  const result = await runOpenClaw(openClawPrompt, settings);
+  const durationMs = Date.now() - startedAt;
+  const parsed = parseOpenClawJson(result.stdout);
+  const finalText = extractOpenClawText(parsed) || result.stdout.trim();
+  const body = [
+    finalText || "OpenClaw did not produce a final message.",
+    result.exitCode !== 0 && result.stderr.trim() ? `\n\nstderr:\n${result.stderr.trim()}` : "",
+  ].join("").trim();
+  const output = normalizeAiOutput({
+    title: result.exitCode === 0 ? "OpenClaw result" : "OpenClaw issue",
+    body,
+    summary: (finalText || result.stderr || "OpenClaw run completed.").split("\n").find(Boolean)?.slice(0, 220) ?? "OpenClaw run completed.",
+    suggestedStatus: "needs_review",
+    tags: ["openclaw", "code"],
+  }, prompt);
+  const response = {
+    id: randomUUID(),
+    provider: "openclaw",
+    model: stringOr(parsed?.model, stringOr(parsed?.meta?.agentMeta?.model, settings.model || "openclaw-cli")),
+    output,
+    openClawSessionKey: result.openClawSessionKey,
+    openClawLogPath: result.openClawLogPath,
+    rawText: result.stdout,
+    usage: {
+      ...normalizeOpenClawUsage(parsed?.usage ?? parsed?.meta?.agentMeta?.usage ?? parsed),
+      durationMs,
+    },
+  };
+  await saveOpenClawResponseLog(result.openClawLogPath, response);
+  return response;
+}
+
+async function runOpenClaw(prompt, settings) {
+  assertExistingWorkspace(settings.workspace, "OpenClaw");
+  const startedAt = new Date().toISOString();
+  const sessionKey = buildOpenClawSessionKey(settings);
+  const boundedPrompt = truncateText(prompt, openClawPromptCharLimit);
+  const args = [
+    "agent",
+    "--local",
+    "--json",
+    "--message",
+    boundedPrompt,
+    "--thinking",
+    settings.thinking,
+    "--timeout",
+    String(Math.max(1, Math.ceil(settings.timeoutMs / 1000))),
+    "--session-key",
+    sessionKey,
+  ];
+  if (settings.model) args.push("--model", settings.model);
+  if (settings.agent) args.push("--agent", settings.agent);
+
+  const commandSpec = buildOpenClawCommand(args);
+  const result = await runProcess(commandSpec.command, commandSpec.args, "", settings.timeoutMs, settings.workspace);
+  const completedAt = new Date().toISOString();
+  if (result.exitCode !== 0 && !result.stdout.trim()) {
+    throw new BridgeError(502, result.stderr.trim() || `OpenClaw CLI exited with ${result.exitCode}`);
+  }
+  const openClawLogPath = await saveOpenClawRunLog({
+    settings,
+    prompt: boundedPrompt,
+    result,
+    command: commandSpec.command,
+    args: commandSpec.args,
+    startedAt,
+    completedAt,
+    openClawSessionKey: sessionKey,
+  });
+  return { ...result, openClawSessionKey: sessionKey, openClawLogPath };
+}
+
+function buildOpenClawCommand(args) {
+  if (/\.mjs$/i.test(openClawBin)) {
+    return { command: process.execPath, args: [openClawBin, ...args] };
+  }
+  if (process.platform === "win32" && /\.(cmd|bat)$/i.test(openClawBin)) {
+    return { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", openClawBin, ...args] };
+  }
+  return { command: openClawBin, args };
+}
+
+function buildOpenClawPrompt(prompt, context, settings) {
+  const contextSummary = JSON.stringify({
+    selectedNode: context?.selectedNode,
+    selectedNodes: context?.selectedNodes,
+    path: context?.path,
+    siblingNodes: context?.siblingNodes,
+    scope: context?.scope,
+    stats: context?.stats,
+  }, null, 2);
+  return [
+    "You are OpenClaw CLI invoked from Mind Atlas.",
+    "Mind Atlas is a spatial tree notebook. This is a node-anchored run: use only the explicit node context below, plus files/tools you can access through OpenClaw.",
+    "Return a concise final answer suitable for saving as a child Mind Atlas node.",
+    "Do not change OpenClaw or LM Studio configuration unless the user explicitly asks for that in this prompt.",
+    settings.workspace ? `User-selected work root: ${settings.workspace}` : "No Mind Atlas work root was provided; use the OpenClaw agent default workspace if it has one.",
+    settings.agent ? `OpenClaw agent: ${settings.agent}` : "OpenClaw agent: default",
+    settings.resumeSessionKey ? `Continuing OpenClaw session key: ${settings.resumeSessionKey}` : "Starting a new OpenClaw session key for this branch.",
+    "",
+    "# User request",
+    prompt,
+    "",
+    "# Mind Atlas context",
+    truncateText(contextSummary, Math.max(2000, Math.floor(openClawPromptCharLimit * 0.55))),
+  ].join("\n");
+}
+
+function normalizeOpenClawSettings(input, model, context) {
+  const workspace = stringOr(input?.workspace, stringOr(extractWorkspaceFromContext(context), openClawWorkspace));
+  const continueMode = input?.continueMode === "new" ? "new" : "auto";
+  return {
+    model: stringOr(input?.model, model || openClawModel),
+    thinking: openClawThinking,
+    agent: stringOr(input?.agent, openClawAgent),
+    workspace,
+    timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input.timeoutMs) : openClawTimeoutMs,
+    continueMode,
+    resumeSessionKey: continueMode === "new" ? "" : stringOr(input?.resumeSessionKey, ""),
+    sessionKey: stringOr(input?.sessionKey, ""),
+    clientRunId: stringOr(input?.clientRunId, ""),
+    requestNodeId: stringOr(input?.requestNodeId, ""),
+    sourceNodeId: stringOr(input?.sourceNodeId, ""),
+  };
+}
+
+function buildOpenClawSessionKey(settings) {
+  const existing = settings.resumeSessionKey || settings.sessionKey;
+  if (existing) return sanitizeOpenClawSessionKey(existing);
+  const seed = settings.requestNodeId || settings.clientRunId || settings.sourceNodeId || randomUUID();
+  return sanitizeOpenClawSessionKey(`mind-atlas-${seed}`);
+}
+
+function sanitizeOpenClawSessionKey(value) {
+  return String(value || "mind-atlas")
+    .trim()
+    .replace(/[^A-Za-z0-9_.:-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 160) || `mind-atlas-${randomUUID()}`;
+}
+
+function parseOpenClawJson(stdout) {
+  const text = String(stdout ?? "").trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Some CLI versions may print diagnostics before the final JSON line.
+  }
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines.slice().reverse()) {
+    try {
+      return JSON.parse(line);
+    } catch {
+      // keep looking
+    }
+  }
+  return null;
+}
+
+function extractOpenClawText(data) {
+  if (!data) return "";
+  const candidates = [
+    data.text,
+    data.output,
+    data.response,
+    data.reply,
+    data.message,
+    data.final,
+    data.result?.text,
+    data.result?.output,
+    data.result?.message,
+    data.result?.response,
+    data.data?.text,
+    data.data?.output,
+    data.finalAssistantVisibleText,
+    data.finalAssistantRawText,
+    Array.isArray(data.payloads) ? data.payloads.map((payload) => payload?.text).filter(Boolean).join("\n") : "",
+  ];
+  for (const candidate of candidates) {
+    const text = contentText(candidate);
+    if (text.trim()) return text.trim();
+  }
+  const messageArrays = [data.messages, data.items, data.events, data.result?.messages, data.data?.messages].filter(Array.isArray);
+  for (const messages of messageArrays) {
+    for (const item of messages.slice().reverse()) {
+      const text = contentText(item?.content ?? item?.text ?? item?.message ?? item?.output);
+      if (text.trim()) return text.trim();
+    }
+  }
+  return "";
+}
+
+function contentText(value) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => contentText(item?.text ?? item?.content ?? item)).filter(Boolean).join("\n");
+  }
+  if (value && typeof value === "object") {
+    return contentText(value.text ?? value.content ?? value.output ?? value.message);
+  }
+  return "";
+}
+
+function normalizeOpenClawUsage(value) {
+  return withoutUndefined({
+    inputTokens: numberOrUndefined(value?.input_tokens ?? value?.inputTokens ?? value?.prompt_tokens ?? value?.promptTokens ?? value?.input),
+    outputTokens: numberOrUndefined(value?.output_tokens ?? value?.outputTokens ?? value?.completion_tokens ?? value?.completionTokens ?? value?.output),
+    totalTokens: numberOrUndefined(value?.total_tokens ?? value?.totalTokens ?? value?.total),
+  });
+}
+
+async function saveOpenClawRunLog({ settings, prompt, result, command, args, startedAt, completedAt, openClawSessionKey }) {
+  const workspaceName = toSafeFilePart(basename(resolve(stringOr(settings.workspace, "workspace"))) || "workspace");
+  const sessionName = toSafeFilePart(openClawSessionKey || "no-session");
+  const runName = `${startedAt.replace(/[-:.TZ]/g, "").slice(0, 14)}-${toSafeFilePart(randomUUID()).slice(0, 8)}`;
+  const directory = join(openClawLogDir, workspaceName, sessionName, runName);
+  await mkdir(directory, { recursive: true });
+  await Promise.all([
+    writeFile(join(directory, "prompt.txt"), prompt, "utf8"),
+    writeFile(join(directory, "stdout.json"), result.stdout, "utf8"),
+    writeFile(join(directory, "stderr.txt"), result.stderr, "utf8"),
+    writeFile(join(directory, "metadata.json"), JSON.stringify({
+      startedAt,
+      completedAt,
+      workspace: settings.workspace,
+      model: settings.model,
+      thinking: settings.thinking,
+      agent: settings.agent,
+      continueMode: settings.continueMode,
+      resumeSessionKey: settings.resumeSessionKey,
+      openClawSessionKey,
+      clientRunId: settings.clientRunId,
+      requestNodeId: settings.requestNodeId,
+      sourceNodeId: settings.sourceNodeId,
+      command,
+      args,
+      exitCode: result.exitCode,
+    }, null, 2), "utf8"),
+  ]);
+  return directory;
+}
+
+async function saveOpenClawResponseLog(logPath, response) {
+  if (!logPath) return;
+  try {
+    await writeFile(join(logPath, "response.json"), JSON.stringify(response, null, 2), "utf8");
+  } catch (error) {
+    console.warn(`[bridge] failed to save OpenClaw response log: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
 async function runCodex(prompt, settings) {
+  assertExistingWorkspace(settings.workspace, "Codex");
   const result = await runCodexOnce(prompt, settings);
   if (!shouldRetryWindowsSandboxSetupFailure(result, settings)) {
     return {
@@ -1024,7 +1322,7 @@ async function codexSupportsSearchFlag() {
 }
 
 function normalizeCodexSettings(input, model, context) {
-  const workspace = stringOr(extractWorkspaceFromContext(context), stringOr(input?.workspace, codexWorkspace));
+  const workspace = stringOr(input?.workspace, stringOr(extractWorkspaceFromContext(context), codexWorkspace));
   const requestedSandbox = normalizeCodexSandbox(input?.sandbox ?? codexSandbox);
   const fullAccessApproved = input?.fullAccessApproved === true;
   const sandbox = requestedSandbox === "danger-full-access" && !fullAccessApproved ? "workspace-write" : requestedSandbox;
@@ -1531,6 +1829,14 @@ function runProcess(command, args, stdin, timeoutMs, cwd) {
 function normalizeProcessCwd(cwd) {
   const candidate = String(cwd || "").trim();
   return candidate && existsSync(candidate) ? candidate : process.cwd();
+}
+
+function assertExistingWorkspace(workspace, label) {
+  const candidate = String(workspace || "").trim();
+  if (!candidate) return;
+  if (!existsSync(candidate)) {
+    throw new BridgeError(400, `${label} workspace does not exist: ${candidate}`);
+  }
 }
 
 function appendBoundedOutput(current, chunk) {

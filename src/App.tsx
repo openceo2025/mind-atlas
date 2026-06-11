@@ -1197,6 +1197,8 @@ function notificationKindLabel(kind: NotificationPulse["kind"]) {
       return "Error notification";
     case "codex":
       return "Codex notification";
+    case "openclaw":
+      return "OpenClaw notification";
     case "cost":
       return "Cost notification";
     case "done":

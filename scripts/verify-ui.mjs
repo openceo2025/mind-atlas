@@ -24,7 +24,7 @@ async function launchBrowser() {
 }
 
 async function verifyViewport(browser, name, viewport) {
-  const page = await browser.newPage({ viewport });
+  const page = await browser.newPage({ viewport, ignoreHTTPSErrors: true });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
   await page.waitForTimeout(900);

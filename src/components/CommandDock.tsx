@@ -1,4 +1,4 @@
-import { AudioLines, Bot, Code2, HardDrive, Mic, PenLine, SendHorizonal, Square } from "lucide-react";
+import { AudioLines, Bot, Code2, HardDrive, Mic, PenLine, SendHorizonal, Square, Terminal } from "lucide-react";
 import { FormEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, useEffect, useMemo, useRef, useState } from "react";
 import { getCodexOptions, transcribeAudio } from "../ai/bridgeClient";
 import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceSession, type RealtimeSessionState } from "../ai/realtimeClient";
@@ -46,6 +46,8 @@ export function CommandDock() {
   const setAiContextOptions = useAtlasStore((state) => state.setAiContextOptions);
   const codexSettings = useAtlasStore((state) => state.codexSettings);
   const setCodexSettings = useAtlasStore((state) => state.setCodexSettings);
+  const openClawSettings = useAtlasStore((state) => state.openClawSettings);
+  const setOpenClawSettings = useAtlasStore((state) => state.setOpenClawSettings);
   const loadAiDialogSettingsForNode = useAtlasStore((state) => state.loadAiDialogSettingsForNode);
   const resetAiDialogSettingsToDefaults = useAtlasStore((state) => state.resetAiDialogSettingsToDefaults);
   const setCommandInputEditing = useAtlasStore((state) => state.setCommandInputEditing);
@@ -716,6 +718,7 @@ export function CommandDock() {
         <ModeButton mode="openai" activeMode={mode} onSelect={setMode} />
         <ModeButton mode="local" activeMode={mode} onSelect={setMode} />
         <ModeButton mode="codex" activeMode={mode} onSelect={setMode} />
+        <ModeButton mode="openclaw" activeMode={mode} onSelect={setMode} />
         <ModeButton mode="note" activeMode={mode} onSelect={setMode} />
       </div>
       <select
@@ -742,7 +745,15 @@ export function CommandDock() {
           onChange={(event) => setValue(event.target.value)}
           onFocus={() => setCommandInputEditing(true)}
           onBlur={() => setCommandInputEditing(false)}
-          placeholder={mode === "note" ? "Create a child node here" : mode === "codex" ? "Ask Codex from this location" : "Ask AI from this location"}
+          placeholder={
+            mode === "note"
+              ? "Create a child node here"
+              : mode === "codex"
+                ? "Ask Codex from this location"
+                : mode === "openclaw"
+                  ? "Ask OpenClaw from this location"
+                  : "Ask AI from this location"
+          }
         />
       </label>
       <button className="send-button" type="submit" aria-label="Send instruction" disabled={!value.trim() || codexWorkRootMissing}>
@@ -926,6 +937,62 @@ export function CommandDock() {
           />
         </div>
       ) : null}
+      {mode === "openclaw" ? (
+        <div className="codex-options-row openclaw-options-row" aria-label="OpenClaw settings">
+          <label className="context-option-field">
+            <span>Model</span>
+            <input
+              value={openClawSettings.model}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setOpenClawSettings({ model: event.target.value })}
+              placeholder="OpenClaw default"
+            />
+          </label>
+          <label className="context-option-field">
+            <span>Agent</span>
+            <input
+              value={openClawSettings.agent}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setOpenClawSettings({ agent: event.target.value })}
+              placeholder="default"
+            />
+          </label>
+          <label className="context-option-field codex-workspace-field">
+            <span>Work root</span>
+            <input
+              value={openClawSettings.workspace}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setOpenClawSettings({ workspace: event.target.value })}
+              placeholder="optional project path"
+            />
+          </label>
+          <label className="context-option-field">
+            <span>Session</span>
+            <select
+              value={openClawSettings.continueMode ?? "auto"}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setOpenClawSettings({ continueMode: event.target.value as CodexContinueMode, resumeSessionKey: "" })}
+              title="Auto resumes an OpenClaw session key found on the active node path. New starts a fresh OpenClaw session."
+            >
+              <option value="auto">auto</option>
+              <option value="new">new</option>
+            </select>
+          </label>
+          <ContextNumberControl
+            label="Timeout (min)"
+            value={Math.round(openClawSettings.timeoutMs / 60000)}
+            min={1}
+            max={120}
+            onChange={(minutes) => setOpenClawSettings({ timeoutMs: minutes * 60000 })}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+          />
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -1042,7 +1109,7 @@ function ModeButton({
   activeMode: CommandMode;
   onSelect: (mode: CommandMode) => void;
 }) {
-  const Icon = mode === "openai" ? Bot : mode === "local" ? HardDrive : mode === "codex" ? Code2 : PenLine;
+  const Icon = mode === "openai" ? Bot : mode === "local" ? HardDrive : mode === "codex" ? Code2 : mode === "openclaw" ? Terminal : PenLine;
   return (
     <button
       className={activeMode === mode ? "is-active" : ""}
@@ -1066,13 +1133,15 @@ function modeLabel(mode: CommandMode) {
       return "Local";
     case "codex":
       return "Codex";
+    case "openclaw":
+      return "OpenClaw";
     case "note":
       return "Note";
   }
 }
 
 function isCommandMode(value: unknown): value is CommandMode {
-  return value === "openai" || value === "local" || value === "codex" || value === "note";
+  return value === "openai" || value === "local" || value === "codex" || value === "openclaw" || value === "note";
 }
 
 function isGlobalAiPartnerSurface(atlasRoot: ReturnType<typeof useAtlasStore.getState>["atlasRoot"], selectedNodeId: string) {
