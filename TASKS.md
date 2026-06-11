@@ -140,7 +140,7 @@ Implementation result:
 
 ### T3. Context Assembly Module
 
-Status: Not started
+Status: Completed on 2026-06-11
 Depends on: None
 Blocks: T7
 
@@ -170,6 +170,22 @@ Implementation notes:
 
 - This task is relatively independent and can be done while T2 is in progress.
 - Avoid coupling the module to React or browser APIs.
+
+Implementation result:
+
+- Added pure context assembly module `src/context/contextAssembly.ts`.
+- Added `assembleAtlasContextMarkdown` for structured Markdown containing the
+  ancestor chain, sibling titles, target subtree content, selected-node context,
+  character count, approximate token count, and included/omitted node ids.
+- Reused existing `AiContextScope` concepts for `minimal`, `focused`,
+  `subtree`, `neighborhood`, `selected`, and `custom` scopes.
+- Added deepest-content overflow behavior through a `maxCharacters` budget.
+- Added `scripts/verify-context-assembly.ts` and `npm run verify:context` for
+  book-like tree coverage of Markdown output, scope behavior, stats, and
+  overflow handling.
+- Verification on 2026-06-11: `npm run verify:context` passed;
+  `npm run typecheck` passed; `npm run build` passed with the existing Vite
+  large chunk warning.
 
 ## Phase 0-B: Core Experience, Parallel After Foundations
 

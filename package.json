@@ -11,6 +11,7 @@
     "build": "tsc -b && vite build --configLoader runner",
     "preview": "vite preview --configLoader runner",
     "typecheck": "tsc -b",
+    "verify:context": "node --experimental-strip-types scripts/verify-context-assembly.ts",
     "verify:ui": "node scripts/verify-ui.mjs"
   },
   "dependencies": {
