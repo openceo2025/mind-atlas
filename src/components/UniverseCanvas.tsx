@@ -30,6 +30,7 @@ import {
   getAiContextNodeIds,
   useAtlasStore,
 } from "../store/atlasStore";
+import { deriveAtlasLayout, type Vec3 } from "../layout/atlasLayout";
 import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { createNodeClipboardText, nodeTreeHasAttachments, parseNodeClipboardText } from "../nodeClipboard";
 import { emitOnboardingEvent, getOnboardingCurrentSpaceStep } from "../onboarding/useOnboarding";
@@ -1669,6 +1670,7 @@ function NotebookNodes({
     if (!commandInputEditing || activeCommandMode === "note") return new Set<string>();
     return new Set(getAiContextNodeIds(atlasRoot, selectedNodeId, { ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds }));
   }, [activeCommandMode, aiContextOptions, atlasRoot, commandInputEditing, multiSelectedNodeIds, selectedNodeId]);
+  const layoutPositions = useMemo(() => deriveAtlasLayout(atlasRoot), [atlasRoot]);
 
   useEffect(() => {
     if (findNode(atlasRoot, renderSelectedNodeId)) return;
@@ -1732,7 +1734,7 @@ function NotebookNodes({
       <group>
         {lowRenderPaths.map(({ path, visibleDepthRemaining, suppressParentEdge }) => {
           const node = path[path.length - 1];
-          const position = getNodeWorldPosition(path);
+          const position = getLayoutPosition(layoutPositions, node.id);
           const parentId = path.length > 1 ? path[path.length - 2].id : null;
           return (
             <HierarchyNode
@@ -1759,6 +1761,7 @@ function NotebookNodes({
               suppressParentEdge={suppressParentEdge || parentId !== atlasRoot.id}
               renderQuality={renderQuality}
               theme={theme}
+              layoutPositions={layoutPositions}
               rootOverviewActive={rootIsSelected}
               onOpenNodeContextMenu={onOpenNodeContextMenu}
             />
@@ -1770,7 +1773,7 @@ function NotebookNodes({
 
   if (focusBaseIndex > 0) {
     const parentPath = renderFocusPath.slice(0, focusBaseIndex + 1);
-    const parentPosition = getNodeWorldPosition(parentPath);
+    const parentPosition = getLayoutPosition(layoutPositions, focusParent.id);
     return (
       <group>
         <HierarchyNode
@@ -1796,6 +1799,7 @@ function NotebookNodes({
           suppressParentEdge={false}
           renderQuality={renderQuality}
           theme={theme}
+          layoutPositions={layoutPositions}
           rootOverviewActive={rootIsSelected}
           onOpenNodeContextMenu={onOpenNodeContextMenu}
         />
@@ -1807,7 +1811,7 @@ function NotebookNodes({
     <group>
       {atlasRoot.children.map((node) => {
         const path = [atlasRoot, node];
-        const position = getNodeWorldPosition(path);
+        const position = getLayoutPosition(layoutPositions, node.id);
         return (
           <HierarchyNode
             key={node.id}
@@ -1833,6 +1837,7 @@ function NotebookNodes({
             suppressParentEdge={false}
             renderQuality={renderQuality}
             theme={theme}
+            layoutPositions={layoutPositions}
             rootOverviewActive={rootIsSelected}
             onOpenNodeContextMenu={onOpenNodeContextMenu}
           />
@@ -1877,6 +1882,10 @@ function buildLowQualityRenderPaths(root: AtlasNode, selectedNodeId: string, not
   return entries;
 }
 
+function getLayoutPosition(layoutPositions: Map<string, Vec3>, nodeId: string): Vec3 {
+  return layoutPositions.get(nodeId) ?? [0, 0, 0];
+}
+
 function hasAiContextPreviewNode(node: AtlasNode, aiContextPreviewNodeIds: Set<string>): boolean {
   if (!aiContextPreviewNodeIds.size) return false;
   if (aiContextPreviewNodeIds.has(node.id)) return true;
@@ -1919,6 +1928,7 @@ function HierarchyNode({
   suppressParentEdge,
   renderQuality,
   theme,
+  layoutPositions,
   rootOverviewActive,
   onOpenNodeContextMenu,
 }: {
@@ -1944,6 +1954,7 @@ function HierarchyNode({
   suppressParentEdge: boolean;
   renderQuality: RenderQuality;
   theme: AtlasTheme;
+  layoutPositions: Map<string, Vec3>;
   rootOverviewActive: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
@@ -2532,7 +2543,7 @@ function HierarchyNode({
       {childrenVisible
         ? node.children.map((child) => {
             const childPath = [...path, child];
-            const childWorldPosition = getNodeWorldPosition(childPath);
+            const childWorldPosition = getLayoutPosition(layoutPositions, child.id);
             const position = subtractPosition(childWorldPosition, worldPosition);
             return (
               <HierarchyNode
@@ -2559,6 +2570,7 @@ function HierarchyNode({
                 suppressParentEdge={suppressParentEdge}
                 renderQuality={renderQuality}
                 theme={theme}
+                layoutPositions={layoutPositions}
                 rootOverviewActive={rootOverviewActive}
                 onOpenNodeContextMenu={onOpenNodeContextMenu}
               />

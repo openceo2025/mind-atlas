@@ -7,6 +7,20 @@ import {
 import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme";
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
 import { getBridgeUrl, getBridgeUrlCandidates, recoverCodexRun, requestAiResponse, requestGitPush } from "../ai/bridgeClient";
+import {
+  NOTEBOOK_FIRST_SHELL_RADIUS,
+  NOTEBOOK_SHELL_GAP,
+  TOP_LEVEL_DRAG_PLANAR_LIMIT,
+  TOP_LEVEL_PLANAR_LIMIT,
+  clampDirection,
+  getManualChildSpreadLimit,
+  getNodeWorldPositionFromPath,
+  getPlanarLimitForDepth,
+  getShellRadius,
+  getStoredPositionForWorldDirection,
+  looksLikeLegacyWorldDirection,
+  type Vec3,
+} from "../layout/atlasLayout";
 import { sanitizeNotebookForExport } from "../notebookExport";
 import {
   clearPersistedNotebook,
@@ -63,13 +77,6 @@ const VOICE_LOG_LAST_SEEN_STORAGE_KEY = "mind-atlas-voice-log-last-seen-v1";
 const VOICE_SUMMARY_STORAGE_KEY = "mind-atlas-voice-summary-v1";
 const VOICE_SETTINGS_STORAGE_KEY = "mind-atlas-voice-settings-v1";
 export const NOTEBOOK_NODE_RADIUS = 28;
-export const NOTEBOOK_FIRST_SHELL_RADIUS = 360;
-export const NOTEBOOK_SHELL_GAP = 340;
-export const TOP_LEVEL_PLANAR_LIMIT = 0.5;
-export const TOP_LEVEL_DRAG_PLANAR_LIMIT = Math.min(1, TOP_LEVEL_PLANAR_LIMIT * 2);
-const FOCUSED_NODE_CAMERA_DISTANCE = 300;
-const MIN_CHILD_SCREEN_SEPARATION_RADII = 3.4;
-const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const NOTIFICATION_PULSE_DURATION_MS = 8200;
 const NOTIFICATION_REPEAT_INTERVAL_MS = 3600;
 const HISTORY_LIMIT = 50;
@@ -82,6 +89,16 @@ const DEFAULT_AI_CONTEXT_OPTIONS: AiContextOptions = {
   maxAttachmentCount: 10,
   maxAttachmentBytes: 2 * 1024 * 1024,
   selectedNodeIds: [],
+};
+
+export {
+  NOTEBOOK_FIRST_SHELL_RADIUS,
+  NOTEBOOK_SHELL_GAP,
+  TOP_LEVEL_DRAG_PLANAR_LIMIT,
+  TOP_LEVEL_PLANAR_LIMIT,
+  getManualChildSpreadLimit,
+  getPlanarLimitForDepth,
+  getShellRadius,
 };
 const DEFAULT_CODEX_SETTINGS: CodexSettings = {
   model: "gpt-5.5",
@@ -788,7 +805,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const insertIndex = typeof options.insertIndex === "number" ? options.insertIndex : parent.children.length;
     const childPosition = options.position
       ? getStoredPositionForWorldDirection(parentPath ?? [state.atlasRoot], options.position, childDepth, parent.children.length + 1)
-      : getPhyllotaxisStoredChildPosition(childDepth, parent.children.length + 1, insertIndex, parent.id);
+      : undefined;
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
     const child = createNotebookNode(
       parentId,
@@ -852,9 +869,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const children = drafts.map((draft, offset) => {
       const body = draft.body;
       const title = draft.title || (body ? titleFromBody(body) : "Untitled node");
-      const position = getPhyllotaxisStoredChildPosition(childDepth, startIndex + offset + 1, startIndex + offset, parent.id);
       const child = createNotebookNode(parentId, startIndex + offset, title, body, {
-        position,
         aiDialogSettings: inheritedAiDialogSettings,
         codexThreadId: inheritedCodexThreadId,
         codexLogPath: inheritedCodexLogPath,
@@ -906,12 +921,10 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const label = partnerModeLabel(archive.mode);
     const runId = `partner-run-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
     const requestIndex = parent.children.length;
-    const requestPosition = getPhyllotaxisStoredChildPosition(parentPath.length, requestIndex + 1, requestIndex, parent.id);
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
     const requestAiDialogSettings = createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings, state.openClawSettings);
     const requestNode = {
       ...createAiRequestNode(parentNodeId, requestIndex, runId, runMode, prompt, {
-        position: requestPosition,
         aiDialogSettings: requestAiDialogSettings,
         codexThreadId: inferCodexThreadIdFromNodePath(parentPath),
         codexLogPath: inferCodexLogPathFromNodePath(parentPath),
@@ -941,7 +954,6 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       output,
       archive.usage,
       {
-        position: getPhyllotaxisStoredChildPosition(parentPath.length + 1, 1, 0, requestNode.id),
         aiDialogSettings: requestNode.aiDialogSettings,
         codexThreadId: requestNode.codexThreadId,
         codexLogPath: requestNode.codexLogPath,
@@ -1015,7 +1027,6 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
     const childDepth = parentPath.length;
     const insertIndex = parent.children.length;
-    const rootPosition = getPhyllotaxisStoredChildPosition(childDepth, parent.children.length + 1, insertIndex, parent.id);
     const now = new Date().toISOString();
     const inheritedAiDialogSettings = copiedRoot.aiDialogSettings ?? createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings, state.openClawSettings);
     const inheritedCodexThreadId = copiedRoot.codexThreadId ?? inferCodexThreadIdFromNodePath(parentPath);
@@ -1027,7 +1038,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       copiedRoot,
       parent.id,
       now,
-      rootPosition,
+      undefined,
       true,
       inheritedAiDialogSettings,
       inheritedCodexThreadId,
@@ -1067,11 +1078,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const parent = path[path.length - 2];
     const siblingDepth = path.length - 1;
     const insertIndex = parent.children.length;
-    const siblingPosition = getPhyllotaxisStoredChildPosition(siblingDepth, parent.children.length + 1, insertIndex, parent.id);
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
     const inheritedAiDialogSettings = createInheritedAiDialogSettings(path.slice(0, -1), state.aiContextOptions, state.codexSettings, state.openClawSettings);
     const sibling = createNotebookNode(parent.id, parent.children.length, "Untitled branch", "", {
-      position: siblingPosition,
       aiDialogSettings: inheritedAiDialogSettings,
       codexThreadId: inferCodexThreadIdFromNodePath(path.slice(0, -1)),
       codexLogPath: inferCodexLogPathFromNodePath(path.slice(0, -1)),
@@ -1570,12 +1579,6 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!sourcePath) return;
     const sourceParent = sourcePath?.at(-1);
     if (!sourceParent) return;
-    const requestPosition = getPhyllotaxisStoredChildPosition(
-      sourcePath.length,
-      sourceParent.children.length + 1,
-      sourceParent.children.length,
-      sourceParent.id,
-    );
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
     const inheritedAiDialogSettings = createInheritedAiDialogSettings(sourcePath, state.aiContextOptions, state.codexSettings, state.openClawSettings);
     const requestAiDialogSettings = createCurrentAiDialogSettings(contextOptions, inheritedAiDialogSettings.codexSettings, inheritedAiDialogSettings.openClawSettings);
@@ -1583,7 +1586,6 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       return;
     }
     const requestNode = createAiRequestNode(sourceNodeId, sourceParent.children.length, runId, mode, trimmed, {
-      position: requestPosition,
       aiDialogSettings: requestAiDialogSettings,
       codexThreadId: getCodexThreadIdForNewChild(sourcePath, requestAiDialogSettings),
       codexLogPath: inferCodexLogPathFromNodePath(sourcePath),
@@ -1706,7 +1708,6 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
                 result.output,
                 result.usage,
                 {
-                  position: getPhyllotaxisStoredChildPosition(sourcePath.length + 1, parent.children.length + 1, parent.children.length, parent.id),
                   aiDialogSettings: parent.aiDialogSettings,
                   codexThreadId: result.codexThreadId ?? parent.codexThreadId,
                   codexLogPath: result.codexLogPath ?? parent.codexLogPath,
@@ -1801,12 +1802,6 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         const parent = findNode(current.atlasRoot, requestNode.id);
         const usedNodeIds = collectNodeIdSet(current.atlasRoot);
         const errorNode = createAiErrorNode(requestNode.id, runId, mode, message, {
-          position: getPhyllotaxisStoredChildPosition(
-            sourcePath.length + 1,
-            (parent?.children.length ?? 0) + 1,
-            parent?.children.length ?? 0,
-            requestNode.id,
-          ),
           aiDialogSettings: requestNode.aiDialogSettings,
           codexThreadId: requestNode.codexThreadId,
           codexLogPath: requestNode.codexLogPath,
@@ -2069,7 +2064,6 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             )
           : [
               createAiResponseNode(retryParentId, parent.children.length, runId, "codex", "codex", result.model, result.output, result.usage, {
-                position: getPhyllotaxisStoredChildPosition(retryParentPath.length, parent.children.length + 1, parent.children.length, retryParentId),
                 aiDialogSettings: parent.aiDialogSettings,
                 codexThreadId: result.codexThreadId ?? parent.codexThreadId,
                 codexLogPath: result.codexLogPath ?? parent.codexLogPath,
@@ -2123,7 +2117,6 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         const parent = findNode(current.atlasRoot, retryParentId);
         const usedNodeIds = collectNodeIdSet(current.atlasRoot);
         const errorNode = createAiErrorNode(retryParentId, runId, "codex", message, {
-          position: getPhyllotaxisStoredChildPosition(retryParentPath.length, (parent?.children.length ?? 0) + 1, parent?.children.length ?? 0, retryParentId),
           aiDialogSettings: parent?.aiDialogSettings,
           codexThreadId: parent?.codexThreadId,
           codexLogPath: parent?.codexLogPath,
@@ -2200,7 +2193,6 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
                   recoveredResult.output,
                   recoveredResult.usage,
                   {
-                    position: getPhyllotaxisStoredChildPosition(requestPath.length, requestNode.children.length + 1, requestNode.children.length, requestNode.id),
                     aiDialogSettings: requestNode.aiDialogSettings,
                     codexThreadId: recoveredResult.codexThreadId ?? requestNode.codexThreadId,
                     codexLogPath: recoveredResult.codexLogPath ?? recovery.logPath ?? requestNode.codexLogPath,
@@ -2433,38 +2425,7 @@ export function getAiContextNodeIds(root: AtlasNode, selectedNodeId: string, opt
 }
 
 export function getNodeWorldPosition(path: AtlasNode[]): [number, number, number] {
-  if (path.length <= 1) return [0, 0, 0];
-
-  let world: Vec3 = [0, 0, 0];
-  let direction: Vec3 = [0, 0, 1];
-  for (let depth = 1; depth < path.length; depth += 1) {
-    const node = path[depth];
-    const parent = path[depth - 1];
-    const siblings = parent.children;
-    const index = Math.max(0, siblings.findIndex((item) => item.id === node.id));
-
-    if (node.position) {
-      direction =
-        depth === 1
-          ? clampDirection(node.position, TOP_LEVEL_DRAG_PLANAR_LIMIT)
-          : directionFromStoredChildPosition(direction, node.position, depth, siblings.length);
-      world = scale(direction, getShellRadius(depth));
-      continue;
-    }
-
-    if (depth === 1) {
-      direction = topLevelDirection(index, siblings.length);
-      world = scale(direction, getShellRadius(depth));
-      continue;
-    }
-
-    const angle = (Math.PI * 2 * index) / Math.max(siblings.length, 1) + depth * 0.37;
-    const spread = getChildSpread(depth, siblings.length);
-    direction = childDirection(direction, angle, spread);
-    world = scale(direction, getShellRadius(depth));
-  }
-
-  return world;
+  return getNodeWorldPositionFromPath(path);
 }
 
 export function getNodeVisualRadius(node: Pick<AtlasNode, "kind" | "radius">, depth = 1) {
@@ -2475,20 +2436,6 @@ export function getNodeVisualRadius(node: Pick<AtlasNode, "kind" | "radius">, de
 export function getNodeHitRadius(node: Pick<AtlasNode, "kind" | "radius">, depth = 1) {
   if (node.kind === "root") return node.radius;
   return getNodeVisualRadius(node, depth);
-}
-
-export function getShellRadius(depth: number) {
-  if (depth <= 1) return NOTEBOOK_FIRST_SHELL_RADIUS;
-  return NOTEBOOK_FIRST_SHELL_RADIUS + NOTEBOOK_SHELL_GAP * (depth - 1);
-}
-
-export function getPlanarLimitForDepth(depth: number) {
-  return depth <= 1 ? TOP_LEVEL_DRAG_PLANAR_LIMIT : TOP_LEVEL_PLANAR_LIMIT;
-}
-
-export function getManualChildSpreadLimit(depth: number, siblingCount: number) {
-  if (depth <= 1) return Math.asin(TOP_LEVEL_PLANAR_LIMIT);
-  return getChildSpread(depth, siblingCount);
 }
 
 export function findNodeWithWorldPosition(root: AtlasNode, id: string) {
@@ -2853,7 +2800,6 @@ function buildAtlasNodeFromOutline(
   const fallbackOpenClawSessionKey = fallbackNode.openClawSessionKey ?? inheritedOpenClawSessionKey;
   const fallbackOpenClawLogPath = fallbackNode.openClawLogPath ?? inheritedOpenClawLogPath;
   const base = existingNode ?? createNotebookNode(parentId ?? fallbackNode.sourceParentId ?? "atlas-root", childIndex, outline.title, outline.body, {
-    position: getPhyllotaxisStoredChildPosition(depth, siblingCount, childIndex, parentId ?? fallbackNode.id),
     aiDialogSettings: fallbackAiDialogSettings,
     codexThreadId: fallbackCodexThreadId,
     codexLogPath: fallbackCodexLogPath,
@@ -2960,16 +2906,16 @@ function getPromotedSiblingPosition(
   promotedDepth: number,
   siblingCount: number,
   insertIndex: number,
-): [number, number, number] {
+): [number, number, number] | undefined {
   if (!parent.position) {
-    return getPhyllotaxisStoredChildPosition(promotedDepth, siblingCount, insertIndex, grandparent.id);
+    return undefined;
   }
 
   if (promotedDepth <= 1) {
     return clampDirection([parent.position[0] + 0.08, parent.position[1] + 0.02, parent.position[2]], TOP_LEVEL_PLANAR_LIMIT);
   }
 
-  return clampLocalOffset(
+  return clampLocalOverride(
     [parent.position[0] + 0.08, parent.position[1] + 0.02, 0],
     getManualChildSpreadLimit(promotedDepth, siblingCount),
   );
@@ -4152,7 +4098,6 @@ function createCodexGeneratedNodeTree(
     usage,
     action: spec.action,
     aiDialogSettings,
-    position: getPhyllotaxisStoredChildPosition(parentDepth, siblingCount, index, layoutSeed),
     children: childSpecs.map((child, childIndex) =>
       createCodexGeneratedNodeTree(
         id,
@@ -4526,157 +4471,11 @@ function truncateText(value: string, maxLength: number) {
   return value.length > maxLength ? `${value.slice(0, maxLength)}\n[truncated]` : value;
 }
 
-type Vec3 = [number, number, number];
-
-function topLevelDirection(index: number, count: number): Vec3 {
-  if (count <= 1) return [0, 0, -1];
-  const ringRadius = count <= 4 ? 0.42 : 0.5;
-  const angle = (Math.PI * 2 * index) / count - Math.PI / 2;
-  return normalize([Math.cos(angle) * ringRadius, Math.sin(angle) * ringRadius, -1]);
-}
-
-function getPhyllotaxisStoredChildPosition(
-  depth: number,
-  siblingCount: number,
-  childIndex: number,
-  parentId: string,
-): Vec3 {
-  const i = childIndex + 1;
-  const angle = seededAngle(parentId) + i * GOLDEN_ANGLE;
-  if (depth <= 1) {
-    const planarRadius = Math.min(TOP_LEVEL_DRAG_PLANAR_LIMIT * 0.92, 0.22 + 0.12 * Math.sqrt(i));
-    return clampDirection([Math.cos(angle) * planarRadius, Math.sin(angle) * planarRadius, -1], TOP_LEVEL_DRAG_PLANAR_LIMIT);
-  }
-
-  const limit = getManualChildSpreadLimit(depth, siblingCount);
-  const amount = Math.min(limit * 0.94, limit * (0.38 + 0.12 * Math.sqrt(i)));
-  return clampLocalOffset([Math.cos(angle) * amount, Math.sin(angle) * amount, 0], limit);
-}
-
-function seededAngle(seed: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash ^= seed.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return ((hash >>> 0) / 4294967295) * Math.PI * 2;
-}
-
-function childDirection(parentDirection: Vec3, angle: number, spread: number): Vec3 {
-  const forward = normalize(parentDirection);
-  const reference: Vec3 = Math.abs(forward[1]) > 0.86 ? [1, 0, 0] : [0, 1, 0];
-  const tangentA = normalize(cross(reference, forward));
-  const tangentB = normalize(cross(forward, tangentA));
-  const tangent = normalize(add(scale(tangentA, Math.cos(angle)), scale(tangentB, Math.sin(angle))));
-  return normalize(add(scale(forward, Math.cos(spread)), scale(tangent, Math.sin(spread))));
-}
-
-function getChildSpread(depth: number, siblingCount: number) {
-  const parentRadius = getShellRadius(Math.max(1, depth - 1));
-  const childRadius = getShellRadius(depth);
-  const siblingSpread = siblingCount <= 1 ? 0 : Math.min(2.2, siblingCount * 0.22);
-  const targetRadii = MIN_CHILD_SCREEN_SEPARATION_RADII + siblingSpread;
-  const focusedDistance = FOCUSED_NODE_CAMERA_DISTANCE;
-  const visibleDepth = Math.max(focusedDistance * 0.65, childRadius - parentRadius + focusedDistance);
-  const requiredScreenRatio = (NOTEBOOK_NODE_RADIUS * targetRadii) / FOCUSED_NODE_CAMERA_DISTANCE;
-  return Math.atan((requiredScreenRatio * visibleDepth) / childRadius);
-}
-
-function getStoredPositionForWorldDirection(
-  parentPath: AtlasNode[],
-  worldPosition: Vec3,
-  depth: number,
-  siblingCount: number,
-): Vec3 {
-  if (depth <= 1) {
-    return clampDirection(worldPosition, TOP_LEVEL_DRAG_PLANAR_LIMIT);
-  }
-
-  const parentDirection = normalize(getNodeWorldPosition(parentPath));
-  const desiredDirection = normalize(worldPosition);
-  return localOffsetFromDirections(parentDirection, desiredDirection, getManualChildSpreadLimit(depth, siblingCount));
-}
-
-function directionFromStoredChildPosition(parentDirection: Vec3, storedPosition: Vec3, depth: number, siblingCount: number) {
-  const limit = getManualChildSpreadLimit(depth, siblingCount);
-  const local = looksLikeLegacyWorldDirection(storedPosition)
-    ? localOffsetFromDirections(parentDirection, storedPosition, limit)
-    : clampLocalOffset(storedPosition, limit);
-  const { tangentA, tangentB } = tangentBasis(parentDirection);
-  const amount = Math.hypot(local[0], local[1]);
-  if (amount <= 0.0001) return normalize(parentDirection);
-
-  const tangent = normalize(add(scale(tangentA, local[0] / amount), scale(tangentB, local[1] / amount)));
-  return normalize(add(scale(normalize(parentDirection), Math.cos(amount)), scale(tangent, Math.sin(amount))));
-}
-
-function localOffsetFromDirections(parentDirection: Vec3, desiredDirection: Vec3, limit: number): Vec3 {
-  const forward = normalize(parentDirection);
-  const desired = normalize(desiredDirection);
-  const { tangentA, tangentB } = tangentBasis(forward);
-  const dot = Math.min(1, Math.max(-1, forward[0] * desired[0] + forward[1] * desired[1] + forward[2] * desired[2]));
-  const angle = Math.min(limit, Math.acos(dot));
-  const tangentProjection = normalize(add(scale(tangentA, desired[0] * tangentA[0] + desired[1] * tangentA[1] + desired[2] * tangentA[2]), scale(tangentB, desired[0] * tangentB[0] + desired[1] * tangentB[1] + desired[2] * tangentB[2])));
-  if (Math.hypot(tangentProjection[0], tangentProjection[1], tangentProjection[2]) <= 0.0001 || angle <= 0.0001) return [0, 0, 0];
-  return [
-    (tangentProjection[0] * tangentA[0] + tangentProjection[1] * tangentA[1] + tangentProjection[2] * tangentA[2]) * angle,
-    (tangentProjection[0] * tangentB[0] + tangentProjection[1] * tangentB[1] + tangentProjection[2] * tangentB[2]) * angle,
-    0,
-  ];
-}
-
-function clampLocalOffset(position: Vec3, limit: number): Vec3 {
+function clampLocalOverride(position: Vec3, limit: number): Vec3 {
   const amount = Math.hypot(position[0], position[1]);
   if (amount <= limit) return [position[0], position[1], 0];
   const scaleToLimit = amount > 0 ? limit / amount : 0;
   return [position[0] * scaleToLimit, position[1] * scaleToLimit, 0];
-}
-
-function tangentBasis(parentDirection: Vec3) {
-  const forward = normalize(parentDirection);
-  const reference: Vec3 = Math.abs(forward[1]) > 0.86 ? [1, 0, 0] : [0, 1, 0];
-  const tangentA = normalize(cross(reference, forward));
-  const tangentB = normalize(cross(forward, tangentA));
-  return { tangentA, tangentB };
-}
-
-function looksLikeLegacyWorldDirection(position: Vec3) {
-  return position[2] < -0.2 || Math.hypot(position[0], position[1], position[2]) > 0.7;
-}
-
-function clampDirection(vector: Vec3, planarLimit: number): Vec3 {
-  const normalized = normalize(vector);
-  const x = normalized[0];
-  const y = normalized[1];
-  const planar = Math.hypot(x, y);
-  const limitedPlanar = Math.min(planar, planarLimit);
-  const scaleToLimit = planar > 0 ? limitedPlanar / planar : 0;
-  return normalize([
-    x * scaleToLimit,
-    y * scaleToLimit,
-    -Math.sqrt(Math.max(0.0001, 1 - limitedPlanar * limitedPlanar)),
-  ]);
-}
-
-function normalize(vector: Vec3): Vec3 {
-  const length = Math.hypot(vector[0], vector[1], vector[2]) || 1;
-  return [vector[0] / length, vector[1] / length, vector[2] / length];
-}
-
-function add(a: Vec3, b: Vec3): Vec3 {
-  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-}
-
-function scale(vector: Vec3, amount: number): Vec3 {
-  return [vector[0] * amount, vector[1] * amount, vector[2] * amount];
-}
-
-function cross(a: Vec3, b: Vec3): Vec3 {
-  return [
-    a[1] * b[2] - a[2] * b[1],
-    a[2] * b[0] - a[0] * b[2],
-    a[0] * b[1] - a[1] * b[0],
-  ];
 }
 
 function randomTexture(seedText: string): AtlasNode["texture"] {

@@ -82,7 +82,7 @@ Implementation result:
 
 ### T2. Derived Coordinate Layout Refactor
 
-Status: Not started
+Status: Completed on 2026-06-11
 Depends on: T1
 Blocks: T4, T6
 
@@ -119,6 +119,24 @@ Implementation notes:
 - This is the heaviest and riskiest Set 1 task.
 - Use T1 snapshots to protect users from schema mistakes.
 - Keep the first layout mode intentionally boring: current phyllotaxis parity.
+
+Implementation result:
+
+- Added `src/layout/atlasLayout.ts` with the layout engine interface
+  `(tree, mode, overrides) -> Map<nodeId, position>`.
+- Moved phyllotaxis-compatible display coordinate derivation out of
+  `atlasStore.ts`.
+- Reinterpreted `AtlasNode.position` as a persisted manual override field;
+  existing positions still load as overrides for compatibility.
+- Removed `getPhyllotaxisStoredChildPosition` and its creation-time call sites
+  from `atlasStore.ts`.
+- Updated `UniverseCanvas` and `Minimap` to read display positions from the
+  derived layout map.
+- Drag-created and dragged nodes still save explicit overrides through the
+  existing `position` field.
+- Verification on 2026-06-11: `npm run typecheck` passed; `npm run build`
+  passed with the existing Vite large chunk warning; `npm run verify:ui`
+  passed after restarting Vite on `127.0.0.1:5173`.
 
 ### T3. Context Assembly Module
 

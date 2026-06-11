@@ -1,7 +1,8 @@
 import { useMemo, useRef } from "react";
 import type { PointerEvent as ReactPointerEvent, Touch as ReactTouch, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from "react";
 import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT } from "../events";
-import { getNodeWorldPosition, useAtlasStore } from "../store/atlasStore";
+import { deriveAtlasLayout } from "../layout/atlasLayout";
+import { useAtlasStore } from "../store/atlasStore";
 
 export function Minimap() {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -9,7 +10,10 @@ export function Minimap() {
   const focusNode = useAtlasStore((state) => state.focusNode);
   const pinchRef = useRef<{ distance: number } | null>(null);
   const positions = useMemo(
-    () => atlasRoot.children.map((node) => ({ node, position: getNodeWorldPosition([atlasRoot, node]) })),
+    () => {
+      const layoutPositions = deriveAtlasLayout(atlasRoot);
+      return atlasRoot.children.map((node) => ({ node, position: layoutPositions.get(node.id) ?? [0, 0, 0] as [number, number, number] }));
+    },
     [atlasRoot],
   );
 
