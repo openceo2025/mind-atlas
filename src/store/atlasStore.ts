@@ -8,6 +8,19 @@ import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme"
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
 import { getBridgeUrl, getBridgeUrlCandidates, recoverCodexRun, requestAiResponse, requestGitPush } from "../ai/bridgeClient";
 import { sanitizeNotebookForExport } from "../notebookExport";
+import {
+  clearPersistedNotebook,
+  LEGACY_NOTEBOOK_STORAGE_KEY,
+  listNotebookSnapshots,
+  loadLegacyNotebook,
+  loadPersistedNotebook,
+  migrateLegacyNotebookIfNeeded,
+  requestDurableNotebookStorage,
+  restoreNotebookSnapshot,
+  savePersistedNotebook,
+  type NotebookPersistenceStatus,
+  type NotebookSnapshot,
+} from "../notebookPersistence";
 import type { OutlineNodeInput } from "../outline/atlasOutline";
 import type {
   AiAttachmentMode,
@@ -42,7 +55,7 @@ import type {
   WorkStatus,
 } from "../types";
 
-const NOTEBOOK_STORAGE_KEY = "mind-atlas-notebook-v2";
+const NOTEBOOK_STORAGE_KEY = LEGACY_NOTEBOOK_STORAGE_KEY;
 const UNREAD_NOTIFICATIONS_STORAGE_KEY = "mind-atlas-unread-notifications-v1";
 const NOTIFICATION_READ_STATE_STORAGE_KEY = "mind-atlas-notification-read-state-v1";
 const VOICE_LOG_STORAGE_KEY = "mind-atlas-voice-log-v1";
@@ -173,6 +186,10 @@ interface AtlasStore {
   notificationPulses: NotificationPulse[];
   unreadNotifications: Record<string, UnreadNotification>;
   notificationSnoozePrompt: NotificationSnoozePrompt | null;
+  notebookPersistenceStatus: NotebookPersistenceStatus;
+  notebookPersistenceError: string;
+  notebookSnapshots: NotebookSnapshot[];
+  durableNotebookStorage: boolean;
   voiceLogEntries: VoiceLogEntry[];
   voiceLogLastSeenAt: string;
   voiceSessionSummary: VoiceSessionSummary | null;
@@ -204,6 +221,8 @@ interface AtlasStore {
   setCommandInputEditing: (editing: boolean) => void;
   setActiveCommandMode: (mode: AiExecutionMode | "note") => void;
   appendVoiceLogEntry: (entry: Omit<VoiceLogEntry, "id" | "createdAt"> & Partial<Pick<VoiceLogEntry, "id" | "createdAt">>) => VoiceLogEntry;
+  refreshNotebookSnapshots: () => Promise<void>;
+  restoreNotebookFromSnapshot: (id: string) => Promise<void>;
   clearVoiceLog: () => void;
   markVoiceLogSeen: () => void;
   setVoiceSessionSummary: (summary: VoiceSessionSummary | null) => void;
@@ -270,6 +289,10 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   notificationPulses: [],
   unreadNotifications: restoreUnreadNotifications(initialAtlasRoot),
   notificationSnoozePrompt: null,
+  notebookPersistenceStatus: "loading",
+  notebookPersistenceError: "",
+  notebookSnapshots: [],
+  durableNotebookStorage: false,
   voiceLogEntries: initialVoiceLogEntries,
   voiceLogLastSeenAt: initialVoiceLogLastSeenAt,
   voiceSessionSummary: loadStoredVoiceSessionSummary(),
@@ -446,6 +469,52 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     persistVoiceLog([]);
     persistVoiceLogLastSeenAt(seenAt);
     set({ voiceLogEntries: [], voiceLogLastSeenAt: seenAt });
+  },
+
+  refreshNotebookSnapshots: async () => {
+    try {
+      const notebookSnapshots = await listNotebookSnapshots();
+      set({ notebookSnapshots, notebookPersistenceError: "" });
+    } catch (error) {
+      const message = notebookPersistenceErrorMessage("Notebook history could not be loaded.", error);
+      console.error(message, error);
+      set({ notebookPersistenceError: message, notebookPersistenceStatus: "error" });
+    }
+  },
+
+  restoreNotebookFromSnapshot: async (id) => {
+    try {
+      const atlasRoot = ensureNotebookNode(await restoreNotebookSnapshot(id));
+      const repair = repairDuplicateNodeIds(atlasRoot);
+      const nextRoot = repair.root;
+      const selectedNode = findNode(nextRoot, get().selectedNodeId) ?? nextRoot;
+      const unreadNotifications = restoreUnreadNotifications(nextRoot, get().unreadNotifications);
+      persistUnreadNotifications(unreadNotifications);
+      set((state) => ({
+        ...pushHistory(state),
+        atlasRoot: nextRoot,
+        selected: selectionFromNode(selectedNode),
+        selectedNodeId: selectedNode.id,
+        multiSelectedNodeIds: state.multiSelectedNodeIds.filter((nodeId) => Boolean(findNode(nextRoot, nodeId))),
+        cameraFocusNodeId: null,
+        attachmentPreviewUrls: filterAttachmentPreviewUrls(state.attachmentPreviewUrls, nextRoot),
+        birthMarks: {},
+        unreadNotifications,
+        notificationPulses: [],
+        notificationSnoozePrompt: null,
+        titleEditRequestId: null,
+        notebookPersistenceStatus: "ready",
+        notebookPersistenceError: "",
+      }));
+      await get().refreshNotebookSnapshots();
+      await get().restoreAttachmentPreviews();
+      get().focusNode(selectedNode.id);
+    } catch (error) {
+      const message = notebookPersistenceErrorMessage("Notebook snapshot could not be restored.", error);
+      console.error(message, error);
+      set({ notebookPersistenceError: message, notebookPersistenceStatus: "error" });
+      throw error;
+    }
   },
 
   markVoiceLogSeen: () => {
@@ -2235,6 +2304,47 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   },
 }));
 
+void initializeNotebookPersistence();
+
+async function initializeNotebookPersistence() {
+  if (typeof window === "undefined") return;
+  try {
+    const durableNotebookStorage = await requestDurableNotebookStorage();
+    const migratedRoot = await migrateLegacyNotebookIfNeeded(initialAtlasRoot);
+    const persistedRoot = migratedRoot ? ensureNotebookNode(migratedRoot) : await loadPersistedNotebook();
+    const currentRoot = persistedRoot ? repairDuplicateNodeIds(ensureNotebookNode(persistedRoot)).root : null;
+    useAtlasStore.setState((state) => {
+      if (!currentRoot) {
+        return {
+          durableNotebookStorage,
+          notebookPersistenceStatus: "ready",
+          notebookPersistenceError: "",
+        };
+      }
+      const selectedNode = findNode(currentRoot, state.selectedNodeId) ?? currentRoot;
+      const unreadNotifications = restoreUnreadNotifications(currentRoot, state.unreadNotifications);
+      persistUnreadNotifications(unreadNotifications);
+      return {
+        atlasRoot: currentRoot,
+        selected: selectionFromNode(selectedNode),
+        selectedNodeId: selectedNode.id,
+        multiSelectedNodeIds: state.multiSelectedNodeIds.filter((nodeId) => Boolean(findNode(currentRoot, nodeId))),
+        attachmentPreviewUrls: filterAttachmentPreviewUrls(state.attachmentPreviewUrls, currentRoot),
+        unreadNotifications,
+        durableNotebookStorage,
+        notebookPersistenceStatus: "ready",
+        notebookPersistenceError: "",
+      };
+    });
+    await useAtlasStore.getState().refreshNotebookSnapshots();
+    await useAtlasStore.getState().restoreAttachmentPreviews();
+  } catch (error) {
+    const message = notebookPersistenceErrorMessage("Notebook persistence could not start.", error);
+    console.error(message, error);
+    useAtlasStore.setState({ notebookPersistenceStatus: "error", notebookPersistenceError: message });
+  }
+}
+
 export function getSelectionWorkArea(workAreas: WorkArea[], selected: Selection): WorkArea {
   const id = selected.kind === "workArea" ? selected.id : selected.kind === "node" ? selected.id : selected.parentId;
   return workAreas.find((area) => area.id === id) ?? workAreas[0];
@@ -2396,10 +2506,10 @@ function selectionFromNode(node: AtlasNode): Selection {
 
 function loadStoredNotebook() {
   if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(NOTEBOOK_STORAGE_KEY);
-  if (!raw) return null;
   try {
-    const repair = repairDuplicateNodeIds(ensureNotebookNode(JSON.parse(raw) as AtlasNode));
+    const legacyRoot = loadLegacyNotebook();
+    if (!legacyRoot) return null;
+    const repair = repairDuplicateNodeIds(ensureNotebookNode(legacyRoot));
     if (repair.repairedIds.length) {
       persistNotebook(repair.root);
       console.warn(`Mind Atlas repaired ${repair.repairedIds.length} duplicate node id(s) from local storage.`);
@@ -2513,7 +2623,16 @@ function createInitialNotebook() {
 
 function persistNotebook(root: AtlasNode) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(NOTEBOOK_STORAGE_KEY, JSON.stringify(root));
+  void savePersistedNotebook(root)
+    .then(() => {
+      useAtlasStore.setState({ notebookPersistenceStatus: "ready", notebookPersistenceError: "" });
+      return useAtlasStore.getState().refreshNotebookSnapshots();
+    })
+    .catch((error) => {
+      const message = notebookPersistenceErrorMessage("Notebook could not be saved to IndexedDB.", error);
+      console.error(message, error);
+      useAtlasStore.setState({ notebookPersistenceStatus: "error", notebookPersistenceError: message });
+    });
 }
 
 function persistUnreadNotifications(unreadNotifications: Record<string, UnreadNotification>) {
@@ -2675,8 +2794,19 @@ function filterAttachmentPreviewUrls(previewUrls: Record<string, string>, root: 
 
 function clearStoredNotebook() {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(NOTEBOOK_STORAGE_KEY);
+  void clearPersistedNotebook()
+    .then(() => useAtlasStore.setState({ notebookSnapshots: [], notebookPersistenceStatus: "ready", notebookPersistenceError: "" }))
+    .catch((error) => {
+      const message = notebookPersistenceErrorMessage("Notebook history could not be cleared.", error);
+      console.error(message, error);
+      useAtlasStore.setState({ notebookPersistenceStatus: "error", notebookPersistenceError: message });
+    });
   clearStoredNotificationState();
+}
+
+function notebookPersistenceErrorMessage(prefix: string, error: unknown) {
+  const detail = error instanceof Error ? error.message : String(error);
+  return detail ? `${prefix} ${detail}` : prefix;
 }
 
 function clearStoredNotificationState() {

@@ -1,5 +1,5 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { Bell, BellOff, CloudDownload, CloudUpload, Download, Maximize2, MessageSquareText, Moon, MoreHorizontal, PenLine, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
+import { Bell, BellOff, CloudDownload, CloudUpload, Download, History, Maximize2, MessageSquareText, Moon, MoreHorizontal, PenLine, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
 import { ChangeEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
@@ -14,6 +14,7 @@ import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
 import type { AtlasNode, CloudNotebookEntry, NotificationPulse, VoiceLogEntry, VoicePartnerSettings } from "./types";
+import type { NotebookPersistenceStatus, NotebookSnapshot } from "./notebookPersistence";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const WORKSPACE_PANEL_EXIT_MS = 960;
@@ -44,7 +45,13 @@ export default function App() {
   const voiceLogLastSeenAt = useAtlasStore((state) => state.voiceLogLastSeenAt);
   const voiceSessionSummary = useAtlasStore((state) => state.voiceSessionSummary);
   const voicePartnerSettings = useAtlasStore((state) => state.voicePartnerSettings);
+  const notebookPersistenceStatus = useAtlasStore((state) => state.notebookPersistenceStatus);
+  const notebookPersistenceError = useAtlasStore((state) => state.notebookPersistenceError);
+  const notebookSnapshots = useAtlasStore((state) => state.notebookSnapshots);
+  const durableNotebookStorage = useAtlasStore((state) => state.durableNotebookStorage);
   const setVoicePartnerSettings = useAtlasStore((state) => state.setVoicePartnerSettings);
+  const refreshNotebookSnapshots = useAtlasStore((state) => state.refreshNotebookSnapshots);
+  const restoreNotebookFromSnapshot = useAtlasStore((state) => state.restoreNotebookFromSnapshot);
   const clearVoiceLog = useAtlasStore((state) => state.clearVoiceLog);
   const markVoiceLogSeen = useAtlasStore((state) => state.markVoiceLogSeen);
   const notificationPulses = useAtlasStore((state) => state.notificationPulses);
@@ -57,6 +64,7 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [voiceLogOpen, setVoiceLogOpen] = useState(false);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
+  const [restoreHistoryOpen, setRestoreHistoryOpen] = useState(false);
   const [outlineEditorOpen, setOutlineEditorOpen] = useState(false);
   const [cloudLoadOpen, setCloudLoadOpen] = useState(false);
   const [mobileNotificationsEnabled, setMobileNotificationsEnabled] = useState(() => loadMobileNotificationPreference());
@@ -113,6 +121,7 @@ export default function App() {
     setMenuOpen(false);
     setVoiceLogOpen(false);
     setVoiceSettingsOpen(false);
+    setRestoreHistoryOpen(false);
     setCloudLoadOpen(false);
     setOutlineEditorOpen(false);
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
@@ -367,6 +376,12 @@ export default function App() {
     setCloudLoadOpen(true);
     setMenuOpen(false);
     void refreshCloudNotebooks();
+  };
+
+  const handleOpenRestoreHistory = () => {
+    setRestoreHistoryOpen(true);
+    setMenuOpen(false);
+    void refreshNotebookSnapshots();
   };
 
   const handleLoadCloudNotebook = async (entry: CloudNotebookEntry) => {
@@ -723,6 +738,13 @@ export default function App() {
                 <small>.mindatlaspkg / includes images and video</small>
               </span>
             </button>
+            <button type="button" onClick={handleOpenRestoreHistory}>
+              <History size={15} />
+              <span>
+                Restore from history
+                <small>{notebookHistoryStatusLabel(notebookPersistenceStatus, notebookSnapshots.length, durableNotebookStorage, notebookPersistenceError)}</small>
+              </span>
+            </button>
             {onboarding.showAiFeatures ? (
               <>
                 <button type="button" onClick={handleSaveToCloud}>
@@ -808,6 +830,16 @@ export default function App() {
           onClose={() => setVoiceSettingsOpen(false)}
           onSave={setVoicePartnerSettings}
           onRestart={handleRestartRealtime}
+        />
+      ) : null}
+      {restoreHistoryOpen ? (
+        <NotebookHistoryDialog
+          snapshots={notebookSnapshots}
+          status={notebookPersistenceStatus}
+          error={notebookPersistenceError}
+          onClose={() => setRestoreHistoryOpen(false)}
+          onRefresh={refreshNotebookSnapshots}
+          onRestore={restoreNotebookFromSnapshot}
         />
       ) : null}
       {onboarding.showAiFeatures && cloudLoadOpen ? (
@@ -1034,6 +1066,100 @@ function VoiceLogDialog({
   );
 }
 
+function NotebookHistoryDialog({
+  snapshots,
+  status,
+  error,
+  onClose,
+  onRefresh,
+  onRestore,
+}: {
+  snapshots: NotebookSnapshot[];
+  status: NotebookPersistenceStatus;
+  error: string;
+  onClose: () => void;
+  onRefresh: () => Promise<void>;
+  onRestore: (id: string) => Promise<void>;
+}) {
+  const [restoringId, setRestoringId] = useState("");
+
+  const handleRestore = async (snapshot: NotebookSnapshot) => {
+    const confirmed = window.confirm(`Restore "${snapshot.title}" from ${formatFullDateTime(snapshot.createdAt)}? The current notebook will be saved in history first.`);
+    if (!confirmed) return;
+    try {
+      setRestoringId(snapshot.id);
+      await onRestore(snapshot.id);
+      onClose();
+    } catch (restoreError) {
+      const message = restoreError instanceof Error ? restoreError.message : "Notebook restore failed.";
+      window.alert(message);
+    } finally {
+      setRestoringId("");
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="notebook-history-dialog" role="dialog" aria-modal="true" aria-label="Restore from history" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="voice-log-header">
+          <div>
+            <h2>Restore from history</h2>
+            <p>{notebookHistoryDialogStatus(status, snapshots.length, error)}</p>
+          </div>
+          <div className="voice-log-actions">
+            <button className="icon-button" type="button" onClick={() => void onRefresh()} aria-label="Refresh notebook history">
+              <RefreshCw size={16} />
+            </button>
+            <button className="icon-button" type="button" onClick={onClose} aria-label="Close notebook history">
+              <X size={17} />
+            </button>
+          </div>
+        </header>
+        {error ? <p className="notebook-history-error">{error}</p> : null}
+        <div className="notebook-history-list">
+          {snapshots.length ? (
+            snapshots.map((snapshot) => (
+              <article key={snapshot.id} className="notebook-history-entry">
+                <div>
+                  <strong>{snapshot.title}</strong>
+                  <span>
+                    Generation {snapshot.generation} / {formatFullDateTime(snapshot.createdAt)}
+                  </span>
+                  <small>
+                    {snapshot.nodeCount} nodes / {formatBytes(snapshot.sizeBytes)}
+                  </small>
+                </div>
+                <button className="secondary-button" type="button" disabled={Boolean(restoringId)} onClick={() => void handleRestore(snapshot)}>
+                  {restoringId === snapshot.id ? "Restoring..." : "Restore"}
+                </button>
+              </article>
+            ))
+          ) : (
+            <p className="voice-log-empty">No notebook snapshots yet. Make an edit and Mind Atlas will save history automatically.</p>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function notebookHistoryStatusLabel(
+  status: NotebookPersistenceStatus,
+  snapshotCount: number,
+  durable: boolean,
+  error: string,
+) {
+  if (error) return "save error";
+  if (status === "loading") return "loading snapshots";
+  return `${snapshotCount} snapshots${durable ? " / durable" : ""}`;
+}
+
+function notebookHistoryDialogStatus(status: NotebookPersistenceStatus, snapshotCount: number, error: string) {
+  if (error) return "Notebook persistence needs attention";
+  if (status === "loading") return "Loading local notebook history";
+  return `${snapshotCount} retained snapshots`;
+}
+
 function voiceRoleLabel(role: string) {
   switch (role) {
     case "user":
@@ -1068,6 +1194,18 @@ function formatVoiceLogTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString([], {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatFullDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], {
+    year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
