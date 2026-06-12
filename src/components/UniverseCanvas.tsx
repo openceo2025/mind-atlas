@@ -536,6 +536,7 @@ function NotificationPulseLayer({
   pageActive: boolean;
 }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
+  const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const pulses = useAtlasStore((state) => state.notificationPulses);
   const tickNotificationPulses = useAtlasStore((state) => state.tickNotificationPulses);
   const lastPruneRef = useRef(0);
@@ -552,7 +553,7 @@ function NotificationPulseLayer({
   return (
     <>
       {animatedPulses.map((pulse) => {
-        const located = findNodeWithWorldPosition(atlasRoot, pulse.nodeId, layoutMode);
+        const located = findNodeWithWorldPosition(atlasRoot, pulse.nodeId, layoutMode, selectedNodeId);
         if (!located) return null;
         return (
           <GlobalNotificationPulse
@@ -1660,6 +1661,7 @@ function NotebookNodes({
   const focusRequest = useAtlasStore((state) => state.focusRequest);
   const focusNonce = focusRequest?.nonce ?? 0;
   const mobileLabelScope = useMobilePerformanceMode();
+  const { size } = useThree();
   const [focusWaveStartedAt, setFocusWaveStartedAt] = useState(() => performance.now());
   const [renderSelectedNodeId, setRenderSelectedNodeId] = useState(selectedNodeId);
   const selectedPath = findNodePath(atlasRoot, renderSelectedNodeId) ?? findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
@@ -1683,7 +1685,11 @@ function NotebookNodes({
     if (!commandInputEditing || activeCommandMode === "note") return new Set<string>();
     return new Set(getAiContextNodeIds(atlasRoot, selectedNodeId, { ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds }));
   }, [activeCommandMode, aiContextOptions, atlasRoot, commandInputEditing, multiSelectedNodeIds, selectedNodeId]);
-  const layoutPositions = useMemo(() => deriveAtlasLayout(atlasRoot, layoutMode), [atlasRoot, layoutMode]);
+  const layoutViewport = isMobilePortraitCamera(size.width, size.height) ? "mobile-portrait" : "desktop";
+  const layoutPositions = useMemo(
+    () => deriveAtlasLayout(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport: layoutViewport }),
+    [atlasRoot, layoutMode, layoutViewport, selectedNodeId],
+  );
 
   useEffect(() => {
     if (findNode(atlasRoot, renderSelectedNodeId)) return;
@@ -1691,6 +1697,10 @@ function NotebookNodes({
   }, [atlasRoot, renderSelectedNodeId, selectedNodeId]);
 
   useEffect(() => {
+    if (layoutMode !== "phyllotaxis") {
+      setRenderSelectedNodeId(selectedNodeId);
+      return;
+    }
     if (!focusRequest || focusRequest.nodeId !== selectedNodeId) {
       setRenderSelectedNodeId(selectedNodeId);
       return;
@@ -1721,7 +1731,7 @@ function NotebookNodes({
       window.clearTimeout(timeout);
       window.removeEventListener(FOCUS_TRANSITION_COMPLETE_EVENT, handleFocusTransitionComplete);
     };
-  }, [atlasRoot, focusRequest, renderSelectedNodeId, selectedNodeId]);
+  }, [atlasRoot, focusRequest, layoutMode, renderSelectedNodeId, selectedNodeId]);
 
   useEffect(() => {
     setFocusWaveStartedAt(performance.now());
@@ -1775,6 +1785,7 @@ function NotebookNodes({
               renderQuality={renderQuality}
               theme={theme}
               layoutPositions={layoutPositions}
+              layoutMode={layoutMode}
               rootOverviewActive={rootIsSelected}
               onOpenNodeContextMenu={onOpenNodeContextMenu}
             />
@@ -1813,6 +1824,7 @@ function NotebookNodes({
           renderQuality={renderQuality}
           theme={theme}
           layoutPositions={layoutPositions}
+          layoutMode={layoutMode}
           rootOverviewActive={rootIsSelected}
           onOpenNodeContextMenu={onOpenNodeContextMenu}
         />
@@ -1822,9 +1834,6 @@ function NotebookNodes({
 
   return (
     <group>
-      {layoutMode === "phyllotaxis" && renderQuality === "high" ? (
-        <PhyllotaxisSiblingGuide root={atlasRoot} layoutPositions={layoutPositions} theme={theme} />
-      ) : null}
       {atlasRoot.children.map((node) => {
         const path = [atlasRoot, node];
         const position = getLayoutPosition(layoutPositions, node.id);
@@ -1854,6 +1863,7 @@ function NotebookNodes({
             renderQuality={renderQuality}
             theme={theme}
             layoutPositions={layoutPositions}
+            layoutMode={layoutMode}
             rootOverviewActive={rootIsSelected}
             onOpenNodeContextMenu={onOpenNodeContextMenu}
           />
@@ -1902,33 +1912,6 @@ function getLayoutPosition(layoutPositions: Map<string, Vec3>, nodeId: string): 
   return layoutPositions.get(nodeId) ?? [0, 0, 0];
 }
 
-function PhyllotaxisSiblingGuide({
-  root,
-  layoutPositions,
-  theme,
-}: {
-  root: AtlasNode;
-  layoutPositions: Map<string, Vec3>;
-  theme: AtlasTheme;
-}) {
-  const points = root.children
-    .map((child) => layoutPositions.get(child.id))
-    .filter((position): position is Vec3 => Boolean(position));
-  if (points.length < 3) return null;
-  return (
-    <Line
-      points={points}
-      color={theme === "light" ? "#6f9ed1" : "#7dd8bf"}
-      transparent
-      opacity={theme === "light" ? 0.18 : 0.13}
-      lineWidth={1}
-      dashed
-      dashSize={18}
-      gapSize={16}
-    />
-  );
-}
-
 function hasAiContextPreviewNode(node: AtlasNode, aiContextPreviewNodeIds: Set<string>): boolean {
   if (!aiContextPreviewNodeIds.size) return false;
   if (aiContextPreviewNodeIds.has(node.id)) return true;
@@ -1972,6 +1955,7 @@ function HierarchyNode({
   renderQuality,
   theme,
   layoutPositions,
+  layoutMode,
   rootOverviewActive,
   onOpenNodeContextMenu,
 }: {
@@ -1998,6 +1982,7 @@ function HierarchyNode({
   renderQuality: RenderQuality;
   theme: AtlasTheme;
   layoutPositions: Map<string, Vec3>;
+  layoutMode: AtlasLayoutMode;
   rootOverviewActive: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
@@ -2022,7 +2007,8 @@ function HierarchyNode({
   const parentId = path.length > 1 ? path[path.length - 2].id : null;
   const selectedIndexInPath = path.findIndex((item) => item.id === selectedNodeId);
   const canDragNodeInRootOverview = !rootOverviewActive || depth === 1;
-  const dragFallsThroughToSpace = rootOverviewActive && !canDragNodeInRootOverview;
+  const layoutLocksNodeDrag = layoutMode !== "phyllotaxis";
+  const dragFallsThroughToSpace = layoutLocksNodeDrag || (rootOverviewActive && !canDragNodeInRootOverview);
   const activeDescendantDistance =
     selectedIndexInPath >= 0 ? path.length - 1 - selectedIndexInPath : null;
   const activePathIndex = selectedPathIndexByNodeId.get(node.id);
@@ -2123,6 +2109,12 @@ function HierarchyNode({
   const groupRef = useRef<Group>(null);
   const parentWorldRef = useRef<Vec3Tuple>(subtractPosition(worldPosition, localPosition));
   const visualWorldRef = useRef<Vec3Tuple>(worldPosition);
+  const layoutTransitionRef = useRef<{
+    startWorld: Vec3Tuple;
+    targetWorld: Vec3Tuple;
+    parentWorld: Vec3Tuple;
+    elapsed: number;
+  } | null>(null);
   const nodeHitRaycast = useMemo(() => createConditionalMeshRaycast(() => shouldSkipNodeRaycast(node.id)), [node.id]);
   const applyVisualWorldPositionRef = useRef<(nextWorld: Vec3Tuple, parentWorldOverride?: Vec3Tuple) => void>(() => undefined);
   const birthStartedAt = birthMarks[node.id];
@@ -2141,10 +2133,40 @@ function HierarchyNode({
   useLayoutEffect(() => {
     const parentWorld = subtractPosition(worldPosition, localPosition);
     parentWorldRef.current = parentWorld;
-    if (!dragRef.current) {
+    if (dragRef.current) return;
+    if (layoutMode === "phyllotaxis") {
+      layoutTransitionRef.current = null;
       applyVisualWorldPosition(worldPosition, parentWorld);
+      return;
     }
-  }, [localPosition, worldPosition]);
+
+    const currentWorld = visualWorldRef.current;
+    if (distanceBetweenPositions(currentWorld, worldPosition) <= 0.01) {
+      layoutTransitionRef.current = null;
+      applyVisualWorldPosition(worldPosition, parentWorld);
+      return;
+    }
+    layoutTransitionRef.current = {
+      startWorld: currentWorld,
+      targetWorld: worldPosition,
+      parentWorld,
+      elapsed: 0,
+    };
+  }, [layoutMode, localPosition, worldPosition]);
+
+  useFrame((_, delta) => {
+    const transition = layoutTransitionRef.current;
+    if (!transition || dragRef.current) return;
+    transition.elapsed += delta;
+    const progress = Math.min(1, transition.elapsed / FOCUS_DURATION_SECONDS);
+    const eased = easeInOutQuint(progress);
+    const nextWorld = lerpPosition(transition.startWorld, transition.targetWorld, eased);
+    applyVisualWorldPosition(nextWorld, transition.parentWorld);
+    if (progress >= 1) {
+      layoutTransitionRef.current = null;
+      applyVisualWorldPosition(transition.targetWorld, transition.parentWorld);
+    }
+  });
 
   useEffect(() => {
     const handle: VisualNodeHandle = {
@@ -2614,6 +2636,7 @@ function HierarchyNode({
                 renderQuality={renderQuality}
                 theme={theme}
                 layoutPositions={layoutPositions}
+                layoutMode={layoutMode}
                 rootOverviewActive={rootOverviewActive}
                 onOpenNodeContextMenu={onOpenNodeContextMenu}
               />
@@ -3948,16 +3971,17 @@ function reportNodeVisibility(root: AtlasNode, camera: PerspectiveCamera, state:
   state.lastCheckedAt = now;
 
   const layoutMode = useAtlasStore.getState().layoutMode;
-  const allOffscreen = areAllNodesOffscreen(root, camera, layoutMode);
+  const selectedNodeId = useAtlasStore.getState().selectedNodeId;
+  const allOffscreen = areAllNodesOffscreen(root, camera, layoutMode, selectedNodeId);
   if (state.allOffscreen === allOffscreen) return;
   state.allOffscreen = allOffscreen;
   emitOnboardingEvent(allOffscreen ? "all-nodes-offscreen" : "nodes-onscreen");
 }
 
-function areAllNodesOffscreen(root: AtlasNode, camera: PerspectiveCamera, layoutMode: AtlasLayoutMode) {
+function areAllNodesOffscreen(root: AtlasNode, camera: PerspectiveCamera, layoutMode: AtlasLayoutMode, selectedNodeId: string) {
   if (!root.children.length) return false;
   camera.updateMatrixWorld();
-  const layoutPositions = deriveAtlasLayout(root, layoutMode);
+  const layoutPositions = deriveAtlasLayout(root, layoutMode, undefined, { focusNodeId: selectedNodeId });
   return !root.children.some((child) => isNodePathOnscreen([root, child], camera, layoutPositions));
 }
 
@@ -4248,6 +4272,14 @@ function getFallbackTangent(direction: Vec3Tuple): Vec3Tuple {
 
 function subtractPosition(a: [number, number, number], b: [number, number, number]): [number, number, number] {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+
+function distanceBetweenPositions(a: [number, number, number], b: [number, number, number]) {
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+function lerpPosition(a: [number, number, number], b: [number, number, number], amount: number): [number, number, number] {
+  return [lerp(a[0], b[0], amount), lerp(a[1], b[1], amount), lerp(a[2], b[2], amount)];
 }
 
 function normalizeVector(vector: [number, number, number]): [number, number, number] {

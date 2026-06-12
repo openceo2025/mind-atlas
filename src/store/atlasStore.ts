@@ -336,7 +336,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   selectNode: (id) => {
     const state = get();
-    const located = findNodeWithWorldPosition(state.atlasRoot, id, state.layoutMode);
+    const located = findNodeWithWorldPosition(state.atlasRoot, id, state.layoutMode, id);
     if (!located) return;
     const { node, path, position } = located;
     const visualRadius = getNodeVisualRadius(node, path.length - 1);
@@ -375,7 +375,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   focusNode: (id) => {
     const state = get();
-    const located = findNodeWithWorldPosition(state.atlasRoot, id, state.layoutMode);
+    const located = findNodeWithWorldPosition(state.atlasRoot, id, state.layoutMode, id);
     if (!located) return;
     const { node, path, position } = located;
     const visualRadius = getNodeVisualRadius(node, path.length - 1);
@@ -1161,7 +1161,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const deletedNodeIds = collectNodeIds(deletedNode);
     const deletedAttachmentIds = collectAttachmentIds(deletedNode);
     const nextRoot = clearResolvedPropagatedErrors(removeNodeById(state.atlasRoot, id));
-    const parentLocation = findNodeWithWorldPosition(nextRoot, parentNode.id, state.layoutMode);
+    const parentLocation = findNodeWithWorldPosition(nextRoot, parentNode.id, state.layoutMode, parentNode.id);
     const nextSelectedNode = parentLocation?.node ?? nextRoot;
     const nextPosition = parentLocation?.position ?? [0, 0, 0];
     const nextDepth = Math.max(0, (parentLocation?.path.length ?? 1) - 1);
@@ -2433,12 +2433,12 @@ export function getAiContextNodeIds(root: AtlasNode, selectedNodeId: string, opt
   return [...ids];
 }
 
-export function getNodeWorldPosition(path: AtlasNode[], mode: AtlasLayoutMode = "phyllotaxis"): [number, number, number] {
+export function getNodeWorldPosition(path: AtlasNode[], mode: AtlasLayoutMode = "phyllotaxis", focusNodeId?: string): [number, number, number] {
   if (mode === "phyllotaxis") return getNodeWorldPositionFromPath(path);
   const root = path[0];
   const node = path.at(-1);
   if (!root || !node) return [0, 0, 0];
-  return deriveAtlasLayout(root, mode).get(node.id) ?? [0, 0, 0];
+  return deriveAtlasLayout(root, mode, undefined, { focusNodeId: focusNodeId ?? node.id }).get(node.id) ?? [0, 0, 0];
 }
 
 export function getNodeVisualRadius(node: Pick<AtlasNode, "kind" | "radius">, depth = 1) {
@@ -2451,10 +2451,10 @@ export function getNodeHitRadius(node: Pick<AtlasNode, "kind" | "radius">, depth
   return getNodeVisualRadius(node, depth);
 }
 
-export function findNodeWithWorldPosition(root: AtlasNode, id: string, mode: AtlasLayoutMode = "phyllotaxis") {
+export function findNodeWithWorldPosition(root: AtlasNode, id: string, mode: AtlasLayoutMode = "phyllotaxis", focusNodeId?: string) {
   const path = findNodePath(root, id);
   if (!path) return undefined;
-  return { node: path[path.length - 1], path, position: getNodeWorldPosition(path, mode) };
+  return { node: path[path.length - 1], path, position: getNodeWorldPosition(path, mode, focusNodeId ?? id) };
 }
 
 function selectionFromNode(node: AtlasNode): Selection {
@@ -2731,7 +2731,7 @@ function focusNodeCameraOnly(
   id: string,
 ) {
   const state = getState();
-  const located = findNodeWithWorldPosition(state.atlasRoot, id, state.layoutMode);
+  const located = findNodeWithWorldPosition(state.atlasRoot, id, state.layoutMode, id);
   if (!located) return;
   const { node, path, position } = located;
   const visualRadius = getNodeVisualRadius(node, path.length - 1);

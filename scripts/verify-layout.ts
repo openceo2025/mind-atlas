@@ -42,9 +42,24 @@ const treeLayout = deriveAtlasLayout(root, "tree");
 assert.ok((treeLayout.get("alpha-1")?.[1] ?? 0) < (treeLayout.get("alpha")?.[1] ?? 0), "tree children should be below parents");
 assert.ok((treeLayout.get("alpha-1")?.[0] ?? 0) < (treeLayout.get("gamma")?.[0] ?? 0), "tree layout should preserve sibling order");
 
+const focusedTreeLayout = deriveAtlasLayout(root, "tree", undefined, { focusNodeId: "alpha" });
+assertVecClose(focusedTreeLayout.get("alpha"), [0, 92, -620], "tree focused node should be centered in the 2D plane");
+assert.ok((focusedTreeLayout.get("atlas-root")?.[1] ?? 0) > (focusedTreeLayout.get("alpha")?.[1] ?? 0), "tree focused parent should be above active node");
+assert.ok((focusedTreeLayout.get("alpha-1")?.[1] ?? 0) < (focusedTreeLayout.get("alpha")?.[1] ?? 0), "tree focused children should be below active node");
+assert.equal(focusedTreeLayout.get("alpha")?.[2], focusedTreeLayout.get("alpha-1")?.[2], "tree focused layout should be flat");
+
+const mobileTreeLayout = deriveAtlasLayout(root, "tree", undefined, { focusNodeId: "alpha", viewport: "mobile-portrait" });
+assert.ok((mobileTreeLayout.get("alpha-1")?.[0] ?? 0) > (mobileTreeLayout.get("alpha")?.[0] ?? 0), "mobile tree children should be to the right of active node");
+assert.ok((mobileTreeLayout.get("atlas-root")?.[0] ?? 0) < (mobileTreeLayout.get("alpha")?.[0] ?? 0), "mobile tree parent should be to the left of active node");
+assert.equal(mobileTreeLayout.get("alpha")?.[2], mobileTreeLayout.get("alpha-1")?.[2], "mobile tree layout should be flat");
+
 const mindMapLayout = deriveAtlasLayout(root, "mind-map");
 assert.ok(distanceFromRoot(mindMapLayout.get("alpha")) < distanceFromRoot(mindMapLayout.get("alpha-1")), "mind map descendants should move outward");
 assert.equal(JSON.stringify([...mindMapLayout.entries()]), JSON.stringify([...deriveAtlasLayout(root, "mind-map").entries()]), "mind map layout should be deterministic");
+
+const focusedMindMapLayout = deriveAtlasLayout(root, "mind-map", undefined, { focusNodeId: "alpha" });
+assertVecClose(focusedMindMapLayout.get("alpha"), [0, 0, -620], "mind map focused node should be centered in the 2D plane");
+assert.equal(focusedMindMapLayout.get("alpha")?.[2], focusedMindMapLayout.get("gamma")?.[2], "mind map layout should be flat");
 
 const taggedRoot = cloneTree(root);
 findNode(taggedRoot, "alpha")?.tags.push("shared");
@@ -53,6 +68,9 @@ findNode(taggedRoot, "alpha-2")?.tags.push("shared");
 findNode(taggedRoot, "gamma")?.tags.push("other");
 const hubLayout = deriveAtlasLayout(taggedRoot, "hub-emphasis");
 assert.ok(distanceFromRoot(hubLayout.get("alpha")) < distanceFromRoot(hubLayout.get("gamma")), "hub emphasis should pull resonant hubs inward");
+const focusedHubLayout = deriveAtlasLayout(taggedRoot, "hub-emphasis", undefined, { focusNodeId: "alpha" });
+assertVecClose(focusedHubLayout.get("alpha"), [0, 0, -360], "hub focused node should rotate to the front tier");
+assert.ok(distanceFromRoot(focusedHubLayout.get("alpha")) < distanceFromRoot(focusedHubLayout.get("gamma")), "hub focused layout should keep child-count tiers");
 
 console.log("Layout verification passed");
 

@@ -3,6 +3,12 @@ import type { AtlasNode } from "../types";
 export type Vec3 = [number, number, number];
 export type AtlasLayoutMode = "phyllotaxis" | "tree" | "mind-map" | "hub-emphasis";
 export type AtlasPositionOverrides = Map<string, Vec3> | Record<string, Vec3 | undefined>;
+export type AtlasLayoutViewport = "desktop" | "mobile-portrait";
+
+export interface AtlasLayoutOptions {
+  focusNodeId?: string;
+  viewport?: AtlasLayoutViewport;
+}
 
 export const NOTEBOOK_FIRST_SHELL_RADIUS = 360;
 export const NOTEBOOK_SHELL_GAP = 340;
@@ -13,21 +19,32 @@ const FOCUSED_NODE_CAMERA_DISTANCE = 300;
 const NOTEBOOK_NODE_RADIUS = 28;
 const MIN_CHILD_SCREEN_SEPARATION_RADII = 3.4;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+const FOCUS_LAYOUT_PLANE_Z = -620;
+const TREE_ACTIVE_Y = 92;
+const TREE_DESKTOP_X_GAP = 220;
+const TREE_DESKTOP_Y_GAP = 190;
+const TREE_MOBILE_ACTIVE_X = -170;
+const TREE_MOBILE_X_GAP = 235;
+const TREE_MOBILE_Y_GAP = 150;
+const MIND_MAP_MIN_CHILD_RADIUS = 180;
+const MIND_MAP_MAX_CHILD_RADIUS = 350;
+const MIND_MAP_SIBLING_SCREEN_GAP = 118;
 
 export function deriveAtlasLayout(
   tree: AtlasNode,
   mode: AtlasLayoutMode = "phyllotaxis",
   overrides: AtlasPositionOverrides = collectPositionOverrides(tree),
+  options: AtlasLayoutOptions = {},
 ): Map<string, Vec3> {
   switch (mode) {
     case "phyllotaxis":
       return derivePhyllotaxisLayout(tree, overrides);
     case "tree":
-      return deriveTreeLayout(tree);
+      return deriveTreeLayout(tree, options);
     case "mind-map":
-      return deriveMindMapLayout(tree);
+      return deriveMindMapLayout(tree, options);
     case "hub-emphasis":
-      return deriveHubEmphasisLayout(tree);
+      return deriveHubEmphasisLayout(tree, overrides, options);
   }
 }
 
@@ -47,8 +64,8 @@ function derivePhyllotaxisLayout(tree: AtlasNode, overrides: AtlasPositionOverri
   return positions;
 }
 
-function deriveTreeLayout(tree: AtlasNode): Map<string, Vec3> {
-  const positions = new Map<string, Vec3>([[tree.id, [0, 0, 0]]]);
+function deriveTreeLayout(tree: AtlasNode, options: AtlasLayoutOptions): Map<string, Vec3> {
+  const positions = new Map<string, Vec3>();
   const leafSlots = new Map<string, number>();
   let slot = 0;
 
@@ -65,53 +82,55 @@ function deriveTreeLayout(tree: AtlasNode): Map<string, Vec3> {
   };
 
   assignSlots(tree);
-  const centerSlot = (Math.max(1, slot) - 1) / 2;
+  const focusPath = findAtlasNodePath(tree, options.focusNodeId ?? tree.id) ?? [tree];
+  const focusNode = focusPath[focusPath.length - 1] ?? tree;
+  const focusDepth = Math.max(0, focusPath.length - 1);
+  const focusSlot = leafSlots.get(focusNode.id) ?? (Math.max(1, slot) - 1) / 2;
+  const active: Vec3 = options.viewport === "mobile-portrait" ? [TREE_MOBILE_ACTIVE_X, 0, FOCUS_LAYOUT_PLANE_Z] : [0, TREE_ACTIVE_Y, FOCUS_LAYOUT_PLANE_Z];
+
   const visit = (node: AtlasNode, depth: number) => {
-    for (const child of node.children) {
-      const childDepth = depth + 1;
-      const x = ((leafSlots.get(child.id) ?? 0) - centerSlot) * 230;
-      const y = -childDepth * 185;
-      const z = -640 - childDepth * 90;
-      positions.set(child.id, [x, y, z]);
-      visit(child, childDepth);
-    }
+    const nodeSlot = leafSlots.get(node.id) ?? focusSlot;
+    const depthOffset = depth - focusDepth;
+    const slotOffset = nodeSlot - focusSlot;
+    const position: Vec3 =
+      options.viewport === "mobile-portrait"
+        ? [
+            active[0] + depthOffset * TREE_MOBILE_X_GAP,
+            active[1] - slotOffset * TREE_MOBILE_Y_GAP,
+            FOCUS_LAYOUT_PLANE_Z,
+          ]
+        : [
+            active[0] + slotOffset * TREE_DESKTOP_X_GAP,
+            active[1] - depthOffset * TREE_DESKTOP_Y_GAP,
+            FOCUS_LAYOUT_PLANE_Z,
+          ];
+    positions.set(node.id, position);
+    node.children.forEach((child) => visit(child, depth + 1));
   };
   visit(tree, 0);
   return positions;
 }
 
-function deriveMindMapLayout(tree: AtlasNode): Map<string, Vec3> {
-  const positions = new Map<string, Vec3>([[tree.id, [0, 0, 0]]]);
-  const topLevelCount = Math.max(1, tree.children.length);
-  tree.children.forEach((child, index) => {
-    const startAngle = (Math.PI * 2 * index) / topLevelCount - Math.PI / 2;
-    const endAngle = (Math.PI * 2 * (index + 1)) / topLevelCount - Math.PI / 2;
-    placeRadialSubtree(child, 1, startAngle, endAngle, positions);
-  });
-  return positions;
+function deriveMindMapLayout(tree: AtlasNode, options: AtlasLayoutOptions): Map<string, Vec3> {
+  const positions = new Map<string, Vec3>([[tree.id, [0, 0, FOCUS_LAYOUT_PLANE_Z]]]);
+  placeMindMapChildren(tree, [0, 0, FOCUS_LAYOUT_PLANE_Z], -Math.PI / 2, 0, positions);
+  return centerLayoutOnFocus(positions, options.focusNodeId ?? tree.id, [0, 0, FOCUS_LAYOUT_PLANE_Z]);
 }
 
-function deriveHubEmphasisLayout(tree: AtlasNode): Map<string, Vec3> {
+function deriveHubEmphasisLayout(tree: AtlasNode, overrides: AtlasPositionOverrides, options: AtlasLayoutOptions): Map<string, Vec3> {
+  const phyllotaxisPositions = derivePhyllotaxisLayout(tree, overrides);
   const positions = new Map<string, Vec3>([[tree.id, [0, 0, 0]]]);
-  const scores = new Map<string, number>();
-  const tagCounts = collectTagCounts(tree);
-  const scoreNode = (node: AtlasNode): number => {
-    const childScore = node.children.reduce((sum, child) => sum + scoreNode(child), 0);
-    const tagScore = node.tags.reduce((sum, tag) => sum + Math.max(0, (tagCounts.get(tag) ?? 1) - 1), 0);
-    const score = 1 + node.children.length * 1.8 + tagScore * 0.9 + childScore * 0.28;
-    scores.set(node.id, score);
-    return score;
-  };
-  scoreNode(tree);
+  const nodes = flattenAtlasNodes(tree).filter((node) => node.id !== tree.id);
+  const focusNodeId = options.focusNodeId ?? tree.id;
+  const focusDirection = focusNodeId === tree.id ? [0, 0, -1] as Vec3 : normalize(phyllotaxisPositions.get(focusNodeId) ?? [0, 0, -1]);
+  const maxChildCount = Math.max(0, ...nodes.map((node) => node.children.length));
 
-  const topLevelCount = Math.max(1, tree.children.length);
-  tree.children
-    .map((child, index) => ({ child, index, score: scores.get(child.id) ?? 1 }))
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .forEach(({ child, index, score }, sortedIndex) => {
-      const angle = (Math.PI * 2 * sortedIndex) / topLevelCount - Math.PI / 2;
-      placeHubSubtree(child, 1, angle, score, scores, positions);
-    });
+  for (const node of nodes) {
+    const freeDirection = normalize(phyllotaxisPositions.get(node.id) ?? [0, 0, -1]);
+    const centeredDirection = rotateDirectionBetween(freeDirection, focusDirection, [0, 0, -1]);
+    const tier = node.id === focusNodeId ? 1 : getConnectionTier(node.children.length, maxChildCount);
+    positions.set(node.id, scale(centeredDirection, getShellRadius(tier)));
+  }
   return positions;
 }
 
@@ -228,57 +247,100 @@ function getPhyllotaxisTopLevelDirection(index: number): Vec3 {
   return clampDirection([Math.cos(angle) * planarRadius, Math.sin(angle) * planarRadius, -1], TOP_LEVEL_DRAG_PLANAR_LIMIT);
 }
 
-function placeRadialSubtree(node: AtlasNode, depth: number, startAngle: number, endAngle: number, positions: Map<string, Vec3>) {
-  const angle = (startAngle + endAngle) / 2;
-  const radius = 280 + depth * 260;
-  positions.set(node.id, [Math.cos(angle) * radius, Math.sin(angle) * radius, -620 - depth * 80]);
-  if (!node.children.length) return;
-
-  const spread = Math.min(Math.PI * 0.72, Math.max(0.42, endAngle - startAngle));
-  const childStart = angle - spread / 2;
-  const childStep = spread / Math.max(1, node.children.length);
-  node.children.forEach((child, index) => {
-    placeRadialSubtree(child, depth + 1, childStart + childStep * index, childStart + childStep * (index + 1), positions);
-  });
-}
-
-function placeHubSubtree(
-  node: AtlasNode,
+function placeMindMapChildren(
+  parent: AtlasNode,
+  parentPosition: Vec3,
+  heading: number,
   depth: number,
-  angle: number,
-  inheritedScore: number,
-  scores: Map<string, number>,
   positions: Map<string, Vec3>,
 ) {
-  const score = scores.get(node.id) ?? inheritedScore;
-  const hubPull = Math.min(180, Math.log2(score + 1) * 58);
-  const radius = Math.max(220, 410 + depth * 235 - hubPull);
-  const orbitSkew = Math.sin(depth * 1.7 + score) * 54;
-  positions.set(node.id, [
-    Math.cos(angle) * radius + Math.cos(angle + Math.PI / 2) * orbitSkew,
-    Math.sin(angle) * radius + Math.sin(angle + Math.PI / 2) * orbitSkew,
-    -620 - depth * 86 + Math.min(90, score * 8),
-  ]);
-  if (!node.children.length) return;
+  const count = parent.children.length;
+  if (!count) return;
 
-  const sortedChildren = node.children
-    .map((child, index) => ({ child, index, score: scores.get(child.id) ?? 1 }))
-    .sort((a, b) => b.score - a.score || a.index - b.index);
-  const spread = Math.min(Math.PI * 0.82, 0.36 + sortedChildren.length * 0.2);
-  sortedChildren.forEach(({ child }, index) => {
-    const offset = sortedChildren.length <= 1 ? 0 : -spread / 2 + (spread * index) / (sortedChildren.length - 1);
-    placeHubSubtree(child, depth + 1, angle + offset, score, scores, positions);
+  const radius = getMindMapChildRadius(count, depth + 1);
+  const fullCircle = depth === 0;
+  const spread = fullCircle ? Math.PI * 2 : Math.min(Math.PI * 1.08, Math.max(0.78, count * 0.22));
+  const start = fullCircle ? -Math.PI / 2 : heading - spread / 2;
+  const step = fullCircle
+    ? (Math.PI * 2) / count
+    : count <= 1
+      ? 0
+      : spread / (count - 1);
+
+  parent.children.forEach((child, index) => {
+    const angle = count <= 1 && !fullCircle ? heading : start + step * index;
+    const childPosition: Vec3 = [
+      parentPosition[0] + Math.cos(angle) * radius,
+      parentPosition[1] + Math.sin(angle) * radius,
+      FOCUS_LAYOUT_PLANE_Z,
+    ];
+    positions.set(child.id, childPosition);
+    placeMindMapChildren(child, childPosition, angle, depth + 1, positions);
   });
 }
 
-function collectTagCounts(tree: AtlasNode) {
-  const counts = new Map<string, number>();
-  const visit = (node: AtlasNode) => {
-    node.tags.forEach((tag) => counts.set(tag, (counts.get(tag) ?? 0) + 1));
-    node.children.forEach(visit);
-  };
-  visit(tree);
-  return counts;
+function getMindMapChildRadius(siblingCount: number, depth: number) {
+  const countRadius = (Math.max(1, siblingCount) * MIND_MAP_SIBLING_SCREEN_GAP) / (Math.PI * 2);
+  const depthNudge = Math.min(55, Math.max(0, depth - 1) * 18);
+  return Math.min(MIND_MAP_MAX_CHILD_RADIUS, Math.max(MIND_MAP_MIN_CHILD_RADIUS, countRadius + depthNudge));
+}
+
+function centerLayoutOnFocus(positions: Map<string, Vec3>, focusNodeId: string, activePosition: Vec3) {
+  const focusPosition = positions.get(focusNodeId) ?? positions.values().next().value ?? activePosition;
+  const delta: Vec3 = [
+    activePosition[0] - focusPosition[0],
+    activePosition[1] - focusPosition[1],
+    activePosition[2] - focusPosition[2],
+  ];
+  return new Map(
+    [...positions.entries()].map(([id, position]) => [
+      id,
+      [position[0] + delta[0], position[1] + delta[1], FOCUS_LAYOUT_PLANE_Z] as Vec3,
+    ]),
+  );
+}
+
+function getConnectionTier(childCount: number, maxChildCount: number) {
+  if (maxChildCount <= 0) return 10;
+  const normalized = childCount / maxChildCount;
+  return clampInteger(1 + Math.floor((1 - normalized) * 9.999), 1, 10);
+}
+
+function flattenAtlasNodes(tree: AtlasNode): AtlasNode[] {
+  return [tree, ...tree.children.flatMap((child) => flattenAtlasNodes(child))];
+}
+
+function findAtlasNodePath(root: AtlasNode, id: string): AtlasNode[] | null {
+  if (root.id === id) return [root];
+  for (const child of root.children) {
+    const path = findAtlasNodePath(child, id);
+    if (path) return [root, ...path];
+  }
+  return null;
+}
+
+function rotateDirectionBetween(vector: Vec3, from: Vec3, to: Vec3) {
+  const normalizedFrom = normalize(from);
+  const normalizedTo = normalize(to);
+  const axis = cross(normalizedFrom, normalizedTo);
+  const sin = vectorLength(axis);
+  const cos = clamp(dot(normalizedFrom, normalizedTo), -1, 1);
+  if (sin <= 0.000001) {
+    if (cos > 0) return vector;
+    return rotateAroundAxis(vector, tangentBasis(normalizedFrom).tangentA, Math.PI);
+  }
+
+  return rotateAroundAxis(vector, scale(axis, 1 / sin), Math.atan2(sin, cos));
+}
+
+function rotateAroundAxis(vector: Vec3, axis: Vec3, angle: number): Vec3 {
+  const normalizedAxis = normalize(axis);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return add(
+    add(scale(vector, cos), scale(cross(normalizedAxis, vector), sin)),
+    scale(normalizedAxis, dot(normalizedAxis, vector) * (1 - cos)),
+  );
 }
 
 function getPhyllotaxisChildDirection(parentDirection: Vec3, depth: number, siblingCount: number, childIndex: number, parentId: string): Vec3 {
@@ -368,6 +430,22 @@ function add(a: Vec3, b: Vec3): Vec3 {
 
 function scale(vector: Vec3, amount: number): Vec3 {
   return [vector[0] * amount, vector[1] * amount, vector[2] * amount];
+}
+
+function dot(a: Vec3, b: Vec3) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function vectorLength(vector: Vec3) {
+  return Math.hypot(vector[0], vector[1], vector[2]);
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function clampInteger(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 function cross(a: Vec3, b: Vec3): Vec3 {
