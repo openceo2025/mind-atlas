@@ -1,7 +1,7 @@
 import type { AtlasNode } from "../types";
 
 export type Vec3 = [number, number, number];
-export type AtlasLayoutMode = "phyllotaxis";
+export type AtlasLayoutMode = "phyllotaxis" | "tree" | "mind-map" | "hub-emphasis";
 export type AtlasPositionOverrides = Map<string, Vec3> | Record<string, Vec3 | undefined>;
 
 export const NOTEBOOK_FIRST_SHELL_RADIUS = 360;
@@ -19,10 +19,19 @@ export function deriveAtlasLayout(
   mode: AtlasLayoutMode = "phyllotaxis",
   overrides: AtlasPositionOverrides = collectPositionOverrides(tree),
 ): Map<string, Vec3> {
-  if (mode !== "phyllotaxis") {
-    throw new Error(`Unsupported atlas layout mode: ${mode}`);
+  switch (mode) {
+    case "phyllotaxis":
+      return derivePhyllotaxisLayout(tree, overrides);
+    case "tree":
+      return deriveTreeLayout(tree);
+    case "mind-map":
+      return deriveMindMapLayout(tree);
+    case "hub-emphasis":
+      return deriveHubEmphasisLayout(tree);
   }
+}
 
+function derivePhyllotaxisLayout(tree: AtlasNode, overrides: AtlasPositionOverrides): Map<string, Vec3> {
   const positions = new Map<string, Vec3>([[tree.id, [0, 0, 0]]]);
   const overrideMap = normalizeOverrides(overrides);
 
@@ -35,6 +44,74 @@ export function deriveAtlasLayout(
   };
 
   visit(tree, [tree]);
+  return positions;
+}
+
+function deriveTreeLayout(tree: AtlasNode): Map<string, Vec3> {
+  const positions = new Map<string, Vec3>([[tree.id, [0, 0, 0]]]);
+  const leafSlots = new Map<string, number>();
+  let slot = 0;
+
+  const assignSlots = (node: AtlasNode): number => {
+    if (!node.children.length) {
+      leafSlots.set(node.id, slot);
+      slot += 1;
+      return leafSlots.get(node.id) ?? 0;
+    }
+    const childSlots = node.children.map(assignSlots);
+    const center = childSlots.reduce((sum, value) => sum + value, 0) / childSlots.length;
+    leafSlots.set(node.id, center);
+    return center;
+  };
+
+  assignSlots(tree);
+  const centerSlot = (Math.max(1, slot) - 1) / 2;
+  const visit = (node: AtlasNode, depth: number) => {
+    for (const child of node.children) {
+      const childDepth = depth + 1;
+      const x = ((leafSlots.get(child.id) ?? 0) - centerSlot) * 230;
+      const y = -childDepth * 185;
+      const z = -640 - childDepth * 90;
+      positions.set(child.id, [x, y, z]);
+      visit(child, childDepth);
+    }
+  };
+  visit(tree, 0);
+  return positions;
+}
+
+function deriveMindMapLayout(tree: AtlasNode): Map<string, Vec3> {
+  const positions = new Map<string, Vec3>([[tree.id, [0, 0, 0]]]);
+  const topLevelCount = Math.max(1, tree.children.length);
+  tree.children.forEach((child, index) => {
+    const startAngle = (Math.PI * 2 * index) / topLevelCount - Math.PI / 2;
+    const endAngle = (Math.PI * 2 * (index + 1)) / topLevelCount - Math.PI / 2;
+    placeRadialSubtree(child, 1, startAngle, endAngle, positions);
+  });
+  return positions;
+}
+
+function deriveHubEmphasisLayout(tree: AtlasNode): Map<string, Vec3> {
+  const positions = new Map<string, Vec3>([[tree.id, [0, 0, 0]]]);
+  const scores = new Map<string, number>();
+  const tagCounts = collectTagCounts(tree);
+  const scoreNode = (node: AtlasNode): number => {
+    const childScore = node.children.reduce((sum, child) => sum + scoreNode(child), 0);
+    const tagScore = node.tags.reduce((sum, tag) => sum + Math.max(0, (tagCounts.get(tag) ?? 1) - 1), 0);
+    const score = 1 + node.children.length * 1.8 + tagScore * 0.9 + childScore * 0.28;
+    scores.set(node.id, score);
+    return score;
+  };
+  scoreNode(tree);
+
+  const topLevelCount = Math.max(1, tree.children.length);
+  tree.children
+    .map((child, index) => ({ child, index, score: scores.get(child.id) ?? 1 }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .forEach(({ child, index, score }, sortedIndex) => {
+      const angle = (Math.PI * 2 * sortedIndex) / topLevelCount - Math.PI / 2;
+      placeHubSubtree(child, 1, angle, score, scores, positions);
+    });
   return positions;
 }
 
@@ -95,6 +172,23 @@ export function getStoredPositionForWorldDirection(
   return localOffsetFromDirections(parentDirection, desiredDirection, getManualChildSpreadLimit(depth, siblingCount));
 }
 
+export function getAtlasLayoutModeLabel(mode: AtlasLayoutMode) {
+  switch (mode) {
+    case "phyllotaxis":
+      return "Phyllotaxis";
+    case "tree":
+      return "Tree";
+    case "mind-map":
+      return "Mind map";
+    case "hub-emphasis":
+      return "Hub emphasis";
+  }
+}
+
+export function isAtlasLayoutMode(value: unknown): value is AtlasLayoutMode {
+  return value === "phyllotaxis" || value === "tree" || value === "mind-map" || value === "hub-emphasis";
+}
+
 export function getShellRadius(depth: number) {
   if (depth <= 1) return NOTEBOOK_FIRST_SHELL_RADIUS;
   return NOTEBOOK_FIRST_SHELL_RADIUS + NOTEBOOK_SHELL_GAP * (depth - 1);
@@ -132,6 +226,59 @@ function getPhyllotaxisTopLevelDirection(index: number): Vec3 {
   const angle = seededAngle("atlas-root") + i * GOLDEN_ANGLE;
   const planarRadius = Math.min(TOP_LEVEL_DRAG_PLANAR_LIMIT * 0.92, 0.22 + 0.12 * Math.sqrt(i));
   return clampDirection([Math.cos(angle) * planarRadius, Math.sin(angle) * planarRadius, -1], TOP_LEVEL_DRAG_PLANAR_LIMIT);
+}
+
+function placeRadialSubtree(node: AtlasNode, depth: number, startAngle: number, endAngle: number, positions: Map<string, Vec3>) {
+  const angle = (startAngle + endAngle) / 2;
+  const radius = 280 + depth * 260;
+  positions.set(node.id, [Math.cos(angle) * radius, Math.sin(angle) * radius, -620 - depth * 80]);
+  if (!node.children.length) return;
+
+  const spread = Math.min(Math.PI * 0.72, Math.max(0.42, endAngle - startAngle));
+  const childStart = angle - spread / 2;
+  const childStep = spread / Math.max(1, node.children.length);
+  node.children.forEach((child, index) => {
+    placeRadialSubtree(child, depth + 1, childStart + childStep * index, childStart + childStep * (index + 1), positions);
+  });
+}
+
+function placeHubSubtree(
+  node: AtlasNode,
+  depth: number,
+  angle: number,
+  inheritedScore: number,
+  scores: Map<string, number>,
+  positions: Map<string, Vec3>,
+) {
+  const score = scores.get(node.id) ?? inheritedScore;
+  const hubPull = Math.min(180, Math.log2(score + 1) * 58);
+  const radius = Math.max(220, 410 + depth * 235 - hubPull);
+  const orbitSkew = Math.sin(depth * 1.7 + score) * 54;
+  positions.set(node.id, [
+    Math.cos(angle) * radius + Math.cos(angle + Math.PI / 2) * orbitSkew,
+    Math.sin(angle) * radius + Math.sin(angle + Math.PI / 2) * orbitSkew,
+    -620 - depth * 86 + Math.min(90, score * 8),
+  ]);
+  if (!node.children.length) return;
+
+  const sortedChildren = node.children
+    .map((child, index) => ({ child, index, score: scores.get(child.id) ?? 1 }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  const spread = Math.min(Math.PI * 0.82, 0.36 + sortedChildren.length * 0.2);
+  sortedChildren.forEach(({ child }, index) => {
+    const offset = sortedChildren.length <= 1 ? 0 : -spread / 2 + (spread * index) / (sortedChildren.length - 1);
+    placeHubSubtree(child, depth + 1, angle + offset, score, scores, positions);
+  });
+}
+
+function collectTagCounts(tree: AtlasNode) {
+  const counts = new Map<string, number>();
+  const visit = (node: AtlasNode) => {
+    node.tags.forEach((tag) => counts.set(tag, (counts.get(tag) ?? 0) + 1));
+    node.children.forEach(visit);
+  };
+  visit(tree);
+  return counts;
 }
 
 function getPhyllotaxisChildDirection(parentDirection: Vec3, depth: number, siblingCount: number, childIndex: number, parentId: string): Vec3 {

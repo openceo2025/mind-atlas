@@ -1,4 +1,5 @@
 import type { AiExecutionMode, ViewportState } from "./types";
+import { isAtlasLayoutMode, type AtlasLayoutMode } from "./layout/atlasLayout";
 
 export type PersistedCommandMode = AiExecutionMode | "note";
 
@@ -15,6 +16,7 @@ export type PersistedUiState = {
   viewport?: ViewportState;
   cameraPose?: PersistedCameraPose;
   renderQuality?: "high" | "low";
+  layoutMode?: AtlasLayoutMode;
   vrModeEnabled?: boolean;
   mobilePanelTab?: "command" | "editor";
   commandDraft?: {
@@ -41,6 +43,7 @@ export function loadPersistedUiState(): PersistedUiState | null {
       viewport: isViewportState(parsed.viewport) ? parsed.viewport : undefined,
       cameraPose: isPersistedCameraPose(parsed.cameraPose) ? parsed.cameraPose : undefined,
       renderQuality: parsed.renderQuality === "high" || parsed.renderQuality === "low" ? parsed.renderQuality : undefined,
+      layoutMode: isAtlasLayoutMode(parsed.layoutMode) ? parsed.layoutMode : undefined,
       vrModeEnabled: typeof parsed.vrModeEnabled === "boolean" ? parsed.vrModeEnabled : undefined,
       mobilePanelTab: parsed.mobilePanelTab === "command" || parsed.mobilePanelTab === "editor" ? parsed.mobilePanelTab : undefined,
       commandDraft: isPersistedCommandDraft(parsed.commandDraft) ? parsed.commandDraft : undefined,

@@ -38,6 +38,22 @@ draggedChild.position = childOverride;
 const childLayout = deriveAtlasLayout(draggedRoot);
 assert.notDeepEqual(childLayout.get("alpha-2"), draggedLayout.get("alpha-2"));
 
+const treeLayout = deriveAtlasLayout(root, "tree");
+assert.ok((treeLayout.get("alpha-1")?.[1] ?? 0) < (treeLayout.get("alpha")?.[1] ?? 0), "tree children should be below parents");
+assert.ok((treeLayout.get("alpha-1")?.[0] ?? 0) < (treeLayout.get("gamma")?.[0] ?? 0), "tree layout should preserve sibling order");
+
+const mindMapLayout = deriveAtlasLayout(root, "mind-map");
+assert.ok(distanceFromRoot(mindMapLayout.get("alpha")) < distanceFromRoot(mindMapLayout.get("alpha-1")), "mind map descendants should move outward");
+assert.equal(JSON.stringify([...mindMapLayout.entries()]), JSON.stringify([...deriveAtlasLayout(root, "mind-map").entries()]), "mind map layout should be deterministic");
+
+const taggedRoot = cloneTree(root);
+findNode(taggedRoot, "alpha")?.tags.push("shared");
+findNode(taggedRoot, "alpha-1")?.tags.push("shared");
+findNode(taggedRoot, "alpha-2")?.tags.push("shared");
+findNode(taggedRoot, "gamma")?.tags.push("other");
+const hubLayout = deriveAtlasLayout(taggedRoot, "hub-emphasis");
+assert.ok(distanceFromRoot(hubLayout.get("alpha")) < distanceFromRoot(hubLayout.get("gamma")), "hub emphasis should pull resonant hubs inward");
+
 console.log("Layout verification passed");
 
 function bakeLegacyAutoPositions(tree: AtlasNode): AtlasNode {
@@ -127,6 +143,11 @@ function assertVecClose(actual: Vec3 | undefined, expected: Vec3 | undefined, me
   for (let index = 0; index < 3; index += 1) {
     assert.ok(Math.abs(actual[index] - expected[index]) < 0.000001, `${message}: axis ${index}`);
   }
+}
+
+function distanceFromRoot(position: Vec3 | undefined) {
+  assert.ok(position, "missing position");
+  return Math.hypot(position[0], position[1], position[2]);
 }
 
 function collectNodeIds(tree: AtlasNode): string[] {

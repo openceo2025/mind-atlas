@@ -1,5 +1,5 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { Bell, BellOff, CloudDownload, CloudUpload, Download, History, Maximize2, MessageSquareText, Moon, MoreHorizontal, PenLine, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
+import { Bell, BellOff, CloudDownload, CloudUpload, Download, GitBranch, History, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
 import { ChangeEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
@@ -11,6 +11,7 @@ import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE
 import { createNotebookJsonPackage, createNotebookPackage, importNotebookPackage, type NotebookPackageResult } from "./notebookPackage";
 import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
+import { getAtlasLayoutModeLabel, type AtlasLayoutMode } from "./layout/atlasLayout";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
 import type { AtlasNode, CloudNotebookEntry, NotificationPulse, VoiceLogEntry, VoicePartnerSettings } from "./types";
@@ -20,6 +21,12 @@ const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "
 const WORKSPACE_PANEL_EXIT_MS = 960;
 const RENDER_QUALITY_STORAGE_KEY = "mind-atlas-render-quality";
 const DEFAULT_DATASET_TITLE = "Mind Atlas";
+const LAYOUT_MODE_OPTIONS: Array<{ mode: AtlasLayoutMode; icon: "orbit" | "tree" | "mind" | "hub" }> = [
+  { mode: "phyllotaxis", icon: "orbit" },
+  { mode: "tree", icon: "tree" },
+  { mode: "mind-map", icon: "mind" },
+  { mode: "hub-emphasis", icon: "hub" },
+];
 const UNIVERSE_TITLE_PLACEHOLDER_ALIASES = [
   "Name this universe.",
   "この宇宙に名前をつけてみましょう",
@@ -59,6 +66,8 @@ export default function App() {
   const restoreAttachmentPreviews = useAtlasStore((state) => state.restoreAttachmentPreviews);
   const recoverCompletedCodexRuns = useAtlasStore((state) => state.recoverCompletedCodexRuns);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
+  const layoutMode = useAtlasStore((state) => state.layoutMode);
+  const setLayoutMode = useAtlasStore((state) => state.setLayoutMode);
   const [persistedUiState] = useState<PersistedUiState | null>(() => loadPersistedUiState());
   const [pageActive, setPageActive] = useState(() => isPageRuntimeActive());
   const [menuOpen, setMenuOpen] = useState(false);
@@ -142,10 +151,11 @@ export default function App() {
     latestUiStateRef.current = {
       selectedNodeId,
       renderQuality,
+      layoutMode,
       vrModeEnabled,
       mobilePanelTab,
     };
-  }, [mobilePanelTab, renderQuality, selectedNodeId, vrModeEnabled]);
+  }, [layoutMode, mobilePanelTab, renderQuality, selectedNodeId, vrModeEnabled]);
 
   useEffect(() => {
     if (!uiPersistenceReadyRef.current) {
@@ -153,7 +163,12 @@ export default function App() {
       return;
     }
     persistUiStatePatch(latestUiStateRef.current);
-  }, [mobilePanelTab, renderQuality, selectedNodeId, vrModeEnabled]);
+  }, [layoutMode, mobilePanelTab, renderQuality, selectedNodeId, vrModeEnabled]);
+
+  useEffect(() => {
+    if (!persistedUiState?.layoutMode) return;
+    setLayoutMode(persistedUiState.layoutMode);
+  }, [persistedUiState, setLayoutMode]);
 
   useEffect(() => {
     const saveUiState = () => persistUiStatePatch(latestUiStateRef.current);
@@ -557,6 +572,11 @@ export default function App() {
     persistRenderQualityPreference(quality);
   };
 
+  const handleLayoutModeChange = (mode: AtlasLayoutMode) => {
+    setLayoutMode(mode);
+    persistUiStatePatch({ ...latestUiStateRef.current, layoutMode: mode });
+  };
+
   if (outlineEditorOpen) {
     return (
       <OutlineEditor
@@ -576,6 +596,7 @@ export default function App() {
         theme={theme}
         vrPanEnabled={vrModeEnabled}
         renderQuality={renderQuality}
+        layoutMode={layoutMode}
         pageActive={pageActive}
         initialCameraPose={persistedUiState?.cameraPose ?? null}
       />
@@ -634,6 +655,24 @@ export default function App() {
                 >
                   <Sun size={15} /> White
                 </button>
+              </div>
+            </div>
+            <div className="context-menu-section" aria-label="Layout mode">
+              <span className="context-menu-section-title">Layout</span>
+              <div className="theme-choice-row layout-choice-row">
+                {LAYOUT_MODE_OPTIONS.map((option) => (
+                  <button
+                    key={option.mode}
+                    className={layoutMode === option.mode ? "is-active" : ""}
+                    type="button"
+                    onClick={() => handleLayoutModeChange(option.mode)}
+                    aria-pressed={layoutMode === option.mode}
+                    title={getAtlasLayoutModeLabel(option.mode)}
+                  >
+                    <LayoutModeIcon icon={option.icon} />
+                    {getAtlasLayoutModeLabel(option.mode)}
+                  </button>
+                ))}
               </div>
             </div>
             <div className="undo-redo-row" aria-label="History actions">
@@ -999,6 +1038,19 @@ function VoiceSettingsDialog({
       </section>
     </div>
   );
+}
+
+function LayoutModeIcon({ icon }: { icon: "orbit" | "tree" | "mind" | "hub" }) {
+  switch (icon) {
+    case "orbit":
+      return <Orbit size={15} />;
+    case "tree":
+      return <GitBranch size={15} />;
+    case "mind":
+      return <Network size={15} />;
+    case "hub":
+      return <Radio size={15} />;
+  }
 }
 
 function VoiceLogDialog({

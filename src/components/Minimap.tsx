@@ -6,15 +6,16 @@ import { useAtlasStore } from "../store/atlasStore";
 
 export function Minimap() {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
+  const layoutMode = useAtlasStore((state) => state.layoutMode);
   const viewport = useAtlasStore((state) => state.viewport);
   const focusNode = useAtlasStore((state) => state.focusNode);
   const pinchRef = useRef<{ distance: number } | null>(null);
   const positions = useMemo(
     () => {
-      const layoutPositions = deriveAtlasLayout(atlasRoot);
+      const layoutPositions = deriveAtlasLayout(atlasRoot, layoutMode);
       return atlasRoot.children.map((node) => ({ node, position: layoutPositions.get(node.id) ?? [0, 0, 0] as [number, number, number] }));
     },
-    [atlasRoot],
+    [atlasRoot, layoutMode],
   );
 
   const viewportStyle = useMemo(() => {

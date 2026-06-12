@@ -14,12 +14,14 @@ import {
   TOP_LEVEL_PLANAR_LIMIT,
   clampDirection,
   getManualChildSpreadLimit,
+  deriveAtlasLayout,
   getNodeWorldPositionFromPath,
   getPlanarLimitForDepth,
   getShellRadius,
   getStoredPositionForWorldDirection,
   looksLikeLegacyWorldDirection,
   type Vec3,
+  type AtlasLayoutMode,
 } from "../layout/atlasLayout";
 import { sanitizeNotebookForExport } from "../notebookExport";
 import {
@@ -220,6 +222,7 @@ interface AtlasStore {
   commandInputEditing: boolean;
   activeCommandMode: AiExecutionMode | "note";
   viewport: ViewportState;
+  layoutMode: AtlasLayoutMode;
   focusRequest: FocusRequest | null;
   cameraFocusNodeId: string | null;
   attachmentPreviewUrls: Record<string, string>;
@@ -283,6 +286,7 @@ interface AtlasStore {
   selectEvent: (parentId: string, id: string) => void;
   selectArtifact: (parentId: string, id: string) => void;
   setViewport: (viewport: ViewportState) => void;
+  setLayoutMode: (mode: AtlasLayoutMode) => void;
   focusWorkArea: (id: string) => void;
   focusPoint: (x: number, y: number, diameter: number) => void;
   focusNodeCameraOnly: (id: string) => void;
@@ -323,6 +327,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   commandInputEditing: false,
   activeCommandMode: "openai",
   viewport: { x: 0, y: 0, zoom: 0.92 },
+  layoutMode: "phyllotaxis",
   focusRequest: null,
   cameraFocusNodeId: null,
   attachmentPreviewUrls: {},
@@ -330,7 +335,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   titleEditRequestId: null,
 
   selectNode: (id) => {
-    const located = findNodeWithWorldPosition(get().atlasRoot, id);
+    const state = get();
+    const located = findNodeWithWorldPosition(state.atlasRoot, id, state.layoutMode);
     if (!located) return;
     const { node, path, position } = located;
     const visualRadius = getNodeVisualRadius(node, path.length - 1);
@@ -368,7 +374,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   },
 
   focusNode: (id) => {
-    const located = findNodeWithWorldPosition(get().atlasRoot, id);
+    const state = get();
+    const located = findNodeWithWorldPosition(state.atlasRoot, id, state.layoutMode);
     if (!located) return;
     const { node, path, position } = located;
     const visualRadius = getNodeVisualRadius(node, path.length - 1);
@@ -1154,7 +1161,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const deletedNodeIds = collectNodeIds(deletedNode);
     const deletedAttachmentIds = collectAttachmentIds(deletedNode);
     const nextRoot = clearResolvedPropagatedErrors(removeNodeById(state.atlasRoot, id));
-    const parentLocation = findNodeWithWorldPosition(nextRoot, parentNode.id);
+    const parentLocation = findNodeWithWorldPosition(nextRoot, parentNode.id, state.layoutMode);
     const nextSelectedNode = parentLocation?.node ?? nextRoot;
     const nextPosition = parentLocation?.position ?? [0, 0, 0];
     const nextDepth = Math.max(0, (parentLocation?.path.length ?? 1) - 1);
@@ -1458,6 +1465,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   selectEvent: (parentId, id) => get().focusNode(id),
   selectArtifact: (parentId, id) => get().focusNode(id),
   setViewport: (viewport) => set({ viewport }),
+
+  setLayoutMode: (layoutMode) => set({ layoutMode }),
 
   focusPoint: (x, y, diameter) => {
     set((state) => ({
@@ -2424,8 +2433,12 @@ export function getAiContextNodeIds(root: AtlasNode, selectedNodeId: string, opt
   return [...ids];
 }
 
-export function getNodeWorldPosition(path: AtlasNode[]): [number, number, number] {
-  return getNodeWorldPositionFromPath(path);
+export function getNodeWorldPosition(path: AtlasNode[], mode: AtlasLayoutMode = "phyllotaxis"): [number, number, number] {
+  if (mode === "phyllotaxis") return getNodeWorldPositionFromPath(path);
+  const root = path[0];
+  const node = path.at(-1);
+  if (!root || !node) return [0, 0, 0];
+  return deriveAtlasLayout(root, mode).get(node.id) ?? [0, 0, 0];
 }
 
 export function getNodeVisualRadius(node: Pick<AtlasNode, "kind" | "radius">, depth = 1) {
@@ -2438,10 +2451,10 @@ export function getNodeHitRadius(node: Pick<AtlasNode, "kind" | "radius">, depth
   return getNodeVisualRadius(node, depth);
 }
 
-export function findNodeWithWorldPosition(root: AtlasNode, id: string) {
+export function findNodeWithWorldPosition(root: AtlasNode, id: string, mode: AtlasLayoutMode = "phyllotaxis") {
   const path = findNodePath(root, id);
   if (!path) return undefined;
-  return { node: path[path.length - 1], path, position: getNodeWorldPosition(path) };
+  return { node: path[path.length - 1], path, position: getNodeWorldPosition(path, mode) };
 }
 
 function selectionFromNode(node: AtlasNode): Selection {
@@ -2717,7 +2730,8 @@ function focusNodeCameraOnly(
   getState: typeof useAtlasStore.getState,
   id: string,
 ) {
-  const located = findNodeWithWorldPosition(getState().atlasRoot, id);
+  const state = getState();
+  const located = findNodeWithWorldPosition(state.atlasRoot, id, state.layoutMode);
   if (!located) return;
   const { node, path, position } = located;
   const visualRadius = getNodeVisualRadius(node, path.length - 1);

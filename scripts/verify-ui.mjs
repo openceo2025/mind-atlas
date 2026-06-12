@@ -25,6 +25,7 @@ async function launchBrowser() {
 
 async function verifyViewport(browser, name, viewport) {
   const page = await browser.newPage({ viewport, ignoreHTTPSErrors: true });
+  await seedCompletedOnboarding(page);
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
   await page.waitForTimeout(900);
@@ -77,11 +78,54 @@ async function verifyViewport(browser, name, viewport) {
   return stats;
 }
 
+async function verifyLayoutModeSwitch(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
+  await seedCompletedOnboarding(page);
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  await page.getByLabel("Open atlas menu").click();
+  for (const label of ["Tree", "Mind map", "Hub emphasis", "Phyllotaxis"]) {
+    await page.getByTitle(label).click();
+    await page.waitForTimeout(220);
+    const hasCanvas = await page.locator("canvas").evaluate((canvas) => {
+      const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
+      return Boolean(gl);
+    });
+    if (!hasCanvas) throw new Error(`Layout mode ${label} lost WebGL canvas`);
+  }
+  await page.close();
+}
+
+async function seedCompletedOnboarding(page) {
+  await page.addInitScript(() => {
+    const now = new Date().toISOString();
+    window.localStorage.setItem(
+      "mind-atlas-onboarding-v1",
+      JSON.stringify({
+        version: 1,
+        firstRun: false,
+        rootNodeCreated: true,
+        pan: true,
+        zoom: true,
+        nodeDrag: true,
+        childNodeCreated: true,
+        spaceBasicsCompleted: true,
+        basicCompleted: true,
+        aiUnlocked: true,
+        titlePromptApplied: true,
+        startedAt: now,
+        completedAt: now,
+      }),
+    );
+  });
+}
+
 await mkdir(outputDir, { recursive: true });
 
 const browser = await launchBrowser();
 try {
   const desktop = await verifyViewport(browser, "desktop", { width: 1440, height: 920 });
+  await verifyLayoutModeSwitch(browser);
   const mobile = await verifyViewport(browser, "mobile", { width: 390, height: 844 });
   const mobileLandscape = await verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 });
   console.log("UI verification passed");

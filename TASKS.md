@@ -200,7 +200,7 @@ Implementation result:
 
 ### T4. Layout Modes
 
-Status: Not started
+Status: Completed on 2026-06-12
 Depends on: T2
 Blocks: T5, T9
 
@@ -221,6 +221,28 @@ Definition of Done:
 - Mode choice persists across reloads.
 - Layouts are readable on desktop and mobile.
 - `npm run typecheck`, `npm run build`, and `npm run verify:ui` pass.
+
+Implementation result:
+
+- Added layout modes to `src/layout/atlasLayout.ts`: `tree`, `mind-map`, and
+  `hub-emphasis`, alongside the existing `phyllotaxis` mode.
+- Added readable tree layout for hierarchy and sibling order, root-centered
+  radial mind-map layout, and deterministic hub-emphasis layout based on child
+  count and tag resonance.
+- Kept hub-emphasis on the main thread because the current deterministic
+  computation is cheap and covered by `npm run verify:layout`.
+- Persisted `layoutMode` in `src/uiPersistence.ts` and exposed a Layout section
+  in the global menu.
+- Updated `UniverseCanvas`, `Minimap`, notification pulses, and focus position
+  lookup to use the active layout mode.
+- Added a subtle dashed sibling-order guide for top-level phyllotaxis layout.
+- Extended `npm run verify:layout` to cover all layout modes and manual
+  override behavior.
+- Extended `npm run verify:ui` to click through the layout mode switch path.
+- Verification on 2026-06-12: `npm run verify:layout` passed;
+  `npm run verify:context` passed; `npm run typecheck` passed;
+  `npm run build` passed with the existing Vite large chunk warning;
+  `npm run verify:ui` passed after restarting Vite on `127.0.0.1:5173`.
 
 ### T5. Reformation Animation And Motion Language
 

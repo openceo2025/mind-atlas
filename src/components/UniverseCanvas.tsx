@@ -25,12 +25,11 @@ import {
   getNodeVisualRadius,
   getManualChildSpreadLimit,
   getPlanarLimitForDepth,
-  getNodeWorldPosition,
   getShellRadius,
   getAiContextNodeIds,
   useAtlasStore,
 } from "../store/atlasStore";
-import { deriveAtlasLayout, type Vec3 } from "../layout/atlasLayout";
+import { deriveAtlasLayout, type AtlasLayoutMode, type Vec3 } from "../layout/atlasLayout";
 import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { createNodeClipboardText, nodeTreeHasAttachments, parseNodeClipboardText } from "../nodeClipboard";
 import { emitOnboardingEvent, getOnboardingCurrentSpaceStep } from "../onboarding/useOnboarding";
@@ -289,12 +288,14 @@ export function UniverseCanvas({
   theme,
   vrPanEnabled,
   renderQuality,
+  layoutMode,
   pageActive,
   initialCameraPose,
 }: {
   theme: AtlasTheme;
   vrPanEnabled: boolean;
   renderQuality: RenderQuality;
+  layoutMode: AtlasLayoutMode;
   pageActive: boolean;
   initialCameraPose: PersistedCameraPose | null;
 }) {
@@ -418,8 +419,8 @@ export function UniverseCanvas({
           </>
         ) : null}
         <NavigationController theme={theme} vrPanEnabled={vrPanEnabled} renderQuality={renderQuality} pageActive={pageActive} initialCameraPose={initialCameraPose} />
-        <NotebookNodes theme={theme} renderQuality={renderQuality} pageActive={pageActive} onOpenNodeContextMenu={setNodeContextMenu} />
-        <NotificationPulseLayer theme={theme} renderQuality={renderQuality} pageActive={pageActive} />
+        <NotebookNodes theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} pageActive={pageActive} onOpenNodeContextMenu={setNodeContextMenu} />
+        <NotificationPulseLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} pageActive={pageActive} />
       </Canvas>
       <NodeContextMenu menu={nodeContextMenu} onClose={() => setNodeContextMenu(null)} />
     </section>
@@ -523,7 +524,17 @@ function getKeyboardNavigationTarget(root: AtlasNode, originNodeId: string, key:
   return null;
 }
 
-function NotificationPulseLayer({ theme, renderQuality, pageActive }: { theme: AtlasTheme; renderQuality: RenderQuality; pageActive: boolean }) {
+function NotificationPulseLayer({
+  theme,
+  renderQuality,
+  layoutMode,
+  pageActive,
+}: {
+  theme: AtlasTheme;
+  renderQuality: RenderQuality;
+  layoutMode: AtlasLayoutMode;
+  pageActive: boolean;
+}) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const pulses = useAtlasStore((state) => state.notificationPulses);
   const tickNotificationPulses = useAtlasStore((state) => state.tickNotificationPulses);
@@ -541,7 +552,7 @@ function NotificationPulseLayer({ theme, renderQuality, pageActive }: { theme: A
   return (
     <>
       {animatedPulses.map((pulse) => {
-        const located = findNodeWithWorldPosition(atlasRoot, pulse.nodeId);
+        const located = findNodeWithWorldPosition(atlasRoot, pulse.nodeId, layoutMode);
         if (!located) return null;
         return (
           <GlobalNotificationPulse
@@ -1625,11 +1636,13 @@ function formatUsageForExport(usage: NonNullable<AtlasNode["usage"]>) {
 function NotebookNodes({
   theme,
   renderQuality,
+  layoutMode,
   pageActive,
   onOpenNodeContextMenu,
 }: {
   theme: AtlasTheme;
   renderQuality: RenderQuality;
+  layoutMode: AtlasLayoutMode;
   pageActive: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
@@ -1670,7 +1683,7 @@ function NotebookNodes({
     if (!commandInputEditing || activeCommandMode === "note") return new Set<string>();
     return new Set(getAiContextNodeIds(atlasRoot, selectedNodeId, { ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds }));
   }, [activeCommandMode, aiContextOptions, atlasRoot, commandInputEditing, multiSelectedNodeIds, selectedNodeId]);
-  const layoutPositions = useMemo(() => deriveAtlasLayout(atlasRoot), [atlasRoot]);
+  const layoutPositions = useMemo(() => deriveAtlasLayout(atlasRoot, layoutMode), [atlasRoot, layoutMode]);
 
   useEffect(() => {
     if (findNode(atlasRoot, renderSelectedNodeId)) return;
@@ -1809,6 +1822,9 @@ function NotebookNodes({
 
   return (
     <group>
+      {layoutMode === "phyllotaxis" && renderQuality === "high" ? (
+        <PhyllotaxisSiblingGuide root={atlasRoot} layoutPositions={layoutPositions} theme={theme} />
+      ) : null}
       {atlasRoot.children.map((node) => {
         const path = [atlasRoot, node];
         const position = getLayoutPosition(layoutPositions, node.id);
@@ -1884,6 +1900,33 @@ function buildLowQualityRenderPaths(root: AtlasNode, selectedNodeId: string, not
 
 function getLayoutPosition(layoutPositions: Map<string, Vec3>, nodeId: string): Vec3 {
   return layoutPositions.get(nodeId) ?? [0, 0, 0];
+}
+
+function PhyllotaxisSiblingGuide({
+  root,
+  layoutPositions,
+  theme,
+}: {
+  root: AtlasNode;
+  layoutPositions: Map<string, Vec3>;
+  theme: AtlasTheme;
+}) {
+  const points = root.children
+    .map((child) => layoutPositions.get(child.id))
+    .filter((position): position is Vec3 => Boolean(position));
+  if (points.length < 3) return null;
+  return (
+    <Line
+      points={points}
+      color={theme === "light" ? "#6f9ed1" : "#7dd8bf"}
+      transparent
+      opacity={theme === "light" ? 0.18 : 0.13}
+      lineWidth={1}
+      dashed
+      dashSize={18}
+      gapSize={16}
+    />
+  );
 }
 
 function hasAiContextPreviewNode(node: AtlasNode, aiContextPreviewNodeIds: Set<string>): boolean {
@@ -2210,7 +2253,7 @@ function HierarchyNode({
       startWorld: worldPosition,
       startPointerWorld: intersectRaySphere(event.ray, layerRadius),
       currentWorld: worldPosition,
-      parentWorld: path.length > 2 ? getNodeWorldPosition(path.slice(0, -1)) : undefined,
+      parentWorld: path.length > 2 ? getLayoutPosition(layoutPositions, path[path.length - 2].id) : undefined,
       siblingCount: path.length > 2 ? path[path.length - 2].children.length : 1,
       layerRadius,
       stage: "moving",
@@ -2224,7 +2267,7 @@ function HierarchyNode({
     setHiddenDragEdgeNodeId(node.id);
     setDragBoundary({
       depth,
-      parentWorldPosition: path.length > 2 ? getNodeWorldPosition(path.slice(0, -1)) : undefined,
+      parentWorldPosition: path.length > 2 ? getLayoutPosition(layoutPositions, path[path.length - 2].id) : undefined,
       siblingCount: path.length > 2 ? path[path.length - 2].children.length : undefined,
     });
   };
@@ -3904,23 +3947,25 @@ function reportNodeVisibility(root: AtlasNode, camera: PerspectiveCamera, state:
   if (now - state.lastCheckedAt < NODE_VISIBILITY_CHECK_MS) return;
   state.lastCheckedAt = now;
 
-  const allOffscreen = areAllNodesOffscreen(root, camera);
+  const layoutMode = useAtlasStore.getState().layoutMode;
+  const allOffscreen = areAllNodesOffscreen(root, camera, layoutMode);
   if (state.allOffscreen === allOffscreen) return;
   state.allOffscreen = allOffscreen;
   emitOnboardingEvent(allOffscreen ? "all-nodes-offscreen" : "nodes-onscreen");
 }
 
-function areAllNodesOffscreen(root: AtlasNode, camera: PerspectiveCamera) {
+function areAllNodesOffscreen(root: AtlasNode, camera: PerspectiveCamera, layoutMode: AtlasLayoutMode) {
   if (!root.children.length) return false;
   camera.updateMatrixWorld();
-  return !root.children.some((child) => isNodePathOnscreen([root, child], camera));
+  const layoutPositions = deriveAtlasLayout(root, layoutMode);
+  return !root.children.some((child) => isNodePathOnscreen([root, child], camera, layoutPositions));
 }
 
-function isNodePathOnscreen(path: AtlasNode[], camera: PerspectiveCamera): boolean {
+function isNodePathOnscreen(path: AtlasNode[], camera: PerspectiveCamera, layoutPositions: Map<string, Vec3>): boolean {
   const node = path.at(-1);
   if (!node) return false;
-  if (isWorldPositionOnscreen(getNodeWorldPosition(path), camera)) return true;
-  return node.children.some((child) => isNodePathOnscreen([...path, child], camera));
+  if (isWorldPositionOnscreen(getLayoutPosition(layoutPositions, node.id), camera)) return true;
+  return node.children.some((child) => isNodePathOnscreen([...path, child], camera, layoutPositions));
 }
 
 function isWorldPositionOnscreen(position: Vec3Tuple, camera: PerspectiveCamera) {
