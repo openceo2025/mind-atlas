@@ -43,7 +43,7 @@ assert.ok((treeLayout.get("alpha-1")?.[1] ?? 0) < (treeLayout.get("alpha")?.[1] 
 assert.ok((treeLayout.get("alpha-1")?.[0] ?? 0) < (treeLayout.get("gamma")?.[0] ?? 0), "tree layout should preserve sibling order");
 
 const focusedTreeLayout = deriveAtlasLayout(root, "tree", undefined, { focusNodeId: "alpha" });
-assertVecClose(focusedTreeLayout.get("alpha"), [0, 92, -620], "tree focused node should be centered in the 2D plane");
+assertVecClose(focusedTreeLayout.get("alpha"), [0, 92, -1320], "tree focused node should be centered in the 2D plane");
 assert.ok((focusedTreeLayout.get("atlas-root")?.[1] ?? 0) > (focusedTreeLayout.get("alpha")?.[1] ?? 0), "tree focused parent should be above active node");
 assert.ok((focusedTreeLayout.get("alpha-1")?.[1] ?? 0) < (focusedTreeLayout.get("alpha")?.[1] ?? 0), "tree focused children should be below active node");
 assert.equal(focusedTreeLayout.get("alpha")?.[2], focusedTreeLayout.get("alpha-1")?.[2], "tree focused layout should be flat");
@@ -58,7 +58,7 @@ assert.ok(distanceFromRoot(mindMapLayout.get("alpha")) < distanceFromRoot(mindMa
 assert.equal(JSON.stringify([...mindMapLayout.entries()]), JSON.stringify([...deriveAtlasLayout(root, "mind-map").entries()]), "mind map layout should be deterministic");
 
 const focusedMindMapLayout = deriveAtlasLayout(root, "mind-map", undefined, { focusNodeId: "alpha" });
-assertVecClose(focusedMindMapLayout.get("alpha"), [0, 0, -620], "mind map focused node should be centered in the 2D plane");
+assertVecClose(focusedMindMapLayout.get("alpha"), [0, 0, -1320], "mind map focused node should be centered in the 2D plane");
 assert.equal(focusedMindMapLayout.get("alpha")?.[2], focusedMindMapLayout.get("gamma")?.[2], "mind map layout should be flat");
 
 const taggedRoot = cloneTree(root);
@@ -71,6 +71,16 @@ assert.ok(distanceFromRoot(hubLayout.get("alpha")) < distanceFromRoot(hubLayout.
 const focusedHubLayout = deriveAtlasLayout(taggedRoot, "hub-emphasis", undefined, { focusNodeId: "alpha" });
 assertVecClose(focusedHubLayout.get("alpha"), [0, 0, -360], "hub focused node should rotate to the front tier");
 assert.ok(distanceFromRoot(focusedHubLayout.get("alpha")) < distanceFromRoot(focusedHubLayout.get("gamma")), "hub focused layout should keep child-count tiers");
+
+const outlierRoot = node("atlas-root", "Outlier", [
+  node("huge", "Huge", Array.from({ length: 100 }, (_, index) => node(`huge-${index}`, `Huge ${index}`))),
+  ...Array.from({ length: 19 }, (_, index) => node(`peer-${index}`, `Peer ${index}`, Array.from({ length: index % 4 }, (_, childIndex) => node(`peer-${index}-${childIndex}`, `Peer ${index}.${childIndex}`)))),
+]);
+const outlierHubLayout = deriveAtlasLayout(outlierRoot, "hub-emphasis");
+const peerTiers = outlierRoot.children
+  .filter((node) => node.id.startsWith("peer-"))
+  .map((node) => tierFromDistance(outlierHubLayout.get(node.id)));
+assert.ok(new Set(peerTiers).size > 3, "hub tiers should be rank-distributed instead of collapsing all non-outliers to the back");
 
 console.log("Layout verification passed");
 
@@ -166,6 +176,12 @@ function assertVecClose(actual: Vec3 | undefined, expected: Vec3 | undefined, me
 function distanceFromRoot(position: Vec3 | undefined) {
   assert.ok(position, "missing position");
   return Math.hypot(position[0], position[1], position[2]);
+}
+
+function tierFromDistance(position: Vec3 | undefined) {
+  assert.ok(position, "missing position");
+  const distance = Math.hypot(position[0], position[1], position[2]);
+  return Math.round((distance - 360) / 340) + 1;
 }
 
 function collectNodeIds(tree: AtlasNode): string[] {

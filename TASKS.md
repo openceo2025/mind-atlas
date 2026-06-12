@@ -233,9 +233,9 @@ Implementation result:
 - Added focus-aware flat mind-map layout with compact child radii based on
   sibling count so root-level nodes do not spread too far off screen.
 - Updated hub-emphasis to preserve phyllotaxis angular directions while
-  assigning nodes to up to ten depth tiers by child count. The active node is
-  rotated to the front tier, and drag coordinate changes are disabled outside
-  phyllotaxis mode.
+  assigning nodes to up to ten rank-distributed depth tiers by child count.
+  The active node is rotated to the forward viewing direction, and drag
+  coordinate changes are disabled outside phyllotaxis mode.
 - Kept hub-emphasis on the main thread because the current deterministic
   computation is cheap and covered by `npm run verify:layout`.
 - Persisted `layoutMode` in `src/uiPersistence.ts` and exposed a Layout section
@@ -246,8 +246,12 @@ Implementation result:
   reduced readability.
 - Added node easing for generated layout changes when the active node or layout
   mode changes.
+- Locked generated layout camera focus to the layout-facing direction so tree
+  and mind-map axes align with the browser X/Y axes, and made generated layout
+  depth fade use the actual layout depth.
 - Extended `npm run verify:layout` to cover all layout modes, manual override
-  behavior, focus-aware flat layouts, mobile tree orientation, and hub tiers.
+  behavior, focus-aware flat layouts, mobile tree orientation, and
+  rank-distributed hub tiers.
 - Extended `npm run verify:ui` to click through the layout mode switch path.
 - Verification on 2026-06-12: `npm run verify:layout` passed;
   `npm run verify:context` passed; `npm run typecheck` passed;

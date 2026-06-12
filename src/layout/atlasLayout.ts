@@ -19,7 +19,7 @@ const FOCUSED_NODE_CAMERA_DISTANCE = 300;
 const NOTEBOOK_NODE_RADIUS = 28;
 const MIN_CHILD_SCREEN_SEPARATION_RADII = 3.4;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-const FOCUS_LAYOUT_PLANE_Z = -620;
+const FOCUS_LAYOUT_PLANE_Z = -1320;
 const TREE_ACTIVE_Y = 92;
 const TREE_DESKTOP_X_GAP = 220;
 const TREE_DESKTOP_Y_GAP = 190;
@@ -123,12 +123,12 @@ function deriveHubEmphasisLayout(tree: AtlasNode, overrides: AtlasPositionOverri
   const nodes = flattenAtlasNodes(tree).filter((node) => node.id !== tree.id);
   const focusNodeId = options.focusNodeId ?? tree.id;
   const focusDirection = focusNodeId === tree.id ? [0, 0, -1] as Vec3 : normalize(phyllotaxisPositions.get(focusNodeId) ?? [0, 0, -1]);
-  const maxChildCount = Math.max(0, ...nodes.map((node) => node.children.length));
+  const tierByNodeId = rankNodesIntoConnectionTiers(nodes);
 
   for (const node of nodes) {
     const freeDirection = normalize(phyllotaxisPositions.get(node.id) ?? [0, 0, -1]);
     const centeredDirection = rotateDirectionBetween(freeDirection, focusDirection, [0, 0, -1]);
-    const tier = node.id === focusNodeId ? 1 : getConnectionTier(node.children.length, maxChildCount);
+    const tier = tierByNodeId.get(node.id) ?? 10;
     positions.set(node.id, scale(centeredDirection, getShellRadius(tier)));
   }
   return positions;
@@ -300,10 +300,16 @@ function centerLayoutOnFocus(positions: Map<string, Vec3>, focusNodeId: string, 
   );
 }
 
-function getConnectionTier(childCount: number, maxChildCount: number) {
-  if (maxChildCount <= 0) return 10;
-  const normalized = childCount / maxChildCount;
-  return clampInteger(1 + Math.floor((1 - normalized) * 9.999), 1, 10);
+function rankNodesIntoConnectionTiers(nodes: AtlasNode[]) {
+  const tiers = new Map<string, number>();
+  if (!nodes.length) return tiers;
+
+  const ranked = [...nodes].sort((a, b) => b.children.length - a.children.length || a.id.localeCompare(b.id));
+  ranked.forEach((node, index) => {
+    const tier = clampInteger(Math.floor((index / ranked.length) * 10) + 1, 1, 10);
+    tiers.set(node.id, tier);
+  });
+  return tiers;
 }
 
 function flattenAtlasNodes(tree: AtlasNode): AtlasNode[] {
