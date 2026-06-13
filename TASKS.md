@@ -312,6 +312,10 @@ Implementation result:
   node transition target, and applies backstage enter/exit only to nodes whose
   visibility actually changes. Visible-to-visible nodes move directly from
   their previous position to their next position.
+- Follow-up refinement on 2026-06-13: child node transition local coordinates
+  now use the current visual parent position, preventing nested nodes from
+  receiving both parent motion and their own world motion as separate visible
+  easing phases.
 
 ### T6. Permanent Bidirectional Outline Editor
 

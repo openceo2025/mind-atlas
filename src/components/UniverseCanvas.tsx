@@ -2281,7 +2281,7 @@ function HierarchyNode({
   const birthStartedAt = birthMarks[node.id];
 
   applyVisualWorldPositionRef.current = (nextWorld, parentWorldOverride) => {
-    const parentWorld = parentWorldOverride ?? parentWorldRef.current;
+    const parentWorld = parentWorldOverride ?? getVisualParentWorld(path, parentWorldRef.current);
     const nextLocal = subtractPosition(nextWorld, parentWorld);
     groupRef.current?.position.set(nextLocal[0], nextLocal[1], nextLocal[2]);
     visualWorldRef.current = nextWorld;
@@ -2351,11 +2351,11 @@ function HierarchyNode({
     const progress = Math.min(1, delayedElapsed / transition.duration);
     const eased = getLayoutMotionProgress(progress, renderQuality);
     const nextWorld = lerpPosition(transition.startWorld, transition.targetWorld, eased);
-    applyVisualWorldPosition(nextWorld, transition.parentWorld);
+    applyVisualWorldPosition(nextWorld, getVisualParentWorld(path, transition.parentWorld));
     groupRef.current?.scale.setScalar(getNodeTransitionScale(progress, transition.kind));
     if (progress >= 1) {
       layoutTransitionRef.current = null;
-      applyVisualWorldPosition(transition.targetWorld, transition.parentWorld);
+      applyVisualWorldPosition(transition.targetWorld, getVisualParentWorld(path, transition.parentWorld));
       groupRef.current?.scale.setScalar(transition.kind === "exit" ? 0.56 : 1);
     }
   });
@@ -4185,6 +4185,12 @@ function getNodeTransitionScale(progress: number, kind: "move" | "enter" | "exit
 
 function getBackstagePosition(position: Vec3Tuple): Vec3Tuple {
   return [position[0], position[1], position[2] + LAYOUT_BACKSTAGE_Z_OFFSET];
+}
+
+function getVisualParentWorld(path: AtlasNode[], fallback: Vec3Tuple): Vec3Tuple {
+  const parent = path.length > 1 ? path[path.length - 2] : null;
+  if (!parent || parent.id === path[0]?.id) return fallback;
+  return visualNodeHandles.get(parent.id)?.getWorldPosition() ?? fallback;
 }
 
 function directionToYawPitch(direction: Vector3) {
