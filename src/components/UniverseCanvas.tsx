@@ -51,6 +51,8 @@ const LAYOUT_MOTION_DURATION_SECONDS = 1.18;
 const LOW_QUALITY_MOTION_DURATION_SECONDS = 0.42;
 const LAYOUT_MOTION_STAGGER_SECONDS = 0.036;
 const LAYOUT_MOTION_MAX_STAGGER_SECONDS = 0.24;
+const LAYOUT_VISIBILITY_HOLD_MS = 1700;
+const LAYOUT_BACKSTAGE_Z_OFFSET = -430;
 const MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER = 3;
 const VISIBLE_DESCENDANT_DEPTH = 5;
 const GENERATED_LAYOUT_VISIBLE_DESCENDANT_DEPTH = 3;
@@ -1746,8 +1748,80 @@ function NotebookNodes({
     () => deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport: layoutViewport }),
     [atlasRoot, layoutMode, layoutViewport, selectedNodeId],
   );
-  const layoutPositions = layoutFrame.positions;
-  const visibleNodeIds = layoutFrame.visibleIds;
+  const currentLayoutPositions = layoutFrame.positions;
+  const currentVisibleNodeIds = layoutFrame.visibleIds;
+  const previousVisibleNodeIdsRef = useRef<Set<string> | null>(null);
+  const previousLayoutPositionsRef = useRef<Map<string, Vec3>>(currentLayoutPositions);
+  const retainedLayoutPositionsRef = useRef<Map<string, Vec3>>(new Map());
+  const visibilityTimeoutsRef = useRef<number[]>([]);
+  const [exitingNodeIds, setExitingNodeIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(
+    () => () => {
+      visibilityTimeoutsRef.current.forEach((timeout) => window.clearTimeout(timeout));
+      visibilityTimeoutsRef.current = [];
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (layoutMode === "phyllotaxis" || renderQuality === "low") {
+      visibilityTimeoutsRef.current.forEach((timeout) => window.clearTimeout(timeout));
+      visibilityTimeoutsRef.current = [];
+      previousVisibleNodeIdsRef.current = new Set(currentVisibleNodeIds);
+      previousLayoutPositionsRef.current = currentLayoutPositions;
+      retainedLayoutPositionsRef.current = new Map();
+      setExitingNodeIds((current) => (current.size ? new Set() : current));
+      return;
+    }
+
+    const previousVisibleNodeIds = previousVisibleNodeIdsRef.current;
+    if (!previousVisibleNodeIds) {
+      previousVisibleNodeIdsRef.current = new Set(currentVisibleNodeIds);
+      previousLayoutPositionsRef.current = currentLayoutPositions;
+      return;
+    }
+
+    const nextExitingIds = [...previousVisibleNodeIds].filter((id) => !currentVisibleNodeIds.has(id));
+    if (nextExitingIds.length) {
+      nextExitingIds.forEach((id) => {
+        const retainedPosition = previousLayoutPositionsRef.current.get(id) ?? currentLayoutPositions.get(id);
+        if (retainedPosition) retainedLayoutPositionsRef.current.set(id, retainedPosition);
+      });
+      setExitingNodeIds((current) => new Set([...current, ...nextExitingIds]));
+      const timeout = window.setTimeout(() => {
+        nextExitingIds.forEach((id) => retainedLayoutPositionsRef.current.delete(id));
+        setExitingNodeIds((current) => {
+          const next = new Set(current);
+          nextExitingIds.forEach((id) => next.delete(id));
+          return next;
+        });
+      }, LAYOUT_VISIBILITY_HOLD_MS);
+      visibilityTimeoutsRef.current.push(timeout);
+
+      previousVisibleNodeIdsRef.current = new Set(currentVisibleNodeIds);
+      previousLayoutPositionsRef.current = currentLayoutPositions;
+      return;
+    }
+
+    previousVisibleNodeIdsRef.current = new Set(currentVisibleNodeIds);
+    previousLayoutPositionsRef.current = currentLayoutPositions;
+  }, [currentLayoutPositions, currentVisibleNodeIds, layoutMode, renderQuality]);
+
+  const renderVisibleNodeIds = useMemo(
+    () => {
+      if (layoutMode === "phyllotaxis" || renderQuality === "low") return currentVisibleNodeIds;
+      return new Set([...currentVisibleNodeIds, ...exitingNodeIds]);
+    },
+    [currentVisibleNodeIds, exitingNodeIds, layoutMode, renderQuality],
+  );
+  const layoutPositions = useMemo(
+    () => {
+      if (layoutMode === "phyllotaxis" || renderQuality === "low") return currentLayoutPositions;
+      return new Map([...retainedLayoutPositionsRef.current, ...currentLayoutPositions]);
+    },
+    [currentLayoutPositions, exitingNodeIds, layoutMode, renderQuality],
+  );
 
   useEffect(() => {
     if (findNode(atlasRoot, renderSelectedNodeId)) return;
@@ -1843,7 +1917,8 @@ function NotebookNodes({
               renderQuality={renderQuality}
               theme={theme}
               layoutPositions={layoutPositions}
-              visibleNodeIds={visibleNodeIds}
+              visibleNodeIds={renderVisibleNodeIds}
+              currentVisibleNodeIds={currentVisibleNodeIds}
               layoutMode={layoutMode}
               rootOverviewActive={rootIsSelected}
               onOpenNodeContextMenu={onOpenNodeContextMenu}
@@ -1884,7 +1959,8 @@ function NotebookNodes({
           renderQuality={renderQuality}
           theme={theme}
           layoutPositions={layoutPositions}
-          visibleNodeIds={visibleNodeIds}
+          visibleNodeIds={renderVisibleNodeIds}
+          currentVisibleNodeIds={currentVisibleNodeIds}
           layoutMode={layoutMode}
           rootOverviewActive={rootIsSelected}
           onOpenNodeContextMenu={onOpenNodeContextMenu}
@@ -1895,7 +1971,7 @@ function NotebookNodes({
 
   return (
     <group>
-      {atlasRoot.children.filter((node) => visibleNodeIds.has(node.id)).map((node) => {
+      {atlasRoot.children.filter((node) => renderVisibleNodeIds.has(node.id)).map((node) => {
         const path = [atlasRoot, node];
         const position = getLayoutPosition(layoutPositions, node.id);
         const visibleDepthRemaining = layoutMode === "phyllotaxis" ? VISIBLE_DESCENDANT_DEPTH : GENERATED_LAYOUT_VISIBLE_DESCENDANT_DEPTH;
@@ -1925,7 +2001,8 @@ function NotebookNodes({
             renderQuality={renderQuality}
             theme={theme}
             layoutPositions={layoutPositions}
-            visibleNodeIds={visibleNodeIds}
+            visibleNodeIds={renderVisibleNodeIds}
+            currentVisibleNodeIds={currentVisibleNodeIds}
             layoutMode={layoutMode}
             rootOverviewActive={rootIsSelected}
             onOpenNodeContextMenu={onOpenNodeContextMenu}
@@ -2019,6 +2096,7 @@ function HierarchyNode({
   theme,
   layoutPositions,
   visibleNodeIds,
+  currentVisibleNodeIds,
   layoutMode,
   rootOverviewActive,
   onOpenNodeContextMenu,
@@ -2047,6 +2125,7 @@ function HierarchyNode({
   theme: AtlasTheme;
   layoutPositions: Map<string, Vec3>;
   visibleNodeIds: Set<string>;
+  currentVisibleNodeIds: Set<string>;
   layoutMode: AtlasLayoutMode;
   rootOverviewActive: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
@@ -2175,7 +2254,9 @@ function HierarchyNode({
   } | null>(null);
   const groupRef = useRef<Group>(null);
   const parentWorldRef = useRef<Vec3Tuple>(subtractPosition(worldPosition, localPosition));
-  const visualWorldRef = useRef<Vec3Tuple>(worldPosition);
+  const isNodeLayoutVisible = layoutMode === "phyllotaxis" || currentVisibleNodeIds.has(node.id);
+  const initialVisualWorld = layoutMode !== "phyllotaxis" && renderQuality !== "low" ? getBackstagePosition(worldPosition) : worldPosition;
+  const visualWorldRef = useRef<Vec3Tuple>(initialVisualWorld);
   const layoutTransitionRef = useRef<{
     startWorld: Vec3Tuple;
     targetWorld: Vec3Tuple;
@@ -2183,6 +2264,7 @@ function HierarchyNode({
     elapsed: number;
     delay: number;
     duration: number;
+    kind: "move" | "enter" | "exit";
   } | null>(null);
   const nodeHitRaycast = useMemo(() => createConditionalMeshRaycast(() => shouldSkipNodeRaycast(node.id)), [node.id]);
   const applyVisualWorldPositionRef = useRef<(nextWorld: Vec3Tuple, parentWorldOverride?: Vec3Tuple) => void>(() => undefined);
@@ -2210,22 +2292,25 @@ function HierarchyNode({
       return;
     }
 
+    const targetWorld = isNodeLayoutVisible ? worldPosition : getBackstagePosition(worldPosition);
     const currentWorld = visualWorldRef.current;
-    if (distanceBetweenPositions(currentWorld, worldPosition) <= 0.01) {
+    if (distanceBetweenPositions(currentWorld, targetWorld) <= 0.01) {
       layoutTransitionRef.current = null;
-      applyVisualWorldPosition(worldPosition, parentWorld);
-      groupRef.current?.scale.setScalar(1);
+      applyVisualWorldPosition(targetWorld, parentWorld);
+      groupRef.current?.scale.setScalar(isNodeLayoutVisible ? 1 : 0.56);
       return;
     }
+    const enteringFromBackstage = isNodeLayoutVisible && distanceBetweenPositions(currentWorld, getBackstagePosition(worldPosition)) <= 0.01;
     layoutTransitionRef.current = {
       startWorld: currentWorld,
-      targetWorld: worldPosition,
+      targetWorld,
       parentWorld,
       elapsed: 0,
       delay: getLayoutMotionDelay(visualDepthIndex),
       duration: LAYOUT_MOTION_DURATION_SECONDS,
+      kind: isNodeLayoutVisible ? (enteringFromBackstage ? "enter" : "move") : "exit",
     };
-  }, [layoutMode, localPosition, renderQuality, visualDepthIndex, worldPosition]);
+  }, [isNodeLayoutVisible, layoutMode, localPosition, renderQuality, visualDepthIndex, worldPosition]);
 
   useFrame((_, delta) => {
     const transition = layoutTransitionRef.current;
@@ -2236,11 +2321,11 @@ function HierarchyNode({
     const eased = getLayoutMotionProgress(progress, renderQuality);
     const nextWorld = lerpPosition(transition.startWorld, transition.targetWorld, eased);
     applyVisualWorldPosition(nextWorld, transition.parentWorld);
-    groupRef.current?.scale.setScalar(getReformationScale(progress));
+    groupRef.current?.scale.setScalar(getNodeTransitionScale(progress, transition.kind));
     if (progress >= 1) {
       layoutTransitionRef.current = null;
       applyVisualWorldPosition(transition.targetWorld, transition.parentWorld);
-      groupRef.current?.scale.setScalar(1);
+      groupRef.current?.scale.setScalar(transition.kind === "exit" ? 0.56 : 1);
     }
   });
 
@@ -2713,6 +2798,7 @@ function HierarchyNode({
                 theme={theme}
                 layoutPositions={layoutPositions}
                 visibleNodeIds={visibleNodeIds}
+                currentVisibleNodeIds={currentVisibleNodeIds}
                 layoutMode={layoutMode}
                 rootOverviewActive={rootOverviewActive}
                 onOpenNodeContextMenu={onOpenNodeContextMenu}
@@ -4055,6 +4141,18 @@ function getReformationScale(progress: number) {
   const settle = springOvershoot(progress);
   const breathe = Math.sin(Math.PI * clamp01(progress));
   return 0.965 + Math.min(1.045, settle) * 0.035 + breathe * 0.018;
+}
+
+function getNodeTransitionScale(progress: number, kind: "move" | "enter" | "exit") {
+  const clamped = clamp01(progress);
+  if (kind === "move") return getReformationScale(clamped);
+  const eased = springOvershoot(clamped);
+  if (kind === "enter") return lerp(0.56, 1, Math.min(1, eased));
+  return lerp(1, 0.56, easeInOutQuint(clamped));
+}
+
+function getBackstagePosition(position: Vec3Tuple): Vec3Tuple {
+  return [position[0], position[1], position[2] + LAYOUT_BACKSTAGE_Z_OFFSET];
 }
 
 function directionToYawPitch(direction: Vector3) {

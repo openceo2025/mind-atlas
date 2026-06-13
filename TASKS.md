@@ -292,6 +292,9 @@ Implementation result:
   cheaper short ease in low render quality.
 - Added generated-layout node reformation motion with focus-distance stagger,
   slight scale breathing, and shared timing with camera auto-framing.
+- Kept nodes mounted briefly when generated-layout visibility changes so they
+  can ease out toward the backstage depth; newly visible nodes ease in from
+  that same depth instead of appearing instantly.
 - Low render quality skips per-node reformation animation and uses the shorter
   camera transition path to avoid expensive animation work.
 - Updated notification pulses and focus wave rings to use the same spring
@@ -300,6 +303,10 @@ Implementation result:
   `npm run verify:layout` passed; `npm run build` passed with the existing
   Vite large chunk warning; `npm run verify:ui` passed against
   `https://127.0.0.1:5173`.
+- Follow-up verification on 2026-06-13 after seamless visibility easing:
+  `npm run typecheck` passed; `npm run verify:layout` passed;
+  `npm run build` passed with the existing Vite large chunk warning;
+  `npm run verify:ui` passed against `https://127.0.0.1:5173`.
 
 ### T6. Permanent Bidirectional Outline Editor
 
