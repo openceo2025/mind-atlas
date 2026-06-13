@@ -14,7 +14,7 @@ import {
   TOP_LEVEL_PLANAR_LIMIT,
   clampDirection,
   getManualChildSpreadLimit,
-  deriveAtlasLayout,
+  deriveAtlasLayoutFrame,
   getNodeWorldPositionFromPath,
   getPlanarLimitForDepth,
   getShellRadius,
@@ -1466,7 +1466,18 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   selectArtifact: (parentId, id) => get().focusNode(id),
   setViewport: (viewport) => set({ viewport }),
 
-  setLayoutMode: (layoutMode) => set({ layoutMode }),
+  setLayoutMode: (layoutMode) => set((state) => ({
+    layoutMode,
+    cameraFocusNodeId: null,
+    focusRequest: {
+      x: 0,
+      y: 0,
+      z: 0,
+      diameter: getNodeVisualRadius(findNode(state.atlasRoot, state.selectedNodeId) ?? state.atlasRoot, 1) * 2,
+      nonce: (state.focusRequest?.nonce ?? 0) + 1,
+      nodeId: state.selectedNodeId,
+    },
+  })),
 
   focusPoint: (x, y, diameter) => {
     set((state) => ({
@@ -2438,7 +2449,7 @@ export function getNodeWorldPosition(path: AtlasNode[], mode: AtlasLayoutMode = 
   const root = path[0];
   const node = path.at(-1);
   if (!root || !node) return [0, 0, 0];
-  return deriveAtlasLayout(root, mode, undefined, { focusNodeId: focusNodeId ?? node.id }).get(node.id) ?? [0, 0, 0];
+  return deriveAtlasLayoutFrame(root, mode, undefined, { focusNodeId: focusNodeId ?? node.id }).positions.get(node.id) ?? [0, 0, 0];
 }
 
 export function getNodeVisualRadius(node: Pick<AtlasNode, "kind" | "radius">, depth = 1) {

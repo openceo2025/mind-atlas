@@ -20,7 +20,6 @@ import {
   NOTEBOOK_SHELL_GAP,
   NOTEBOOK_NODE_RADIUS,
   findNode,
-  findNodeWithWorldPosition,
   findNodePath,
   getNodeHitRadius,
   getNodeVisualRadius,
@@ -30,7 +29,7 @@ import {
   getAiContextNodeIds,
   useAtlasStore,
 } from "../store/atlasStore";
-import { deriveAtlasLayout, type AtlasLayoutMode, type AtlasLayoutViewport, type Vec3 } from "../layout/atlasLayout";
+import { deriveAtlasLayout, deriveAtlasLayoutFrame, type AtlasLayoutFrame, type AtlasLayoutMode, type AtlasLayoutViewport, type Vec3 } from "../layout/atlasLayout";
 import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { createNodeClipboardText, nodeTreeHasAttachments, parseNodeClipboardText } from "../nodeClipboard";
 import { emitOnboardingEvent, getOnboardingCurrentSpaceStep } from "../onboarding/useOnboarding";
@@ -47,6 +46,7 @@ const CAMERA_FOV = 45;
 const INITIAL_CAMERA_OFFSET = 0;
 const MIN_CAMERA_OFFSET = -120;
 const MAX_CAMERA_OFFSET = 90000;
+const FOCUSED_NODE_CAMERA_DISTANCE = 300;
 const MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER = 3;
 const VISIBLE_DESCENDANT_DEPTH = 5;
 const GENERATED_LAYOUT_VISIBLE_DESCENDANT_DEPTH = 3;
@@ -542,7 +542,13 @@ function NotificationPulseLayer({
   const pulses = useAtlasStore((state) => state.notificationPulses);
   const tickNotificationPulses = useAtlasStore((state) => state.tickNotificationPulses);
   const lastPruneRef = useRef(0);
+  const { size } = useThree();
+  const layoutViewport: AtlasLayoutViewport = isMobilePortraitCamera(size.width, size.height) ? "mobile-portrait" : "desktop";
   const animatedPulses = useMemo(() => selectAnimatedNotificationPulses(pulses, renderQuality), [pulses, renderQuality]);
+  const layoutFrame = useMemo(
+    () => deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport: layoutViewport }),
+    [atlasRoot, layoutMode, layoutViewport, selectedNodeId],
+  );
 
   useFrame(() => {
     if (!pageActive) return;
@@ -555,12 +561,12 @@ function NotificationPulseLayer({
   return (
     <>
       {animatedPulses.map((pulse) => {
-        const located = findNodeWithWorldPosition(atlasRoot, pulse.nodeId, layoutMode, selectedNodeId);
-        if (!located) return null;
+        const position = layoutFrame.visibleIds.has(pulse.nodeId) ? layoutFrame.positions.get(pulse.nodeId) : undefined;
+        if (!position) return null;
         return (
           <GlobalNotificationPulse
             key={pulse.id}
-            position={located.position}
+            position={position}
             kind={pulse.kind}
             createdAt={pulse.createdAt}
             theme={theme}
@@ -737,7 +743,7 @@ function NavigationController({
   const mobileCamera = isMobileCamera(size.width, size.height);
   const mobileLandscapeCamera = isMobileLandscapeCamera(size.width, size.height, keyboardPortraitLock);
   const initialCenteredRef = useRef(false);
-  const yawPitchRef = useRef({ yaw: 0, pitch: 0, offset: INITIAL_CAMERA_OFFSET });
+  const yawPitchRef = useRef({ yaw: 0, pitch: 0, offset: INITIAL_CAMERA_OFFSET, panX: 0, panY: 0 });
   const dragRef = useRef<SpaceDragState | null>(null);
   const wheelZoomOutRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelZoomInRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
@@ -757,9 +763,13 @@ function NavigationController({
     startYaw: number;
     startPitch: number;
     startOffset: number;
+    startPanX: number;
+    startPanY: number;
     targetYaw: number;
     targetPitch: number;
     targetOffset: number;
+    targetPanX: number;
+    targetPanY: number;
     elapsed: number;
     nonce: number;
     nodeId: string;
@@ -767,7 +777,7 @@ function NavigationController({
   const [birthEffect, setBirthEffect] = useState<BirthEffect | null>(null);
   const inputSphereSegments: [number, number] = renderQuality === "low" ? [32, 16] : [64, 32];
 
-  const setViewportFromCameraState = (state: { yaw: number; pitch: number; offset: number }, forcePersist = false) => {
+  const setViewportFromCameraState = (state: { yaw: number; pitch: number; offset: number; panX?: number; panY?: number }, forcePersist = false) => {
     const viewport = { x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) };
     setViewport(viewport);
     const now = performance.now();
@@ -906,9 +916,13 @@ function NavigationController({
       startYaw: current.yaw,
       startPitch: current.pitch,
       startOffset: current.offset,
+      startPanX: current.panX,
+      startPanY: current.panY,
       targetYaw: closestAngle(current.yaw, targetAngles.yaw),
       targetPitch: clamp(targetAngles.pitch, -FOCUS_PITCH_LIMIT, FOCUS_PITCH_LIMIT),
       targetOffset,
+      targetPanX: generatedLayoutActive ? targetVector.x : 0,
+      targetPanY: generatedLayoutActive ? targetVector.y : 0,
       elapsed: 0,
       nonce: focusRequest.nonce,
       nodeId: focusRequest.nodeId ?? "",
@@ -927,8 +941,10 @@ function NavigationController({
             yaw: restoredPose.yaw,
             pitch: clamp(restoredPose.pitch, -1.22, 1.22),
             offset: clamp(restoredPose.offset, getMinCameraOffset(mobilePortraitCamera), MAX_CAMERA_OFFSET),
+            panX: 0,
+            panY: 0,
           }
-        : { yaw: 0, pitch: 0, offset: initialOffset };
+        : { yaw: 0, pitch: 0, offset: initialOffset, panX: 0, panY: 0 };
       applyCameraPose(perspective, yawPitchRef.current);
       setViewportFromCameraState(yawPitchRef.current, true);
     });
@@ -973,7 +989,8 @@ function NavigationController({
       setBirthEffect(null);
     }
 
-    reportNodeVisibility(atlasRoot, perspective, nodeVisibilityRef.current);
+    const visibilityViewport: AtlasLayoutViewport = isMobilePortraitCamera(size.width, size.height, keyboardPortraitLock) ? "mobile-portrait" : "desktop";
+    reportNodeVisibility(atlasRoot, perspective, nodeVisibilityRef.current, visibilityViewport);
 
     const drag = dragRef.current;
     if (drag?.mode === "hold" && drag.canBirth && !drag.created) {
@@ -1012,6 +1029,8 @@ function NavigationController({
     state.yaw = lerp(transition.startYaw, transition.targetYaw, eased);
     state.pitch = lerp(transition.startPitch, transition.targetPitch, eased);
     state.offset = lerp(transition.startOffset, transition.targetOffset, eased);
+    state.panX = lerp(transition.startPanX, transition.targetPanX, eased);
+    state.panY = lerp(transition.startPanY, transition.targetPanY, eased);
     applyCameraPose(perspective, state);
     setViewportFromCameraState(state);
 
@@ -1096,6 +1115,17 @@ function NavigationController({
     if (Math.abs(deltaX) < 0.01 && Math.abs(deltaY) < 0.01) return;
     if (options.emitOnboarding !== false && Math.hypot(deltaX, deltaY) > 4) emitOnboardingEvent("pan");
     const state = yawPitchRef.current;
+    if (layoutMode !== "phyllotaxis") {
+      const worldPerPixel = getWorldUnitsPerPixel(Math.abs(state.offset), size.height, perspective.fov);
+      state.panX -= deltaX * worldPerPixel;
+      state.panY += deltaY * worldPerPixel;
+      state.yaw = 0;
+      state.pitch = 0;
+      transitionRef.current = null;
+      applyCameraPose(perspective, state);
+      setViewportFromCameraState(state);
+      return;
+    }
     const rotationGain = getRotationGain(state.offset);
     state.yaw -= deltaX * rotationGain;
     state.pitch = clamp(state.pitch + deltaY * rotationGain, -1.22, 1.22);
@@ -1705,10 +1735,12 @@ function NotebookNodes({
     return new Set(getAiContextNodeIds(atlasRoot, selectedNodeId, { ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds }));
   }, [activeCommandMode, aiContextOptions, atlasRoot, commandInputEditing, multiSelectedNodeIds, selectedNodeId]);
   const layoutViewport = isMobilePortraitCamera(size.width, size.height) ? "mobile-portrait" : "desktop";
-  const layoutPositions = useMemo(
-    () => deriveAtlasLayout(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport: layoutViewport }),
+  const layoutFrame = useMemo(
+    () => deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport: layoutViewport }),
     [atlasRoot, layoutMode, layoutViewport, selectedNodeId],
   );
+  const layoutPositions = layoutFrame.positions;
+  const visibleNodeIds = layoutFrame.visibleIds;
 
   useEffect(() => {
     if (findNode(atlasRoot, renderSelectedNodeId)) return;
@@ -1804,6 +1836,7 @@ function NotebookNodes({
               renderQuality={renderQuality}
               theme={theme}
               layoutPositions={layoutPositions}
+              visibleNodeIds={visibleNodeIds}
               layoutMode={layoutMode}
               rootOverviewActive={rootIsSelected}
               onOpenNodeContextMenu={onOpenNodeContextMenu}
@@ -1844,6 +1877,7 @@ function NotebookNodes({
           renderQuality={renderQuality}
           theme={theme}
           layoutPositions={layoutPositions}
+          visibleNodeIds={visibleNodeIds}
           layoutMode={layoutMode}
           rootOverviewActive={rootIsSelected}
           onOpenNodeContextMenu={onOpenNodeContextMenu}
@@ -1854,7 +1888,7 @@ function NotebookNodes({
 
   return (
     <group>
-      {atlasRoot.children.map((node) => {
+      {atlasRoot.children.filter((node) => visibleNodeIds.has(node.id)).map((node) => {
         const path = [atlasRoot, node];
         const position = getLayoutPosition(layoutPositions, node.id);
         const visibleDepthRemaining = layoutMode === "phyllotaxis" ? VISIBLE_DESCENDANT_DEPTH : GENERATED_LAYOUT_VISIBLE_DESCENDANT_DEPTH;
@@ -1884,6 +1918,7 @@ function NotebookNodes({
             renderQuality={renderQuality}
             theme={theme}
             layoutPositions={layoutPositions}
+            visibleNodeIds={visibleNodeIds}
             layoutMode={layoutMode}
             rootOverviewActive={rootIsSelected}
             onOpenNodeContextMenu={onOpenNodeContextMenu}
@@ -1976,6 +2011,7 @@ function HierarchyNode({
   renderQuality,
   theme,
   layoutPositions,
+  visibleNodeIds,
   layoutMode,
   rootOverviewActive,
   onOpenNodeContextMenu,
@@ -2003,6 +2039,7 @@ function HierarchyNode({
   renderQuality: RenderQuality;
   theme: AtlasTheme;
   layoutPositions: Map<string, Vec3>;
+  visibleNodeIds: Set<string>;
   layoutMode: AtlasLayoutMode;
   rootOverviewActive: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
@@ -2054,13 +2091,15 @@ function HierarchyNode({
         : isActiveSibling
           ? 1
           : visibleDepthIndex;
-  const depthFade = getDepthFade(getLayoutDepthFadeIndex(layoutMode, worldPosition, visualDepthIndex));
+  const depthFade = getDepthFade(getCameraDepthFadeIndex(perspective, worldPosition, visualDepthIndex));
   const childrenVisible =
     visibleDepthRemaining > 0 &&
     node.children.length > 0 &&
+    (layoutMode === "phyllotaxis" || node.children.some((child) => visibleNodeIds.has(child.id))) &&
     (isActiveAncestor ||
       (activeDescendantDistance !== null && activeDescendantDistance < VISIBLE_DESCENDANT_DEPTH) ||
-      node.children.some((child) => hasAiContextPreviewNode(child, aiContextPreviewNodeIds)));
+      node.children.some((child) => hasAiContextPreviewNode(child, aiContextPreviewNodeIds)) ||
+      layoutMode !== "phyllotaxis");
   const isLocalContextNode = isSelected || isMultiSelected || aiContextPreviewNodeIds.has(node.id) || isActiveAncestor || isActiveSibling || isDirectChildOfSelected;
   const mobileLabelVisible = isSelected || isDirectChildOfSelected;
   const lowQualityLabelVisible = isSelected || isDirectChildOfSelected;
@@ -2627,7 +2666,7 @@ function HierarchyNode({
       ) : null}
 
       {childrenVisible
-        ? node.children.map((child) => {
+        ? node.children.filter((child) => visibleNodeIds.has(child.id)).map((child) => {
             const childPath = [...path, child];
             const childWorldPosition = getLayoutPosition(layoutPositions, child.id);
             const position = subtractPosition(childWorldPosition, worldPosition);
@@ -2657,6 +2696,7 @@ function HierarchyNode({
                 renderQuality={renderQuality}
                 theme={theme}
                 layoutPositions={layoutPositions}
+                visibleNodeIds={visibleNodeIds}
                 layoutMode={layoutMode}
                 rootOverviewActive={rootOverviewActive}
                 onOpenNodeContextMenu={onOpenNodeContextMenu}
@@ -3979,38 +4019,38 @@ function directionToYawPitch(direction: Vector3) {
   };
 }
 
-function applyCameraPose(camera: PerspectiveCamera, state: { yaw: number; pitch: number; offset: number }) {
+function applyCameraPose(camera: PerspectiveCamera, state: { yaw: number; pitch: number; offset: number; panX?: number; panY?: number }) {
   const direction = directionFromYawPitch(state.yaw, state.pitch);
-  camera.position.copy(direction.clone().multiplyScalar(state.offset));
+  camera.position.copy(direction.clone().multiplyScalar(state.offset).add(new Vector3(state.panX ?? 0, state.panY ?? 0, 0)));
   camera.lookAt(camera.position.clone().add(direction));
   camera.updateProjectionMatrix();
 }
 
-function reportNodeVisibility(root: AtlasNode, camera: PerspectiveCamera, state: NodeVisibilityState) {
+function reportNodeVisibility(root: AtlasNode, camera: PerspectiveCamera, state: NodeVisibilityState, viewport: AtlasLayoutViewport) {
   const now = performance.now();
   if (now - state.lastCheckedAt < NODE_VISIBILITY_CHECK_MS) return;
   state.lastCheckedAt = now;
 
   const layoutMode = useAtlasStore.getState().layoutMode;
   const selectedNodeId = useAtlasStore.getState().selectedNodeId;
-  const allOffscreen = areAllNodesOffscreen(root, camera, layoutMode, selectedNodeId);
+  const allOffscreen = areAllNodesOffscreen(root, camera, layoutMode, selectedNodeId, viewport);
   if (state.allOffscreen === allOffscreen) return;
   state.allOffscreen = allOffscreen;
   emitOnboardingEvent(allOffscreen ? "all-nodes-offscreen" : "nodes-onscreen");
 }
 
-function areAllNodesOffscreen(root: AtlasNode, camera: PerspectiveCamera, layoutMode: AtlasLayoutMode, selectedNodeId: string) {
+function areAllNodesOffscreen(root: AtlasNode, camera: PerspectiveCamera, layoutMode: AtlasLayoutMode, selectedNodeId: string, viewport: AtlasLayoutViewport) {
   if (!root.children.length) return false;
   camera.updateMatrixWorld();
-  const layoutPositions = deriveAtlasLayout(root, layoutMode, undefined, { focusNodeId: selectedNodeId });
-  return !root.children.some((child) => isNodePathOnscreen([root, child], camera, layoutPositions));
+  const frame = deriveAtlasLayoutFrame(root, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport });
+  return !root.children.some((child) => frame.visibleIds.has(child.id) && isNodePathOnscreen([root, child], camera, frame.positions, frame.visibleIds));
 }
 
-function isNodePathOnscreen(path: AtlasNode[], camera: PerspectiveCamera, layoutPositions: Map<string, Vec3>): boolean {
+function isNodePathOnscreen(path: AtlasNode[], camera: PerspectiveCamera, layoutPositions: Map<string, Vec3>, visibleIds: Set<string>): boolean {
   const node = path.at(-1);
   if (!node) return false;
   if (isWorldPositionOnscreen(getLayoutPosition(layoutPositions, node.id), camera)) return true;
-  return node.children.some((child) => isNodePathOnscreen([...path, child], camera, layoutPositions));
+  return node.children.some((child) => visibleIds.has(child.id) && isNodePathOnscreen([...path, child], camera, layoutPositions, visibleIds));
 }
 
 function isWorldPositionOnscreen(position: Vec3Tuple, camera: PerspectiveCamera) {
@@ -4043,8 +4083,8 @@ function getFocusTargetVector(
     return new Vector3(focusRequest.x, focusRequest.y, focusRequest.z);
   }
 
-  const layoutPositions = deriveAtlasLayout(root, layoutMode, undefined, { focusNodeId: focusRequest.nodeId, viewport });
-  const position = layoutPositions.get(focusRequest.nodeId);
+  const frame = deriveAtlasLayoutFrame(root, layoutMode, undefined, { focusNodeId: focusRequest.nodeId, viewport });
+  const position = frame.positions.get(focusRequest.nodeId);
   return position ? new Vector3(...position) : new Vector3(focusRequest.x, focusRequest.y, focusRequest.z);
 }
 
@@ -4054,42 +4094,10 @@ function getGeneratedLayoutFocusDiameter(
   focusNodeId: string,
   viewport: AtlasLayoutViewport,
 ) {
-  const layoutPositions = deriveAtlasLayout(root, layoutMode, undefined, { focusNodeId, viewport });
-  const ids = getGeneratedLayoutCameraNodeIds(root, focusNodeId);
-  const positions = ids
-    .map((id) => layoutPositions.get(id))
-    .filter((position): position is Vec3 => Boolean(position));
-  if (!positions.length) return NOTEBOOK_NODE_RADIUS * 8;
-
-  const xs = positions.map((position) => position[0]);
-  const ys = positions.map((position) => position[1]);
-  const width = Math.max(...xs) - Math.min(...xs) + NOTEBOOK_NODE_RADIUS * 7;
-  const height = Math.max(...ys) - Math.min(...ys) + NOTEBOOK_NODE_RADIUS * 8;
+  const frame = deriveAtlasLayoutFrame(root, layoutMode, undefined, { focusNodeId, viewport });
+  const width = frame.bounds.maxX - frame.bounds.minX + NOTEBOOK_NODE_RADIUS * 7;
+  const height = frame.bounds.maxY - frame.bounds.minY + NOTEBOOK_NODE_RADIUS * 8;
   return Math.max(width, height, NOTEBOOK_NODE_RADIUS * 10);
-}
-
-function getGeneratedLayoutCameraNodeIds(root: AtlasNode, focusNodeId: string) {
-  const ids = new Set<string>();
-  const path = findNodePath(root, focusNodeId) ?? [root];
-  const focusNode = path[path.length - 1] ?? root;
-  const parent = path.length > 1 ? path[path.length - 2] : null;
-
-  ids.add(focusNode.id);
-  parent?.children.forEach((node) => ids.add(node.id));
-  path.forEach((node) => ids.add(node.id));
-  focusNode.children.forEach((child) => {
-    ids.add(child.id);
-    child.children.forEach((grandchild) => ids.add(grandchild.id));
-  });
-
-  if (focusNode.id === root.id) {
-    root.children.forEach((child) => {
-      ids.add(child.id);
-      child.children.forEach((grandchild) => ids.add(grandchild.id));
-    });
-  }
-
-  return [...ids];
 }
 
 function getCameraDistanceForDiameter(diameter: number, viewportHeight: number, fov: number, maxDistance = 620) {
@@ -4097,6 +4105,11 @@ function getCameraDistanceForDiameter(diameter: number, viewportHeight: number, 
   const verticalFov = (fov * Math.PI) / 180;
   const distance = targetWorldHeight / (2 * Math.tan(verticalFov / 2));
   return Math.min(maxDistance, Math.max(42, distance * Math.max(0.72, 920 / Math.max(viewportHeight, 1))));
+}
+
+function getWorldUnitsPerPixel(distance: number, viewportHeight: number, fov: number) {
+  const verticalFov = (fov * Math.PI) / 180;
+  return (2 * Math.tan(verticalFov / 2) * Math.max(1, distance)) / Math.max(1, viewportHeight);
 }
 
 function getInitialCameraOffset(mobilePortraitCamera: boolean) {
@@ -4240,11 +4253,14 @@ function getDepthFade(index: number) {
   };
 }
 
-function getLayoutDepthFadeIndex(layoutMode: AtlasLayoutMode, worldPosition: Vec3Tuple, fallbackIndex: number) {
-  if (layoutMode === "tree" || layoutMode === "mind-map") return 0;
-  const radius = vectorLength(worldPosition);
-  if (radius <= 0.001) return fallbackIndex;
-  return Math.max(0, (radius - NOTEBOOK_FIRST_SHELL_RADIUS) / NOTEBOOK_SHELL_GAP);
+function getCameraDepthFadeIndex(camera: PerspectiveCamera, worldPosition: Vec3Tuple, fallbackIndex: number) {
+  camera.updateMatrixWorld();
+  const forward = new Vector3();
+  camera.getWorldDirection(forward);
+  const toNode = new Vector3(...worldPosition).sub(camera.position);
+  const distance = toNode.dot(forward);
+  if (!Number.isFinite(distance) || distance <= 0) return fallbackIndex;
+  return Math.max(0, (distance - FOCUSED_NODE_CAMERA_DISTANCE) / NOTEBOOK_SHELL_GAP);
 }
 
 function getLightThemeDepthWash(index: number) {

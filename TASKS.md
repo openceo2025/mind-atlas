@@ -226,12 +226,15 @@ Implementation result:
 
 - Added layout modes to `src/layout/atlasLayout.ts`: `tree`, `mind-map`, and
   `hub-emphasis`, alongside the existing `phyllotaxis` mode.
-- Added focus-aware tree layout for hierarchy and sibling order. Desktop tree
-  mode keeps the active node near the upper center, parent nodes above, and
-  child branches below on a flat plane. Mobile portrait tree mode places the
-  active node left and recursive child branches to the right.
-- Added focus-aware flat mind-map layout with compact child radii based on
-  sibling count so root-level nodes do not spread too far off screen.
+- Added `deriveAtlasLayoutFrame` so generated modes return positions,
+  visible node ids, plane information, and bounds from one layout frame.
+- Reworked tree mode as a focus-local flat layout instead of a global leaf-slot
+  layout. Desktop keeps the active node near the upper center, ancestors above,
+  siblings on the active row, and child branches below. Mobile portrait
+  transposes the same structure so children recurse to the right.
+- Reworked mind-map mode as a focus-local flat radial layout instead of a
+  root-global layout. Children are distributed by visible subtree weight, with
+  parent and sibling context kept near the focus.
 - Updated hub-emphasis to preserve phyllotaxis angular directions while
   assigning nodes to up to ten rank-distributed depth tiers by child count.
   The active node is rotated to the forward viewing direction, and drag
@@ -241,14 +244,16 @@ Implementation result:
 - Persisted `layoutMode` in `src/uiPersistence.ts` and exposed a Layout section
   in the global menu.
 - Updated `UniverseCanvas`, `Minimap`, notification pulses, and focus position
-  lookup to use the active layout mode.
+  lookup to consume the same active layout frame and visible-node set.
 - Removed the phyllotaxis sibling dotted guide after visual review because it
   reduced readability.
 - Added node easing for generated layout changes when the active node or layout
   mode changes.
-- Locked generated layout camera focus to the layout-facing direction so tree
-  and mind-map axes align with the browser X/Y axes, and made generated layout
-  depth fade use the actual layout depth.
+- Locked generated layout camera focus to a front-facing pan/zoom mode so tree
+  and mind-map axes align with the browser X/Y axes; phyllotaxis remains the
+  orbital free-drag mode.
+- Made depth fade use camera-space distance from the visual node position
+  instead of layout mode or origin-radius heuristics.
 - Extended `npm run verify:layout` to cover all layout modes, manual override
   behavior, focus-aware flat layouts, mobile tree orientation, and
   rank-distributed hub tiers.

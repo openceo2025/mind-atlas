@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { deriveAtlasLayout, getStoredPositionForWorldDirection, type Vec3 } from "../src/layout/atlasLayout.ts";
+import { deriveAtlasLayout, deriveAtlasLayoutFrame, getStoredPositionForWorldDirection, type Vec3 } from "../src/layout/atlasLayout.ts";
 import type { AtlasNode } from "../src/types.ts";
 
 const root = node("atlas-root", "Atlas", [
@@ -47,6 +47,12 @@ assertVecClose(focusedTreeLayout.get("alpha"), [0, 92, -1320], "tree focused nod
 assert.ok((focusedTreeLayout.get("atlas-root")?.[1] ?? 0) > (focusedTreeLayout.get("alpha")?.[1] ?? 0), "tree focused parent should be above active node");
 assert.ok((focusedTreeLayout.get("alpha-1")?.[1] ?? 0) < (focusedTreeLayout.get("alpha")?.[1] ?? 0), "tree focused children should be below active node");
 assert.equal(focusedTreeLayout.get("alpha")?.[2], focusedTreeLayout.get("alpha-1")?.[2], "tree focused layout should be flat");
+const focusedTreeFrame = deriveAtlasLayoutFrame(root, "tree", undefined, { focusNodeId: "alpha" });
+assert.ok(focusedTreeFrame.visibleIds.has("alpha"));
+assert.ok(focusedTreeFrame.visibleIds.has("alpha-1"));
+assert.ok(focusedTreeFrame.visibleIds.has("beta"), "tree should show focused siblings");
+assert.ok(!focusedTreeFrame.visibleIds.has("gamma-1"), "tree should hide distant cousin descendants");
+assertMinDistance(focusedTreeFrame, 80, "tree visible nodes should not collapse onto each other");
 
 const mobileTreeLayout = deriveAtlasLayout(root, "tree", undefined, { focusNodeId: "alpha", viewport: "mobile-portrait" });
 assert.ok((mobileTreeLayout.get("alpha-1")?.[0] ?? 0) > (mobileTreeLayout.get("alpha")?.[0] ?? 0), "mobile tree children should be to the right of active node");
@@ -60,6 +66,11 @@ assert.equal(JSON.stringify([...mindMapLayout.entries()]), JSON.stringify([...de
 const focusedMindMapLayout = deriveAtlasLayout(root, "mind-map", undefined, { focusNodeId: "alpha" });
 assertVecClose(focusedMindMapLayout.get("alpha"), [0, 0, -1320], "mind map focused node should be centered in the 2D plane");
 assert.equal(focusedMindMapLayout.get("alpha")?.[2], focusedMindMapLayout.get("gamma")?.[2], "mind map layout should be flat");
+const focusedMindMapFrame = deriveAtlasLayoutFrame(root, "mind-map", undefined, { focusNodeId: "alpha" });
+assert.ok(focusedMindMapFrame.visibleIds.has("alpha"));
+assert.ok(focusedMindMapFrame.visibleIds.has("atlas-root"), "mind map should show focused parent");
+assert.ok(focusedMindMapFrame.visibleIds.has("beta"), "mind map should show focused siblings near parent context");
+assertMinDistance(focusedMindMapFrame, 46, "mind map visible nodes should not collapse onto each other");
 
 const taggedRoot = cloneTree(root);
 findNode(taggedRoot, "alpha")?.tags.push("shared");
@@ -182,6 +193,18 @@ function tierFromDistance(position: Vec3 | undefined) {
   assert.ok(position, "missing position");
   const distance = Math.hypot(position[0], position[1], position[2]);
   return Math.round((distance - 360) / 340) + 1;
+}
+
+function assertMinDistance(frame: ReturnType<typeof deriveAtlasLayoutFrame>, minDistance: number, message: string) {
+  const entries = [...frame.positions.entries()].filter(([id]) => frame.visibleIds.has(id));
+  for (let leftIndex = 0; leftIndex < entries.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < entries.length; rightIndex += 1) {
+      const [leftId, left] = entries[leftIndex];
+      const [rightId, right] = entries[rightIndex];
+      const distance = Math.hypot(left[0] - right[0], left[1] - right[1]);
+      assert.ok(distance >= minDistance, `${message}: ${leftId} and ${rightId} are ${distance.toFixed(2)} apart`);
+    }
+  }
 }
 
 function collectNodeIds(tree: AtlasNode): string[] {
