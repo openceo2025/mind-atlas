@@ -143,6 +143,7 @@ function deriveMindMapLayout(tree: AtlasNode, options: AtlasLayoutOptions): Map<
   if (parent) {
     const parentPosition: Vec3 = [0, getMindMapChildRadius(1, 1), FOCUS_LAYOUT_PLANE_Z];
     positions.set(parent.id, parentPosition);
+    placeMindMapAncestorChain(focusPath.slice(0, -2), parentPosition, positions);
     placeMindMapSiblings(parent.children.filter((node) => node.id !== focusNode.id), parentPosition, positions);
   }
 
@@ -379,6 +380,12 @@ function placeMindMapSiblings(siblings: AtlasNode[], parentPosition: Vec3, posit
   const start = -((siblings.length - 1) * gap) / 2;
   siblings.forEach((sibling, index) => {
     positions.set(sibling.id, [parentPosition[0] + start + index * gap, parentPosition[1] + 74, FOCUS_LAYOUT_PLANE_Z]);
+  });
+}
+
+function placeMindMapAncestorChain(ancestors: AtlasNode[], parentPosition: Vec3, positions: Map<string, Vec3>) {
+  ancestors.reverse().forEach((ancestor, index) => {
+    positions.set(ancestor.id, [parentPosition[0], parentPosition[1] + (index + 1) * 150, FOCUS_LAYOUT_PLANE_Z]);
   });
 }
 

@@ -1822,6 +1822,10 @@ function NotebookNodes({
     },
     [currentLayoutPositions, exitingNodeIds, layoutMode, renderQuality],
   );
+  const enteringNodeIds =
+    layoutMode === "phyllotaxis" || renderQuality === "low" || !previousVisibleNodeIdsRef.current
+      ? new Set<string>()
+      : new Set([...currentVisibleNodeIds].filter((id) => !previousVisibleNodeIdsRef.current?.has(id)));
 
   useEffect(() => {
     if (findNode(atlasRoot, renderSelectedNodeId)) return;
@@ -1919,6 +1923,7 @@ function NotebookNodes({
               layoutPositions={layoutPositions}
               visibleNodeIds={renderVisibleNodeIds}
               currentVisibleNodeIds={currentVisibleNodeIds}
+              enteringNodeIds={enteringNodeIds}
               layoutMode={layoutMode}
               rootOverviewActive={rootIsSelected}
               onOpenNodeContextMenu={onOpenNodeContextMenu}
@@ -1929,7 +1934,7 @@ function NotebookNodes({
     );
   }
 
-  if (focusBaseIndex > 0) {
+  if (layoutMode === "phyllotaxis" && focusBaseIndex > 0) {
     const parentPath = renderFocusPath.slice(0, focusBaseIndex + 1);
     const parentPosition = getLayoutPosition(layoutPositions, focusParent.id);
     const visibleDepthRemaining = layoutMode === "phyllotaxis" ? VISIBLE_DESCENDANT_DEPTH + 1 : GENERATED_LAYOUT_VISIBLE_DESCENDANT_DEPTH;
@@ -1961,6 +1966,7 @@ function NotebookNodes({
           layoutPositions={layoutPositions}
           visibleNodeIds={renderVisibleNodeIds}
           currentVisibleNodeIds={currentVisibleNodeIds}
+          enteringNodeIds={enteringNodeIds}
           layoutMode={layoutMode}
           rootOverviewActive={rootIsSelected}
           onOpenNodeContextMenu={onOpenNodeContextMenu}
@@ -2003,6 +2009,7 @@ function NotebookNodes({
             layoutPositions={layoutPositions}
             visibleNodeIds={renderVisibleNodeIds}
             currentVisibleNodeIds={currentVisibleNodeIds}
+            enteringNodeIds={enteringNodeIds}
             layoutMode={layoutMode}
             rootOverviewActive={rootIsSelected}
             onOpenNodeContextMenu={onOpenNodeContextMenu}
@@ -2097,6 +2104,7 @@ function HierarchyNode({
   layoutPositions,
   visibleNodeIds,
   currentVisibleNodeIds,
+  enteringNodeIds,
   layoutMode,
   rootOverviewActive,
   onOpenNodeContextMenu,
@@ -2126,6 +2134,7 @@ function HierarchyNode({
   layoutPositions: Map<string, Vec3>;
   visibleNodeIds: Set<string>;
   currentVisibleNodeIds: Set<string>;
+  enteringNodeIds: Set<string>;
   layoutMode: AtlasLayoutMode;
   rootOverviewActive: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
@@ -2255,7 +2264,8 @@ function HierarchyNode({
   const groupRef = useRef<Group>(null);
   const parentWorldRef = useRef<Vec3Tuple>(subtractPosition(worldPosition, localPosition));
   const isNodeLayoutVisible = layoutMode === "phyllotaxis" || currentVisibleNodeIds.has(node.id);
-  const initialVisualWorld = layoutMode !== "phyllotaxis" && renderQuality !== "low" ? getBackstagePosition(worldPosition) : worldPosition;
+  const isEnteringLayout = layoutMode !== "phyllotaxis" && renderQuality !== "low" && enteringNodeIds.has(node.id);
+  const initialVisualWorld = isEnteringLayout ? getBackstagePosition(worldPosition) : worldPosition;
   const visualWorldRef = useRef<Vec3Tuple>(initialVisualWorld);
   const layoutTransitionRef = useRef<{
     startWorld: Vec3Tuple;
@@ -2300,7 +2310,16 @@ function HierarchyNode({
       groupRef.current?.scale.setScalar(isNodeLayoutVisible ? 1 : 0.56);
       return;
     }
-    const enteringFromBackstage = isNodeLayoutVisible && distanceBetweenPositions(currentWorld, getBackstagePosition(worldPosition)) <= 0.01;
+    const transitionKind: "move" | "enter" | "exit" = isNodeLayoutVisible ? (isEnteringLayout ? "enter" : "move") : "exit";
+    const existingTransition = layoutTransitionRef.current;
+    if (
+      existingTransition &&
+      (existingTransition.kind === transitionKind || (existingTransition.kind === "enter" && transitionKind === "move")) &&
+      distanceBetweenPositions(existingTransition.targetWorld, targetWorld) <= 0.01 &&
+      distanceBetweenPositions(existingTransition.parentWorld, parentWorld) <= 0.01
+    ) {
+      return;
+    }
     layoutTransitionRef.current = {
       startWorld: currentWorld,
       targetWorld,
@@ -2308,9 +2327,21 @@ function HierarchyNode({
       elapsed: 0,
       delay: getLayoutMotionDelay(visualDepthIndex),
       duration: LAYOUT_MOTION_DURATION_SECONDS,
-      kind: isNodeLayoutVisible ? (enteringFromBackstage ? "enter" : "move") : "exit",
+      kind: transitionKind,
     };
-  }, [isNodeLayoutVisible, layoutMode, localPosition, renderQuality, visualDepthIndex, worldPosition]);
+  }, [
+    isEnteringLayout,
+    isNodeLayoutVisible,
+    layoutMode,
+    localPosition[0],
+    localPosition[1],
+    localPosition[2],
+    renderQuality,
+    visualDepthIndex,
+    worldPosition[0],
+    worldPosition[1],
+    worldPosition[2],
+  ]);
 
   useFrame((_, delta) => {
     const transition = layoutTransitionRef.current;
@@ -2799,6 +2830,7 @@ function HierarchyNode({
                 layoutPositions={layoutPositions}
                 visibleNodeIds={visibleNodeIds}
                 currentVisibleNodeIds={currentVisibleNodeIds}
+                enteringNodeIds={enteringNodeIds}
                 layoutMode={layoutMode}
                 rootOverviewActive={rootOverviewActive}
                 onOpenNodeContextMenu={onOpenNodeContextMenu}

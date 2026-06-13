@@ -307,6 +307,11 @@ Implementation result:
   `npm run typecheck` passed; `npm run verify:layout` passed;
   `npm run build` passed with the existing Vite large chunk warning;
   `npm run verify:ui` passed against `https://127.0.0.1:5173`.
+- Follow-up refinement on 2026-06-13: generated layout rendering now keeps the
+  same root render path to reduce remounts, guards against restarting the same
+  node transition target, and applies backstage enter/exit only to nodes whose
+  visibility actually changes. Visible-to-visible nodes move directly from
+  their previous position to their next position.
 
 ### T6. Permanent Bidirectional Outline Editor
 
