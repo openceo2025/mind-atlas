@@ -294,6 +294,12 @@ export interface AiContextStats {
   estimatedInputTokens: number;
   includedAttachmentCount: number;
   includedAttachmentBytes: number;
+  truncated?: boolean;
+  truncatedNodeCount?: number;
+  truncatedBodyCount?: number;
+  truncatedSummaryCount?: number;
+  omittedChildNodeCount?: number;
+  truncatedAttachmentCount?: number;
   sections: {
     selected: number;
     path: number;

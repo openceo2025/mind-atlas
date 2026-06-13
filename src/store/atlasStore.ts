@@ -1647,6 +1647,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     try {
       const context = await buildAiNodeContextWithAttachments(state.atlasRoot, sourceNodeId, contextOptions);
       if (!context) throw new Error("AI context could not be built.");
+      notifyAiContextTruncated(mode, context.stats);
       const codexSettingsForRun = mode === "codex" ? buildCodexSettingsForRun(requestAiDialogSettings.codexSettings, context) : undefined;
       const openClawSettingsForRun = mode === "openclaw" ? buildOpenClawSettingsForRun(requestAiDialogSettings.openClawSettings, context) : undefined;
       if (mode === "codex" && codexSettingsForRun) {
@@ -1695,6 +1696,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             }
           : undefined,
       });
+      notifyLocalOutputTruncated(mode, result.usage);
       let responseNodeId = "";
       let generatedAttachmentBlobs: Array<{ attachment: NodeAttachment; blob: Blob }> = [];
       set((current) => {
@@ -2031,6 +2033,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
     const context = await buildAiNodeContextWithAttachments(state.atlasRoot, action.sourceNodeId, action.contextOptions);
     if (!context) return;
+    notifyAiContextTruncated("codex", context.stats);
     const initialRun: AiRun = {
       id: runId,
       nodeId: action.sourceNodeId,
@@ -2384,26 +2387,30 @@ export function buildAiNodeContext(root: AtlasNode, selectedNodeId: string, opti
   const options = normalizeAiContextOptions(optionsInput);
   const path = findNodePath(root, selectedNodeId);
   if (!path) return null;
+  const truncationStats = createAiContextTruncationStats();
   const selectedNode = path[path.length - 1];
   const parent = path.length > 1 ? path[path.length - 2] : null;
   const selectedDepth = getSelectedSnapshotDepth(options);
-  const selectedSnapshotOptions = options.scope === "subtree" ? { childLimit: Number.MAX_SAFE_INTEGER } : undefined;
+  const selectedSnapshotOptions = {
+    ...(options.scope === "subtree" ? { childLimit: Number.MAX_SAFE_INTEGER } : {}),
+    truncationStats,
+  };
   const siblingDepth = options.scope === "neighborhood" ? 1 : 0;
   const includeSiblings = options.scope === "neighborhood";
   const selectedSnapshot = nodeToAiSnapshot(selectedNode, selectedDepth, selectedSnapshotOptions);
-  const pathSnapshots = getContextPathNodes(path, options).map((node) => nodeToAiSnapshot(node, 0));
+  const pathSnapshots = getContextPathNodes(path, options).map((node) => nodeToAiSnapshot(node, 0, { truncationStats }));
   const siblingSnapshots =
     options.scope === "custom"
-      ? getLateralContextNodes(root, selectedNodeId, options).map((node) => nodeToAiSnapshot(node, 0))
+      ? getLateralContextNodes(root, selectedNodeId, options).map((node) => nodeToAiSnapshot(node, 0, { truncationStats }))
       : parent && includeSiblings
-        ? parent.children.filter((node) => node.id !== selectedNode.id).map((node) => nodeToAiSnapshot(node, siblingDepth))
+        ? parent.children.filter((node) => node.id !== selectedNode.id).map((node) => nodeToAiSnapshot(node, siblingDepth, { truncationStats }))
         : [];
   const selectedContextNodes = options.scope === "selected" ? getSelectedContextNodes(root, selectedNodeId, options.selectedNodeIds) : [];
   const selectedNodes =
     options.scope === "selected"
-      ? selectedContextNodes.map((node) => nodeToAiSnapshot(node, selectedDepth))
+      ? selectedContextNodes.map((node) => nodeToAiSnapshot(node, selectedDepth, { truncationStats }))
       : undefined;
-  const stats = buildAiContextStats(options.scope, selectedSnapshot, pathSnapshots, siblingSnapshots, selectedNodes);
+  const stats = buildAiContextStats(options.scope, selectedSnapshot, pathSnapshots, siblingSnapshots, selectedNodes, truncationStats);
   return {
     selectedNode: selectedSnapshot,
     selectedNodes,
@@ -2424,8 +2431,20 @@ export async function buildAiNodeContextWithAttachments(
 ): Promise<AiNodeContext | null> {
   const context = buildAiNodeContext(root, selectedNodeId, optionsInput);
   if (!context || context.options?.attachmentMode !== "content") return context;
+  const previousStats = context.stats;
   await attachAiContextAttachmentContent(context, context.options);
-  context.stats = buildAiContextStats(context.scope, context.selectedNode, context.path, context.siblingNodes, context.selectedNodes);
+  const nextStats = buildAiContextStats(context.scope, context.selectedNode, context.path, context.siblingNodes, context.selectedNodes, undefined);
+  context.stats = {
+    ...nextStats,
+    truncated:
+      Boolean(previousStats.truncated) ||
+      Boolean(nextStats.truncated),
+    truncatedNodeCount: previousStats.truncatedNodeCount ?? nextStats.truncatedNodeCount,
+    truncatedBodyCount: previousStats.truncatedBodyCount ?? nextStats.truncatedBodyCount,
+    truncatedSummaryCount: previousStats.truncatedSummaryCount ?? nextStats.truncatedSummaryCount,
+    omittedChildNodeCount: previousStats.omittedChildNodeCount ?? nextStats.omittedChildNodeCount,
+    truncatedAttachmentCount: nextStats.truncatedAttachmentCount,
+  };
   return context;
 }
 
@@ -3431,6 +3450,38 @@ function isBridgeConnectionFailureMessage(message: string) {
   );
 }
 
+function notifyAiContextTruncated(mode: AiExecutionMode, stats: AiContextStats) {
+  if (!stats.truncated || typeof window === "undefined" || typeof window.alert !== "function") return;
+  const details = [
+    stats.truncatedBodyCount ? `node bodies: ${stats.truncatedBodyCount}` : "",
+    stats.truncatedSummaryCount ? `summaries: ${stats.truncatedSummaryCount}` : "",
+    stats.omittedChildNodeCount ? `child nodes omitted: ${stats.omittedChildNodeCount}` : "",
+    stats.truncatedAttachmentCount ? `attachments: ${stats.truncatedAttachmentCount}` : "",
+  ].filter(Boolean);
+  window.alert(
+    [
+      `Mind Atlas cut some selected node context before sending this ${modeLabel(mode)} request.`,
+      details.length ? `Cut details: ${details.join(", ")}.` : "",
+      "Narrow the AI context scope or split large nodes if the missing detail matters.",
+    ].filter(Boolean).join("\n"),
+  );
+}
+
+function notifyLocalOutputTruncated(mode: AiExecutionMode, usage: AiUsage | undefined) {
+  if (mode !== "local" || !usage?.outputLimitHit || typeof window === "undefined" || typeof window.alert !== "function") return;
+  const details = [
+    typeof usage.maxOutputTokens === "number" ? `max output tokens: ${usage.maxOutputTokens}` : "",
+    usage.finishReason ? `finish reason: ${usage.finishReason}` : "",
+  ].filter(Boolean);
+  window.alert(
+    [
+      "LM Studio appears to have cut off the Local response before Mind Atlas received the full answer.",
+      details.length ? details.join("\n") : "",
+      "Increase the Local output token limit or ask for a shorter answer if the result is incomplete.",
+    ].filter(Boolean).join("\n"),
+  );
+}
+
 function describeCodexTokenLimit(message: string, nowIso: string) {
   if (!isCodexTokenLimitMessage(message)) return null;
   const resetText = extractCodexLimitResetText(message, nowIso);
@@ -4223,13 +4274,49 @@ function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCou
   };
 }
 
-function nodeToAiSnapshot(node: AtlasNode, depthRemaining: number, options: { childLimit?: number } = {}): AiNodeSnapshot {
+interface AiContextTruncationStats {
+  truncatedNodeIds: Set<string>;
+  truncatedBodyCount: number;
+  truncatedSummaryCount: number;
+  omittedChildNodeCount: number;
+}
+
+function createAiContextTruncationStats(): AiContextTruncationStats {
+  return {
+    truncatedNodeIds: new Set<string>(),
+    truncatedBodyCount: 0,
+    truncatedSummaryCount: 0,
+    omittedChildNodeCount: 0,
+  };
+}
+
+function nodeToAiSnapshot(
+  node: AtlasNode,
+  depthRemaining: number,
+  options: { childLimit?: number; truncationStats?: AiContextTruncationStats } = {},
+): AiNodeSnapshot {
   const childLimit = options.childLimit ?? 8;
+  const body = truncateText(node.body, 4000);
+  const summary = truncateText(node.summary, 600);
+  const includedChildren = depthRemaining > 0 ? node.children.slice(0, childLimit) : [];
+  const omittedChildCount = depthRemaining > 0 ? Math.max(0, node.children.length - includedChildren.length) : 0;
+  if (body !== node.body) {
+    options.truncationStats?.truncatedNodeIds.add(node.id);
+    if (options.truncationStats) options.truncationStats.truncatedBodyCount += 1;
+  }
+  if (summary !== node.summary) {
+    options.truncationStats?.truncatedNodeIds.add(node.id);
+    if (options.truncationStats) options.truncationStats.truncatedSummaryCount += 1;
+  }
+  if (omittedChildCount > 0) {
+    options.truncationStats?.truncatedNodeIds.add(node.id);
+    if (options.truncationStats) options.truncationStats.omittedChildNodeCount += omittedChildCount;
+  }
   return {
     id: node.id,
     title: node.title,
-    body: truncateText(node.body, 4000),
-    summary: truncateText(node.summary, 600),
+    body,
+    summary,
     status: node.status,
     author: node.author,
     nodeType: node.nodeType,
@@ -4248,7 +4335,7 @@ function nodeToAiSnapshot(node: AtlasNode, depthRemaining: number, options: { ch
       mimeType: attachment.mimeType,
       size: attachment.size,
     })),
-    children: depthRemaining > 0 ? node.children.slice(0, childLimit).map((child) => nodeToAiSnapshot(child, depthRemaining - 1, options)) : [],
+    children: includedChildren.map((child) => nodeToAiSnapshot(child, depthRemaining - 1, options)),
   };
 }
 
@@ -4362,6 +4449,7 @@ function buildAiContextStats(
   path: AiNodeSnapshot[],
   siblingNodes: AiNodeSnapshot[],
   selectedNodes?: AiNodeSnapshot[],
+  truncationStats?: AiContextTruncationStats,
 ): AiContextStats {
   const selectedCount = countSnapshotNodes(selectedNode);
   const pathCount = path.reduce((sum, node) => sum + countSnapshotNodes(node), 0);
@@ -4369,12 +4457,23 @@ function buildAiContextStats(
   const selectedNodesCount = selectedNodes?.reduce((sum, node) => sum + countSnapshotNodes(node), 0) ?? 0;
   const text = JSON.stringify({ selectedNode, selectedNodes, path, siblingNodes });
   const attachmentStats = countSnapshotAttachments([selectedNode, ...(selectedNodes ?? []), ...path, ...siblingNodes]);
+  const truncatedAttachmentCount = countTruncatedSnapshotAttachments([selectedNode, ...(selectedNodes ?? []), ...path, ...siblingNodes]);
+  const truncatedNodeCount = truncationStats?.truncatedNodeIds.size ?? 0;
+  const truncatedBodyCount = truncationStats?.truncatedBodyCount ?? 0;
+  const truncatedSummaryCount = truncationStats?.truncatedSummaryCount ?? 0;
+  const omittedChildNodeCount = truncationStats?.omittedChildNodeCount ?? 0;
   return {
     scope,
     includedNodeCount: selectedCount + pathCount + siblingCount + selectedNodesCount,
     estimatedInputTokens: Math.ceil(text.length / 3.8),
     includedAttachmentCount: attachmentStats.count,
     includedAttachmentBytes: attachmentStats.bytes,
+    truncated: truncatedNodeCount > 0 || truncatedAttachmentCount > 0,
+    truncatedNodeCount,
+    truncatedBodyCount,
+    truncatedSummaryCount,
+    omittedChildNodeCount,
+    truncatedAttachmentCount,
     sections: {
       selected: selectedCount,
       path: pathCount,
@@ -4473,6 +4572,21 @@ function countSnapshotAttachments(nodes: AiNodeSnapshot[]) {
       if (attachmentIds.has(attachment.id)) continue;
       attachmentIds.add(attachment.id);
       if (attachment.content) bytes += attachment.content.bytes;
+    }
+    for (const child of node.children) visit(child);
+  }
+}
+
+function countTruncatedSnapshotAttachments(nodes: AiNodeSnapshot[]) {
+  const attachmentIds = new Set<string>();
+  for (const node of nodes) {
+    visit(node);
+  }
+  return attachmentIds.size;
+
+  function visit(node: AiNodeSnapshot) {
+    for (const attachment of node.attachments) {
+      if (attachment.content?.truncated) attachmentIds.add(attachment.id);
     }
     for (const child of node.children) visit(child);
   }

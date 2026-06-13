@@ -12,6 +12,7 @@ server-data/
 
 # Local-only files
 AGENTS.md
+CLAUDE.md
 .DS_Store
 .idea/
 .vscode/
