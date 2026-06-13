@@ -265,7 +265,7 @@ Implementation result:
 
 ### T5. Reformation Animation And Motion Language
 
-Status: Not started
+Status: Implemented
 Depends on: T4
 Blocks: T9, T14
 
@@ -284,6 +284,22 @@ Definition of Done:
   media marketing.
 - Low render quality avoids expensive animation work.
 - `npm run verify:ui` covers the mode switch path.
+
+Implementation result:
+
+- Replaced generated-layout camera easing with the shared reformation motion
+  curve: a short inertial spring with slight overshoot in normal quality and a
+  cheaper short ease in low render quality.
+- Added generated-layout node reformation motion with focus-distance stagger,
+  slight scale breathing, and shared timing with camera auto-framing.
+- Low render quality skips per-node reformation animation and uses the shorter
+  camera transition path to avoid expensive animation work.
+- Updated notification pulses and focus wave rings to use the same spring
+  motion character so mode changes, alerts, and focus feedback feel related.
+- Verification on 2026-06-13: `npm run typecheck` passed;
+  `npm run verify:layout` passed; `npm run build` passed with the existing
+  Vite large chunk warning; `npm run verify:ui` passed against
+  `https://127.0.0.1:5173`.
 
 ### T6. Permanent Bidirectional Outline Editor
 

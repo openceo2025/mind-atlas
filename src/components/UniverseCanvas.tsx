@@ -47,6 +47,10 @@ const INITIAL_CAMERA_OFFSET = 0;
 const MIN_CAMERA_OFFSET = -120;
 const MAX_CAMERA_OFFSET = 90000;
 const FOCUSED_NODE_CAMERA_DISTANCE = 300;
+const LAYOUT_MOTION_DURATION_SECONDS = 1.18;
+const LOW_QUALITY_MOTION_DURATION_SECONDS = 0.42;
+const LAYOUT_MOTION_STAGGER_SECONDS = 0.036;
+const LAYOUT_MOTION_MAX_STAGGER_SECONDS = 0.24;
 const MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER = 3;
 const VISIBLE_DESCENDANT_DEPTH = 5;
 const GENERATED_LAYOUT_VISIBLE_DESCENDANT_DEPTH = 3;
@@ -615,7 +619,8 @@ function GlobalNotificationPulse({
 
   const progress = Math.min(1, age / NOTIFICATION_PULSE_DURATION_MS);
   const wave = Math.sin(progress * Math.PI);
-  const radius = 48 + progress * 1560;
+  const motion = springOvershoot(progress);
+  const radius = 48 + motion * 1560;
   const opacity = (theme === "light" ? 0.62 : 0.72) * Math.pow(1 - progress, 0.78) * (0.52 + wave * 0.48);
 
   return (
@@ -771,6 +776,7 @@ function NavigationController({
     targetPanX: number;
     targetPanY: number;
     elapsed: number;
+    duration: number;
     nonce: number;
     nodeId: string;
   } | null>(null);
@@ -924,10 +930,11 @@ function NavigationController({
       targetPanX: generatedLayoutActive ? targetVector.x : 0,
       targetPanY: generatedLayoutActive ? targetVector.y : 0,
       elapsed: 0,
+      duration: renderQuality === "low" ? LOW_QUALITY_MOTION_DURATION_SECONDS : LAYOUT_MOTION_DURATION_SECONDS,
       nonce: focusRequest.nonce,
       nodeId: focusRequest.nodeId ?? "",
     };
-  }, [atlasRoot, focusRequest, keyboardPortraitLock, layoutMode, mobileCamera, mobileLandscapeCamera, mobilePortraitCamera, perspective.fov, size.height, size.width]);
+  }, [atlasRoot, focusRequest, keyboardPortraitLock, layoutMode, mobileCamera, mobileLandscapeCamera, mobilePortraitCamera, perspective.fov, renderQuality, size.height, size.width]);
 
   useEffect(() => {
     if (initialCenteredRef.current) return;
@@ -1023,8 +1030,8 @@ function NavigationController({
     if (!transition) return;
 
     transition.elapsed += delta;
-    const progress = Math.min(1, transition.elapsed / FOCUS_DURATION_SECONDS);
-    const eased = easeInOutQuint(progress);
+    const progress = Math.min(1, transition.elapsed / transition.duration);
+    const eased = getLayoutMotionProgress(progress, renderQuality);
     const state = yawPitchRef.current;
     state.yaw = lerp(transition.startYaw, transition.targetYaw, eased);
     state.pitch = lerp(transition.startPitch, transition.targetPitch, eased);
@@ -2174,6 +2181,8 @@ function HierarchyNode({
     targetWorld: Vec3Tuple;
     parentWorld: Vec3Tuple;
     elapsed: number;
+    delay: number;
+    duration: number;
   } | null>(null);
   const nodeHitRaycast = useMemo(() => createConditionalMeshRaycast(() => shouldSkipNodeRaycast(node.id)), [node.id]);
   const applyVisualWorldPositionRef = useRef<(nextWorld: Vec3Tuple, parentWorldOverride?: Vec3Tuple) => void>(() => undefined);
@@ -2194,9 +2203,10 @@ function HierarchyNode({
     const parentWorld = subtractPosition(worldPosition, localPosition);
     parentWorldRef.current = parentWorld;
     if (dragRef.current) return;
-    if (layoutMode === "phyllotaxis") {
+    if (layoutMode === "phyllotaxis" || renderQuality === "low") {
       layoutTransitionRef.current = null;
       applyVisualWorldPosition(worldPosition, parentWorld);
+      groupRef.current?.scale.setScalar(1);
       return;
     }
 
@@ -2204,6 +2214,7 @@ function HierarchyNode({
     if (distanceBetweenPositions(currentWorld, worldPosition) <= 0.01) {
       layoutTransitionRef.current = null;
       applyVisualWorldPosition(worldPosition, parentWorld);
+      groupRef.current?.scale.setScalar(1);
       return;
     }
     layoutTransitionRef.current = {
@@ -2211,20 +2222,25 @@ function HierarchyNode({
       targetWorld: worldPosition,
       parentWorld,
       elapsed: 0,
+      delay: getLayoutMotionDelay(visualDepthIndex),
+      duration: LAYOUT_MOTION_DURATION_SECONDS,
     };
-  }, [layoutMode, localPosition, worldPosition]);
+  }, [layoutMode, localPosition, renderQuality, visualDepthIndex, worldPosition]);
 
   useFrame((_, delta) => {
     const transition = layoutTransitionRef.current;
     if (!transition || dragRef.current) return;
     transition.elapsed += delta;
-    const progress = Math.min(1, transition.elapsed / FOCUS_DURATION_SECONDS);
-    const eased = easeInOutQuint(progress);
+    const delayedElapsed = Math.max(0, transition.elapsed - transition.delay);
+    const progress = Math.min(1, delayedElapsed / transition.duration);
+    const eased = getLayoutMotionProgress(progress, renderQuality);
     const nextWorld = lerpPosition(transition.startWorld, transition.targetWorld, eased);
     applyVisualWorldPosition(nextWorld, transition.parentWorld);
+    groupRef.current?.scale.setScalar(getReformationScale(progress));
     if (progress >= 1) {
       layoutTransitionRef.current = null;
       applyVisualWorldPosition(transition.targetWorld, transition.parentWorld);
+      groupRef.current?.scale.setScalar(1);
     }
   });
 
@@ -3461,7 +3477,7 @@ function AnimatedNodeFocusRing({
       const age = performance.now() - waveStartedAt - waveDepth * FOCUS_WAVE_STEP_MS;
       const nextGlow =
         age >= 0 && age <= FOCUS_WAVE_DURATION_MS
-          ? Math.sin((age / FOCUS_WAVE_DURATION_MS) * Math.PI)
+          ? Math.sin((age / FOCUS_WAVE_DURATION_MS) * Math.PI) * (0.82 + springOvershoot(age / FOCUS_WAVE_DURATION_MS) * 0.18)
           : 0;
       setWaveGlow((current) => (Math.abs(current - nextGlow) > 0.025 ? nextGlow : current));
     }
@@ -4009,6 +4025,36 @@ function lerp(start: number, end: number, amount: number) {
 
 function easeInOutQuint(value: number) {
   return value < 0.5 ? 16 * value * value * value * value * value : 1 - Math.pow(-2 * value + 2, 5) / 2;
+}
+
+function getLayoutMotionProgress(progress: number, renderQuality: RenderQuality) {
+  const clamped = clamp01(progress);
+  if (renderQuality === "low") return easeInOutQuint(clamped);
+  return springOvershoot(clamped);
+}
+
+function springOvershoot(value: number) {
+  const clamped = clamp01(value);
+  if (clamped <= 0) return 0;
+  if (clamped >= 1) return 1;
+  const omega = 8.2;
+  const damping = 0.72;
+  const damped = omega * Math.sqrt(1 - damping * damping);
+  return 1 - Math.exp(-damping * omega * clamped) * (
+    Math.cos(damped * clamped) + (damping / Math.sqrt(1 - damping * damping)) * Math.sin(damped * clamped)
+  );
+}
+
+function getLayoutMotionDelay(visualDepthIndex: number) {
+  return Math.min(LAYOUT_MOTION_MAX_STAGGER_SECONDS, Math.max(0, visualDepthIndex) * LAYOUT_MOTION_STAGGER_SECONDS);
+}
+
+function getReformationScale(progress: number) {
+  if (progress <= 0) return 0.965;
+  if (progress >= 1) return 1;
+  const settle = springOvershoot(progress);
+  const breathe = Math.sin(Math.PI * clamp01(progress));
+  return 0.965 + Math.min(1.045, settle) * 0.035 + breathe * 0.018;
 }
 
 function directionToYawPitch(direction: Vector3) {
