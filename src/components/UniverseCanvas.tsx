@@ -31,6 +31,7 @@ import {
 } from "../store/atlasStore";
 import { deriveAtlasLayout, deriveAtlasLayoutFrame, type AtlasLayoutFrame, type AtlasLayoutMode, type AtlasLayoutViewport, type Vec3 } from "../layout/atlasLayout";
 import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
+import { buildContextCopy, CONTEXT_COPY_PRESETS, copyContextMarkdown, type ContextCopyPreset } from "../context/contextCopy";
 import { createNodeClipboardText, nodeTreeHasAttachments, parseNodeClipboardText } from "../nodeClipboard";
 import { emitOnboardingEvent, getOnboardingCurrentSpaceStep } from "../onboarding/useOnboarding";
 import type { AtlasTheme } from "../theme";
@@ -55,7 +56,7 @@ const LAYOUT_VISIBILITY_HOLD_MS = 1700;
 const LAYOUT_BACKSTAGE_Z_OFFSET = -430;
 const MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER = 3;
 const VISIBLE_DESCENDANT_DEPTH = 5;
-const GENERATED_LAYOUT_VISIBLE_DESCENDANT_DEPTH = 3;
+const GENERATED_LAYOUT_VISIBLE_DESCENDANT_DEPTH = VISIBLE_DESCENDANT_DEPTH;
 const HOLD_TO_BIRTH_MS = 1520;
 const WHITE_HOLE_CANCEL_PX = 12;
 const ROOT_BIRTH_FOCUS_MIDPOINT = 0.5;
@@ -382,7 +383,8 @@ export function UniverseCanvas({
       if (!shortcutOriginNodeId) return;
 
       const store = useAtlasStore.getState();
-      const targetNodeId = getKeyboardNavigationTarget(store.atlasRoot, shortcutOriginNodeId, event.key);
+      const navigationKey = getLayoutKeyboardNavigationKey(layoutMode, event.key);
+      const targetNodeId = getKeyboardNavigationTarget(store.atlasRoot, shortcutOriginNodeId, navigationKey);
       if (!targetNodeId) return;
       event.preventDefault();
       event.stopPropagation();
@@ -401,7 +403,7 @@ export function UniverseCanvas({
       window.removeEventListener("keydown", handleKeyDown, { capture: true });
       window.removeEventListener("wheel", preventBrowserZoom, { capture: true });
     };
-  }, []);
+  }, [layoutMode]);
 
   useEffect(() => {
     const closeMenu = () => setNodeContextMenu(null);
@@ -496,6 +498,13 @@ function isInteractiveShortcutTarget(target: EventTarget | null) {
 
 function isArrowNavigationKey(key: string) {
   return key === "ArrowUp" || key === "ArrowDown" || key === "ArrowLeft" || key === "ArrowRight";
+}
+
+function getLayoutKeyboardNavigationKey(layoutMode: AtlasLayoutMode, key: string) {
+  if (layoutMode !== "tree" && layoutMode !== "mind-map") return key;
+  if (key === "ArrowUp") return "ArrowDown";
+  if (key === "ArrowDown") return "ArrowUp";
+  return key;
 }
 
 function getKeyboardNavigationTarget(root: AtlasNode, originNodeId: string, key: string) {
@@ -651,6 +660,7 @@ function getNotificationPulseColor(kind: NotificationPulseKind, theme: AtlasThem
   if (kind === "error") return "#ff6b6b";
   if (kind === "codex") return theme === "light" ? "#0b63ce" : "#86b7ff";
   if (kind === "openclaw") return theme === "light" ? "#087f5b" : "#62e6b8";
+  if (kind === "claude") return theme === "light" ? "#8f4a00" : "#ffcc80";
   if (kind === "cost") return "#f59f48";
   if (kind === "done") return "#8bd8d2";
   return "#f7d765";
@@ -712,7 +722,7 @@ function markNotificationPath(kinds: Map<string, NotificationPulseKind>, path: A
 
 function notificationPriority(kind: NotificationPulseKind) {
   if (kind === "error") return 5;
-  if (kind === "codex" || kind === "openclaw") return 4;
+  if (kind === "codex" || kind === "openclaw" || kind === "claude") return 4;
   if (kind === "needs_review") return 3;
   if (kind === "cost") return 2;
   return 1;
@@ -1360,10 +1370,34 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
   const deleteNode = useAtlasStore((state) => state.deleteNode);
   const pasteNodeSubtree = useAtlasStore((state) => state.pasteNodeSubtree);
   const promoteNodeOneLevel = useAtlasStore((state) => state.promoteNodeOneLevel);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const [clipboardNode, setClipboardNode] = useState<AtlasNode | null>(null);
   const [clipboardState, setClipboardState] = useState<"checking" | "available" | "unavailable">("unavailable");
+  const [copyContextPreset, setCopyContextPreset] = useState("");
   const nodePath = menu ? findNodePath(atlasRoot, menu.nodeId) : null;
   const node = nodePath?.at(-1);
+
+  useEffect(() => {
+    if (!menu) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && menuRef.current?.contains(target)) return;
+      onClose();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      onClose();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, { capture: true });
+    document.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, { capture: true });
+      document.removeEventListener("keydown", handleKeyDown, { capture: true });
+    };
+  }, [menu, onClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1420,6 +1454,15 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
       onClose();
     } catch (error) {
       console.error("Failed to copy node tree text", error);
+    }
+  };
+
+  const handleCopyContext = async (preset: ContextCopyPreset) => {
+    try {
+      await copyContextMarkdown(atlasRoot, node.id, preset);
+      onClose();
+    } catch (error) {
+      console.error("Failed to copy context text", error);
     }
   };
 
@@ -1482,6 +1525,7 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
 
   return (
     <div
+      ref={menuRef}
       className="context-menu node-context-menu"
       style={{ left: menu.x, top: menu.y }}
       onPointerDown={(event) => event.stopPropagation()}
@@ -1513,6 +1557,25 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
       <button type="button" onClick={handleCopyAsText}>
         <Copy size={15} /> テキストにコピー
       </button>
+      <label className="node-context-copy-select">
+        <Copy size={15} />
+        <select
+          value={copyContextPreset}
+          onChange={(event) => {
+            const preset = event.target.value as ContextCopyPreset;
+            setCopyContextPreset(event.target.value);
+            if (preset) void handleCopyContext(preset);
+          }}
+          aria-label="Copy with context"
+        >
+          <option value="">Copy with context</option>
+          {CONTEXT_COPY_PRESETS.map((preset) => (
+            <option key={preset.id} value={preset.id}>
+              {preset.label} ({buildContextCopy(atlasRoot, node.id, preset.id)?.stats.estimatedTokens.toLocaleString() ?? "0"} tokens)
+            </option>
+          ))}
+        </select>
+      </label>
       <button className="destructive-menu-button" type="button" onClick={handleDelete}>
         <Trash2 size={15} /> 削除
       </button>
@@ -2186,7 +2249,7 @@ function HierarchyNode({
         : isActiveSibling
           ? 1
           : visibleDepthIndex;
-  const depthFade = getDepthFade(getCameraDepthFadeIndex(perspective, worldPosition, visualDepthIndex));
+  const depthFade = getLayoutAwareDepthFade(layoutMode, renderQuality, currentVisibleNodeIds.has(node.id), perspective, worldPosition, visualDepthIndex);
   const childrenVisible =
     visibleDepthRemaining > 0 &&
     node.children.length > 0 &&
@@ -4433,6 +4496,25 @@ function getDepthFade(index: number) {
     brightness,
     backgroundBlend: 1 - brightness,
   };
+}
+
+function getLayoutAwareDepthFade(
+  layoutMode: AtlasLayoutMode,
+  renderQuality: RenderQuality,
+  layoutVisible: boolean,
+  camera: PerspectiveCamera,
+  worldPosition: Vec3Tuple,
+  fallbackIndex: number,
+) {
+  if ((layoutMode === "tree" || layoutMode === "mind-map") && renderQuality === "high" && layoutVisible) {
+    return {
+      index: 0,
+      opacity: 1,
+      brightness: 1,
+      backgroundBlend: 0,
+    };
+  }
+  return getDepthFade(getCameraDepthFadeIndex(camera, worldPosition, fallbackIndex));
 }
 
 function getCameraDepthFadeIndex(camera: PerspectiveCamera, worldPosition: Vec3Tuple, fallbackIndex: number) {

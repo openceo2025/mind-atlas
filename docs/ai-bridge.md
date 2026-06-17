@@ -29,7 +29,9 @@ If no API key is configured, text prompts still work through a mock response so 
 
 ## Configuration
 
-Copy `.env.example` values into your shell or deployment environment.
+Copy `.env.example` values into your shell, deployment environment, or local
+`.env.local`. The bridge reads `.env` and `.env.local` on startup without
+overriding variables already set by the shell.
 
 - `MIND_ATLAS_OPENAI_API_KEY`: server-side OpenAI key. `OPENAI_API_KEY` also works.
 - `MIND_ATLAS_OPENAI_MODEL`: default Responses API model.
@@ -59,6 +61,15 @@ Copy `.env.example` values into your shell or deployment environment.
 - `MIND_ATLAS_OPENCLAW_AGENT`: optional OpenClaw agent id. Leave blank to use the OpenClaw default agent.
 - `MIND_ATLAS_OPENCLAW_WORKSPACE`: optional work root hint passed into the OpenClaw prompt. The bridge does not modify OpenClaw workspace configuration.
 - `MIND_ATLAS_OPENCLAW_TIMEOUT_MS`: OpenClaw execution timeout in milliseconds. Defaults to 10 minutes.
+- `MIND_ATLAS_CLAUDE_BIN`: Claude Code executable. Defaults to `claude`. On Windows, the WinGet link path is usually `C:\Users\<you>\AppData\Local\Microsoft\WinGet\Links\claude.exe`.
+- `MIND_ATLAS_CLAUDE_MODEL`: default Claude Code model. The command dock can override this per run with presets for `claude-opus-4-8`, `claude-fable-5`, and `deepseek-v4-pro[1m]`.
+- `MIND_ATLAS_CLAUDE_ANTHROPIC_BASE_URL`: optional `ANTHROPIC_BASE_URL` injected only into Claude Code child processes. Use `https://api.anthropic.com` for Anthropic, or `https://api.deepseek.com/anthropic` for DeepSeek.
+- `MIND_ATLAS_CLAUDE_ANTHROPIC_API_KEY`: optional `ANTHROPIC_API_KEY` for Anthropic API billing in non-interactive Claude Code runs. Keep it on the bridge/server side, not in browser storage.
+- `MIND_ATLAS_CLAUDE_DEEPSEEK_AUTH_TOKEN`: optional DeepSeek API key sent as `ANTHROPIC_AUTH_TOKEN` only when the run targets `https://api.deepseek.com/anthropic`.
+- `MIND_ATLAS_CLAUDE_ANTHROPIC_AUTH_TOKEN`: optional generic `ANTHROPIC_AUTH_TOKEN` for custom Anthropic-compatible gateways. Prefer `MIND_ATLAS_CLAUDE_DEEPSEEK_AUTH_TOKEN` for DeepSeek when switching between Anthropic and DeepSeek presets.
+- `MIND_ATLAS_CLAUDE_DEFAULT_FABLE_MODEL`, `MIND_ATLAS_CLAUDE_DEFAULT_OPUS_MODEL`, `MIND_ATLAS_CLAUDE_DEFAULT_SONNET_MODEL`, `MIND_ATLAS_CLAUDE_DEFAULT_HAIKU_MODEL`, `MIND_ATLAS_CLAUDE_SUBAGENT_MODEL`, `MIND_ATLAS_CLAUDE_EFFORT_LEVEL`: optional Claude Code env overrides. DeepSeek runs automatically fill the recommended V4 Pro / V4 Flash defaults when these are not set.
+- `MIND_ATLAS_CLAUDE_WORKSPACE`: default work root for Claude Code runs.
+- `MIND_ATLAS_CLAUDE_TIMEOUT_MS`: Claude Code execution timeout in milliseconds. Defaults to 60 minutes.
 
 On Windows, Codex can occasionally fail before command execution with
 `windows sandbox: spawn setup refresh`. When this exact sandbox initialization
@@ -89,7 +100,7 @@ Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that ne
 
 ## Current AI Surface
 
-- The command dock supports OpenAI, Local, Codex, and OpenClaw modes.
+- The command dock supports OpenAI, Local, Codex, OpenClaw, and Claude Code modes.
 - A user request is saved as a child notebook node first. The provider result is saved as a child of that request.
 - OpenAI uses the Responses API by default.
 - OpenAI image-generation prompts are routed through the Image API and saved as image attachments on the result node.
@@ -97,6 +108,8 @@ Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that ne
 - Codex mode runs `codex exec --json` in `workspace-write` sandbox by default. The user-facing answer becomes `Codex final`; run metadata, command logs, and changed-file details are collected into one sibling `Codex details` node.
 - OpenClaw mode runs `openclaw agent --local --json --thinking off` through the bridge. The result is saved as a child notebook node, and the OpenClaw session key plus run log path are stored on the request/result branch.
 - OpenClaw `Session: auto` resumes an OpenClaw session key found on the active node path. `Session: new` starts a fresh key for that request.
+- Claude Code mode pipes the Mind Atlas prompt/context into `claude -p --output-format json` through the bridge. The bridge injects the selected model, base URL, and provider-appropriate auth variables into that child process, saves stdout/stderr/metadata under `server-data/claude-runs`, and stores the log path on the request/result branch.
+- The Claude Code settings row includes presets for Bridge env, Claude Opus 4.8, Claude Fable 5, and DeepSeek V4 Pro. Anthropic presets explicitly route to `https://api.anthropic.com`; the DeepSeek preset routes to `https://api.deepseek.com/anthropic`.
 - Command failures inside a normal Codex run are treated as ordinary diagnostic detail, not Mind Atlas error nodes. Error pulses are reserved for Codex invocation failures or explicit approval/error nodes.
 - The Codex settings row has a `Skip Git` checkbox. It is off by default; when enabled, the bridge passes `--skip-git-repo-check` for first runs in a non-Git or not-yet-trusted work root.
 - If Codex appears blocked by permissions, Mind Atlas creates a pulsing approval request node. Its child option nodes have centered buttons for approving or denying a retry with `danger-full-access`.

@@ -14,6 +14,14 @@ type VoiceButtonState = "idle" | "dictation_recording" | "dictation_transcribing
 
 const VOICE_LONG_PRESS_MS = 460;
 const VOICE_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
+const CLAUDE_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
+const CLAUDE_DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic";
+const CLAUDE_MODEL_PRESETS = [
+  { id: "bridge", label: "Bridge env", model: "", baseUrl: "" },
+  { id: "opus-4-8", label: "Claude Opus 4.8", model: "claude-opus-4-8", baseUrl: CLAUDE_ANTHROPIC_BASE_URL },
+  { id: "fable-5", label: "Claude Fable 5", model: "claude-fable-5", baseUrl: CLAUDE_ANTHROPIC_BASE_URL },
+  { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", model: "deepseek-v4-pro[1m]", baseUrl: CLAUDE_DEEPSEEK_BASE_URL },
+] as const;
 
 export function CommandDock() {
   const [persistedCommandDraft] = useState(() => loadPersistedUiState()?.commandDraft ?? null);
@@ -48,6 +56,8 @@ export function CommandDock() {
   const setCodexSettings = useAtlasStore((state) => state.setCodexSettings);
   const openClawSettings = useAtlasStore((state) => state.openClawSettings);
   const setOpenClawSettings = useAtlasStore((state) => state.setOpenClawSettings);
+  const claudeSettings = useAtlasStore((state) => state.claudeSettings);
+  const setClaudeSettings = useAtlasStore((state) => state.setClaudeSettings);
   const loadAiDialogSettingsForNode = useAtlasStore((state) => state.loadAiDialogSettingsForNode);
   const resetAiDialogSettingsToDefaults = useAtlasStore((state) => state.resetAiDialogSettingsToDefaults);
   const setCommandInputEditing = useAtlasStore((state) => state.setCommandInputEditing);
@@ -82,6 +92,7 @@ export function CommandDock() {
   const codexEfforts = selectedCodexModel?.supportedReasoningEfforts.length
     ? selectedCodexModel.supportedReasoningEfforts
     : (["low", "medium", "high", "xhigh"] as CodexReasoningEffort[]);
+  const selectedClaudePreset = getClaudePresetId(claudeSettings.model, claudeSettings.baseUrl);
 
   const selectedNodeTitle = selectedNode?.title.trim() || "Mind Atlas";
 
@@ -719,6 +730,7 @@ export function CommandDock() {
         <ModeButton mode="local" activeMode={mode} onSelect={setMode} />
         <ModeButton mode="codex" activeMode={mode} onSelect={setMode} />
         <ModeButton mode="openclaw" activeMode={mode} onSelect={setMode} />
+        <ModeButton mode="claude" activeMode={mode} onSelect={setMode} />
         <ModeButton mode="note" activeMode={mode} onSelect={setMode} />
       </div>
       <select
@@ -993,6 +1005,69 @@ export function CommandDock() {
           />
         </div>
       ) : null}
+      {mode === "claude" ? (
+        <div className="codex-options-row claude-options-row" aria-label="Claude Code settings">
+          <label className="context-option-field">
+            <span>Preset</span>
+            <select
+              value={selectedClaudePreset}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => {
+                const preset = CLAUDE_MODEL_PRESETS.find((item) => item.id === event.target.value);
+                if (preset) setClaudeSettings({ model: preset.model, baseUrl: preset.baseUrl });
+              }}
+              title="Claude Code provider and model preset"
+            >
+              {CLAUDE_MODEL_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                </option>
+              ))}
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <label className="context-option-field">
+            <span>Model</span>
+            <input
+              value={claudeSettings.model}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setClaudeSettings({ model: event.target.value })}
+              placeholder="bridge env or deepseek-v4-pro[1m]"
+            />
+          </label>
+          <label className="context-option-field">
+            <span>Base URL</span>
+            <input
+              value={claudeSettings.baseUrl}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setClaudeSettings({ baseUrl: event.target.value })}
+              placeholder="bridge env or DeepSeek Anthropic URL"
+            />
+          </label>
+          <label className="context-option-field codex-workspace-field">
+            <span>Work root</span>
+            <input
+              value={claudeSettings.workspace}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setClaudeSettings({ workspace: event.target.value })}
+              placeholder="optional project path"
+            />
+          </label>
+          <ContextNumberControl
+            label="Timeout (min)"
+            value={Math.round(claudeSettings.timeoutMs / 60000)}
+            min={1}
+            max={120}
+            onChange={(minutes) => setClaudeSettings({ timeoutMs: minutes * 60000 })}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+          />
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -1109,7 +1184,7 @@ function ModeButton({
   activeMode: CommandMode;
   onSelect: (mode: CommandMode) => void;
 }) {
-  const Icon = mode === "openai" ? Bot : mode === "local" ? HardDrive : mode === "codex" ? Code2 : mode === "openclaw" ? Terminal : PenLine;
+  const Icon = mode === "openai" ? Bot : mode === "local" ? HardDrive : mode === "codex" ? Code2 : mode === "openclaw" ? Terminal : mode === "claude" ? Bot : PenLine;
   return (
     <button
       className={activeMode === mode ? "is-active" : ""}
@@ -1135,13 +1210,21 @@ function modeLabel(mode: CommandMode) {
       return "Codex";
     case "openclaw":
       return "OpenClaw";
+    case "claude":
+      return "Claude Code";
     case "note":
       return "Note";
   }
 }
 
+function getClaudePresetId(model: string, baseUrl: string) {
+  const normalizedModel = model.trim();
+  const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
+  return CLAUDE_MODEL_PRESETS.find((preset) => preset.model === normalizedModel && preset.baseUrl === normalizedBaseUrl)?.id ?? "custom";
+}
+
 function isCommandMode(value: unknown): value is CommandMode {
-  return value === "openai" || value === "local" || value === "codex" || value === "openclaw" || value === "note";
+  return value === "openai" || value === "local" || value === "codex" || value === "openclaw" || value === "claude" || value === "note";
 }
 
 function isGlobalAiPartnerSurface(atlasRoot: ReturnType<typeof useAtlasStore.getState>["atlasRoot"], selectedNodeId: string) {

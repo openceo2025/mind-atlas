@@ -13,6 +13,7 @@ export type OutlineDraftNode = {
 
 export type OutlineNodeInput = {
   id?: string;
+  clientKey?: string;
   title: string;
   body: string;
   children: OutlineNodeInput[];
@@ -32,6 +33,7 @@ export function createOutlineDraftFromAtlas(root: AtlasNode): OutlineDraftNode {
 export function outlineDraftToInput(node: OutlineDraftNode): OutlineNodeInput {
   return {
     id: node.id,
+    clientKey: node.key,
     title: normalizeOutlineTitle(node.title),
     body: normalizeOutlineBody(node.body),
     children: node.children.map(outlineDraftToInput),

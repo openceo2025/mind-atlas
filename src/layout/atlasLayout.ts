@@ -38,10 +38,9 @@ const MIND_MAP_MAX_CHILD_RADIUS = 350;
 const MIND_MAP_SIBLING_SCREEN_GAP = 118;
 const TREE_NODE_GAP = 190;
 const TREE_SUBTREE_GAP = 120;
-const TREE_MAX_DESCENDANT_DEPTH = 2;
+const FOCUS_LAYOUT_MAX_DESCENDANT_DEPTH = 5;
 const MIND_MAP_RING_GAP = 235;
 const MIND_MAP_PARENT_SECTOR = Math.PI / 3;
-const MIND_MAP_MAX_DESCENDANT_DEPTH = 2;
 
 export function deriveAtlasLayout(
   tree: AtlasNode,
@@ -120,7 +119,7 @@ function deriveTreeLayout(tree: AtlasNode, options: AtlasLayoutOptions): Map<str
 
   if (focusNode.id === tree.id) {
     positions.set(tree.id, active);
-    layoutTreeChildren(tree.children, active, 1, portrait, TREE_MAX_DESCENDANT_DEPTH, positions);
+    layoutTreeChildren(tree.children, active, 1, portrait, FOCUS_LAYOUT_MAX_DESCENDANT_DEPTH, positions);
     return positions;
   }
 
@@ -128,7 +127,7 @@ function deriveTreeLayout(tree: AtlasNode, options: AtlasLayoutOptions): Map<str
   layoutAncestorChain(focusPath, active, portrait, positions);
   const parent = focusPath.length > 1 ? focusPath[focusPath.length - 2] : null;
   if (parent) layoutTreeSiblings(parent.children, focusNode.id, active, portrait, positions);
-  layoutTreeChildren(focusNode.children, active, 1, portrait, TREE_MAX_DESCENDANT_DEPTH, positions);
+  layoutTreeChildren(focusNode.children, active, 1, portrait, FOCUS_LAYOUT_MAX_DESCENDANT_DEPTH, positions);
   return positions;
 }
 
@@ -352,9 +351,9 @@ function placeMindMapSector(
   depth: number,
   positions: Map<string, Vec3>,
 ) {
-  if (!nodes.length || depth > MIND_MAP_MAX_DESCENDANT_DEPTH) return;
+  if (!nodes.length || depth > FOCUS_LAYOUT_MAX_DESCENDANT_DEPTH) return;
 
-  const weights = nodes.map((node) => Math.max(1, getVisibleMindMapLeafWeight(node, MIND_MAP_MAX_DESCENDANT_DEPTH - depth)));
+  const weights = nodes.map((node) => Math.max(1, getVisibleMindMapLeafWeight(node, FOCUS_LAYOUT_MAX_DESCENDANT_DEPTH - depth)));
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
   const available = endAngle - startAngle;
   let cursor = startAngle;

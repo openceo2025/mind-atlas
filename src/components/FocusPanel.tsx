@@ -2,6 +2,7 @@ import {
   Bot,
   CalendarClock,
   CornerDownLeft,
+  Copy,
   FileArchive,
   FileCode,
   FileJson,
@@ -18,6 +19,7 @@ import {
 import { ChangeEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { saveStoredAttachmentBlob } from "../attachmentStorage";
+import { buildContextCopy, CONTEXT_COPY_PRESETS, copyContextMarkdown, formatContextCopyStats, type ContextCopyPreset } from "../context/contextCopy";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { findNode, useAtlasStore } from "../store/atlasStore";
 import type { AtlasTheme } from "../theme";
@@ -41,6 +43,8 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
   const selectedNode = findNode(atlasRoot, selectedNodeId) ?? atlasRoot;
   const isRoot = selectedNode.id === atlasRoot.id;
   const [surfaceMenuOpen, setSurfaceMenuOpen] = useState(false);
+  const [copyMenuOpen, setCopyMenuOpen] = useState(false);
+  const [copyStatus, setCopyStatus] = useState("");
   const [reminderMenuOpen, setReminderMenuOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [reminderDraftAt, setReminderDraftAt] = useState(sessionReminderDraftAt);
@@ -52,6 +56,7 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
   useEffect(() => {
     const closeMenus = () => {
       setSurfaceMenuOpen(false);
+      setCopyMenuOpen(false);
       setReminderMenuOpen(false);
       setStatusMenuOpen(false);
     };
@@ -196,6 +201,15 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
     event.target.value = "";
   };
 
+  const handleCopyContext = (preset: ContextCopyPreset) => {
+    void copyContextMarkdown(atlasRoot, selectedNode.id, preset)
+      .then((result) => {
+        setCopyStatus(`Copied ${formatContextCopyStats(result)}`);
+        setCopyMenuOpen(false);
+      })
+      .catch((error) => setCopyStatus(error instanceof Error ? error.message : "Copy failed."));
+  };
+
   return (
     <>
       <aside className={`focus-panel ${isRoot ? "is-hidden" : "is-active"}`} aria-label="Focused context" aria-hidden={isRoot}>
@@ -204,6 +218,34 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
           <Plus size={18} />
           <input type="file" multiple onChange={handleAttachmentChange} />
         </label>
+        <div className="panel-menu-anchor">
+          <button
+            className="icon-button panel-tool-button"
+            type="button"
+            onClick={() => {
+              setCopyMenuOpen((open) => !open);
+              setSurfaceMenuOpen(false);
+              setReminderMenuOpen(false);
+              setStatusMenuOpen(false);
+            }}
+            aria-label="Copy with context"
+          >
+            <Copy size={17} />
+          </button>
+          {copyMenuOpen ? (
+            <div className="context-menu surface-context-menu">
+              {CONTEXT_COPY_PRESETS.map((preset) => {
+                const preview = buildContextCopy(atlasRoot, selectedNode.id, preset.id);
+                return (
+                  <button key={preset.id} type="button" onClick={() => handleCopyContext(preset.id)} title={formatContextCopyStats(preview)}>
+                    <span>{preset.label}</span>
+                    <small>{formatContextCopyStats(preview)}</small>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
         <div className="panel-menu-anchor">
           <button
             className="ai-node-status"
@@ -303,6 +345,7 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
           ) : null}
         </div>
       </div>
+      {copyStatus ? <div className="panel-copy-status" role="status">{copyStatus}</div> : null}
 
       <div className="panel-text-section">
         <textarea

@@ -26,7 +26,7 @@ type VoiceToolSpec = RealtimeToolDefinition & {
 };
 
 const scopeValues: AiContextScope[] = ["minimal", "focused", "subtree", "neighborhood", "selected", "custom"];
-const aiModes: AiExecutionMode[] = ["openai", "local", "codex", "openclaw"];
+const aiModes: AiExecutionMode[] = ["openai", "local", "codex", "openclaw", "claude"];
 const statuses: WorkStatus[] = ["running", "needs_review", "waiting", "blocked", "error", "done"];
 const runAiPurposes = ["node_ai_run", "persistent_result", "delegate_to_node_context"] as const;
 
@@ -59,6 +59,12 @@ const toolSpecs: VoiceToolSpec[] = [
           workspace: state.openClawSettings.workspace,
           timeoutMs: state.openClawSettings.timeoutMs,
           continueMode: state.openClawSettings.continueMode,
+        },
+        claudeSettings: {
+          model: state.claudeSettings.model,
+          baseUrl: state.claudeSettings.baseUrl,
+          workspace: state.claudeSettings.workspace,
+          timeoutMs: state.claudeSettings.timeoutMs,
         },
         unreadNotifications: Object.values(state.unreadNotifications).map((item) => ({
           nodeId: item.nodeId,
@@ -583,7 +589,7 @@ function optionalEnumArg<T extends string>(args: Record<string, unknown>, key: s
 
 function notificationScore(kind: string) {
   if (kind === "error") return 5;
-  if (kind === "codex" || kind === "openclaw") return 4;
+  if (kind === "codex" || kind === "openclaw" || kind === "claude") return 4;
   if (kind === "needs_review") return 3;
   if (kind === "cost") return 2;
   return 1;

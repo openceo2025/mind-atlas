@@ -18,7 +18,7 @@ export type PersistedUiState = {
   renderQuality?: "high" | "low";
   layoutMode?: AtlasLayoutMode;
   vrModeEnabled?: boolean;
-  mobilePanelTab?: "command" | "editor";
+  mobilePanelTab?: "command" | "editor" | "outline";
   commandDraft?: {
     value: string;
     mode: PersistedCommandMode;
@@ -45,7 +45,7 @@ export function loadPersistedUiState(): PersistedUiState | null {
       renderQuality: parsed.renderQuality === "high" || parsed.renderQuality === "low" ? parsed.renderQuality : undefined,
       layoutMode: isAtlasLayoutMode(parsed.layoutMode) ? parsed.layoutMode : undefined,
       vrModeEnabled: typeof parsed.vrModeEnabled === "boolean" ? parsed.vrModeEnabled : undefined,
-      mobilePanelTab: parsed.mobilePanelTab === "command" || parsed.mobilePanelTab === "editor" ? parsed.mobilePanelTab : undefined,
+      mobilePanelTab: parsed.mobilePanelTab === "command" || parsed.mobilePanelTab === "editor" || parsed.mobilePanelTab === "outline" ? parsed.mobilePanelTab : undefined,
       commandDraft: isPersistedCommandDraft(parsed.commandDraft) ? parsed.commandDraft : undefined,
     };
   } catch {
@@ -85,5 +85,5 @@ function isPersistedCommandDraft(value: unknown): value is NonNullable<Persisted
 }
 
 function isPersistedCommandMode(value: unknown): value is PersistedCommandMode {
-  return value === "openai" || value === "local" || value === "codex" || value === "openclaw" || value === "note";
+  return value === "openai" || value === "local" || value === "codex" || value === "openclaw" || value === "claude" || value === "note";
 }

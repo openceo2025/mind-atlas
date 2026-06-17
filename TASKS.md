@@ -319,7 +319,7 @@ Implementation result:
 
 ### T6. Permanent Bidirectional Outline Editor
 
-Status: Not started
+Status: Done on 2026-06-13
 Depends on: T2
 
 Scope:
@@ -338,10 +338,27 @@ Definition of Done:
 - Adding or focusing a node in the universe updates the outline immediately.
 - Undo/redo works for outline edits.
 - Desktop and mobile flows are usable.
+- Implementation notes: `src/components/OutlineEditor.tsx` now renders the
+  whole atlas as an immediate editor backed by `applyOutlineSubtree`, with
+  focus/selection sync, local collapsed state, scroll-to-focused-node behavior,
+  and mobile toolbar close/edit controls.
+- Verification on 2026-06-13: `npm run typecheck` passed; `npm run build`
+  passed with the existing Vite large chunk warning; `npm run verify:ui`
+  passed against the existing `127.0.0.1:5173` dev server.
+- Quality follow-up on 2026-06-13: new outline draft keys are now carried
+  through outline application so newly created nodes receive focus after the
+  store assigns their real node ids. Existing title/body edits use live store
+  updates with one history entry per editing session instead of rebuilding the
+  whole atlas and pushing history for every keystroke.
+- Completion follow-up on 2026-06-13: Outline Editor is now integrated into
+  the mobile workspace tab system as an `outline` tab while keeping the desktop
+  full-screen outline workflow. `npm run verify:ui` includes an outline E2E
+  check for add child, focus, edit, copy with context, undo, and mobile outline
+  panel containment.
 
 ### T7. Context-Aware Copy UI
 
-Status: Not started
+Status: Done on 2026-06-13
 Depends on: T3
 
 Scope:
@@ -364,12 +381,31 @@ Definition of Done:
   answer that reflects broader book context.
 - Record one manual demo example for later marketing material.
 - `npm run typecheck`, `npm run build`, and `npm run verify:ui` pass.
+- Implementation notes: `src/context/contextCopy.ts` adds shared copy presets
+  for node only, ancestor context, and subtree context. Copy actions are wired
+  into the focus panel, outline rows, node context menu, and `Ctrl+Shift+C`
+  for focused-node ancestor context. Each visible menu shows approximate token
+  counts before copying and success feedback after copying.
+- Manual demo note: use a book-like universe, select a section node, choose
+  `With ancestors`, and paste into ChatGPT or Claude to demonstrate that the
+  section carries its chapter/book path plus node body context.
+- Verification on 2026-06-13: `npm run typecheck` passed; `npm run build`
+  passed with the existing Vite large chunk warning; `npm run verify:ui`
+  passed against the existing `127.0.0.1:5173` dev server.
+- Quality follow-up on 2026-06-13: Copy with context now renders node-only,
+  ancestor, and subtree exports without duplicating the selected node, and
+  outline row copy presets include approximate token and node counts before
+  copying.
+- Completion follow-up on 2026-06-13: `npm run verify:ui` now validates that
+  the copied ancestor context has the expected sections, includes token/node
+  preview text, and does not duplicate the selected node title beyond the
+  selected header plus target node line.
 
 ## Phase 0-C: Growth Loops, Parallel
 
 ### T8. Imports: Markdown, OPML, FreeMind
 
-Status: Not started
+Status: Implemented on 2026-06-14
 Depends on: None
 Blocks: T10
 
@@ -387,6 +423,19 @@ Definition of Done:
 - Markdown, OPML, and FreeMind sample files import into sensible trees.
 - Imported trees can be saved, reloaded, and exported.
 - Error messages are clear for invalid files.
+
+Implementation notes:
+
+- Added `src/notebookImport.ts` for Markdown heading/list, OPML outline, and
+  FreeMind `.mm` parsing into normalized `AtlasNode` trees.
+- Main menu import and drag-and-drop import load external files into the
+  existing notebook store.
+- "Import text outline" applies pasted Markdown to the active node with
+  replace-body, replace-subtree, append-children, and preview-merge actions.
+  Preview merge shows current/incoming node blocks and applies the selected
+  choices through `applyOutlineSubtree`, so undo remains available.
+- `scripts/verify-ui.mjs` includes Markdown, OPML, FreeMind, append-children,
+  and preview-merge checks.
 
 ### T9. Share Link And Self-Contained HTML Export
 

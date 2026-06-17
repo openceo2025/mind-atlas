@@ -8,6 +8,8 @@ import { tmpdir } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 
+loadLocalEnvFiles();
+
 const port = Number(process.env.MIND_ATLAS_BRIDGE_PORT ?? process.env.PORT ?? 8787);
 const host = process.env.MIND_ATLAS_BRIDGE_HOST ?? "127.0.0.1";
 const bridgeProtocol = process.env.MIND_ATLAS_BRIDGE_PROTOCOL ?? "http";
@@ -56,6 +58,19 @@ const openClawTimeoutMs = Number(process.env.MIND_ATLAS_OPENCLAW_TIMEOUT_MS ?? 1
 const openClawPromptCharLimit = readPositiveIntEnv("MIND_ATLAS_OPENCLAW_PROMPT_CHAR_LIMIT", 24_000);
 const openClawDisabled = process.env.MIND_ATLAS_OPENCLAW_DISABLED === "true";
 const openClawLogDir = resolve(process.env.MIND_ATLAS_OPENCLAW_LOG_DIR ?? join(process.cwd(), "server-data", "openclaw-runs"));
+
+const claudeBin = process.env.MIND_ATLAS_CLAUDE_BIN ?? "claude";
+const claudeModel = process.env.MIND_ATLAS_CLAUDE_MODEL ?? process.env.ANTHROPIC_MODEL ?? "";
+const claudeBaseUrl = stringOr(process.env.MIND_ATLAS_CLAUDE_ANTHROPIC_BASE_URL, stringOr(process.env.MIND_ATLAS_CLAUDE_BASE_URL, process.env.ANTHROPIC_BASE_URL ?? "")).replace(/\/+$/, "");
+const claudeApiKey = process.env.MIND_ATLAS_CLAUDE_ANTHROPIC_API_KEY ?? process.env.MIND_ATLAS_CLAUDE_API_KEY ?? process.env.ANTHROPIC_API_KEY ?? "";
+const claudeAuthToken = process.env.MIND_ATLAS_CLAUDE_ANTHROPIC_AUTH_TOKEN ?? process.env.MIND_ATLAS_CLAUDE_AUTH_TOKEN ?? process.env.ANTHROPIC_AUTH_TOKEN ?? "";
+const claudeDeepSeekAuthToken = process.env.MIND_ATLAS_CLAUDE_DEEPSEEK_AUTH_TOKEN ?? process.env.DEEPSEEK_API_KEY ?? "";
+const claudeWorkspace = process.env.MIND_ATLAS_CLAUDE_WORKSPACE ?? codexWorkspace;
+const claudeTimeoutMs = Number(process.env.MIND_ATLAS_CLAUDE_TIMEOUT_MS ?? 60 * 60 * 1000);
+const claudePromptCharLimit = readPositiveIntEnv("MIND_ATLAS_CLAUDE_PROMPT_CHAR_LIMIT", 32_000);
+const claudeDisabled = process.env.MIND_ATLAS_CLAUDE_DISABLED === "true";
+const claudeLogDir = resolve(process.env.MIND_ATLAS_CLAUDE_LOG_DIR ?? join(process.cwd(), "server-data", "claude-runs"));
+const claudeDeepSeekBaseUrl = "https://api.deepseek.com/anthropic";
 
 const realtimeModel = process.env.MIND_ATLAS_REALTIME_MODEL ?? "gpt-realtime";
 const realtimeVoice = process.env.MIND_ATLAS_REALTIME_VOICE ?? "marin";
@@ -193,6 +208,14 @@ const server = createBridgeServer(async (request, response) => {
             model: openClawModel || "openclaw-default",
             detail: `${openClawBin}; ${openClawThinking}; ${openClawAgent || "default-agent"}`,
           },
+          {
+            id: "claude",
+            label: "Claude Code",
+            configured: !claudeDisabled,
+            model: claudeModel || "claude-code-default",
+            baseUrl: claudeBaseUrl || undefined,
+            detail: `${claudeBin}; ${claudeWorkspace}; ${claudeApiKey || claudeAuthToken || claudeDeepSeekAuthToken ? "auth configured" : "auth not configured"}`,
+          },
         ],
       });
       return;
@@ -305,7 +328,43 @@ server.listen(port, host, () => {
   console.log(`Local upstream: ${localBaseUrl}`);
   console.log(`Codex command: ${codexUseWsl ? "wsl " : ""}${codexBin}`);
   console.log(`OpenClaw command: ${openClawBin}`);
+  console.log(`Claude Code command: ${claudeBin}${claudeBaseUrl ? ` (${claudeBaseUrl})` : ""}`);
 });
+
+function loadLocalEnvFiles() {
+  const fileEnv = {
+    ...readDotEnvFile(".env"),
+    ...readDotEnvFile(".env.local"),
+  };
+  for (const [key, value] of Object.entries(fileEnv)) {
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
+function readDotEnvFile(fileName) {
+  const filePath = resolve(process.cwd(), fileName);
+  if (!existsSync(filePath)) return {};
+
+  const parsed = {};
+  const content = readFileSync(filePath, "utf8");
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    const separator = line.indexOf("=");
+    if (separator === -1) continue;
+
+    const key = line.slice(0, separator).trim();
+    let value = line.slice(separator + 1).trim();
+    if (!key) continue;
+
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    parsed[key] = value;
+  }
+  return parsed;
+}
 
 function createBridgeServer(handler) {
   if (bridgeProtocol !== "https") return createHttpServer(handler);
@@ -362,6 +421,16 @@ async function createAiResponse(payload) {
       context,
       model: stringOr(payload?.model, openClawModel),
       openclaw: payload?.openclaw ?? {},
+      startedAt,
+    });
+  }
+
+  if (provider === "claude") {
+    return await createClaudeCodeResponse({
+      prompt,
+      context,
+      model: stringOr(payload?.model, claudeModel),
+      claude: payload?.claude ?? {},
       startedAt,
     });
   }
@@ -1132,6 +1201,267 @@ async function saveOpenClawResponseLog(logPath, response) {
   }
 }
 
+async function createClaudeCodeResponse({ prompt, context, model, claude, startedAt }) {
+  if (claudeDisabled) throw new BridgeError(503, "Claude Code CLI is disabled");
+  const settings = normalizeClaudeSettings(claude, model, context);
+  const claudePrompt = buildClaudePrompt(prompt, context, settings);
+  const result = await runClaudeCode(claudePrompt, settings);
+  const durationMs = Date.now() - startedAt;
+  const parsed = parseClaudeJson(result.stdout);
+  const finalText = extractClaudeText(parsed) || result.stdout.trim();
+  const body = [
+    finalText || "Claude Code did not produce a final message.",
+    result.stderr.trim() ? `\n\nstderr:\n${result.stderr.trim()}` : "",
+  ].join("").trim();
+  const output = normalizeAiOutput({
+    title: result.exitCode === 0 ? "Claude Code result" : "Claude Code issue",
+    body,
+    summary: (finalText || result.stderr || "Claude Code run completed.").split("\n").find(Boolean)?.slice(0, 220) ?? "Claude Code run completed.",
+    suggestedStatus: "needs_review",
+    tags: ["claude", "code"],
+  }, prompt);
+  const response = {
+    id: randomUUID(),
+    provider: "claude",
+    model: stringOr(parsed?.model, settings.model || "claude-code"),
+    output,
+    claudeLogPath: result.claudeLogPath,
+    rawText: result.stdout,
+    usage: {
+      ...normalizeClaudeUsage(parsed),
+      durationMs,
+    },
+  };
+  await saveClaudeResponseLog(result.claudeLogPath, response);
+  return response;
+}
+
+async function runClaudeCode(prompt, settings) {
+  assertExistingWorkspace(settings.workspace, "Claude Code");
+  const startedAt = new Date().toISOString();
+  const boundedPrompt = truncateText(prompt, claudePromptCharLimit);
+  const args = [
+    "-p",
+    "--output-format",
+    "json",
+  ];
+  const commandSpec = buildClaudeCommand(args);
+  const result = await runProcess(commandSpec.command, commandSpec.args, boundedPrompt, settings.timeoutMs, settings.workspace, buildClaudeEnv(settings));
+  const completedAt = new Date().toISOString();
+  if (result.exitCode !== 0 && !result.stdout.trim()) {
+    throw new BridgeError(502, result.stderr.trim() || `Claude Code CLI exited with ${result.exitCode}`);
+  }
+  const claudeLogPath = await saveClaudeRunLog({
+    settings,
+    prompt: boundedPrompt,
+    result,
+    command: commandSpec.command,
+    args: commandSpec.args,
+    startedAt,
+    completedAt,
+  });
+  return { ...result, claudeLogPath };
+}
+
+function buildClaudeCommand(args) {
+  if (/\.mjs$/i.test(claudeBin)) {
+    return { command: process.execPath, args: [claudeBin, ...args] };
+  }
+  if (process.platform === "win32" && /\.(cmd|bat)$/i.test(claudeBin)) {
+    return { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", claudeBin, ...args] };
+  }
+  return { command: claudeBin, args };
+}
+
+function buildClaudeEnv(settings) {
+  const env = { ...process.env };
+  const baseUrl = settings.baseUrl || claudeBaseUrl;
+  const model = settings.model || claudeModel;
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  delete env.ANTHROPIC_BASE_URL;
+  if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
+  const auth = resolveClaudeAuthForBaseUrl(baseUrl);
+  if (auth.apiKey) env.ANTHROPIC_API_KEY = auth.apiKey;
+  if (auth.authToken) env.ANTHROPIC_AUTH_TOKEN = auth.authToken;
+  if (model) env.ANTHROPIC_MODEL = model;
+  env.API_TIMEOUT_MS = stringOr(process.env.API_TIMEOUT_MS, String(settings.timeoutMs));
+  for (const [source, target] of [
+    ["MIND_ATLAS_CLAUDE_DEFAULT_FABLE_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL"],
+    ["MIND_ATLAS_CLAUDE_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL"],
+    ["MIND_ATLAS_CLAUDE_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL"],
+    ["MIND_ATLAS_CLAUDE_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+    ["MIND_ATLAS_CLAUDE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"],
+    ["MIND_ATLAS_CLAUDE_EFFORT_LEVEL", "CLAUDE_CODE_EFFORT_LEVEL"],
+  ]) {
+    const configured = process.env[source] ?? process.env[target];
+    if (configured) env[target] = configured;
+  }
+  applyDeepSeekClaudeDefaults(env, baseUrl, model);
+  return env;
+}
+
+function resolveClaudeAuthForBaseUrl(baseUrl) {
+  if (baseUrl === claudeDeepSeekBaseUrl) {
+    return { apiKey: "", authToken: claudeDeepSeekAuthToken || claudeAuthToken };
+  }
+  if (!baseUrl || isAnthropicClaudeBaseUrl(baseUrl)) {
+    return { apiKey: claudeApiKey, authToken: claudeApiKey ? "" : claudeAuthToken };
+  }
+  return { apiKey: claudeApiKey, authToken: claudeAuthToken };
+}
+
+function isAnthropicClaudeBaseUrl(baseUrl) {
+  try {
+    const host = new URL(baseUrl).hostname;
+    return host === "api.anthropic.com" || host.endsWith(".anthropic.com");
+  } catch {
+    return false;
+  }
+}
+
+function applyDeepSeekClaudeDefaults(env, baseUrl, model) {
+  if (baseUrl !== claudeDeepSeekBaseUrl) return;
+  const proModel = model || "deepseek-v4-pro[1m]";
+  env.ANTHROPIC_DEFAULT_OPUS_MODEL ||= proModel;
+  env.ANTHROPIC_DEFAULT_SONNET_MODEL ||= proModel;
+  env.ANTHROPIC_DEFAULT_HAIKU_MODEL ||= "deepseek-v4-flash";
+  env.CLAUDE_CODE_SUBAGENT_MODEL ||= "deepseek-v4-flash";
+  env.CLAUDE_CODE_EFFORT_LEVEL ||= "max";
+}
+
+function buildClaudePrompt(prompt, context, settings) {
+  const contextSummary = JSON.stringify({
+    selectedNode: context?.selectedNode,
+    selectedNodes: context?.selectedNodes,
+    path: context?.path,
+    siblingNodes: context?.siblingNodes,
+    scope: context?.scope,
+    stats: context?.stats,
+  }, null, 2);
+  return [
+    "You are Claude Code invoked from Mind Atlas.",
+    "Mind Atlas is a spatial tree notebook. This is a node-anchored run: use the explicit node context below, plus the files and tools available in the configured work root.",
+    "Return a concise final answer suitable for saving as a child Mind Atlas node.",
+    "Do not change Claude Code configuration unless the user explicitly asks for that in this prompt.",
+    settings.workspace ? `User-selected work root: ${settings.workspace}` : "No Mind Atlas work root was provided; use the bridge default workspace.",
+    settings.baseUrl ? `Claude API base URL override: ${settings.baseUrl}` : "Claude API base URL: bridge environment default.",
+    settings.model ? `Claude model: ${settings.model}` : "Claude model: bridge environment default.",
+    "",
+    "# User request",
+    prompt,
+    "",
+    "# Mind Atlas context",
+    truncateText(contextSummary, Math.max(2000, Math.floor(claudePromptCharLimit * 0.55))),
+  ].join("\n");
+}
+
+function normalizeClaudeSettings(input, model, context) {
+  const workspace = stringOr(input?.workspace, stringOr(extractWorkspaceFromContext(context), claudeWorkspace));
+  return {
+    model: stringOr(input?.model, model || claudeModel),
+    baseUrl: stringOr(input?.baseUrl, claudeBaseUrl).replace(/\/+$/, ""),
+    workspace,
+    timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input.timeoutMs) : claudeTimeoutMs,
+    clientRunId: stringOr(input?.clientRunId, ""),
+    requestNodeId: stringOr(input?.requestNodeId, ""),
+    sourceNodeId: stringOr(input?.sourceNodeId, ""),
+  };
+}
+
+function parseClaudeJson(stdout) {
+  const text = String(stdout ?? "").trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Some CLI versions may print diagnostics before the final JSON object.
+  }
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines.slice().reverse()) {
+    try {
+      return JSON.parse(line);
+    } catch {
+      // keep looking
+    }
+  }
+  return null;
+}
+
+function extractClaudeText(data) {
+  if (!data) return "";
+  const candidates = [
+    data.result,
+    data.text,
+    data.output,
+    data.response,
+    data.message,
+    data.final,
+    data.content,
+    data.assistant_response,
+  ];
+  for (const candidate of candidates) {
+    const text = contentText(candidate);
+    if (text.trim()) return text.trim();
+  }
+  const messageArrays = [data.messages, data.items, data.events].filter(Array.isArray);
+  for (const messages of messageArrays) {
+    for (const item of messages.slice().reverse()) {
+      const text = contentText(item?.content ?? item?.text ?? item?.message ?? item?.output);
+      if (text.trim()) return text.trim();
+    }
+  }
+  return "";
+}
+
+function normalizeClaudeUsage(value) {
+  const usage = value?.usage ?? value;
+  return withoutUndefined({
+    inputTokens: numberOrUndefined(usage?.input_tokens ?? usage?.inputTokens ?? usage?.prompt_tokens ?? usage?.promptTokens),
+    outputTokens: numberOrUndefined(usage?.output_tokens ?? usage?.outputTokens ?? usage?.completion_tokens ?? usage?.completionTokens),
+    totalTokens: numberOrUndefined(usage?.total_tokens ?? usage?.totalTokens),
+    estimatedCostUsd: numberOrUndefined(value?.total_cost_usd ?? value?.totalCostUsd ?? usage?.cost_usd ?? usage?.estimatedCostUsd),
+  });
+}
+
+async function saveClaudeRunLog({ settings, prompt, result, command, args, startedAt, completedAt }) {
+  const workspaceName = toSafeFilePart(basename(resolve(stringOr(settings.workspace, "workspace"))) || "workspace");
+  const runName = `${startedAt.replace(/[-:.TZ]/g, "").slice(0, 14)}-${toSafeFilePart(randomUUID()).slice(0, 8)}`;
+  const directory = join(claudeLogDir, workspaceName, runName);
+  await mkdir(directory, { recursive: true });
+  await Promise.all([
+    writeFile(join(directory, "prompt.txt"), prompt, "utf8"),
+    writeFile(join(directory, "stdout.json"), result.stdout, "utf8"),
+    writeFile(join(directory, "stderr.txt"), result.stderr, "utf8"),
+    writeFile(join(directory, "metadata.json"), JSON.stringify({
+      startedAt,
+      completedAt,
+      workspace: settings.workspace,
+      model: settings.model,
+      baseUrl: settings.baseUrl,
+      apiKeyConfigured: Boolean(claudeApiKey),
+      authTokenConfigured: Boolean(claudeAuthToken),
+      deepSeekAuthTokenConfigured: Boolean(claudeDeepSeekAuthToken),
+      clientRunId: settings.clientRunId,
+      requestNodeId: settings.requestNodeId,
+      sourceNodeId: settings.sourceNodeId,
+      command,
+      args,
+      exitCode: result.exitCode,
+    }, null, 2), "utf8"),
+  ]);
+  return directory;
+}
+
+async function saveClaudeResponseLog(logPath, response) {
+  if (!logPath) return;
+  try {
+    await writeFile(join(logPath, "response.json"), JSON.stringify(response, null, 2), "utf8");
+  } catch (error) {
+    console.warn(`[bridge] failed to save Claude Code response log: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
 async function runCodex(prompt, settings) {
   assertExistingWorkspace(settings.workspace, "Codex");
   const result = await runCodexOnce(prompt, settings);
@@ -1766,12 +2096,13 @@ function truncateFromStart(value, maxLength) {
   return text.length > maxLength ? `[Earlier context truncated]\n${text.slice(text.length - maxLength)}` : text;
 }
 
-function runProcess(command, args, stdin, timeoutMs, cwd) {
+function runProcess(command, args, stdin, timeoutMs, cwd, env = process.env) {
   return new Promise((resolve, reject) => {
     let child;
     try {
       child = spawn(command, args, {
         cwd: normalizeProcessCwd(cwd),
+        env,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });

@@ -88,7 +88,7 @@ export type AtlasNodeKind = "root" | "workArea" | "artifact" | "event" | "concep
 
 export type PlanetTexture = "speckled" | "bands" | "freckles" | "craters" | "mist" | "cell";
 
-export type AiExecutionMode = "openai" | "local" | "codex" | "openclaw";
+export type AiExecutionMode = "openai" | "local" | "codex" | "openclaw" | "claude";
 
 export type AiContextScope = "minimal" | "focused" | "subtree" | "neighborhood" | "selected" | "custom";
 
@@ -105,7 +105,7 @@ export interface AiContextOptions {
   selectedNodeIds: string[];
 }
 
-export type AiProvider = "openai" | "openai-compatible" | "local" | "codex" | "openclaw" | "mock";
+export type AiProvider = "openai" | "openai-compatible" | "local" | "codex" | "openclaw" | "claude" | "mock";
 
 export type AiRunStatus = "running" | "needs_review" | "error" | "done";
 
@@ -142,6 +142,16 @@ export interface OpenClawSettings {
   continueMode?: CodexContinueMode;
   resumeSessionKey?: string;
   sessionKey?: string;
+  clientRunId?: string;
+  requestNodeId?: string;
+  sourceNodeId?: string;
+}
+
+export interface ClaudeSettings {
+  model: string;
+  baseUrl: string;
+  workspace: string;
+  timeoutMs: number;
   clientRunId?: string;
   requestNodeId?: string;
   sourceNodeId?: string;
@@ -210,6 +220,7 @@ export interface AiDialogSettings {
   contextOptions: AiContextOptions;
   codexSettings: CodexSettings;
   openClawSettings: OpenClawSettings;
+  claudeSettings: ClaudeSettings;
 }
 
 export interface AiUsage {
@@ -243,6 +254,7 @@ export interface AiRun {
   codexLogPath?: string;
   openClawSessionKey?: string;
   openClawLogPath?: string;
+  claudeLogPath?: string;
 }
 
 export interface AiNodeSnapshot {
@@ -261,6 +273,7 @@ export interface AiNodeSnapshot {
   codexLogPath?: string;
   openClawSessionKey?: string;
   openClawLogPath?: string;
+  claudeLogPath?: string;
   attachments: AiAttachmentSnapshot[];
   children: AiNodeSnapshot[];
 }
@@ -315,6 +328,7 @@ export interface AiResponsePayload {
   model?: string;
   codex?: Partial<CodexSettings>;
   openclaw?: Partial<OpenClawSettings>;
+  claude?: Partial<ClaudeSettings>;
   // Node anchored AI runs must stay limited to the explicit node context.
   // Do not add AI Partner log, voice summary, or other global history here.
 }
@@ -347,6 +361,7 @@ export interface AiResponseResult {
   codexLogPath?: string;
   openClawSessionKey?: string;
   openClawLogPath?: string;
+  claudeLogPath?: string;
   rawText: string;
   usage?: AiUsage;
 }
@@ -398,7 +413,7 @@ export interface AiBridgeProvider {
   detail?: string;
 }
 
-export type NotificationPulseKind = "done" | "needs_review" | "error" | "codex" | "openclaw" | "cost";
+export type NotificationPulseKind = "done" | "needs_review" | "error" | "codex" | "openclaw" | "claude" | "cost";
 
 export interface NotificationPulse {
   id: string;
@@ -558,6 +573,7 @@ export interface AtlasNode {
   codexLogPath?: string;
   openClawSessionKey?: string;
   openClawLogPath?: string;
+  claudeLogPath?: string;
   usage?: AiUsage;
   action?: AtlasNodeAction;
   aiDialogSettings?: AiDialogSettings;

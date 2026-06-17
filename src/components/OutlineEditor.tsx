@@ -8,14 +8,15 @@ import {
   ChevronRight,
   ChevronsDown,
   ChevronsUp,
+  Copy,
   GitBranchPlus,
   ListPlus,
   ListTree,
-  Save,
   Trash2,
   X,
 } from "lucide-react";
-import { CSSProperties, KeyboardEvent, useMemo, useRef, useState } from "react";
+import { CSSProperties, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { buildContextCopy, CONTEXT_COPY_PRESETS, copyContextMarkdown, formatContextCopyStats, type ContextCopyPreset } from "../context/contextCopy";
 import {
   createOutlineDraftFromAtlas,
   findOutlineNodePath,
@@ -34,25 +35,78 @@ import type { AtlasNode } from "../types";
 
 type OutlineEditorProps = {
   root: AtlasNode;
-  onCancel: () => void;
-  onSave: (rootId: string, outline: ReturnType<typeof outlineDraftToInput>) => void;
+  selectedNodeId: string;
+  onClose: () => void;
+  onFocusNode: (id: string) => void;
+  onApplyOutline: (rootId: string, outline: ReturnType<typeof outlineDraftToInput>, options?: { focusKey?: string }) => void;
+  onUpdateNodeLive: (id: string, patch: Partial<Pick<AtlasNode, "title" | "body" | "summary">>, options?: { history?: boolean }) => void;
 };
 
-export function OutlineEditor({ root, onCancel, onSave }: OutlineEditorProps) {
-  const [draftRoot, setDraftRoot] = useState(() => createOutlineDraftFromAtlas(root));
-  const [activeKey, setActiveKey] = useState(draftRoot.key);
+export function OutlineEditor({ root, selectedNodeId, onClose, onFocusNode, onApplyOutline, onUpdateNodeLive }: OutlineEditorProps) {
+  const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(() => new Set());
+  const [activeKey, setActiveKey] = useState(selectedNodeId);
+  const [copyStatus, setCopyStatus] = useState("");
+  const liveEditHistoryNodeIdsRef = useRef<Set<string>>(new Set());
+  const draftRoot = useMemo(() => applyCollapsedState(createOutlineDraftFromAtlas(root), collapsedNodeIds), [collapsedNodeIds, root]);
   const activePath = useMemo(() => findOutlineNodePath(draftRoot, activeKey), [activeKey, draftRoot]);
   const activeDepth = activePath?.length ?? 0;
 
-  const run = (operation: (root: OutlineDraftNode, key: string) => { root: OutlineDraftNode; key?: string } | OutlineDraftNode) => {
-    setDraftRoot((current) => {
-      const result = operation(current, activeKey);
-      if ("root" in result) {
-        if (result.key) setActiveKey(result.key);
-        return result.root;
-      }
-      return result;
+  useEffect(() => {
+    if (selectedNodeId !== activeKey) {
+      setActiveKey(selectedNodeId);
+      setCollapsedNodeIds((current) => expandPath(root, selectedNodeId, current));
+    }
+  }, [activeKey, root, selectedNodeId]);
+
+  useEffect(() => {
+    const element = document.querySelector(`[data-outline-node-id="${CSS.escape(activeKey)}"]`);
+    element?.scrollIntoView({ block: "nearest" });
+  }, [activeKey, draftRoot]);
+
+  const applyDraft = (nextRoot: OutlineDraftNode, nextKey = activeKey) => {
+    onApplyOutline(root.id, outlineDraftToInput(nextRoot), { focusKey: nextKey });
+    setActiveKey(nextKey);
+    if (!nextKey.startsWith("outline-draft-")) onFocusNode(nextKey);
+  };
+
+  const run = (operation: (root: OutlineDraftNode, key: string) => { root: OutlineDraftNode; key?: string; nextKey?: string } | OutlineDraftNode) => {
+    const result = operation(draftRoot, activeKey);
+    if ("root" in result) {
+      applyDraft(result.root, result.key ?? result.nextKey ?? activeKey);
+      return;
+    }
+    applyDraft(result);
+  };
+
+  const toggleCollapsed = (key: string) => {
+    setCollapsedNodeIds((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
     });
+  };
+
+  const activateNode = (key: string) => {
+    setActiveKey(key);
+    if (!key.startsWith("outline-draft-")) onFocusNode(key);
+  };
+
+  const updateExistingNodeLive = (key: string, patch: Partial<Pick<AtlasNode, "title" | "body">>) => {
+    const nodePath = findAtlasNodePath(root, key);
+    const node = nodePath?.at(-1);
+    if (!node) return;
+    const nextPatch = {
+      ...patch,
+      summary: patch.body !== undefined ? patch.body.split("\n").find(Boolean) ?? "Empty notebook node." : node.summary,
+    };
+    const history = !liveEditHistoryNodeIdsRef.current.has(key);
+    liveEditHistoryNodeIdsRef.current.add(key);
+    onUpdateNodeLive(key, nextPatch, { history });
+  };
+
+  const endLiveEdit = (key: string) => {
+    liveEditHistoryNodeIdsRef.current.delete(key);
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -85,19 +139,17 @@ export function OutlineEditor({ root, onCancel, onSave }: OutlineEditorProps) {
             <ListTree size={16} /> Outline Editor
           </span>
           <h2>{root.title || OUTLINE_UNTITLED_TITLE}</h2>
+          {copyStatus ? <p>{copyStatus}</p> : null}
         </div>
         <div className="outline-editor-actions">
-          <button type="button" onClick={onCancel}>
-            <X size={17} /> Cancel
+          <button type="button" onClick={onClose}>
+            <X size={17} /> Close
           </button>
-          <button type="button" onClick={() => setDraftRoot((current) => setOutlineCollapsed(current, false))}>
+          <button type="button" onClick={() => setCollapsedNodeIds(new Set())}>
             <ChevronsDown size={17} /> Expand all
           </button>
-          <button type="button" onClick={() => setDraftRoot((current) => setOutlineCollapsed(current, true))}>
+          <button type="button" onClick={() => setCollapsedNodeIds(new Set(collectOutlineIds(draftRoot)))}>
             <ChevronsUp size={17} /> Collapse all
-          </button>
-          <button className="is-primary" type="button" onClick={() => onSave(root.id, outlineDraftToInput(draftRoot))} aria-label="Save outline">
-            <Save size={17} /> Save
           </button>
         </div>
       </header>
@@ -105,10 +157,24 @@ export function OutlineEditor({ root, onCancel, onSave }: OutlineEditorProps) {
       <main className="outline-editor-body" aria-label="Mind Atlas outline editor">
         <OutlineNodeEditor
           node={draftRoot}
+          root={root}
           depth={0}
           activeKey={activeKey}
-          onActivate={setActiveKey}
-          onUpdate={(key, patch) => setDraftRoot((current) => updateOutlineNode(current, key, (node) => ({ ...node, ...patch })))}
+          onActivate={activateNode}
+          onUpdate={(key, patch) => {
+            if (!key.startsWith("outline-draft-") && (patch.title !== undefined || patch.body !== undefined)) {
+              updateExistingNodeLive(key, patch);
+              return;
+            }
+            applyDraft(updateOutlineNode(draftRoot, key, (node) => ({ ...node, ...patch })), key);
+          }}
+          onEndEdit={endLiveEdit}
+          onToggleCollapsed={toggleCollapsed}
+          onCopy={(key, preset) => {
+            void copyContextMarkdown(root, key, preset)
+              .then((result) => setCopyStatus(`Copied ${formatContextCopyStats(result)}`))
+              .catch((error) => setCopyStatus(error instanceof Error ? error.message : "Copy failed."));
+          }}
           onCommand={(command, key) => {
             setActiveKey(key);
             run((current) => runOutlineCommand(current, key, command));
@@ -135,7 +201,7 @@ export function OutlineEditor({ root, onCancel, onSave }: OutlineEditorProps) {
         <button type="button" onClick={() => run((current, key) => insertOutlineChild(current, key))} aria-label="Add child node">
           <GitBranchPlus size={18} />
         </button>
-        <button className="is-primary" type="button" onClick={() => onSave(root.id, outlineDraftToInput(draftRoot))} aria-label="Save outline">
+        <button className="is-primary" type="button" onClick={() => onClose()} aria-label="Close outline">
           <Check size={18} />
         </button>
       </nav>
@@ -145,17 +211,25 @@ export function OutlineEditor({ root, onCancel, onSave }: OutlineEditorProps) {
 
 function OutlineNodeEditor({
   node,
+  root,
   depth,
   activeKey,
   onActivate,
   onUpdate,
+  onEndEdit,
+  onToggleCollapsed,
+  onCopy,
   onCommand,
 }: {
   node: OutlineDraftNode;
+  root: AtlasNode;
   depth: number;
   activeKey: string;
   onActivate: (key: string) => void;
   onUpdate: (key: string, patch: Partial<OutlineDraftNode>) => void;
+  onEndEdit: (key: string) => void;
+  onToggleCollapsed: (key: string) => void;
+  onCopy: (key: string, preset: ContextCopyPreset) => void;
   onCommand: (command: OutlineCommand, key: string) => void;
 }) {
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
@@ -164,13 +238,13 @@ function OutlineNodeEditor({
   const bodyHidden = node.collapsed;
 
   return (
-    <section className={`outline-node-row ${isActive ? "is-active" : ""}`} data-depth={depth}>
+    <section className={`outline-node-row ${isActive ? "is-active" : ""}`} data-depth={depth} data-outline-node-id={node.id ?? node.key}>
       <div className="outline-title-row" onFocusCapture={() => onActivate(node.key)}>
         <div className="outline-indent-gutter" aria-hidden="true" style={{ "--outline-depth": depth } as CSSProperties} />
         <button
           className="outline-fold-button"
           type="button"
-          onClick={() => onUpdate(node.key, { collapsed: !node.collapsed })}
+          onClick={() => onToggleCollapsed(node.key)}
           aria-label={node.collapsed ? "Show node body" : "Hide node body"}
         >
           {node.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
@@ -180,6 +254,7 @@ function OutlineNodeEditor({
           value={node.title}
           onFocus={() => onActivate(node.key)}
           onChange={(event) => onUpdate(node.key, { title: event.target.value })}
+          onBlur={() => onEndEdit(node.key)}
           aria-label="Node title"
         />
         <div className="outline-line-actions">
@@ -201,6 +276,29 @@ function OutlineNodeEditor({
           <button type="button" onClick={() => onCommand("child", node.key)} aria-label="Add child">
             <GitBranchPlus size={14} />
           </button>
+          <div className="outline-copy-menu">
+            <Copy size={14} />
+            <select
+              value=""
+              onChange={(event) => {
+                const preset = event.target.value as ContextCopyPreset;
+                if (preset) onCopy(node.id ?? node.key, preset);
+                event.currentTarget.value = "";
+              }}
+              aria-label="Copy with context"
+              title={formatContextCopyStats(buildContextCopy(root, node.id ?? node.key, "ancestors"))}
+            >
+              <option value="">Copy</option>
+              {CONTEXT_COPY_PRESETS.map((preset) => {
+                const preview = buildContextCopy(root, node.id ?? node.key, preset.id);
+                return (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label} ({formatContextCopyStats(preview)})
+                  </option>
+                );
+              })}
+            </select>
+          </div>
           <button type="button" onClick={() => onCommand("delete", node.key)} disabled={depth === 0} aria-label="Delete node">
             <Trash2 size={14} />
           </button>
@@ -221,7 +319,10 @@ function OutlineNodeEditor({
               onFocus={() => onActivate(node.key)}
               onChange={(event) => onUpdate(node.key, { body: event.target.value })}
               onInput={() => autoSizeTextarea(bodyRef.current)}
-              onBlur={() => autoSizeTextarea(bodyRef.current)}
+              onBlur={() => {
+                autoSizeTextarea(bodyRef.current);
+                onEndEdit(node.key);
+              }}
               placeholder="Body"
               aria-label="Node body"
               rows={Math.max(2, node.body.split("\n").length)}
@@ -233,10 +334,14 @@ function OutlineNodeEditor({
             <OutlineNodeEditor
               key={child.key}
               node={child}
+              root={root}
               depth={depth + 1}
               activeKey={activeKey}
               onActivate={onActivate}
               onUpdate={onUpdate}
+              onEndEdit={onEndEdit}
+              onToggleCollapsed={onToggleCollapsed}
+              onCopy={onCopy}
               onCommand={onCommand}
             />
           ))}
@@ -271,12 +376,33 @@ function countDraftDescendants(node: OutlineDraftNode): number {
   return node.children.reduce((count, child) => count + 1 + countDraftDescendants(child), 0);
 }
 
-function setOutlineCollapsed(node: OutlineDraftNode, collapsed: boolean): OutlineDraftNode {
+function applyCollapsedState(node: OutlineDraftNode, collapsedNodeIds: Set<string>): OutlineDraftNode {
   return {
     ...node,
-    collapsed,
-    children: node.children.map((child) => setOutlineCollapsed(child, collapsed)),
+    collapsed: collapsedNodeIds.has(node.id ?? node.key),
+    children: node.children.map((child) => applyCollapsedState(child, collapsedNodeIds)),
   };
+}
+
+function collectOutlineIds(node: OutlineDraftNode): string[] {
+  return [node.id ?? node.key, ...node.children.flatMap(collectOutlineIds)];
+}
+
+function expandPath(root: AtlasNode, nodeId: string, collapsedNodeIds: Set<string>) {
+  const path = findAtlasNodePath(root, nodeId);
+  if (!path) return collapsedNodeIds;
+  const next = new Set(collapsedNodeIds);
+  path.slice(0, -1).forEach((node) => next.delete(node.id));
+  return next;
+}
+
+function findAtlasNodePath(root: AtlasNode, nodeId: string): AtlasNode[] | null {
+  if (root.id === nodeId) return [root];
+  for (const child of root.children) {
+    const path = findAtlasNodePath(child, nodeId);
+    if (path) return [root, ...path];
+  }
+  return null;
 }
 
 function autoSizeTextarea(element: HTMLTextAreaElement | null) {

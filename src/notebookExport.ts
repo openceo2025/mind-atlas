@@ -11,6 +11,7 @@ import type {
   CodexReasoningEffort,
   CodexSandboxMode,
   CodexSettings,
+  ClaudeSettings,
   NodeAttachment,
   NotebookNodeType,
   OpenClawSettings,
@@ -31,8 +32,8 @@ const NOTEBOOK_NODE_TYPES: NotebookNodeType[] = [
 ];
 const WORK_STATUSES: WorkStatus[] = ["running", "needs_review", "waiting", "blocked", "error", "done"];
 const PLANET_TEXTURES: PlanetTexture[] = ["speckled", "bands", "freckles", "craters", "mist", "cell"];
-const AI_PROVIDERS: AiProvider[] = ["openai", "openai-compatible", "local", "codex", "openclaw", "mock"];
-const AI_EXECUTION_MODES: AiExecutionMode[] = ["openai", "local", "codex", "openclaw"];
+const AI_PROVIDERS: AiProvider[] = ["openai", "openai-compatible", "local", "codex", "openclaw", "claude", "mock"];
+const AI_EXECUTION_MODES: AiExecutionMode[] = ["openai", "local", "codex", "openclaw", "claude"];
 const CODEX_REASONING_EFFORTS: CodexReasoningEffort[] = ["low", "medium", "high", "xhigh"];
 const CODEX_SANDBOX_MODES: CodexSandboxMode[] = ["read-only", "workspace-write", "danger-full-access"];
 
@@ -76,6 +77,7 @@ export function sanitizeNotebookForExport(node: AtlasNode, options: NotebookExpo
   assignOptionalString(sanitized, "codexLogPath", source.codexLogPath);
   assignOptionalString(sanitized, "openClawSessionKey", source.openClawSessionKey);
   assignOptionalString(sanitized, "openClawLogPath", source.openClawLogPath);
+  assignOptionalString(sanitized, "claudeLogPath", source.claudeLogPath);
   assignOptionalString(sanitized, "reminderAt", source.reminderAt);
   assignOptionalString(sanitized, "reminderFiredAt", source.reminderFiredAt);
 
@@ -155,6 +157,7 @@ function assignOptionalString(
     | "codexLogPath"
     | "openClawSessionKey"
     | "openClawLogPath"
+    | "claudeLogPath"
     | "reminderAt"
     | "reminderFiredAt",
   value: unknown,
@@ -223,8 +226,9 @@ function sanitizeAiDialogSettings(value: unknown): AiDialogSettings | undefined 
   const contextOptions = sanitizeAiContextOptions(value.contextOptions);
   const codexSettings = sanitizeCodexSettings(value.codexSettings);
   const openClawSettings = sanitizeOpenClawSettings(value.openClawSettings ?? {});
-  if (!contextOptions || !codexSettings || !openClawSettings) return undefined;
-  return { contextOptions, codexSettings, openClawSettings };
+  const claudeSettings = sanitizeClaudeSettings(value.claudeSettings ?? {});
+  if (!contextOptions || !codexSettings || !openClawSettings || !claudeSettings) return undefined;
+  return { contextOptions, codexSettings, openClawSettings, claudeSettings };
 }
 
 function sanitizeAiContextOptions(value: unknown): AiContextOptions | undefined {
@@ -281,6 +285,16 @@ function sanitizeOpenClawSettings(value: unknown): OpenClawSettings | undefined 
     timeoutMs: safeInteger(value.timeoutMs, 10 * 60 * 1000),
     continueMode: value.continueMode === "new" ? "new" : "auto",
     resumeSessionKey: typeof value.resumeSessionKey === "string" ? value.resumeSessionKey.slice(0, 220) : "",
+  };
+}
+
+function sanitizeClaudeSettings(value: unknown): ClaudeSettings | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    model: safeString(value.model, ""),
+    baseUrl: safeString(value.baseUrl, ""),
+    workspace: safeString(value.workspace, ""),
+    timeoutMs: safeInteger(value.timeoutMs, 60 * 60 * 1000),
   };
 }
 

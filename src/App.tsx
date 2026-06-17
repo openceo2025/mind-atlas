@@ -1,15 +1,18 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { Bell, BellOff, CloudDownload, CloudUpload, Download, GitBranch, History, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
-import { ChangeEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Bell, BellOff, CloudDownload, CloudUpload, Download, FileText, GitBranch, History, ListTree, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
+import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
 import { CommandDock } from "./components/CommandDock";
+import { copyContextMarkdown, formatContextCopyStats } from "./context/contextCopy";
 import { Minimap } from "./components/Minimap";
 import { OutlineEditor } from "./components/OutlineEditor";
 import { UniverseCanvas } from "./components/UniverseCanvas";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
+import { detectImportFormat, importExternalNotebookFile, importMarkdownText } from "./notebookImport";
 import { createNotebookJsonPackage, createNotebookPackage, importNotebookPackage, type NotebookPackageResult } from "./notebookPackage";
 import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
+import type { OutlineNodeInput } from "./outline/atlasOutline";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
 import { getAtlasLayoutModeLabel, type AtlasLayoutMode } from "./layout/atlasLayout";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
@@ -21,6 +24,7 @@ const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "
 const WORKSPACE_PANEL_EXIT_MS = 960;
 const RENDER_QUALITY_STORAGE_KEY = "mind-atlas-render-quality";
 const DEFAULT_DATASET_TITLE = "Mind Atlas";
+const IMPORT_ACCEPT_TYPES = ".mindatlas,.mindatlaspkg,.md,.markdown,.opml,.mm,application/mindatlas+json,application/x-mindatlas-package,text/markdown,text/plain,text/xml,application/xml";
 const LAYOUT_MODE_OPTIONS: Array<{ mode: AtlasLayoutMode; icon: "orbit" | "tree" | "mind" | "hub" }> = [
   { mode: "phyllotaxis", icon: "orbit" },
   { mode: "tree", icon: "tree" },
@@ -32,6 +36,23 @@ const UNIVERSE_TITLE_PLACEHOLDER_ALIASES = [
   "この宇宙に名前をつけてみましょう",
   "この宇宙に名前を付けてみましょう",
 ];
+type MobilePanelTab = "command" | "editor" | "outline";
+type MergeChoice = "current" | "incoming";
+
+interface MergePreviewBlock {
+  key: string;
+  path: string;
+  currentTitle: string;
+  incomingTitle: string;
+  currentBody: string;
+  incomingBody: string;
+  choice: MergeChoice;
+  children: MergePreviewBlock[];
+}
+
+interface MergePreviewState {
+  root: MergePreviewBlock;
+}
 
 export default function App() {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -40,6 +61,7 @@ export default function App() {
   const selectNodeInPlace = useAtlasStore((state) => state.selectNodeInPlace);
   const showNotificationSnoozePrompt = useAtlasStore((state) => state.showNotificationSnoozePrompt);
   const updateNode = useAtlasStore((state) => state.updateNode);
+  const updateNodeLive = useAtlasStore((state) => state.updateNodeLive);
   const exportNotebook = useAtlasStore((state) => state.exportNotebook);
   const importNotebook = useAtlasStore((state) => state.importNotebook);
   const applyOutlineSubtree = useAtlasStore((state) => state.applyOutlineSubtree);
@@ -71,10 +93,12 @@ export default function App() {
   const [persistedUiState] = useState<PersistedUiState | null>(() => loadPersistedUiState());
   const [pageActive, setPageActive] = useState(() => isPageRuntimeActive());
   const [menuOpen, setMenuOpen] = useState(false);
+  const globalMenuRef = useRef<HTMLDivElement | null>(null);
   const [voiceLogOpen, setVoiceLogOpen] = useState(false);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
   const [restoreHistoryOpen, setRestoreHistoryOpen] = useState(false);
   const [outlineEditorOpen, setOutlineEditorOpen] = useState(false);
+  const [outlineEditorRootId, setOutlineEditorRootId] = useState<string | null>(null);
   const [cloudLoadOpen, setCloudLoadOpen] = useState(false);
   const [mobileNotificationsEnabled, setMobileNotificationsEnabled] = useState(() => loadMobileNotificationPreference());
   const [mobileNotificationPermission, setMobileNotificationPermission] = useState<MobileNotificationPermission>(() => getMobileNotificationPermission());
@@ -88,17 +112,27 @@ export default function App() {
   const [cloudStatus, setCloudStatus] = useState("");
   const [cloudError, setCloudError] = useState("");
   const [theme, setTheme] = useState<AtlasTheme>(() => loadStoredTheme());
-  const [mobilePanelTab, setMobilePanelTab] = useState<"command" | "editor">(persistedUiState?.mobilePanelTab ?? "command");
+  const [mobilePanelTab, setMobilePanelTab] = useState<MobilePanelTab>(persistedUiState?.mobilePanelTab ?? "command");
   const [mobileWorkspacePanelRevealed, setMobileWorkspacePanelRevealed] = useState(false);
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
+  const [contextCopyStatus, setContextCopyStatus] = useState("");
+  const [textImportOpen, setTextImportOpen] = useState(false);
+  const [textImportValue, setTextImportValue] = useState("");
+  const [mergePreview, setMergePreview] = useState<MergePreviewState | null>(null);
+  const [dragImportActive, setDragImportActive] = useState(false);
   const mobilePortraitBreadcrumb = useMobilePortraitBreadcrumbLayout();
   const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
   const selectedNode = selectedPath[selectedPath.length - 1] ?? atlasRoot;
+  const outlineEditorRoot = outlineEditorRootId ? findNode(atlasRoot, outlineEditorRootId) ?? selectedNode : selectedNode;
   const onboarding = useOnboarding();
-  const effectiveMobilePanelTab = onboarding.showAiFeatures ? mobilePanelTab : "editor";
-  const showWorkspacePanel = onboarding.showAiFeatures || selectedNodeId !== atlasRoot.id || (onboarding.showMainChrome && mobileWorkspacePanelRevealed);
-  const focusPanelOpen = selectedNodeId !== atlasRoot.id;
+  const effectiveMobilePanelTab: MobilePanelTab = outlineEditorOpen && mobilePanelTab === "outline"
+    ? "outline"
+    : onboarding.showAiFeatures
+      ? mobilePanelTab === "outline" ? "command" : mobilePanelTab
+      : "editor";
+  const showWorkspacePanel = outlineEditorOpen || onboarding.showAiFeatures || selectedNodeId !== atlasRoot.id || (onboarding.showMainChrome && mobileWorkspacePanelRevealed);
+  const focusPanelOpen = outlineEditorOpen || selectedNodeId !== atlasRoot.id;
   const [renderWorkspacePanel, setRenderWorkspacePanel] = useState(showWorkspacePanel);
   const appClassName = [
     "app-shell",
@@ -132,7 +166,10 @@ export default function App() {
     setVoiceSettingsOpen(false);
     setRestoreHistoryOpen(false);
     setCloudLoadOpen(false);
+    setTextImportOpen(false);
+    setMergePreview(null);
     setOutlineEditorOpen(false);
+    setOutlineEditorRootId(null);
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   }, []);
 
@@ -204,6 +241,28 @@ export default function App() {
     window.addEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenu);
     return () => window.removeEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenu);
   }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && globalMenuRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, { capture: true });
+    document.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, { capture: true });
+      document.removeEventListener("keydown", handleKeyDown, { capture: true });
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     const revealMobileWorkspacePanel = () => {
@@ -417,9 +476,7 @@ export default function App() {
     }
   };
 
-  const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const handleImportFile = async (file: File) => {
     const lowerName = file.name.toLowerCase();
     if (lowerName.endsWith(".mindatlaspkg")) {
       try {
@@ -429,8 +486,22 @@ export default function App() {
         setMenuOpen(false);
       } catch (error) {
         console.error("Notebook package import failed", error);
+        window.alert(importErrorMessage("Package import failed.", error));
       }
-      event.target.value = "";
+      return;
+    }
+
+    const externalFormat = detectImportFormat(file.name);
+    if (externalFormat) {
+      try {
+        const result = await importExternalNotebookFile(file);
+        await replaceStoredAttachmentBlobs(result.root, {});
+        importNotebook(result.root, result.datasetName);
+        setMenuOpen(false);
+      } catch (error) {
+        console.error(`${externalFormat} import failed`, error);
+        window.alert(importErrorMessage(`${externalFormatLabel(externalFormat)} import failed.`, error));
+      }
       return;
     }
 
@@ -441,8 +512,116 @@ export default function App() {
       setMenuOpen(false);
     } catch (error) {
       console.error("Notebook import failed", error);
+      window.alert(importErrorMessage("Notebook import failed.", error));
     }
+  };
+
+  const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await handleImportFile(file);
     event.target.value = "";
+  };
+
+  const parseTextImportMarkdown = () => importMarkdownText(textImportValue, selectedNode.title || "Imported text outline").root;
+
+  const handleReplaceActiveNodeBody = () => {
+    try {
+      const importedRoot = parseTextImportMarkdown();
+      const body = markdownBodyForActiveNodeReplacement(importedRoot);
+      updateNode(selectedNodeId, { body, summary: firstMarkdownLine(body) || selectedNode.summary });
+      setTextImportValue("");
+      setTextImportOpen(false);
+      setMenuOpen(false);
+    } catch (error) {
+      console.error("Replace active node body failed", error);
+      window.alert(importErrorMessage("Replace active node body failed.", error));
+    }
+  };
+
+  const handleReplaceActiveSubtree = () => {
+    try {
+      const importedRoot = parseTextImportMarkdown();
+      applyOutlineSubtree(selectedNodeId, atlasNodeToOutlineInput(importedRoot, selectedNodeId), { focusKey: selectedNodeId });
+      setTextImportValue("");
+      setTextImportOpen(false);
+      setMenuOpen(false);
+    } catch (error) {
+      console.error("Replace active subtree failed", error);
+      window.alert(importErrorMessage("Replace active subtree failed.", error));
+    }
+  };
+
+  const handleAppendAsChildren = () => {
+    try {
+      const importedRoot = parseTextImportMarkdown();
+      const appended = importedRoot.children.length ? importedRoot.children : [importedRoot];
+      applyOutlineSubtree(
+        selectedNodeId,
+        {
+          id: selectedNode.id,
+          clientKey: selectedNode.id,
+          title: selectedNode.title,
+          body: selectedNode.body,
+          children: [
+            ...selectedNode.children.map((child) => atlasNodeToOutlineInput(child)),
+            ...appended.map((child) => atlasNodeToOutlineInput(child)),
+          ],
+        },
+        { focusKey: appended[0]?.id },
+      );
+      setTextImportValue("");
+      setTextImportOpen(false);
+      setMenuOpen(false);
+    } catch (error) {
+      console.error("Append as children failed", error);
+      window.alert(importErrorMessage("Append as children failed.", error));
+    }
+  };
+
+  const handleOpenPreviewMerge = () => {
+    try {
+      const importedRoot = parseTextImportMarkdown();
+      setMergePreview(createMergePreviewState(selectedNode, importedRoot));
+    } catch (error) {
+      console.error("Preview merge failed", error);
+      window.alert(importErrorMessage("Preview merge failed.", error));
+    }
+  };
+
+  const handleApplyPreviewMerge = () => {
+    if (!mergePreview) return;
+    applyOutlineSubtree(selectedNodeId, mergePreviewToOutline(selectedNode, mergePreview), { focusKey: selectedNodeId });
+    setTextImportValue("");
+    setTextImportOpen(false);
+    setMergePreview(null);
+    setMenuOpen(false);
+  };
+
+  const handleImportDragEnter = (event: ReactDragEvent<HTMLElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    setDragImportActive(true);
+  };
+
+  const handleImportDragOver = (event: ReactDragEvent<HTMLElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setDragImportActive(true);
+  };
+
+  const handleImportDragLeave = (event: ReactDragEvent<HTMLElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setDragImportActive(false);
+  };
+
+  const handleImportDrop = (event: ReactDragEvent<HTMLElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    setDragImportActive(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) void handleImportFile(file);
   };
 
   const handleInitialize = () => {
@@ -464,10 +643,25 @@ export default function App() {
 
   useEffect(() => {
     const handleHistoryShortcut = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.altKey || event.metaKey || event.shiftKey || !event.ctrlKey) return;
+      if (event.defaultPrevented || event.altKey || event.metaKey || !event.ctrlKey) return;
       if (isEditableShortcutTarget(event.target)) return;
 
       const key = event.key.toLowerCase();
+      if (event.shiftKey && key === "c") {
+        event.preventDefault();
+        void copyContextMarkdown(atlasRoot, selectedNodeId, "ancestors")
+          .then((result) => {
+            setContextCopyStatus(`Copied ${formatContextCopyStats(result)}`);
+            window.setTimeout(() => setContextCopyStatus(""), 2400);
+          })
+          .catch((error) => {
+            setContextCopyStatus(error instanceof Error ? error.message : "Copy failed.");
+            window.setTimeout(() => setContextCopyStatus(""), 2400);
+          });
+        return;
+      }
+
+      if (event.shiftKey) return;
       if (key === "z") {
         if (!canUndo) return;
         event.preventDefault();
@@ -486,7 +680,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleHistoryShortcut, { capture: true });
     return () => window.removeEventListener("keydown", handleHistoryShortcut, { capture: true });
-  }, [canRedo, canUndo, redo, undo]);
+  }, [atlasRoot, canRedo, canUndo, redo, selectedNodeId, undo]);
 
   const handleOpenVoiceLog = () => {
     setVoiceLogOpen(true);
@@ -577,21 +771,30 @@ export default function App() {
     persistUiStatePatch({ ...latestUiStateRef.current, layoutMode: mode });
   };
 
-  if (outlineEditorOpen) {
-    return (
-      <OutlineEditor
-        root={selectedNode}
-        onCancel={() => setOutlineEditorOpen(false)}
-        onSave={(rootId, outline) => {
-          applyOutlineSubtree(rootId, outline);
-          setOutlineEditorOpen(false);
-        }}
-      />
-    );
-  }
+  const handleOpenOutlineEditor = () => {
+    setOutlineEditorRootId(selectedNodeId);
+    setOutlineEditorOpen(true);
+    setMobilePanelTab("outline");
+    setRenderWorkspacePanel(true);
+    setMenuOpen(false);
+  };
+
+  const handleCloseOutlineEditor = () => {
+    setOutlineEditorOpen(false);
+    setOutlineEditorRootId(null);
+    setMobilePanelTab(onboarding.showAiFeatures ? "command" : "editor");
+  };
 
   return (
-    <main className={appClassName} data-theme={theme} data-focus-panel={focusPanelOpen ? "open" : "closed"}>
+    <main
+      className={appClassName}
+      data-theme={theme}
+      data-focus-panel={focusPanelOpen ? "open" : "closed"}
+      onDragEnter={handleImportDragEnter}
+      onDragOver={handleImportDragOver}
+      onDragLeave={handleImportDragLeave}
+      onDrop={handleImportDrop}
+    >
       <UniverseCanvas
         theme={theme}
         vrPanEnabled={vrModeEnabled}
@@ -604,6 +807,17 @@ export default function App() {
       {onboarding.message ? (
         <div className="onboarding-message" role="status" aria-live="polite">
           {onboarding.message}
+        </div>
+      ) : null}
+      {contextCopyStatus ? (
+        <div className="onboarding-message context-copy-toast" role="status" aria-live="polite">
+          {contextCopyStatus}
+        </div>
+      ) : null}
+      {dragImportActive ? (
+        <div className="import-drop-overlay" role="status" aria-live="polite">
+          <Upload size={28} />
+          <span>Drop Markdown, OPML, FreeMind, or Mind Atlas file</span>
         </div>
       ) : null}
 
@@ -630,7 +844,7 @@ export default function App() {
       </header>
 
       {onboarding.showMainChrome ? (
-      <div className="global-menu" aria-label="Atlas actions">
+      <div ref={globalMenuRef} className="global-menu" aria-label="Atlas actions">
         <button className="icon-button" type="button" onClick={() => setMenuOpen((open) => !open)} aria-label="Open atlas menu">
           <MoreHorizontal size={19} />
         </button>
@@ -722,7 +936,7 @@ export default function App() {
                 <small>hide browser bars</small>
               </span>
             </button>
-            <button type="button" onClick={() => { setOutlineEditorOpen(true); setMenuOpen(false); }}>
+            <button type="button" onClick={handleOpenOutlineEditor}>
               <PenLine size={15} />
               <span>
                 Outline editor
@@ -804,8 +1018,15 @@ export default function App() {
             ) : null}
             <label>
               <Upload size={15} /> Import
-              <input type="file" accept=".mindatlas,.mindatlaspkg,application/mindatlas+json,application/x-mindatlas-package" onChange={handleImport} />
+              <input type="file" accept={IMPORT_ACCEPT_TYPES} onChange={handleImport} />
             </label>
+            <button type="button" onClick={() => { setTextImportOpen(true); setMenuOpen(false); }}>
+              <FileText size={15} />
+              <span>
+                Import text outline
+                <small>Markdown headings and lists</small>
+              </span>
+            </button>
             <button type="button" onClick={handleInitialize}>
               <RotateCcw size={15} /> Initialize
             </button>
@@ -844,6 +1065,18 @@ export default function App() {
               <PenLine size={15} />
               <span>Editor</span>
             </button>
+            {outlineEditorOpen ? (
+              <button
+                className={effectiveMobilePanelTab === "outline" ? "is-active" : ""}
+                type="button"
+                role="tab"
+                aria-selected={effectiveMobilePanelTab === "outline"}
+                onClick={() => setMobilePanelTab("outline")}
+              >
+                <ListTree size={15} />
+                <span>Outline</span>
+              </button>
+            ) : null}
           </div>
           {onboarding.showAiFeatures ? (
             <div className="mobile-panel-slot mobile-command-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "command"}>
@@ -853,7 +1086,38 @@ export default function App() {
           <div className="mobile-panel-slot mobile-editor-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "editor"}>
             <FocusPanel theme={theme} />
           </div>
+          <div className="mobile-panel-slot mobile-outline-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "outline"}>
+            {outlineEditorOpen ? (
+              <OutlineEditor
+                root={outlineEditorRoot}
+                selectedNodeId={findNode(outlineEditorRoot, selectedNodeId) ? selectedNodeId : outlineEditorRoot.id}
+                onClose={handleCloseOutlineEditor}
+                onFocusNode={selectNodeInPlace}
+                onApplyOutline={applyOutlineSubtree}
+                onUpdateNodeLive={updateNodeLive}
+              />
+            ) : null}
+          </div>
         </section>
+      ) : null}
+      {textImportOpen ? (
+        <TextImportModal
+          value={textImportValue}
+          onChange={setTextImportValue}
+          onReplaceBody={handleReplaceActiveNodeBody}
+          onReplaceSubtree={handleReplaceActiveSubtree}
+          onAppendChildren={handleAppendAsChildren}
+          onPreviewMerge={handleOpenPreviewMerge}
+          onClose={() => setTextImportOpen(false)}
+        />
+      ) : null}
+      {mergePreview ? (
+        <MergePreviewDialog
+          state={mergePreview}
+          onChange={setMergePreview}
+          onApply={handleApplyPreviewMerge}
+          onClose={() => setMergePreview(null)}
+        />
       ) : null}
       {onboarding.showAiFeatures && voiceLogOpen ? (
         <VoiceLogDialog
@@ -893,6 +1157,125 @@ export default function App() {
         />
       ) : null}
     </main>
+  );
+}
+
+function TextImportModal({
+  value,
+  onChange,
+  onReplaceBody,
+  onReplaceSubtree,
+  onAppendChildren,
+  onPreviewMerge,
+  onClose,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onReplaceBody: () => void;
+  onReplaceSubtree: () => void;
+  onAppendChildren: () => void;
+  onPreviewMerge: () => void;
+  onClose: () => void;
+}) {
+  const canImport = value.trim().length > 0;
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="notebook-history-dialog text-import-dialog" role="dialog" aria-modal="true" aria-label="Import text outline" onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <strong>Import text outline</strong>
+            <span>Paste Markdown from ChatGPT, then choose how to apply it to the active node.</span>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close text import">
+            <X size={16} />
+          </button>
+        </header>
+        <textarea
+          aria-label="Markdown outline text"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={"# Book\n\n## Chapter 1\n\n- Scene 1\n- Scene 2"}
+        />
+        <footer>
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="button" onClick={onReplaceBody} disabled={!canImport}>Replace active node body</button>
+          <button type="button" onClick={onReplaceSubtree} disabled={!canImport}>Replace active subtree</button>
+          <button type="button" onClick={onAppendChildren} disabled={!canImport}>Append as children</button>
+          <button type="button" onClick={onPreviewMerge} disabled={!canImport}>Preview merge</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function MergePreviewDialog({
+  state,
+  onChange,
+  onApply,
+  onClose,
+}: {
+  state: MergePreviewState;
+  onChange: (state: MergePreviewState) => void;
+  onApply: () => void;
+  onClose: () => void;
+}) {
+  const updateChoice = (key: string, choice: MergeChoice) => onChange({ root: updateMergeChoice(state.root, key, choice) });
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="notebook-history-dialog merge-preview-dialog" role="dialog" aria-modal="true" aria-label="Preview merge" onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <strong>Preview merge</strong>
+            <span>Choose current or incoming text per node block before applying.</span>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close merge preview">
+            <X size={16} />
+          </button>
+        </header>
+        <div className="merge-preview-list">
+          <MergePreviewBlockView block={state.root} onChoice={updateChoice} />
+        </div>
+        <footer>
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="button" onClick={onApply}>Apply merge</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function MergePreviewBlockView({ block, onChoice }: { block: MergePreviewBlock; onChoice: (key: string, choice: MergeChoice) => void }) {
+  const changed = block.currentTitle !== block.incomingTitle || block.currentBody !== block.incomingBody;
+  return (
+    <section className={`merge-preview-block ${changed ? "is-changed" : ""}`}>
+      <header>
+        <div>
+          <strong>{block.path}</strong>
+          <span>{changed ? "Changed" : "Unchanged"}</span>
+        </div>
+        <div className="merge-choice-buttons" role="group" aria-label={`Merge choice for ${block.path}`}>
+          <button type="button" className={block.choice === "current" ? "is-active" : ""} onClick={() => onChoice(block.key, "current")}>Keep current</button>
+          <button type="button" className={block.choice === "incoming" ? "is-active" : ""} onClick={() => onChoice(block.key, "incoming")}>Accept incoming</button>
+        </div>
+      </header>
+      <div className="merge-columns">
+        <article>
+          <span>Current</span>
+          <strong>{block.currentTitle || "Untitled"}</strong>
+          <pre>{block.currentBody || "(empty)"}</pre>
+        </article>
+        <article>
+          <span>Incoming</span>
+          <strong>{block.incomingTitle || "Untitled"}</strong>
+          <pre>{block.incomingBody || "(empty)"}</pre>
+        </article>
+      </div>
+      {block.children.length ? (
+        <div className="merge-preview-children">
+          {block.children.map((child) => <MergePreviewBlockView key={child.key} block={child} onChoice={onChoice} />)}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -1389,6 +1772,8 @@ function notificationKindLabel(kind: NotificationPulse["kind"]) {
       return "Codex notification";
     case "openclaw":
       return "OpenClaw notification";
+    case "claude":
+      return "Claude Code notification";
     case "cost":
       return "Cost notification";
     case "done":
@@ -1996,7 +2381,95 @@ function datasetFileName(name: string) {
 }
 
 function datasetNameFromFile(fileName: string) {
-  return fileName.replace(/\.(mindatlaspkg|mindatlas)$/i, "").trim() || "Untitled Atlas";
+  return fileName.replace(/\.(mindatlaspkg|mindatlas|markdown|md|opml|mm)$/i, "").trim() || "Untitled Atlas";
+}
+
+function atlasNodeToOutlineInput(node: AtlasNode, forcedId?: string): OutlineNodeInput {
+  return {
+    id: forcedId ?? node.id,
+    clientKey: forcedId ?? node.id,
+    title: node.title,
+    body: node.body,
+    children: node.children.map((child) => atlasNodeToOutlineInput(child)),
+  };
+}
+
+function markdownBodyForActiveNodeReplacement(root: AtlasNode) {
+  if (root.body.trim()) return root.body.trim();
+  if (root.children.length === 1 && root.children[0].body.trim()) return root.children[0].body.trim();
+  if (root.children.length) return root.children.map(formatNodeAsMarkdown).join("\n\n").trim();
+  return "";
+}
+
+function formatNodeAsMarkdown(node: AtlasNode, depth = 2): string {
+  const heading = `${"#".repeat(Math.min(6, depth))} ${node.title}`;
+  const parts = [heading, node.body.trim(), ...node.children.map((child) => formatNodeAsMarkdown(child, depth + 1))].filter(Boolean);
+  return parts.join("\n\n");
+}
+
+function firstMarkdownLine(value: string) {
+  return value.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
+}
+
+function createMergePreviewState(current: AtlasNode, incoming: AtlasNode): MergePreviewState {
+  return { root: createMergePreviewBlock(current, incoming, current.title || incoming.title || "Active node", "merge-root") };
+}
+
+function createMergePreviewBlock(current: AtlasNode | undefined, incoming: AtlasNode | undefined, path: string, key: string): MergePreviewBlock {
+  const currentChildren = current?.children ?? [];
+  const incomingChildren = incoming?.children ?? [];
+  const maxChildren = Math.max(currentChildren.length, incomingChildren.length);
+  const children = Array.from({ length: maxChildren }, (_, index) => {
+    const currentChild = currentChildren[index];
+    const incomingChild = incomingChildren[index];
+    const title = incomingChild?.title || currentChild?.title || `Child ${index + 1}`;
+    return createMergePreviewBlock(currentChild, incomingChild, `${path} / ${title}`, `${key}-${index}`);
+  });
+  return {
+    key,
+    path,
+    currentTitle: current?.title ?? "",
+    incomingTitle: incoming?.title ?? current?.title ?? "",
+    currentBody: current?.body ?? "",
+    incomingBody: incoming?.body ?? current?.body ?? "",
+    choice: "incoming",
+    children,
+  };
+}
+
+function updateMergeChoice(block: MergePreviewBlock, key: string, choice: MergeChoice): MergePreviewBlock {
+  if (block.key === key) return { ...block, choice };
+  return { ...block, children: block.children.map((child) => updateMergeChoice(child, key, choice)) };
+}
+
+function mergePreviewToOutline(current: AtlasNode, preview: MergePreviewState): OutlineNodeInput {
+  return mergeBlockToOutline(current, preview.root, current.id);
+}
+
+function mergeBlockToOutline(current: AtlasNode | undefined, block: MergePreviewBlock, forcedId?: string): OutlineNodeInput {
+  const useIncoming = block.choice === "incoming";
+  return {
+    id: forcedId ?? current?.id,
+    clientKey: forcedId ?? current?.id ?? block.key,
+    title: useIncoming ? block.incomingTitle || block.currentTitle || "Untitled" : block.currentTitle || block.incomingTitle || "Untitled",
+    body: useIncoming ? block.incomingBody : block.currentBody,
+    children: block.children.map((child, index) => mergeBlockToOutline(current?.children[index], child)),
+  };
+}
+
+function hasDraggedFiles(event: ReactDragEvent<HTMLElement>) {
+  return Array.from(event.dataTransfer.types).includes("Files");
+}
+
+function externalFormatLabel(format: ReturnType<typeof detectImportFormat>) {
+  if (format === "opml") return "OPML";
+  if (format === "freemind") return "FreeMind";
+  return "Markdown";
+}
+
+function importErrorMessage(prefix: string, error: unknown) {
+  const detail = error instanceof Error ? error.message : String(error);
+  return detail ? `${prefix}\n\n${detail}` : prefix;
 }
 
 function downloadBlob(blob: Blob, fileName: string) {
