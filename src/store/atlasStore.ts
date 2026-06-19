@@ -55,6 +55,7 @@ import type {
   AtlasEvent,
   AtlasNodeAction,
   AtlasNode,
+  ChatSettings,
   ClaudeSettings,
   CodexGeneratedNode,
   CodexRunRecoveryRequest,
@@ -108,7 +109,7 @@ const DEFAULT_CODEX_SETTINGS: CodexSettings = {
   reasoningEffort: "medium",
   sandbox: "workspace-write",
   workspace: "",
-  webSearch: false,
+  webSearch: true,
   skipGitRepoCheck: false,
   timeoutMs: 60 * 60 * 1000,
   continueMode: "auto",
@@ -126,11 +127,18 @@ const DEFAULT_OPENCLAW_SETTINGS: OpenClawSettings = {
 const DEFAULT_CLAUDE_SETTINGS: ClaudeSettings = {
   model: "",
   baseUrl: "",
+  reasoningEffort: "default",
+  permissionMode: "default",
   workspace: "",
   timeoutMs: 60 * 60 * 1000,
 };
+const DEFAULT_CHAT_SETTINGS: ChatSettings = {
+  service: "openai",
+  model: "",
+  reasoningEffort: "medium",
+};
 const DEFAULT_VOICE_PARTNER_SETTINGS: VoicePartnerSettings = {
-  realtimeModel: "gpt-realtime",
+  realtimeModel: "gpt-realtime-2",
   realtimeVoice: "marin",
 };
 
@@ -176,7 +184,7 @@ type ChildNodeDraft = {
   summary?: string;
 };
 
-type PartnerArchiveMode = Extract<AiExecutionMode, "openai" | "local"> | "realtime";
+type PartnerArchiveMode = Extract<AiExecutionMode, "chat" | "openai" | "local"> | "realtime";
 
 type PartnerTurnArchive = {
   parentNodeId?: string | null;
@@ -224,6 +232,7 @@ interface AtlasStore {
   selectedNodeId: string;
   multiSelectedNodeIds: string[];
   aiContextOptions: AiContextOptions;
+  chatSettings: ChatSettings;
   codexSettings: CodexSettings;
   openClawSettings: OpenClawSettings;
   claudeSettings: ClaudeSettings;
@@ -242,6 +251,7 @@ interface AtlasStore {
   toggleMultiSelectedNode: (id: string) => void;
   clearMultiSelection: () => void;
   setAiContextOptions: (patch: Partial<AiContextOptions>) => void;
+  setChatSettings: (patch: Partial<ChatSettings>) => void;
   setCodexSettings: (patch: Partial<CodexSettings>) => void;
   setOpenClawSettings: (patch: Partial<OpenClawSettings>) => void;
   setClaudeSettings: (patch: Partial<ClaudeSettings>) => void;
@@ -332,11 +342,12 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   selectedNodeId: "atlas-root",
   multiSelectedNodeIds: [],
   aiContextOptions: DEFAULT_AI_CONTEXT_OPTIONS,
+  chatSettings: DEFAULT_CHAT_SETTINGS,
   codexSettings: DEFAULT_CODEX_SETTINGS,
   openClawSettings: DEFAULT_OPENCLAW_SETTINGS,
   claudeSettings: DEFAULT_CLAUDE_SETTINGS,
   commandInputEditing: false,
-  activeCommandMode: "openai",
+  activeCommandMode: "chat",
   viewport: { x: 0, y: 0, zoom: 0.92 },
   layoutMode: "phyllotaxis",
   focusRequest: null,
@@ -434,6 +445,17 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     }));
   },
 
+  setChatSettings: (patch) => {
+    set((state) => ({
+      ...withAiDialogSettingsSaved(state, {
+        chatSettings: normalizeChatSettings({
+          ...state.chatSettings,
+          ...patch,
+        }),
+      }),
+    }));
+  },
+
   setCodexSettings: (patch) => {
     set((state) => ({
       ...withAiDialogSettingsSaved(state, {
@@ -472,6 +494,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const settings = path ? findAiDialogSettingsInPath(path) : undefined;
     set((state) => ({
       aiContextOptions: normalizeAiContextOptions(settings?.contextOptions ?? DEFAULT_AI_CONTEXT_OPTIONS),
+      chatSettings: normalizeChatSettings(settings?.chatSettings ?? DEFAULT_CHAT_SETTINGS),
       codexSettings: normalizeCodexSettings(settings?.codexSettings ?? DEFAULT_CODEX_SETTINGS),
       openClawSettings: normalizeOpenClawSettings(settings?.openClawSettings ?? DEFAULT_OPENCLAW_SETTINGS),
       claudeSettings: normalizeClaudeSettings(settings?.claudeSettings ?? DEFAULT_CLAUDE_SETTINGS),
@@ -481,6 +504,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   resetAiDialogSettingsToDefaults: () => {
     set({
       aiContextOptions: normalizeAiContextOptions(DEFAULT_AI_CONTEXT_OPTIONS),
+      chatSettings: normalizeChatSettings(DEFAULT_CHAT_SETTINGS),
       codexSettings: normalizeCodexSettings(DEFAULT_CODEX_SETTINGS),
       openClawSettings: normalizeOpenClawSettings(DEFAULT_OPENCLAW_SETTINGS),
       claudeSettings: normalizeClaudeSettings(DEFAULT_CLAUDE_SETTINGS),
@@ -822,7 +846,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   addRootNodeAt: (position, title = "Untitled node") => {
     const state = get();
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
-    const aiDialogSettings = createInheritedAiDialogSettings([state.atlasRoot], state.aiContextOptions, state.codexSettings, state.openClawSettings, state.claudeSettings);
+    const aiDialogSettings = createInheritedAiDialogSettings([state.atlasRoot], state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
     const child = createNotebookNode("atlas-root", state.atlasRoot.children.length, title, "", {
       position: clampDirection(position, TOP_LEVEL_DRAG_PLANAR_LIMIT),
       aiDialogSettings,
@@ -853,7 +877,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!parent) return;
     const parentPath = findNodePath(state.atlasRoot, parentId);
     const childDepth = parentPath?.length ?? 1;
-    const inheritedAiDialogSettings = createInheritedAiDialogSettings(parentPath ?? [parent], state.aiContextOptions, state.codexSettings, state.openClawSettings, state.claudeSettings);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(parentPath ?? [parent], state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
     const insertIndex = typeof options.insertIndex === "number" ? options.insertIndex : parent.children.length;
     const childPosition = options.position
       ? getStoredPositionForWorldDirection(parentPath ?? [state.atlasRoot], options.position, childDepth, parent.children.length + 1)
@@ -915,7 +939,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const childDepth = parentPath.length;
     const startIndex = parent.children.length;
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
-    const inheritedAiDialogSettings = createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings, state.openClawSettings, state.claudeSettings);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
     const inheritedCodexThreadId = inferCodexThreadIdFromNodePath(parentPath);
     const inheritedCodexLogPath = inferCodexLogPathFromNodePath(parentPath);
     const children = drafts.map((draft, offset) => {
@@ -974,7 +998,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const runId = `partner-run-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
     const requestIndex = parent.children.length;
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
-    const requestAiDialogSettings = createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings, state.openClawSettings, state.claudeSettings);
+    const requestAiDialogSettings = createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
     const requestNode = {
       ...createAiRequestNode(parentNodeId, requestIndex, runId, runMode, prompt, {
         aiDialogSettings: requestAiDialogSettings,
@@ -1080,7 +1104,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const childDepth = parentPath.length;
     const insertIndex = parent.children.length;
     const now = new Date().toISOString();
-    const inheritedAiDialogSettings = copiedRoot.aiDialogSettings ?? createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.codexSettings, state.openClawSettings, state.claudeSettings);
+    const inheritedAiDialogSettings = copiedRoot.aiDialogSettings ?? createInheritedAiDialogSettings(parentPath, state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
     const inheritedCodexThreadId = copiedRoot.codexThreadId ?? inferCodexThreadIdFromNodePath(parentPath);
     const inheritedCodexLogPath = copiedRoot.codexLogPath ?? inferCodexLogPathFromNodePath(parentPath);
     const inheritedOpenClawSessionKey = copiedRoot.openClawSessionKey ?? inferOpenClawSessionKeyFromNodePath(parentPath);
@@ -1131,7 +1155,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const siblingDepth = path.length - 1;
     const insertIndex = parent.children.length;
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
-    const inheritedAiDialogSettings = createInheritedAiDialogSettings(path.slice(0, -1), state.aiContextOptions, state.codexSettings, state.openClawSettings, state.claudeSettings);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(path.slice(0, -1), state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
     const sibling = createNotebookNode(parent.id, parent.children.length, "Untitled branch", "", {
       aiDialogSettings: inheritedAiDialogSettings,
       codexThreadId: inferCodexThreadIdFromNodePath(path.slice(0, -1)),
@@ -1360,7 +1384,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     }
     persistNotebook(atlasRoot);
     clearStoredNotificationState();
-    const unreadNotifications = restoreUnreadNotifications(atlasRoot, {});
+    const unreadNotifications: Record<string, UnreadNotification> = {};
     persistUnreadNotifications(unreadNotifications);
     set({
       ...pushHistory(current),
@@ -1387,7 +1411,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
     const nodeIdByClientKey = new Map<string, string>();
     const parentId = path.length > 1 ? path[path.length - 2].id : undefined;
-    const inheritedAiDialogSettings = createInheritedAiDialogSettings(path, state.aiContextOptions, state.codexSettings, state.openClawSettings, state.claudeSettings);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(path, state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
     const nextSubtree = buildAtlasNodeFromOutline(
       outline,
       target,
@@ -1650,8 +1674,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const sourceParent = sourcePath?.at(-1);
     if (!sourceParent) return;
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
-    const inheritedAiDialogSettings = createInheritedAiDialogSettings(sourcePath, state.aiContextOptions, state.codexSettings, state.openClawSettings, state.claudeSettings);
-    const requestAiDialogSettings = createCurrentAiDialogSettings(contextOptions, inheritedAiDialogSettings.codexSettings, inheritedAiDialogSettings.openClawSettings, inheritedAiDialogSettings.claudeSettings);
+    const inheritedAiDialogSettings = createInheritedAiDialogSettings(sourcePath, state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
+    const requestAiDialogSettings = createCurrentAiDialogSettings(contextOptions, inheritedAiDialogSettings.chatSettings, inheritedAiDialogSettings.codexSettings, inheritedAiDialogSettings.openClawSettings, inheritedAiDialogSettings.claudeSettings);
+    const chatSettingsForRun = isChatLikeMode(mode) ? buildChatSettingsForRun(requestAiDialogSettings.chatSettings, mode) : undefined;
     if (mode === "codex" && !requestAiDialogSettings.codexSettings.workspace.trim()) {
       return;
     }
@@ -1671,7 +1696,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       requestNodeId: requestNode.id,
       provider: providerForMode(mode),
       mode,
-      modelId: mode === "codex"
+      modelId: chatSettingsForRun
+        ? chatSettingsForRun.model || chatSettingsForRun.service
+        : mode === "codex"
         ? requestAiDialogSettings.codexSettings.model
         : mode === "openclaw"
           ? requestAiDialogSettings.openClawSettings.model || "openclaw-default"
@@ -1728,7 +1755,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       }
       activeRun = {
         ...activeRun,
-        modelId: codexSettingsForRun?.model ?? openClawSettingsForRun?.model ?? claudeSettingsForRun?.model ?? activeRun.modelId,
+        provider: chatSettingsForRun ? chatProvider(chatSettingsForRun) : activeRun.provider,
+        modelId: chatSettingsForRun?.model ?? codexSettingsForRun?.model ?? openClawSettingsForRun?.model ?? claudeSettingsForRun?.model ?? activeRun.modelId,
         contextStats: context.stats,
         workspace: codexSettingsForRun?.workspace ?? openClawSettingsForRun?.workspace ?? claudeSettingsForRun?.workspace,
         codexThreadId: codexSettingsForRun?.resumeThreadId,
@@ -1742,7 +1770,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         prompt: trimmed,
         context,
         provider: mode,
-        model: codexSettingsForRun?.model ?? openClawSettingsForRun?.model ?? claudeSettingsForRun?.model,
+        model: chatSettingsForRun?.model ?? codexSettingsForRun?.model ?? openClawSettingsForRun?.model ?? claudeSettingsForRun?.model,
+        chat: chatSettingsForRun,
         codex: codexSettingsForRun
           ? {
               ...codexSettingsForRun,
@@ -1768,7 +1797,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             }
           : undefined,
       });
-      notifyLocalOutputTruncated(mode, result.usage);
+      notifyLocalOutputTruncated(result.provider === "local" ? "local" : mode, result.usage);
       let responseNodeId = "";
       let generatedAttachmentBlobs: Array<{ attachment: NodeAttachment; blob: Blob }> = [];
       set((current) => {
@@ -2375,6 +2404,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         let unreadNotifications = restoreUnreadNotifications(atlasRoot, state.unreadNotifications);
         for (const node of dueReminders) {
           const title = `Reminder: ${node.title || "Untitled node"}`;
+          if (!canCreateNotificationPulse(atlasRoot, node.id)) continue;
           notificationPulses.push(createNotificationPulse(node.id, "needs_review", title));
           unreadNotifications = markUnreadNotification(
             unreadNotifications,
@@ -2385,6 +2415,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           );
         }
         for (const unread of Object.values(unreadNotifications)) {
+          if (!canCreateNotificationPulse(atlasRoot, unread.nodeId)) continue;
           if (now - unread.lastPulseAt < NOTIFICATION_REPEAT_INTERVAL_MS) continue;
           notificationPulses.push(createNotificationPulse(unread.nodeId, unread.kind, unread.title));
           unreadNotifications[unread.nodeId] = { ...unread, lastPulseAt: now };
@@ -3689,6 +3720,7 @@ function normalizeTags(tags: string[], ...textParts: string[]) {
 }
 
 function providerForMode(mode: AiExecutionMode): AiProvider {
+  if (mode === "chat") return "openai";
   if (mode === "local") return "local";
   if (mode === "codex") return "codex";
   if (mode === "openclaw") return "openclaw";
@@ -3696,17 +3728,34 @@ function providerForMode(mode: AiExecutionMode): AiProvider {
   return "openai";
 }
 
-function partnerProvider(mode: PartnerArchiveMode): AiProvider {
+function isChatLikeMode(mode: AiExecutionMode) {
+  return mode === "chat" || mode === "openai" || mode === "local";
+}
+
+function buildChatSettingsForRun(settings: ChatSettings, mode: AiExecutionMode): ChatSettings {
+  if (mode === "local") return normalizeChatSettings({ ...settings, service: "local", model: "" });
+  if (mode === "openai") return normalizeChatSettings({ ...settings, service: "openai" });
+  return normalizeChatSettings(settings);
+}
+
+function chatProvider(settings: ChatSettings): AiProvider {
+  return settings.service;
+}
+
+function partnerProvider(mode: PartnerArchiveMode, provider?: AiProvider): AiProvider {
+  if (provider) return provider;
   if (mode === "local") return "local";
   return "openai";
 }
 
 function partnerRunMode(mode: PartnerArchiveMode): AiExecutionMode {
-  return mode === "local" ? "local" : "openai";
+  return mode === "realtime" ? "openai" : "chat";
 }
 
 function partnerModeLabel(mode: PartnerArchiveMode) {
   switch (mode) {
+    case "chat":
+      return "Chat";
     case "local":
       return "Local";
     case "realtime":
@@ -3718,6 +3767,8 @@ function partnerModeLabel(mode: PartnerArchiveMode) {
 
 function modeLabel(mode: AiExecutionMode) {
   switch (mode) {
+    case "chat":
+      return "Chat";
     case "openai":
       return "OpenAI";
     case "local":
@@ -3746,6 +3797,10 @@ function createNotificationPulse(nodeId: string, kind: NotificationPulseKind, ti
     title,
     createdAt: performance.now(),
   };
+}
+
+function canCreateNotificationPulse(root: AtlasNode, nodeId: string) {
+  return nodeId !== root.id && Boolean(findNode(root, nodeId));
 }
 
 function markUnreadNotification(
@@ -3804,7 +3859,7 @@ function collectNotificationSources(root: AtlasNode): NotificationSource[] {
     sources.push(...collectNodeNotificationSources(node));
     node.children.forEach(visit);
   };
-  visit(root);
+  root.children.forEach(visit);
   return sources;
 }
 
@@ -3875,15 +3930,17 @@ function markReminderNodesFired(root: AtlasNode, ids: Set<string>, firedAt: stri
 }
 
 function withAiDialogSettingsSaved(
-  state: Pick<AtlasStore, "atlasRoot" | "selectedNodeId" | "aiContextOptions" | "codexSettings" | "openClawSettings" | "claudeSettings">,
+  state: Pick<AtlasStore, "atlasRoot" | "selectedNodeId" | "aiContextOptions" | "chatSettings" | "codexSettings" | "openClawSettings" | "claudeSettings">,
   patch: Partial<AiDialogSettings>,
 ) {
   const nextContextOptions = normalizeAiContextOptions(patch.contextOptions ?? state.aiContextOptions);
+  const nextChatSettings = normalizeChatSettings(patch.chatSettings ?? state.chatSettings);
   const nextCodexSettings = normalizeCodexSettings(patch.codexSettings ?? state.codexSettings);
   const nextOpenClawSettings = normalizeOpenClawSettings(patch.openClawSettings ?? state.openClawSettings);
   const nextClaudeSettings = normalizeClaudeSettings(patch.claudeSettings ?? state.claudeSettings);
   const aiDialogSettings: AiDialogSettings = {
     contextOptions: sanitizeStoredAiContextOptions(nextContextOptions),
+    chatSettings: sanitizeStoredChatSettings(nextChatSettings),
     codexSettings: sanitizeStoredCodexSettings(nextCodexSettings),
     openClawSettings: sanitizeStoredOpenClawSettings(nextOpenClawSettings),
     claudeSettings: sanitizeStoredClaudeSettings(nextClaudeSettings),
@@ -3897,6 +3954,7 @@ function withAiDialogSettingsSaved(
   return {
     atlasRoot,
     aiContextOptions: nextContextOptions,
+    chatSettings: nextChatSettings,
     codexSettings: nextCodexSettings,
     openClawSettings: nextOpenClawSettings,
     claudeSettings: nextClaudeSettings,
@@ -3906,6 +3964,7 @@ function withAiDialogSettingsSaved(
 function createInheritedAiDialogSettings(
   path: AtlasNode[],
   fallbackContextOptions: AiContextOptions,
+  fallbackChatSettings: ChatSettings,
   fallbackCodexSettings: CodexSettings,
   fallbackOpenClawSettings: OpenClawSettings,
   fallbackClaudeSettings: ClaudeSettings,
@@ -3913,6 +3972,7 @@ function createInheritedAiDialogSettings(
   const inherited = findAiDialogSettingsInPath(path);
   return createCurrentAiDialogSettings(
     inherited?.contextOptions ?? fallbackContextOptions,
+    inherited?.chatSettings ?? fallbackChatSettings,
     inherited?.codexSettings ?? fallbackCodexSettings,
     inherited?.openClawSettings ?? fallbackOpenClawSettings,
     inherited?.claudeSettings ?? fallbackClaudeSettings,
@@ -3964,6 +4024,10 @@ function sanitizeStoredAiContextOptions(options: AiContextOptions) {
   });
 }
 
+function sanitizeStoredChatSettings(settings: ChatSettings) {
+  return normalizeChatSettings(settings);
+}
+
 function sanitizeStoredCodexSettings(settings: CodexSettings) {
   const {
     fullAccessApproved: _fullAccessApproved,
@@ -4002,12 +4066,14 @@ function sanitizeStoredClaudeSettings(settings: ClaudeSettings) {
 
 function createCurrentAiDialogSettings(
   contextOptions: AiContextOptions,
+  chatSettings: ChatSettings,
   codexSettings: CodexSettings,
   openClawSettings: OpenClawSettings,
   claudeSettings: ClaudeSettings,
 ): AiDialogSettings {
   return {
     contextOptions: sanitizeStoredAiContextOptions(contextOptions),
+    chatSettings: sanitizeStoredChatSettings(chatSettings),
     codexSettings: sanitizeStoredCodexSettings(codexSettings),
     openClawSettings: sanitizeStoredOpenClawSettings(openClawSettings),
     claudeSettings: sanitizeStoredClaudeSettings(claudeSettings),
@@ -4179,8 +4245,8 @@ function normalizeCodexSettings(settings: Partial<CodexSettings>): CodexSettings
     reasoningEffort: normalizeReasoningEffort(settings.reasoningEffort),
     sandbox,
     workspace: (settings.workspace ?? "").trim(),
-    webSearch: settings.webSearch === true,
-    skipGitRepoCheck: settings.skipGitRepoCheck === true,
+    webSearch: true,
+    skipGitRepoCheck: false,
     timeoutMs: clampInteger(settings.timeoutMs ?? DEFAULT_CODEX_SETTINGS.timeoutMs, 30_000, 120 * 60_000),
     fullAccessApproved: settings.fullAccessApproved === true,
     continueMode,
@@ -4216,12 +4282,43 @@ function normalizeClaudeSettings(settings: Partial<ClaudeSettings>): ClaudeSetti
     ...settings,
     model: (settings.model ?? "").trim(),
     baseUrl: (settings.baseUrl ?? "").trim().replace(/\/+$/, ""),
+    reasoningEffort: normalizeClaudeReasoningEffort(settings.reasoningEffort),
+    permissionMode: normalizeClaudePermissionMode(settings.permissionMode),
     workspace: (settings.workspace ?? "").trim(),
     timeoutMs: clampInteger(settings.timeoutMs ?? DEFAULT_CLAUDE_SETTINGS.timeoutMs, 30_000, 120 * 60_000),
     clientRunId: (settings.clientRunId ?? "").trim(),
     requestNodeId: (settings.requestNodeId ?? "").trim(),
     sourceNodeId: (settings.sourceNodeId ?? "").trim(),
   };
+}
+
+function normalizeClaudeReasoningEffort(value: ClaudeSettings["reasoningEffort"] | undefined): ClaudeSettings["reasoningEffort"] {
+  if (value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") return value;
+  return "default";
+}
+
+function normalizeClaudePermissionMode(value: ClaudeSettings["permissionMode"] | undefined): ClaudeSettings["permissionMode"] {
+  if (value === "acceptEdits" || value === "plan" || value === "auto" || value === "dontAsk" || value === "bypassPermissions") return value;
+  return "default";
+}
+
+function normalizeChatSettings(settings: Partial<ChatSettings>): ChatSettings {
+  const service = normalizeChatService(settings.service);
+  return {
+    service,
+    model: (settings.model ?? "").trim(),
+    reasoningEffort: normalizeChatReasoningEffort(settings.reasoningEffort),
+  };
+}
+
+function normalizeChatService(value: ChatSettings["service"] | undefined): ChatSettings["service"] {
+  if (value === "anthropic" || value === "deepseek" || value === "local") return value;
+  return "openai";
+}
+
+function normalizeChatReasoningEffort(value: ChatSettings["reasoningEffort"] | undefined): ChatSettings["reasoningEffort"] {
+  if (value === "none" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") return value;
+  return "default";
 }
 
 function normalizeReasoningEffort(value: CodexSettings["reasoningEffort"] | undefined): CodexSettings["reasoningEffort"] {

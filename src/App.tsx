@@ -1380,7 +1380,7 @@ function VoiceSettingsDialog({
             <input
               value={draft.realtimeModel}
               onChange={(event) => setDraft((current) => ({ ...current, realtimeModel: event.target.value }))}
-              placeholder="gpt-realtime"
+              placeholder="gpt-realtime-2"
             />
           </label>
           <label className="voice-settings-field">
@@ -1448,6 +1448,7 @@ function VoiceLogDialog({
   onClear: () => void;
 }) {
   const displayedEntries = [...entries].reverse();
+  const approvalCount = entries.filter((entry) => entry.status === "approval_required").length;
 
   const handleClear = () => {
     const confirmed = window.confirm("Clear the local AI Partner log?");
@@ -1464,7 +1465,7 @@ function VoiceLogDialog({
           </button>
           <div>
             <h2>AI Partner log</h2>
-            <p>{entries.length} entries</p>
+            <p>{entries.length} entries{approvalCount ? ` / ${approvalCount} approval pending` : ""}</p>
           </div>
           <div className="voice-log-actions">
             <button className="icon-button" type="button" onClick={onClose} aria-label="Close AI Partner log">
@@ -1488,6 +1489,11 @@ function VoiceLogDialog({
                   <span>{entry.status ? `${entry.status} / ` : ""}{formatVoiceLogTime(entry.createdAt)}</span>
                 </header>
                 <p>{entry.text}</p>
+                {entry.status === "approval_required" ? (
+                  <div className="voice-log-approval" role="status">
+                    Human approval required. This tool request was logged but not executed.
+                  </div>
+                ) : null}
                 {entry.toolName ? <small>tool: {entry.toolName}</small> : null}
                 {entry.metadata ? <small>{formatVoiceLogMetadata(entry.metadata)}</small> : null}
               </article>
@@ -1613,16 +1619,52 @@ function voiceRoleLabel(role: string) {
 }
 
 function formatVoiceLogMetadata(metadata: Record<string, unknown>) {
+  const sources = Array.isArray(metadata.sources) ? metadata.sources.length : undefined;
+  const citations = Array.isArray(metadata.citations) ? metadata.citations.length : undefined;
+  const usage = metadata.usage && typeof metadata.usage === "object" && !Array.isArray(metadata.usage)
+    ? (metadata.usage as Record<string, unknown>)
+    : undefined;
   const items = [
+    ["approval", metadata.approvalId],
+    ["tool", metadata.toolName],
+    ["status", metadata.status],
+    ["executed", typeof metadata.executed === "boolean" ? String(metadata.executed) : undefined],
     ["model", metadata.model],
-    ["duration", typeof metadata.durationMs === "number" ? `${metadata.durationMs}ms` : undefined],
+    ["provider", metadata.provider],
+    ["duration", typeof metadata.durationMs === "number" ? `${metadata.durationMs}ms` : usageNumber(usage?.durationMs, "ms")],
+    ["tokens", usageNumber(usage?.totalTokens)],
     ["audio", typeof metadata.audioSizeBytes === "number" ? formatBytes(metadata.audioSizeBytes) : undefined],
     ["mime", metadata.audioMimeType ?? metadata.mimeType],
     ["chunks", metadata.chunks],
+    ["sources", sources],
+    ["citations", citations],
+    ["node", metadata.nodeId],
+    ["nodes", Array.isArray(metadata.nodeIds) ? metadata.nodeIds.length : undefined],
+    ["args", summarizeMetadataArgs(metadata.args)],
   ]
     .filter(([, value]) => value !== undefined && value !== "")
     .map(([label, value]) => `${label}: ${Array.isArray(value) ? value.join(", ") : String(value)}`);
   return items.join(" / ");
+}
+
+function usageNumber(value: unknown, suffix = "") {
+  return typeof value === "number" && Number.isFinite(value) ? `${value}${suffix}` : undefined;
+}
+
+function summarizeMetadataArgs(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .slice(0, 4)
+    .map(([key, item]) => `${key}=${summarizeMetadataArgValue(item)}`);
+  return entries.length ? entries.join(", ") : undefined;
+}
+
+function summarizeMetadataArgValue(value: unknown) {
+  if (typeof value === "string") return value.length > 48 ? `${value.slice(0, 45)}...` : value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return `${value.length} item(s)`;
+  if (value && typeof value === "object") return "object";
+  return "";
 }
 
 function formatVoiceLogTime(value: string) {

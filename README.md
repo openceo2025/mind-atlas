@@ -16,7 +16,7 @@ Current version: `0.1.1`
 - Treats one visible object as one local notebook/chat-bubble node.
 - Lets the user edit the focused node body in the Focus panel and directly on visible node labels.
 - Supports mouse-first creation of child nodes and sibling branch nodes.
-- Stores notebook data in browser local storage.
+- Stores notebook data in IndexedDB with retained local snapshots and restore history.
 - Exports and imports a single `.mindatlas` JSON file.
 - Initializes the local notebook back to the seeded starting state.
 - Attaches image, audio, video, or file metadata to a node.
@@ -25,7 +25,8 @@ Current version: `0.1.1`
 - Provides appearance controls for node color and texture.
 - Sends the focused node context to a local AI bridge and saves each user request plus provider result as child notebook nodes.
 - Saves OpenAI-generated images as attachments on the provider result node.
-- Supports OpenAI, LM Studio/OpenAI-compatible local models, Codex CLI, OpenClaw CLI, and Claude Code execution through the local bridge.
+- Groups OpenAI, Opus/Anthropic, DeepSeek, and LM Studio/OpenAI-compatible local models under one Chat entry for non-agent conversation.
+- Groups Codex CLI and Claude Code under one Code entry, while OpenClaw remains a separate agent-style bridge mode.
 - Saves and loads rich `.mindatlaspkg` notebook packages through the local bridge's server-side notebook folder.
 - Expands Codex runs into spatial child nodes for summaries, commands, changed files, approval prompts, and final output.
 - Sends OpenClaw requests through the local bridge and stores the OpenClaw result, session key, and log path on the request branch.
@@ -36,6 +37,7 @@ Current version: `0.1.1`
 - Shows a square stop button while Voice Partner audio is responding, so the current reply can be canceled before the next push-to-talk turn.
 - Provides main-menu controls for Voice Partner restart, Realtime model/voice settings, and mobile-only notification alerts.
 - Keeps Voice Partner conversation logs in a global text log view from the main menu.
+- Defaults Voice Partner to `gpt-realtime-2`; set `MIND_ATLAS_REALTIME_MODEL` and `VITE_MIND_ATLAS_VOICE_IDLE_TIMEOUT_MS` when testing another model or a shorter idle-summary cycle.
 
 Embeddings, summarization automation, sync, and remote storage are intentionally out of scope for `0.1.x`.
 
@@ -107,9 +109,15 @@ npm run dev:bridge
 
 Without an API key, the bridge returns mock AI responses so the UI flow remains testable.
 
-For Claude Code mode on Windows, install Claude Code and point the bridge at the
-Windows executable. The command dock can switch per run between Claude Opus 4.8,
-Claude Fable 5, and DeepSeek V4 Pro:
+For Chat mode, the command dock can switch the service between OpenAI, Opus,
+DeepSeek, and Local, then choose a model and any supported effort level. Chat
+requests use the same Mind Atlas context and tool definitions as the previous
+OpenAI/Local entry. With an active node, the reply is saved as a child request
+branch. From the root surface, the request and reply go to the AI Partner log.
+
+For Code mode on Windows, choose either Codex or Claude Code from the Code
+settings row. To use Claude Code, install Claude Code and point the bridge at
+the Windows executable:
 
 ```powershell
 npm run dev:bridge
@@ -200,7 +208,7 @@ Replace `<your-github-username>` with the GitHub account or organization that ow
 
 ## Data Notes
 
-- Notebook data is saved in browser local storage.
+- Notebook data is saved in browser IndexedDB with retained local snapshots and a restore UI. The legacy `mind-atlas-notebook-v2` localStorage payload is still kept as a migration/recovery source.
 - Light export and import use a single `.mindatlas` JSON file.
 - Rich export and import use `.mindatlaspkg` packages and include available attachment blobs.
 - Markdown (`.md`, `.markdown`), OPML (`.opml`), and FreeMind (`.mm`) files can be imported from the main menu or by drag and drop. The "Import text outline" action applies pasted Markdown to the active node by replacing its body, replacing its subtree, appending children, or previewing a node-by-node merge.

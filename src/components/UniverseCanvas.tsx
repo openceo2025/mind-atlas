@@ -559,7 +559,11 @@ function NotificationPulseLayer({
   const lastPruneRef = useRef(0);
   const { size } = useThree();
   const layoutViewport: AtlasLayoutViewport = isMobilePortraitCamera(size.width, size.height) ? "mobile-portrait" : "desktop";
-  const animatedPulses = useMemo(() => selectAnimatedNotificationPulses(pulses, renderQuality), [pulses, renderQuality]);
+  const renderablePulses = useMemo(
+    () => pulses.filter((pulse) => pulse.nodeId !== atlasRoot.id && Boolean(findNode(atlasRoot, pulse.nodeId))),
+    [atlasRoot, pulses],
+  );
+  const animatedPulses = useMemo(() => selectAnimatedNotificationPulses(renderablePulses, renderQuality), [renderablePulses, renderQuality]);
   const layoutFrame = useMemo(
     () => deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport: layoutViewport }),
     [atlasRoot, layoutMode, layoutViewport, selectedNodeId],

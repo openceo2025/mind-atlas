@@ -31,6 +31,7 @@ const webSearchMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_WEB_SEARCH_MAX_O
 const openAiImageModel = process.env.MIND_ATLAS_OPENAI_IMAGE_MODEL ?? "gpt-image-1";
 const openAiImageSize = process.env.MIND_ATLAS_OPENAI_IMAGE_SIZE ?? "1024x1024";
 const openAiTranscriptionModel = process.env.MIND_ATLAS_OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe";
+const openAiChatModels = parseStringList(process.env.MIND_ATLAS_OPENAI_CHAT_MODELS, [defaultModel, "gpt-5.5-pro", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]);
 
 const localBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_LOCAL_BASE_URL ?? "http://127.0.0.1:1234/v1");
 const localApiKey = process.env.MIND_ATLAS_LOCAL_API_KEY ?? "lm-studio";
@@ -72,9 +73,23 @@ const claudeDisabled = process.env.MIND_ATLAS_CLAUDE_DISABLED === "true";
 const claudeLogDir = resolve(process.env.MIND_ATLAS_CLAUDE_LOG_DIR ?? join(process.cwd(), "server-data", "claude-runs"));
 const claudeDeepSeekBaseUrl = "https://api.deepseek.com/anthropic";
 
-const realtimeModel = process.env.MIND_ATLAS_REALTIME_MODEL ?? "gpt-realtime";
+const anthropicChatBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_ANTHROPIC_BASE_URL ?? process.env.MIND_ATLAS_CLAUDE_ANTHROPIC_BASE_URL ?? process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com");
+const anthropicChatApiKey = process.env.MIND_ATLAS_ANTHROPIC_API_KEY ?? claudeApiKey;
+const anthropicChatAuthToken = process.env.MIND_ATLAS_ANTHROPIC_AUTH_TOKEN ?? claudeAuthToken;
+const anthropicChatDefaultModel = process.env.MIND_ATLAS_ANTHROPIC_MODEL ?? claudeModel ?? "claude-opus-4-8";
+const anthropicChatModels = parseStringList(process.env.MIND_ATLAS_ANTHROPIC_MODELS, [anthropicChatDefaultModel || "claude-opus-4-8", "claude-opus-4-8", "claude-fable-5"]);
+const anthropicChatMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_ANTHROPIC_MAX_OUTPUT_TOKENS", openAiMaxOutputTokens);
+
+const deepSeekChatBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_DEEPSEEK_ANTHROPIC_BASE_URL ?? process.env.MIND_ATLAS_DEEPSEEK_BASE_URL ?? claudeDeepSeekBaseUrl);
+const deepSeekChatAuthToken = process.env.MIND_ATLAS_DEEPSEEK_AUTH_TOKEN ?? claudeDeepSeekAuthToken;
+const deepSeekChatDefaultModel = process.env.MIND_ATLAS_DEEPSEEK_MODEL ?? "deepseek-v4-pro[1m]";
+const deepSeekChatModels = parseStringList(process.env.MIND_ATLAS_DEEPSEEK_MODELS, [deepSeekChatDefaultModel, "deepseek-v4-pro[1m]", "deepseek-v4-flash"]);
+const deepSeekChatMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_DEEPSEEK_MAX_OUTPUT_TOKENS", openAiMaxOutputTokens);
+
+const realtimeModel = process.env.MIND_ATLAS_REALTIME_MODEL ?? "gpt-realtime-2";
 const realtimeVoice = process.env.MIND_ATLAS_REALTIME_VOICE ?? "marin";
 const realtimeTranscriptionModel = process.env.MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe";
+const realtimeReasoningEffort = normalizeRealtimeReasoningEffort(process.env.MIND_ATLAS_REALTIME_REASONING_EFFORT ?? "low");
 const allowMockWithoutKey = process.env.MIND_ATLAS_ALLOW_MOCK_WITHOUT_KEY !== "false";
 const cloudNotebookDir = resolve(process.env.MIND_ATLAS_CLOUD_DIR ?? join(process.cwd(), "server-data", "notebooks"));
 const MAX_PROCESS_OUTPUT_CHARS = readPositiveIntEnv("MIND_ATLAS_PROCESS_OUTPUT_CHAR_LIMIT", 1_500_000);
@@ -172,10 +187,18 @@ const server = createBridgeServer(async (request, response) => {
         maxOutputTokens: openAiMaxOutputTokens,
         localMaxOutputTokens,
         realtimeModel,
+        realtimeReasoningEffort,
         transcriptionModel: openAiTranscriptionModel,
         realtimeTranscriptionModel,
         mockFallback: allowMockWithoutKey,
         providers: [
+          {
+            id: "chat",
+            label: "Chat",
+            configured: Boolean(openAiApiKey || anthropicChatApiKey || anthropicChatAuthToken || deepSeekChatAuthToken) || allowMockWithoutKey,
+            model: defaultModel,
+            detail: "OpenAI, Opus, DeepSeek, and Local chat services share the browser Chat entry",
+          },
           {
             id: "openai",
             label: "OpenAI",
@@ -223,6 +246,12 @@ const server = createBridgeServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/codex/options") {
       const result = await createCodexOptionsResponse();
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/chat/options") {
+      const result = createChatOptionsResponse();
       sendJson(response, 200, result);
       return;
     }
@@ -391,18 +420,14 @@ async function createAiResponse(payload) {
     throw new BridgeError(400, "prompt is required");
   }
 
-  if (provider === "local") {
-    const model = await resolveLoadedLocalModel();
-    const result = await createOpenAiCompatibleResponse({
-      baseUrl: localBaseUrl,
-      apiKey: localApiKey,
-      model,
+  if (provider === "chat" || provider === "openai" || provider === "local") {
+    return await createChatAiResponse({
       prompt,
       context,
-      provider: "local",
+      settings: normalizeChatSettings(payload?.chat, provider, payload?.model),
       startedAt,
+      requestId,
     });
-    return result;
   }
 
   if (provider === "codex") {
@@ -480,11 +505,114 @@ async function createAiResponse(payload) {
   };
 }
 
-async function createOpenAiCompatibleResponse({ baseUrl, apiKey, model, prompt, context, provider, startedAt }) {
+async function createChatAiResponse({ prompt, context, settings, startedAt, requestId }) {
+  if (settings.service === "local") {
+    const model = await resolveLoadedLocalModel();
+    return await createOpenAiCompatibleResponse({
+      baseUrl: localBaseUrl,
+      apiKey: localApiKey,
+      model,
+      prompt,
+      context,
+      provider: "local",
+      startedAt,
+      reasoningEffort: "default",
+    });
+  }
+
+  if (settings.service === "anthropic" || settings.service === "deepseek") {
+    return await createAnthropicCompatibleResponse({
+      prompt,
+      context,
+      settings,
+      startedAt,
+      requestId,
+    });
+  }
+
+  const model = stringOr(settings.model, defaultModel);
+  if (!openAiApiKey) {
+    if (!allowMockWithoutKey) throw new BridgeError(503, "OpenAI API key is not configured");
+    const output = createMockOutput(prompt, context);
+    return {
+      id: requestId,
+      provider: "mock",
+      model,
+      output,
+      rawText: JSON.stringify(output, null, 2),
+      usage: { durationMs: Date.now() - startedAt },
+    };
+  }
+
+  if (shouldGenerateImage(prompt)) {
+    return await createOpenAiImageResponse({
+      prompt,
+      model: openAiImageModel,
+      startedAt,
+      requestId,
+    });
+  }
+
+  const system = buildSystemInstruction();
+  const user = buildUserInstruction(prompt, context);
+  const data = openAiMode === "chat-completions"
+    ? await callChatCompletions(openAiBaseUrl, openAiApiKey, model, system, user, openAiMaxOutputTokens, settings.reasoningEffort)
+    : await callResponses(openAiBaseUrl, openAiApiKey, model, system, user, openAiMaxOutputTokens, settings.reasoningEffort);
+  const rawText = extractModelText(data);
+  const output = withCompletionNotice(
+    normalizeAiOutput(parseJsonText(rawText) ?? { body: rawText }, prompt),
+    data,
+    openAiMaxOutputTokens,
+  );
+
+  return {
+    id: data.id ?? requestId,
+    provider: openAiMode === "chat-completions" ? "openai-compatible" : "openai",
+    model,
+    output,
+    rawText,
+    usage: normalizeUsage(data.usage, "openai", Date.now() - startedAt, data, openAiMaxOutputTokens),
+  };
+}
+
+async function createAnthropicCompatibleResponse({ prompt, context, settings, startedAt, requestId }) {
+  const providerConfig = anthropicProviderConfig(settings);
+  const model = stringOr(settings.model, providerConfig.defaultModel);
+  if (!providerConfig.apiKey && !providerConfig.authToken) {
+    throw new BridgeError(503, `${providerConfig.label} API key is not configured`);
+  }
+  const data = await callAnthropicMessages({
+    baseUrl: providerConfig.baseUrl,
+    apiKey: providerConfig.apiKey,
+    authToken: providerConfig.authToken,
+    model,
+    system: buildSystemInstruction(),
+    messages: [{ role: "user", content: buildUserInstruction(prompt, context) }],
+    tools: [],
+    maxOutputTokens: providerConfig.maxOutputTokens,
+    effort: settings.reasoningEffort,
+  });
+  const rawText = extractAnthropicText(data);
+  const output = withCompletionNotice(
+    normalizeAiOutput(parseJsonText(rawText) ?? { body: rawText }, prompt),
+    data,
+    providerConfig.maxOutputTokens,
+  );
+  return {
+    id: data.id ?? requestId,
+    provider: settings.service,
+    model: stringOr(data.model, model),
+    output,
+    rawText,
+    usage: normalizeUsage(data.usage, settings.service, Date.now() - startedAt, data, providerConfig.maxOutputTokens),
+  };
+}
+
+async function createOpenAiCompatibleResponse({ baseUrl, apiKey, model, prompt, context, provider, startedAt, reasoningEffort = "default" }) {
   const system = buildSystemInstruction();
   const user = provider === "local" ? buildLocalUserInstruction(prompt, context) : buildUserInstruction(prompt, context);
   const maxOutputTokens = provider === "local" ? localMaxOutputTokens : openAiMaxOutputTokens;
-  const data = await callChatCompletions(baseUrl, apiKey, model, system, user, maxOutputTokens);
+  const data = await callChatCompletions(baseUrl, apiKey, model, system, user, maxOutputTokens, reasoningEffort);
   const rawText = extractModelText(data);
   const output = withCompletionNotice(
     normalizeAiOutput(parseJsonText(rawText) ?? { body: rawText }, prompt),
@@ -537,9 +665,10 @@ function extractLoadedLocalModelId(data) {
 async function createTextPartnerTurn(payload) {
   const startedAt = Date.now();
   const provider = stringOr(payload?.provider, "openai");
-  if (provider !== "openai" && provider !== "local") {
-    throw new BridgeError(400, "text partner provider must be openai or local");
+  if (!["openai", "anthropic", "deepseek", "local"].includes(provider)) {
+    throw new BridgeError(400, "text partner provider must be openai, anthropic, deepseek, or local");
   }
+  const settings = normalizeChatSettings(payload, provider, payload?.model);
   const context = payload?.context ?? {};
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
   if (!messages.length) throw new BridgeError(400, "messages are required");
@@ -547,13 +676,23 @@ async function createTextPartnerTurn(payload) {
   const summary = payload?.summary?.text ? String(payload.summary.text).slice(0, 4000) : "";
   const voiceLogContext = stringOr(payload?.voiceLogContext, "").slice(0, 14000);
 
-  if (provider === "local") {
+  if (settings.service === "local") {
     const model = await resolveLoadedLocalModel();
     const data = await callChatToolTurn(localBaseUrl, localApiKey, model, "local", context, messages, tools, summary, voiceLogContext);
     return textPartnerResultWithoutRaw(data, "local", startedAt, localMaxOutputTokens);
   }
 
-  const model = stringOr(payload?.model, defaultModel);
+  if (settings.service === "anthropic" || settings.service === "deepseek") {
+    const providerConfig = anthropicProviderConfig(settings);
+    const model = stringOr(settings.model, providerConfig.defaultModel);
+    if (!providerConfig.apiKey && !providerConfig.authToken) {
+      throw new BridgeError(503, `${providerConfig.label} API key is not configured`);
+    }
+    const data = await callAnthropicToolTurn(providerConfig, model, context, messages, tools, summary, voiceLogContext, settings.reasoningEffort);
+    return textPartnerResultWithoutRaw(data, settings.service, startedAt, providerConfig.maxOutputTokens);
+  }
+
+  const model = stringOr(settings.model, defaultModel);
   if (!openAiApiKey) {
     if (!allowMockWithoutKey) throw new BridgeError(503, "OpenAI API key is not configured");
     return {
@@ -566,8 +705,8 @@ async function createTextPartnerTurn(payload) {
   }
 
   const data = openAiMode === "chat-completions"
-    ? await callChatToolTurn(openAiBaseUrl, openAiApiKey, model, "openai", context, messages, tools, summary, voiceLogContext)
-    : await callResponsesToolTurn(openAiBaseUrl, openAiApiKey, model, context, messages, tools, summary, voiceLogContext);
+    ? await callChatToolTurn(openAiBaseUrl, openAiApiKey, model, "openai", context, messages, tools, summary, voiceLogContext, settings.reasoningEffort)
+    : await callResponsesToolTurn(openAiBaseUrl, openAiApiKey, model, context, messages, tools, summary, voiceLogContext, settings.reasoningEffort);
   return textPartnerResultWithoutRaw(data, "openai", startedAt, openAiMaxOutputTokens);
 }
 
@@ -581,23 +720,25 @@ function textPartnerResultWithoutRaw(data, provider, startedAt, maxOutputTokens)
   };
 }
 
-async function callResponsesToolTurn(baseUrl, apiKey, model, context, messages, tools, summary, voiceLogContext) {
+async function callResponsesToolTurn(baseUrl, apiKey, model, context, messages, tools, summary, voiceLogContext, reasoningEffort = "default") {
+  const body = {
+    model,
+    instructions: buildMindAtlasPartnerInstructions({
+      mode: "text",
+      summary,
+      voiceLogContext,
+      context,
+    }),
+    input: buildTextPartnerInput(messages),
+    tools: normalizeRealtimeTools(tools),
+    tool_choice: "auto",
+    max_output_tokens: openAiMaxOutputTokens,
+  };
+  applyOpenAiReasoning(body, reasoningEffort);
   const upstream = await fetch(`${baseUrl}/responses`, {
     method: "POST",
     headers: openAiHeaders(apiKey, { "Content-Type": "application/json" }),
-    body: JSON.stringify({
-      model,
-      instructions: buildMindAtlasPartnerInstructions({
-        mode: "text",
-        summary,
-        voiceLogContext,
-        context,
-      }),
-      input: buildTextPartnerInput(messages),
-      tools: normalizeRealtimeTools(tools),
-      tool_choice: "auto",
-      max_output_tokens: openAiMaxOutputTokens,
-    }),
+    body: JSON.stringify(body),
   });
   const raw = await readUpstreamJson(upstream);
   return {
@@ -609,7 +750,7 @@ async function callResponsesToolTurn(baseUrl, apiKey, model, context, messages, 
   };
 }
 
-async function callChatToolTurn(baseUrl, apiKey, model, provider, context, messages, tools, summary, voiceLogContext) {
+async function callChatToolTurn(baseUrl, apiKey, model, provider, context, messages, tools, summary, voiceLogContext, reasoningEffort = "default") {
   const local = provider === "local";
   const systemContent = buildMindAtlasPartnerInstructions({
     mode: "text",
@@ -632,6 +773,7 @@ async function callChatToolTurn(baseUrl, apiKey, model, provider, context, messa
     max_tokens: provider === "local" ? localMaxOutputTokens : openAiMaxOutputTokens,
   };
   if (model) body.model = model;
+  applyChatCompletionsReasoning(body, reasoningEffort);
   const upstream = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: openAiHeaders(apiKey, { "Content-Type": "application/json" }),
@@ -644,6 +786,72 @@ async function callChatToolTurn(baseUrl, apiKey, model, provider, context, messa
     provider,
     model: stringOr(raw?.model, model || "loaded-local-model"),
     raw,
+  };
+}
+
+async function callAnthropicToolTurn(providerConfig, model, context, messages, tools, summary, voiceLogContext, effort) {
+  const raw = await callAnthropicMessages({
+    baseUrl: providerConfig.baseUrl,
+    apiKey: providerConfig.apiKey,
+    authToken: providerConfig.authToken,
+    model,
+    system: buildMindAtlasPartnerInstructions({
+      mode: "text",
+      summary,
+      voiceLogContext,
+      context,
+    }),
+    messages: buildAnthropicPartnerMessages(messages),
+    tools: normalizeAnthropicTools(tools),
+    maxOutputTokens: providerConfig.maxOutputTokens,
+    effort,
+  });
+  return {
+    text: extractAnthropicText(raw),
+    toolCalls: extractAnthropicToolCalls(raw),
+    provider: providerConfig.provider,
+    model: stringOr(raw?.model, model),
+    raw,
+  };
+}
+
+async function callAnthropicMessages({ baseUrl, apiKey, authToken, model, system, messages, tools, maxOutputTokens, effort }) {
+  const body = {
+    model,
+    max_tokens: maxOutputTokens,
+    system,
+    messages,
+  };
+  if (tools.length) body.tools = tools;
+  applyAnthropicEffort(body, effort);
+  const upstream = await fetch(anthropicMessagesUrl(baseUrl), {
+    method: "POST",
+    headers: anthropicHeaders({ apiKey, authToken }),
+    body: JSON.stringify(body),
+  });
+  return await readUpstreamJson(upstream);
+}
+
+function anthropicProviderConfig(settings) {
+  if (settings.service === "deepseek") {
+    return {
+      provider: "deepseek",
+      label: "DeepSeek",
+      baseUrl: deepSeekChatBaseUrl,
+      apiKey: "",
+      authToken: deepSeekChatAuthToken,
+      defaultModel: deepSeekChatDefaultModel,
+      maxOutputTokens: deepSeekChatMaxOutputTokens,
+    };
+  }
+  return {
+    provider: "anthropic",
+    label: "Opus",
+    baseUrl: anthropicChatBaseUrl,
+    apiKey: anthropicChatApiKey,
+    authToken: anthropicChatAuthToken,
+    defaultModel: anthropicChatDefaultModel || "claude-opus-4-8",
+    maxOutputTokens: anthropicChatMaxOutputTokens,
   };
 }
 
@@ -700,6 +908,77 @@ async function createCodexOptionsResponse() {
     codexOptionsCache = { createdAt: Date.now(), value: fallback };
     return fallback;
   }
+}
+
+function createChatOptionsResponse() {
+  return {
+    defaultService: "openai",
+    services: [
+      {
+        id: "openai",
+        label: "OpenAI",
+        configured: Boolean(openAiApiKey) || allowMockWithoutKey,
+        defaultModel,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: ["default", "none", "minimal", "low", "medium", "high", "xhigh"],
+        models: createChatModelOptions(openAiChatModels, "medium", ["default", "none", "minimal", "low", "medium", "high", "xhigh"]),
+        baseUrl: openAiBaseUrl,
+        detail: openAiApiKey ? "OpenAI key configured" : "mock fallback",
+      },
+      {
+        id: "anthropic",
+        label: "Opus",
+        configured: Boolean(anthropicChatApiKey || anthropicChatAuthToken),
+        defaultModel: anthropicChatDefaultModel || "claude-opus-4-8",
+        defaultReasoningEffort: "default",
+        supportedReasoningEfforts: ["default", "low", "medium", "high", "max"],
+        models: createChatModelOptions(anthropicChatModels, "default", ["default", "low", "medium", "high", "max"]),
+        baseUrl: anthropicChatBaseUrl,
+        detail: anthropicChatApiKey || anthropicChatAuthToken ? "Anthropic key configured" : "Anthropic key not configured",
+      },
+      {
+        id: "deepseek",
+        label: "DeepSeek",
+        configured: Boolean(deepSeekChatAuthToken),
+        defaultModel: deepSeekChatDefaultModel,
+        defaultReasoningEffort: "max",
+        supportedReasoningEfforts: ["default", "low", "medium", "high", "max"],
+        models: createChatModelOptions(deepSeekChatModels, "max", ["default", "low", "medium", "high", "max"]),
+        baseUrl: deepSeekChatBaseUrl,
+        detail: deepSeekChatAuthToken ? "DeepSeek key configured" : "DeepSeek key not configured",
+      },
+      {
+        id: "local",
+        label: "Local",
+        configured: true,
+        defaultModel: "",
+        defaultReasoningEffort: "default",
+        supportedReasoningEfforts: ["default"],
+        models: [
+          {
+            model: "",
+            displayName: "Loaded local model",
+            defaultReasoningEffort: "default",
+            supportedReasoningEfforts: ["default"],
+          },
+        ],
+        baseUrl: localBaseUrl,
+        detail: deprecatedLocalModel
+          ? "MIND_ATLAS_LOCAL_MODEL is ignored; Local uses the model currently loaded in LM Studio"
+          : "Local uses the model currently loaded in LM Studio",
+      },
+    ],
+  };
+}
+
+function createChatModelOptions(models, defaultReasoningEffort, supportedReasoningEfforts) {
+  return Array.from(new Set(models.map((model) => String(model || "").trim()).filter(Boolean)))
+    .map((model) => ({
+      model,
+      displayName: model,
+      defaultReasoningEffort,
+      supportedReasoningEfforts,
+    }));
 }
 
 async function readCodexModels() {
@@ -872,6 +1151,41 @@ function parseCodexModelOverride(value) {
     }));
 }
 
+function parseStringList(value, fallback = []) {
+  const parsed = String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return Array.from(new Set(parsed.length ? parsed : fallback.filter(Boolean)));
+}
+
+function normalizeChatSettings(input, provider, model) {
+  const requestedService = stringOr(input?.service, provider);
+  const service = requestedService === "anthropic" || requestedService === "deepseek" || requestedService === "local"
+    ? requestedService
+    : "openai";
+  return {
+    service,
+    model: stringOr(input?.model, stringOr(model, defaultChatModelForService(service))),
+    reasoningEffort: normalizeChatReasoningEffort(input?.reasoningEffort),
+  };
+}
+
+function defaultChatModelForService(service) {
+  if (service === "anthropic") return anthropicChatDefaultModel || "claude-opus-4-8";
+  if (service === "deepseek") return deepSeekChatDefaultModel;
+  if (service === "local") return "";
+  return defaultModel;
+}
+
+function normalizeChatReasoningEffort(value) {
+  return ["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value) ? value : "default";
+}
+
+function normalizeRealtimeReasoningEffort(value) {
+  return ["default", "low", "medium", "high"].includes(value) ? value : "default";
+}
+
 function normalizeCodexModelOption(model) {
   const slug = stringOr(model?.slug ?? model?.model, "");
   if (!slug) return null;
@@ -890,6 +1204,8 @@ function normalizeCodexModelOption(model) {
 async function createCodexResponse({ prompt, context, model, codex, startedAt }) {
   if (codexDisabled) throw new BridgeError(503, "Codex CLI is disabled");
   const settings = normalizeCodexSettings(codex, model, context);
+  settings.webSearch = true;
+  settings.skipGitRepoCheck = await shouldSkipCodexGitRepoCheck(settings.workspace);
   const codexPrompt = buildCodexPrompt(prompt, context, settings);
   const beforeGitStatus = await collectGitStatus(settings.workspace);
   const result = await runCodex(codexPrompt, settings);
@@ -1245,6 +1561,12 @@ async function runClaudeCode(prompt, settings) {
     "--output-format",
     "json",
   ];
+  if (settings.reasoningEffort && settings.reasoningEffort !== "default") {
+    args.push("--effort", settings.reasoningEffort);
+  }
+  if (settings.permissionMode && settings.permissionMode !== "default") {
+    args.push("--permission-mode", settings.permissionMode);
+  }
   const commandSpec = buildClaudeCommand(args);
   const result = await runProcess(commandSpec.command, commandSpec.args, boundedPrompt, settings.timeoutMs, settings.workspace, buildClaudeEnv(settings));
   const completedAt = new Date().toISOString();
@@ -1347,6 +1669,8 @@ function buildClaudePrompt(prompt, context, settings) {
     settings.workspace ? `User-selected work root: ${settings.workspace}` : "No Mind Atlas work root was provided; use the bridge default workspace.",
     settings.baseUrl ? `Claude API base URL override: ${settings.baseUrl}` : "Claude API base URL: bridge environment default.",
     settings.model ? `Claude model: ${settings.model}` : "Claude model: bridge environment default.",
+    `Claude effort: ${settings.reasoningEffort || "default"}.`,
+    `Claude permission mode: ${settings.permissionMode || "default"} (not equivalent to Codex OS sandbox).`,
     "",
     "# User request",
     prompt,
@@ -1361,12 +1685,22 @@ function normalizeClaudeSettings(input, model, context) {
   return {
     model: stringOr(input?.model, model || claudeModel),
     baseUrl: stringOr(input?.baseUrl, claudeBaseUrl).replace(/\/+$/, ""),
+    reasoningEffort: normalizeClaudeReasoningEffort(input?.reasoningEffort),
+    permissionMode: normalizeClaudePermissionMode(input?.permissionMode),
     workspace,
     timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input.timeoutMs) : claudeTimeoutMs,
     clientRunId: stringOr(input?.clientRunId, ""),
     requestNodeId: stringOr(input?.requestNodeId, ""),
     sourceNodeId: stringOr(input?.sourceNodeId, ""),
   };
+}
+
+function normalizeClaudeReasoningEffort(value) {
+  return ["low", "medium", "high", "xhigh", "max"].includes(value) ? value : "default";
+}
+
+function normalizeClaudePermissionMode(value) {
+  return ["acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"].includes(value) ? value : "default";
 }
 
 function parseClaudeJson(stdout) {
@@ -1651,6 +1985,21 @@ async function codexSupportsSearchFlag() {
   return codexSearchFlagSupportCache;
 }
 
+async function shouldSkipCodexGitRepoCheck(workspace) {
+  const candidate = stringOr(workspace, codexWorkspace);
+  if (!candidate || !existsSync(candidate)) return true;
+  const command = codexUseWsl ? "wsl" : "git";
+  const args = codexUseWsl
+    ? ["git", "-C", toWslPath(candidate), "rev-parse", "--is-inside-work-tree"]
+    : ["-C", candidate, "rev-parse", "--is-inside-work-tree"];
+  try {
+    const result = await runProcess(command, args, "", 10_000, candidate);
+    return result.exitCode !== 0 || result.stdout.trim() !== "true";
+  } catch {
+    return true;
+  }
+}
+
 function normalizeCodexSettings(input, model, context) {
   const workspace = stringOr(input?.workspace, stringOr(extractWorkspaceFromContext(context), codexWorkspace));
   const requestedSandbox = normalizeCodexSandbox(input?.sandbox ?? codexSandbox);
@@ -1662,8 +2011,8 @@ function normalizeCodexSettings(input, model, context) {
     reasoningEffort: normalizeReasoningEffort(input?.reasoningEffort ?? codexReasoningEffort),
     sandbox,
     workspace,
-    webSearch: input?.webSearch === true,
-    skipGitRepoCheck: input?.skipGitRepoCheck === true,
+    webSearch: true,
+    skipGitRepoCheck: false,
     timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input.timeoutMs) : codexTimeoutMs,
     fullAccessApproved,
     continueMode,
@@ -2282,6 +2631,7 @@ function normalizeAudioFileName(value, mimeType) {
 }
 
 async function createWebSearchResponse(payload) {
+  const startedAt = Date.now();
   if (!openAiApiKey) {
     if (allowMockWithoutKey) {
       const query = stringOr(payload?.query, "");
@@ -2289,6 +2639,7 @@ async function createWebSearchResponse(payload) {
         text: `Mock web search result for: ${query}`,
         citations: [],
         sources: [],
+        usage: { durationMs: Date.now() - startedAt },
       };
     }
     throw new BridgeError(503, "OpenAI API key is not configured");
@@ -2296,12 +2647,14 @@ async function createWebSearchResponse(payload) {
 
   const query = stringOr(payload?.query, "");
   if (!query.trim()) throw new BridgeError(400, "query is required");
-  const data = await callWebSearch(openAiBaseUrl, openAiApiKey, stringOr(payload?.model, defaultModel), query);
+  const model = stringOr(payload?.model, defaultModel);
+  const data = await callWebSearch(openAiBaseUrl, openAiApiKey, model, query);
   const citations = extractWebSearchCitations(data);
   return {
     text: extractModelText(data),
     citations,
     sources: dedupeSources(citations),
+    usage: normalizeUsage(data.usage, "openai", Date.now() - startedAt, data, webSearchMaxOutputTokens),
     raw: data,
   };
 }
@@ -2401,16 +2754,18 @@ function safeCloudNotebookPath(name) {
   return resolved;
 }
 
-async function callResponses(baseUrl, apiKey, model, system, user, maxOutputTokens = openAiMaxOutputTokens) {
+async function callResponses(baseUrl, apiKey, model, system, user, maxOutputTokens = openAiMaxOutputTokens, reasoningEffort = "default") {
+  const body = {
+    model,
+    instructions: system,
+    input: user,
+    max_output_tokens: maxOutputTokens,
+  };
+  applyOpenAiReasoning(body, reasoningEffort);
   const upstream = await fetch(`${baseUrl}/responses`, {
     method: "POST",
     headers: openAiHeaders(apiKey, { "Content-Type": "application/json" }),
-    body: JSON.stringify({
-      model,
-      instructions: system,
-      input: user,
-      max_output_tokens: maxOutputTokens,
-    }),
+    body: JSON.stringify(body),
   });
   return await readUpstreamJson(upstream);
 }
@@ -2456,7 +2811,7 @@ async function callImageGenerations(baseUrl, apiKey, model, prompt) {
   return await readUpstreamJson(upstream);
 }
 
-async function callChatCompletions(baseUrl, apiKey, model, system, user, maxOutputTokens = openAiMaxOutputTokens) {
+async function callChatCompletions(baseUrl, apiKey, model, system, user, maxOutputTokens = openAiMaxOutputTokens, reasoningEffort = "default") {
   const body = {
     messages: [
       { role: "system", content: system },
@@ -2465,6 +2820,7 @@ async function callChatCompletions(baseUrl, apiKey, model, system, user, maxOutp
     max_tokens: maxOutputTokens,
   };
   if (model) body.model = model;
+  applyChatCompletionsReasoning(body, reasoningEffort);
   const upstream = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: openAiHeaders(apiKey, { "Content-Type": "application/json" }),
@@ -2536,7 +2892,7 @@ function buildCodexPrompt(prompt, context, settings) {
   ].join("\n");
 }
 
-function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summary = "", voiceLogContext = "", context = null, contextCharLimit = 8000, compactedForLocal = false }) {
+function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summary = "", voiceLogContext = "", notificationSummary = "", context = null, contextCharLimit = 8000, compactedForLocal = false }) {
   const contextText = context ? JSON.stringify(context, null, 2).slice(0, contextCharLimit) : "";
   const voiceMode = mode === "voice";
   return [
@@ -2553,6 +2909,7 @@ function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summa
     compactedForLocal ? "The context below is compacted for a local model with a smaller context window. If detail is missing, ask for a narrower node scope instead of failing." : "",
     extraInstructions,
     summary ? `Previous session summary:\n${summary}` : "",
+    notificationSummary ? `Current notification summary:\n${notificationSummary}` : "",
     voiceLogContext ? `Persistent AI/Partner log context:\n${voiceLogContext}` : "",
     contextText ? `Selected context JSON:\n${contextText}` : "",
   ].filter(Boolean).join("\n\n");
@@ -2572,15 +2929,18 @@ function buildRealtimeSessionConfig(payload) {
   const extraInstructions = stringOr(payload?.instructions, "");
   const summary = payload?.summary?.text ? String(payload.summary.text).slice(0, 4000) : "";
   const voiceLogContext = stringOr(payload?.voiceLogContext, "").slice(0, 14000);
+  const notificationSummary = stringOr(payload?.notificationSummary, "").slice(0, 4000);
   const tools = Array.isArray(payload?.tools) ? payload.tools : [];
-  return {
+  const model = stringOr(payload?.model, realtimeModel);
+  const config = {
     type: "realtime",
-    model: stringOr(payload?.model, realtimeModel),
+    model,
     instructions: buildMindAtlasPartnerInstructions({
       mode: "voice",
       extraInstructions,
       summary,
       voiceLogContext,
+      notificationSummary,
       context: payload?.context ?? null,
     }),
     tools,
@@ -2597,6 +2957,14 @@ function buildRealtimeSessionConfig(payload) {
       },
     },
   };
+  if (supportsRealtimeReasoning(model) && realtimeReasoningEffort !== "default") {
+    config.reasoning = { effort: realtimeReasoningEffort };
+  }
+  return config;
+}
+
+function supportsRealtimeReasoning(model) {
+  return String(model || "").toLowerCase().includes("realtime-2");
 }
 
 function compactAiContextForLocal(context) {
@@ -2676,10 +3044,30 @@ function buildTextPartnerInput(messages) {
 }
 
 function buildChatPartnerMessages(messages) {
-  return messages.map((message) => ({
-    role: message?.role === "assistant" ? "assistant" : "user",
-    content: textPartnerMessageContent(message),
-  }));
+  return messages.map((message) => {
+    if (message?.role === "tool") {
+      return {
+        role: "tool",
+        tool_call_id: stringOr(message.toolCallId, ""),
+        content: textPartnerMessageContent(message),
+      };
+    }
+    const output = {
+      role: message?.role === "assistant" ? "assistant" : "user",
+      content: textPartnerMessageContent(message),
+    };
+    if (message?.role === "assistant" && Array.isArray(message.toolCalls) && message.toolCalls.length) {
+      output.tool_calls = message.toolCalls.map((call) => ({
+        id: stringOr(call.callId, `call_${randomUUID()}`),
+        type: "function",
+        function: {
+          name: stringOr(call.name, ""),
+          arguments: typeof call.arguments === "string" ? call.arguments : JSON.stringify(call.arguments ?? {}),
+        },
+      }));
+    }
+    return output;
+  });
 }
 
 function textPartnerMessageContent(message) {
@@ -2716,6 +3104,104 @@ function normalizeChatTools(tools, options = {}) {
   }));
 }
 
+function normalizeAnthropicTools(tools, options = {}) {
+  return normalizeRealtimeTools(tools, options).map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.parameters,
+  }));
+}
+
+function buildAnthropicPartnerMessages(messages) {
+  return messages.map((message) => {
+    if (message?.role === "assistant") {
+      const content = [];
+      const text = stringOr(message.content, "");
+      if (text) content.push({ type: "text", text });
+      if (Array.isArray(message.toolCalls)) {
+        for (const call of message.toolCalls) {
+          const name = stringOr(call?.name, "");
+          if (!name) continue;
+          content.push({
+            type: "tool_use",
+            id: stringOr(call.callId, `toolu_${randomUUID()}`),
+            name,
+            input: parseJsonText(typeof call.arguments === "string" ? call.arguments : JSON.stringify(call.arguments ?? {})) ?? {},
+          });
+        }
+      }
+      return {
+        role: "assistant",
+        content: content.length ? content : [{ type: "text", text: "" }],
+      };
+    }
+    if (message?.role === "tool") {
+      return {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: stringOr(message.toolCallId, ""),
+            content: textPartnerMessageContent(message),
+          },
+        ],
+      };
+    }
+    return {
+      role: "user",
+      content: textPartnerMessageContent(message),
+    };
+  });
+}
+
+function applyOpenAiReasoning(body, effort) {
+  const normalized = normalizeOpenAiReasoningEffort(effort);
+  if (!normalized) return;
+  body.reasoning = { effort: normalized };
+}
+
+function applyChatCompletionsReasoning(body, effort) {
+  const normalized = normalizeOpenAiReasoningEffort(effort);
+  if (!normalized) return;
+  body.reasoning_effort = normalized;
+}
+
+function normalizeOpenAiReasoningEffort(effort) {
+  return ["none", "minimal", "low", "medium", "high", "xhigh"].includes(effort) ? effort : "";
+}
+
+function applyAnthropicEffort(body, effort) {
+  const normalized = normalizeAnthropicEffort(effort);
+  if (!normalized) return;
+  body.effort = normalized;
+}
+
+function normalizeAnthropicEffort(effort) {
+  if (effort === "xhigh") return "max";
+  return ["low", "medium", "high", "max"].includes(effort) ? effort : "";
+}
+
+function anthropicMessagesUrl(baseUrl) {
+  const base = normalizeBaseUrl(baseUrl);
+  if (/\/v1\/messages$/i.test(base)) return base;
+  if (/\/messages$/i.test(base)) return base;
+  if (/\/v1$/i.test(base)) return `${base}/messages`;
+  return `${base}/v1/messages`;
+}
+
+function anthropicHeaders({ apiKey, authToken }) {
+  const headers = {
+    "Content-Type": "application/json",
+    "anthropic-version": "2023-06-01",
+  };
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  } else if (apiKey) {
+    headers["x-api-key"] = apiKey;
+  }
+  return headers;
+}
+
 function compactJsonSchema(value) {
   if (Array.isArray(value)) return value.map(compactJsonSchema);
   if (!value || typeof value !== "object") return value;
@@ -2750,6 +3236,17 @@ function extractChatToolCalls(raw) {
       callId: stringOr(call?.id, ""),
     }))
     .filter((call) => call.name);
+}
+
+function extractAnthropicToolCalls(raw) {
+  const content = Array.isArray(raw?.content) ? raw.content : [];
+  return content
+    .filter((item) => item?.type === "tool_use" && item.name)
+    .map((item) => ({
+      name: String(item.name),
+      arguments: JSON.stringify(item.input ?? {}),
+      callId: stringOr(item.id, ""),
+    }));
 }
 
 function createMockOutput(prompt, context) {
@@ -2912,7 +3409,19 @@ function extractAssistantText(data) {
   }
   const choice = data.choices?.[0];
   if (typeof choice?.message?.content === "string") return choice.message.content;
+  const anthropicText = extractAnthropicText(data);
+  if (anthropicText) return anthropicText;
   return "";
+}
+
+function extractAnthropicText(data) {
+  if (!Array.isArray(data?.content)) return "";
+  const values = [];
+  for (const item of data.content) {
+    if (item?.type === "text" && typeof item.text === "string") values.push(item.text);
+    if (typeof item?.text === "string" && item?.type !== "tool_use") values.push(item.text);
+  }
+  return values.join("\n");
 }
 
 function extractWebSearchCitations(data) {
@@ -3006,6 +3515,7 @@ function describeCompletion(rawResponse, maxOutputTokens) {
 }
 
 function extractFinishReason(rawResponse) {
+  if (typeof rawResponse?.stop_reason === "string" && rawResponse.stop_reason) return rawResponse.stop_reason;
   const choiceReason = rawResponse?.choices?.[0]?.finish_reason;
   if (typeof choiceReason === "string" && choiceReason) return choiceReason;
   const incompleteReason = rawResponse?.incomplete_details?.reason;
@@ -3020,7 +3530,13 @@ function extractFinishReason(rawResponse) {
 
 function estimateCost(provider, inputTokens, outputTokens) {
   if (typeof inputTokens !== "number" && typeof outputTokens !== "number") return undefined;
-  const prefix = provider === "local" ? "MIND_ATLAS_LOCAL" : "MIND_ATLAS_OPENAI";
+  const prefix = provider === "local"
+    ? "MIND_ATLAS_LOCAL"
+    : provider === "anthropic"
+      ? "MIND_ATLAS_ANTHROPIC"
+      : provider === "deepseek"
+        ? "MIND_ATLAS_DEEPSEEK"
+        : "MIND_ATLAS_OPENAI";
   const inputRate = Number(process.env[`${prefix}_INPUT_USD_PER_1M`] ?? 0);
   const outputRate = Number(process.env[`${prefix}_OUTPUT_USD_PER_1M`] ?? 0);
   if (!inputRate && !outputRate) return undefined;

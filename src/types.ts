@@ -88,7 +88,7 @@ export type AtlasNodeKind = "root" | "workArea" | "artifact" | "event" | "concep
 
 export type PlanetTexture = "speckled" | "bands" | "freckles" | "craters" | "mist" | "cell";
 
-export type AiExecutionMode = "openai" | "local" | "codex" | "openclaw" | "claude";
+export type AiExecutionMode = "chat" | "openai" | "local" | "codex" | "openclaw" | "claude";
 
 export type AiContextScope = "minimal" | "focused" | "subtree" | "neighborhood" | "selected" | "custom";
 
@@ -105,7 +105,11 @@ export interface AiContextOptions {
   selectedNodeIds: string[];
 }
 
-export type AiProvider = "openai" | "openai-compatible" | "local" | "codex" | "openclaw" | "claude" | "mock";
+export type AiProvider = "openai" | "openai-compatible" | "anthropic" | "deepseek" | "local" | "codex" | "openclaw" | "claude" | "mock";
+
+export type ChatServiceId = "openai" | "anthropic" | "deepseek" | "local";
+
+export type ChatReasoningEffort = "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type AiRunStatus = "running" | "needs_review" | "error" | "done";
 
@@ -116,6 +120,10 @@ export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-ac
 export type CodexContinueMode = "auto" | "new";
 
 export type OpenClawThinkingLevel = "off";
+
+export type ClaudeReasoningEffort = "default" | "low" | "medium" | "high" | "xhigh" | "max";
+
+export type ClaudePermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions";
 
 export interface CodexSettings {
   model: string;
@@ -150,11 +158,44 @@ export interface OpenClawSettings {
 export interface ClaudeSettings {
   model: string;
   baseUrl: string;
+  reasoningEffort: ClaudeReasoningEffort;
+  permissionMode: ClaudePermissionMode;
   workspace: string;
   timeoutMs: number;
   clientRunId?: string;
   requestNodeId?: string;
   sourceNodeId?: string;
+}
+
+export interface ChatSettings {
+  service: ChatServiceId;
+  model: string;
+  reasoningEffort: ChatReasoningEffort;
+}
+
+export interface ChatModelOption {
+  model: string;
+  displayName: string;
+  description?: string;
+  defaultReasoningEffort: ChatReasoningEffort;
+  supportedReasoningEfforts: ChatReasoningEffort[];
+}
+
+export interface ChatServiceOption {
+  id: ChatServiceId;
+  label: string;
+  configured: boolean;
+  defaultModel: string;
+  defaultReasoningEffort: ChatReasoningEffort;
+  supportedReasoningEfforts: ChatReasoningEffort[];
+  models: ChatModelOption[];
+  baseUrl?: string;
+  detail?: string;
+}
+
+export interface ChatOptionsResult {
+  services: ChatServiceOption[];
+  defaultService: ChatServiceId;
 }
 
 export interface CodexModelOption {
@@ -218,6 +259,7 @@ export interface CodexGeneratedNode {
 
 export interface AiDialogSettings {
   contextOptions: AiContextOptions;
+  chatSettings: ChatSettings;
   codexSettings: CodexSettings;
   openClawSettings: OpenClawSettings;
   claudeSettings: ClaudeSettings;
@@ -326,6 +368,7 @@ export interface AiResponsePayload {
   context: AiNodeContext;
   provider: AiExecutionMode;
   model?: string;
+  chat?: Partial<ChatSettings>;
   codex?: Partial<CodexSettings>;
   openclaw?: Partial<OpenClawSettings>;
   claude?: Partial<ClaudeSettings>;
@@ -398,6 +441,7 @@ export interface AiBridgeHealth {
   openAiMode: string;
   defaultModel: string;
   realtimeModel: string;
+  realtimeReasoningEffort?: string;
   transcriptionModel?: string;
   realtimeTranscriptionModel?: string;
   mockFallback: boolean;
@@ -481,6 +525,7 @@ export interface WebSearchResult {
     title?: string;
     url: string;
   }>;
+  usage?: AiUsage;
   raw?: unknown;
 }
 
@@ -506,6 +551,7 @@ export interface RealtimeSessionConfig {
   voice?: string;
   summary?: VoiceSessionSummary | null;
   voiceLogContext?: string;
+  notificationSummary?: string;
   tools?: RealtimeToolDefinition[];
 }
 
@@ -516,6 +562,7 @@ export interface TextPartnerMessage {
   content: string;
   name?: string;
   toolCallId?: string;
+  toolCalls?: TextPartnerToolCall[];
 }
 
 export interface TextPartnerToolCall {
@@ -525,11 +572,12 @@ export interface TextPartnerToolCall {
 }
 
 export interface TextPartnerTurnPayload {
-  provider: "openai" | "local";
+  provider: ChatServiceId;
   context: AiNodeContext;
   messages: TextPartnerMessage[];
   tools: RealtimeToolDefinition[];
   model?: string;
+  reasoningEffort?: ChatReasoningEffort;
   summary?: VoiceSessionSummary | null;
   voiceLogContext?: string;
 }

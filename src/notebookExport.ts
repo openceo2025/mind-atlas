@@ -8,10 +8,15 @@ import type {
   AtlasNodeAction,
   AtlasNodeKind,
   AttachmentKind,
+  ChatReasoningEffort,
+  ChatServiceId,
+  ChatSettings,
+  ClaudePermissionMode,
+  ClaudeReasoningEffort,
+  ClaudeSettings,
   CodexReasoningEffort,
   CodexSandboxMode,
   CodexSettings,
-  ClaudeSettings,
   NodeAttachment,
   NotebookNodeType,
   OpenClawSettings,
@@ -32,10 +37,14 @@ const NOTEBOOK_NODE_TYPES: NotebookNodeType[] = [
 ];
 const WORK_STATUSES: WorkStatus[] = ["running", "needs_review", "waiting", "blocked", "error", "done"];
 const PLANET_TEXTURES: PlanetTexture[] = ["speckled", "bands", "freckles", "craters", "mist", "cell"];
-const AI_PROVIDERS: AiProvider[] = ["openai", "openai-compatible", "local", "codex", "openclaw", "claude", "mock"];
-const AI_EXECUTION_MODES: AiExecutionMode[] = ["openai", "local", "codex", "openclaw", "claude"];
+const AI_PROVIDERS: AiProvider[] = ["openai", "openai-compatible", "anthropic", "deepseek", "local", "codex", "openclaw", "claude", "mock"];
+const AI_EXECUTION_MODES: AiExecutionMode[] = ["chat", "openai", "local", "codex", "openclaw", "claude"];
+const CHAT_SERVICES: ChatServiceId[] = ["openai", "anthropic", "deepseek", "local"];
+const CHAT_REASONING_EFFORTS: ChatReasoningEffort[] = ["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const CODEX_REASONING_EFFORTS: CodexReasoningEffort[] = ["low", "medium", "high", "xhigh"];
 const CODEX_SANDBOX_MODES: CodexSandboxMode[] = ["read-only", "workspace-write", "danger-full-access"];
+const CLAUDE_REASONING_EFFORTS: ClaudeReasoningEffort[] = ["default", "low", "medium", "high", "xhigh", "max"];
+const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
 
 export interface NotebookExportOptions {
   includeAttachmentAssetPaths?: boolean;
@@ -224,11 +233,12 @@ function sanitizeNodeAction(value: unknown): AtlasNodeAction | undefined {
 function sanitizeAiDialogSettings(value: unknown): AiDialogSettings | undefined {
   if (!isRecord(value)) return undefined;
   const contextOptions = sanitizeAiContextOptions(value.contextOptions);
+  const chatSettings = sanitizeChatSettings(value.chatSettings ?? {});
   const codexSettings = sanitizeCodexSettings(value.codexSettings);
   const openClawSettings = sanitizeOpenClawSettings(value.openClawSettings ?? {});
   const claudeSettings = sanitizeClaudeSettings(value.claudeSettings ?? {});
-  if (!contextOptions || !codexSettings || !openClawSettings || !claudeSettings) return undefined;
-  return { contextOptions, codexSettings, openClawSettings, claudeSettings };
+  if (!contextOptions || !chatSettings || !codexSettings || !openClawSettings || !claudeSettings) return undefined;
+  return { contextOptions, chatSettings, codexSettings, openClawSettings, claudeSettings };
 }
 
 function sanitizeAiContextOptions(value: unknown): AiContextOptions | undefined {
@@ -266,8 +276,8 @@ function sanitizeCodexSettings(value: unknown): CodexSettings | undefined {
       ? (value.sandbox as CodexSandboxMode)
       : "workspace-write",
     workspace: safeString(value.workspace, ""),
-    webSearch: value.webSearch === true,
-    skipGitRepoCheck: value.skipGitRepoCheck === true,
+    webSearch: true,
+    skipGitRepoCheck: false,
     timeoutMs: safeInteger(value.timeoutMs, 60 * 60 * 1000),
     ...(typeof value.fullAccessApproved === "boolean" ? { fullAccessApproved: value.fullAccessApproved } : {}),
     continueMode: value.continueMode === "new" ? "new" : "auto",
@@ -293,8 +303,25 @@ function sanitizeClaudeSettings(value: unknown): ClaudeSettings | undefined {
   return {
     model: safeString(value.model, ""),
     baseUrl: safeString(value.baseUrl, ""),
+    reasoningEffort: CLAUDE_REASONING_EFFORTS.includes(value.reasoningEffort as ClaudeReasoningEffort)
+      ? (value.reasoningEffort as ClaudeReasoningEffort)
+      : "default",
+    permissionMode: CLAUDE_PERMISSION_MODES.includes(value.permissionMode as ClaudePermissionMode)
+      ? (value.permissionMode as ClaudePermissionMode)
+      : "default",
     workspace: safeString(value.workspace, ""),
     timeoutMs: safeInteger(value.timeoutMs, 60 * 60 * 1000),
+  };
+}
+
+function sanitizeChatSettings(value: unknown): ChatSettings | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    service: CHAT_SERVICES.includes(value.service as ChatServiceId) ? (value.service as ChatServiceId) : "openai",
+    model: safeString(value.model, ""),
+    reasoningEffort: CHAT_REASONING_EFFORTS.includes(value.reasoningEffort as ChatReasoningEffort)
+      ? (value.reasoningEffort as ChatReasoningEffort)
+      : "default",
   };
 }
 

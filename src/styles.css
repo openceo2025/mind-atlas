@@ -1294,6 +1294,16 @@ h1 {
   border-color: rgba(143, 183, 255, 0.22);
 }
 
+.voice-log-approval {
+  border: 1px solid rgba(255, 213, 128, 0.28);
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: rgba(255, 198, 92, 0.09);
+  color: #ffe0a1;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .notebook-history-error {
   margin: 12px 16px 0;
   border: 1px solid rgba(255, 135, 104, 0.32);
@@ -2582,8 +2592,12 @@ button:disabled,
   grid-template-columns: minmax(116px, 1.1fr) minmax(96px, 0.8fr) minmax(210px, 2fr) minmax(78px, 0.6fr) minmax(72px, 0.6fr);
 }
 
+.code-options-row {
+  grid-template-columns: minmax(82px, 0.65fr) minmax(116px, 1.1fr) minmax(88px, 0.75fr) minmax(96px, 0.8fr) minmax(220px, 2fr) minmax(72px, 0.6fr);
+}
+
 .claude-options-row {
-  grid-template-columns: minmax(138px, 1fr) minmax(144px, 1fr) minmax(210px, 1.35fr) minmax(210px, 1.35fr) minmax(72px, 0.55fr);
+  grid-template-columns: minmax(82px, 0.65fr) minmax(138px, 1fr) minmax(88px, 0.75fr) minmax(112px, 0.85fr) minmax(220px, 2fr);
 }
 
 .codex-workspace-field {

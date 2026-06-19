@@ -4,7 +4,7 @@ import {
   normalizeAiContextOptions,
   useAtlasStore,
 } from "../store/atlasStore";
-import type { AiContextScope, AiExecutionMode, AtlasNode, RealtimeToolDefinition, WorkStatus } from "../types";
+import type { AiContextScope, AiExecutionMode, AtlasNode, RealtimeToolDefinition, WebSearchResult, WorkStatus } from "../types";
 
 export interface VoiceToolCall {
   name: string;
@@ -26,7 +26,7 @@ type VoiceToolSpec = RealtimeToolDefinition & {
 };
 
 const scopeValues: AiContextScope[] = ["minimal", "focused", "subtree", "neighborhood", "selected", "custom"];
-const aiModes: AiExecutionMode[] = ["openai", "local", "codex", "openclaw", "claude"];
+const aiModes: AiExecutionMode[] = ["chat", "openai", "local", "codex", "openclaw", "claude"];
 const statuses: WorkStatus[] = ["running", "needs_review", "waiting", "blocked", "error", "done"];
 const runAiPurposes = ["node_ai_run", "persistent_result", "delegate_to_node_context"] as const;
 
@@ -43,6 +43,7 @@ const toolSpecs: VoiceToolSpec[] = [
         activeNode: active ? nodeSummary(active) : null,
         multiSelectedNodeIds: state.multiSelectedNodeIds,
         aiContextOptions: state.aiContextOptions,
+        chatSettings: state.chatSettings,
         codexSettings: {
           model: state.codexSettings.model,
           reasoningEffort: state.codexSettings.reasoningEffort,
@@ -63,6 +64,8 @@ const toolSpecs: VoiceToolSpec[] = [
         claudeSettings: {
           model: state.claudeSettings.model,
           baseUrl: state.claudeSettings.baseUrl,
+          reasoningEffort: state.claudeSettings.reasoningEffort,
+          permissionMode: state.claudeSettings.permissionMode,
           workspace: state.claudeSettings.workspace,
           timeoutMs: state.claudeSettings.timeoutMs,
         },
@@ -168,6 +171,18 @@ const toolSpecs: VoiceToolSpec[] = [
   },
   {
     type: "function",
+    name: "add_child_node",
+    description: "Add one child notebook node under a parent or the active node.",
+    parameters: objectSchema({
+      parentId: { type: "string", description: "Parent node id. If omitted, active node is used." },
+      title: { type: "string" },
+      body: { type: "string" },
+      summary: { type: "string" },
+    }, ["body"]),
+    handler: handleAddChildNodes,
+  },
+  {
+    type: "function",
     name: "add_child_nodes",
     description: "Add one or more child notebook nodes under a parent or the active node. Use this for both single-node and multi-node creation.",
     parameters: objectSchema({
@@ -191,17 +206,7 @@ const toolSpecs: VoiceToolSpec[] = [
       body: { type: "string", description: "Legacy single-node body. Prefer nodes[].body." },
       summary: { type: "string", description: "Legacy single-node summary. Prefer nodes[].summary." },
     }),
-    handler: (args) => {
-      const state = useAtlasStore.getState();
-      const parentId = stringArg(args, "parentId", state.selectedNodeId);
-      const nodeDrafts = nodeDraftArrayArg(args, "nodes");
-      const drafts = nodeDrafts.length
-        ? nodeDrafts
-        : [{ title: stringArg(args, "title", "Untitled note"), body: stringArg(args, "body"), summary: optionalString(args, "summary") ?? "" }];
-      const ids = state.addChildNodes(parentId, drafts, { focus: true });
-      if (!ids.length) return fail("Could not create child nodes.");
-      return ok(`Created ${ids.length} child node(s).`, { nodeIds: ids });
-    },
+    handler: handleAddChildNodes,
   },
   {
     type: "function",
@@ -305,7 +310,7 @@ const toolSpecs: VoiceToolSpec[] = [
     type: "function",
     name: "run_ai_from_active_node",
     description:
-      "Run a separate node-anchored AI job from the active node. This creates AI request/result celestial nodes under the active node and is NOT for answering the current global conversation. Use only when the user explicitly asks to run OpenAI, Local, or Codex on a specific node, delegate work to that node context, or create a persistent node-based AI result. Do not use this tool for listing, picking up, summarizing, inspecting, searching, checking notifications, or answering from existing Mind Atlas state; use search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and answer directly instead.",
+      "Run a separate node-anchored AI job from the active node. This creates AI request/result celestial nodes under the active node and is NOT for answering the current global conversation. Use only when the user explicitly asks to run Chat, Codex, OpenClaw, or Claude Code on a specific node, delegate work to that node context, or create a persistent node-based AI result. Do not use this tool for listing, picking up, summarizing, inspecting, searching, checking notifications, or answering from existing Mind Atlas state; use search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and answer directly instead.",
     parameters: objectSchema({
       prompt: {
         type: "string",
@@ -373,6 +378,7 @@ const toolSpecs: VoiceToolSpec[] = [
           nodeId: item.nodeId,
           kind: item.kind,
           title: item.title,
+          suggestedAction: notificationSuggestedAction(item.kind),
           node: node ? nodeSummary(node) : null,
         };
       });
@@ -390,7 +396,7 @@ const toolSpecs: VoiceToolSpec[] = [
       const ranked = notifications.sort((left, right) => notificationScore(right.kind) - notificationScore(left.kind));
       const lines = ranked.map((item) => {
         const node = findNode(state.atlasRoot, item.nodeId);
-        return `${item.kind}: ${node?.title ?? item.title} - ${node?.summary || node?.nextDecision || item.title}`;
+        return `${item.kind}: ${node?.title ?? item.title} - ${node?.summary || node?.nextDecision || item.title} (${notificationSuggestedAction(item.kind)})`;
       });
       return ok(lines.length ? lines.join("\n") : "No unread notifications.", { count: lines.length });
     },
@@ -403,7 +409,7 @@ const toolSpecs: VoiceToolSpec[] = [
     handler: async (args) => {
       const query = stringArg(args, "query");
       const result = await webSearch(query);
-      return ok(result.text, result);
+      return ok(formatWebSearchToolText(result), result);
     },
   },
   {
@@ -412,6 +418,47 @@ const toolSpecs: VoiceToolSpec[] = [
     description: "Request deletion of a node. This is dangerous and requires human approval.",
     parameters: objectSchema({ nodeId: { type: "string" }, reason: { type: "string" } }, ["nodeId"]),
     handler: (args) => approvalRequired("delete_node", args),
+  },
+  {
+    type: "function",
+    name: "import_notebook",
+    description: "Request notebook import or replacement. This is dangerous and requires human approval; browser and OS file pickers must be opened by the user.",
+    parameters: objectSchema({
+      reason: { type: "string" },
+      sourceDescription: { type: "string", description: "Describe the user-provided source. Do not attempt to open a file picker." },
+    }),
+    handler: (args) => approvalRequired("import_notebook", args),
+  },
+  {
+    type: "function",
+    name: "bulk_update_nodes",
+    description: "Request bulk notebook edits. This is dangerous and requires human approval.",
+    parameters: objectSchema({
+      reason: { type: "string" },
+      updates: { type: "array", items: { type: "object" } },
+    }, ["reason"]),
+    handler: (args) => approvalRequired("bulk_update_nodes", args),
+  },
+  {
+    type: "function",
+    name: "run_codex_full_access",
+    description: "Request a Codex retry with full filesystem access. This is dangerous and requires human approval.",
+    parameters: objectSchema({
+      reason: { type: "string" },
+      workspace: { type: "string" },
+      requestNodeId: { type: "string" },
+    }, ["reason"]),
+    handler: (args) => approvalRequired("run_codex_full_access", args),
+  },
+  {
+    type: "function",
+    name: "request_file_picker_action",
+    description: "Request an operation that needs a browser or OS file picker. Voice Partner cannot open file pickers directly; the user must perform the picker action.",
+    parameters: objectSchema({
+      action: { type: "string" },
+      reason: { type: "string" },
+    }, ["action"]),
+    handler: (args) => approvalRequired("request_file_picker_action", args),
   },
   {
     type: "function",
@@ -429,7 +476,21 @@ export function getVoiceToolDefinitions(): RealtimeToolDefinition[] {
 export async function executeVoiceTool(call: VoiceToolCall): Promise<VoiceToolExecutionResult> {
   const spec = toolSpecs.find((item) => item.name === call.name);
   if (!spec) return fail(`Unknown tool: ${call.name}`);
-  const args = parseToolArguments(call.arguments);
+  let args: Record<string, unknown>;
+  try {
+    args = parseToolArguments(call.arguments);
+  } catch (error) {
+    const result = fail(error instanceof Error ? error.message : "Invalid tool arguments.");
+    useAtlasStore.getState().appendVoiceLogEntry({
+      role: "error",
+      title: `Tool error: ${call.name}`,
+      text: result.text,
+      toolName: call.name,
+      toolCallId: call.callId,
+      status: "error",
+    });
+    return result;
+  }
   useAtlasStore.getState().appendVoiceLogEntry({
     role: "tool",
     title: `Tool: ${call.name}`,
@@ -441,7 +502,7 @@ export async function executeVoiceTool(call: VoiceToolCall): Promise<VoiceToolEx
   try {
     const result = await spec.handler(args);
     useAtlasStore.getState().appendVoiceLogEntry({
-      role: result.ok ? "tool" : "error",
+      role: result.approvalRequired || result.ok ? "tool" : "error",
       title: `Tool result: ${call.name}`,
       text: result.text,
       toolName: call.name,
@@ -465,10 +526,14 @@ export async function executeVoiceTool(call: VoiceToolCall): Promise<VoiceToolEx
 }
 
 function parseToolArguments(value: string | Record<string, unknown>): Record<string, unknown> {
-  if (typeof value !== "string") return value;
+  if (typeof value !== "string") {
+    if (value && typeof value === "object" && !Array.isArray(value)) return value;
+    throw new Error("Tool arguments must be a JSON object.");
+  }
   if (!value.trim()) return {};
   const parsed = JSON.parse(value) as unknown;
-  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+  throw new Error("Tool arguments must be a JSON object.");
 }
 
 function objectSchema(properties: Record<string, unknown>, required: string[] = []) {
@@ -489,13 +554,44 @@ function fail(text: string): VoiceToolExecutionResult {
 }
 
 function approvalRequired(toolName: string, args: Record<string, unknown>): VoiceToolExecutionResult {
-  const text = `${toolName} requires human approval and was not executed.`;
+  const approvalId = `voice-approval-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+  const text = `${toolName} requires human approval and was not executed. The request was recorded in the AI Partner log with approval id ${approvalId}.`;
   return {
     ok: false,
     text,
     approvalRequired: true,
-    data: { toolName, args },
+    data: {
+      approvalId,
+      toolName,
+      args,
+      status: "pending_user_approval",
+      executed: false,
+      instructions: "Review the request in the AI Partner log. Execute the corresponding UI action manually only if it is safe.",
+    },
   };
+}
+
+function handleAddChildNodes(args: Record<string, unknown>) {
+  const state = useAtlasStore.getState();
+  const parentId = stringArg(args, "parentId", state.selectedNodeId);
+  const nodeDrafts = nodeDraftArrayArg(args, "nodes");
+  const drafts = nodeDrafts.length
+    ? nodeDrafts
+    : [{ title: stringArg(args, "title", "Untitled note"), body: stringArg(args, "body"), summary: optionalString(args, "summary") ?? "" }];
+  const ids = state.addChildNodes(parentId, drafts, { focus: true });
+  if (!ids.length) return fail("Could not create child nodes.");
+  return ok(`Created ${ids.length} child node(s).`, { nodeIds: ids });
+}
+
+function formatWebSearchToolText(result: WebSearchResult) {
+  const sourceLines = result.sources
+    .slice(0, 6)
+    .map((source, index) => `${index + 1}. ${source.title || source.url} - ${source.url}`);
+  return [
+    result.text,
+    sourceLines.length ? "\nSources:" : "",
+    ...sourceLines,
+  ].filter(Boolean).join("\n");
 }
 
 function nodeSummary(node: AtlasNode) {
@@ -593,4 +689,12 @@ function notificationScore(kind: string) {
   if (kind === "needs_review") return 3;
   if (kind === "cost") return 2;
   return 1;
+}
+
+function notificationSuggestedAction(kind: string) {
+  if (kind === "error") return "Focus the node and explain the error before proposing a fix.";
+  if (kind === "needs_review") return "Focus the node and summarize what needs human review.";
+  if (kind === "codex" || kind === "openclaw" || kind === "claude") return "Focus the agent result node and summarize completed work.";
+  if (kind === "cost") return "Summarize cost or usage impact.";
+  return "Focus the node if the user wants more detail.";
 }

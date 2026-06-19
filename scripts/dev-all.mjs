@@ -40,6 +40,7 @@ env.MIND_ATLAS_BRIDGE_PROTOCOL = protocol;
 if (!process.env.VITE_MIND_ATLAS_BRIDGE_URL && (!env.VITE_MIND_ATLAS_BRIDGE_URL || isLoopbackUrl(env.VITE_MIND_ATLAS_BRIDGE_URL))) {
   env.VITE_MIND_ATLAS_BRIDGE_URL = `${protocol}://127.0.0.1:${env.MIND_ATLAS_BRIDGE_PORT}`;
 }
+env.VITE_MIND_ATLAS_VOICE_IDLE_TIMEOUT_MS ??= env.MIND_ATLAS_VOICE_IDLE_TIMEOUT_MS ?? "3600000";
 
 const appPort = Number(env.MIND_ATLAS_APP_PORT ?? "5173");
 const bridgePort = Number(env.MIND_ATLAS_BRIDGE_PORT);

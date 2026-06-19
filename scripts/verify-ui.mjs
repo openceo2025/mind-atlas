@@ -298,6 +298,64 @@ async function verifyExternalImports(browser) {
   return { imported: samples.map((sample) => sample.name), textImport: "append and preview merge" };
 }
 
+async function verifyVoiceLogDialog(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  await page.addInitScript(() => {
+    const now = new Date().toISOString();
+    window.localStorage.setItem(
+      "mind-atlas-voice-log-v1",
+      JSON.stringify([
+        {
+          id: "verify-voice-tool",
+          role: "tool",
+          title: "Tool result: delete_node",
+          text: "delete_node requires human approval and was not executed.",
+          status: "approval_required",
+          toolName: "delete_node",
+          createdAt: now,
+          metadata: {
+            approvalId: "voice-approval-verify",
+            toolName: "delete_node",
+            args: { nodeId: "atlas-root", reason: "verify" },
+            status: "pending_user_approval",
+            executed: false,
+          },
+        },
+      ]),
+    );
+    window.localStorage.setItem(
+      "mind-atlas-voice-summary-v1",
+      JSON.stringify({ text: "Verification summary", createdAt: now, sessionId: "verify-session" }),
+    );
+  });
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  await page.getByLabel("Open atlas menu").click();
+  await page.getByText("AI Partner log").click();
+  await page.getByRole("dialog", { name: "AI Partner log" }).waitFor();
+  const dialogText = await page.getByRole("dialog", { name: "AI Partner log" }).innerText();
+  for (const expected of [
+    "1 entries / 1 approval pending",
+    "Latest summary",
+    "Verification summary",
+    "Human approval required. This tool request was logged but not executed.",
+    "approval: voice-approval-verify",
+    "executed: false",
+    "args: nodeId=atlas-root, reason=verify",
+  ]) {
+    if (!dialogText.includes(expected)) {
+      throw new Error(`Voice log dialog is missing ${expected}: ${dialogText}`);
+    }
+  }
+  await context.close();
+  return { approvalPending: 1 };
+}
+
 async function seedCompletedOnboarding(page) {
   await page.addInitScript(() => {
     const now = new Date().toISOString();
@@ -328,13 +386,14 @@ const browser = await launchBrowser();
 try {
   const desktop = await verifyViewport(browser, "desktop", { width: 1440, height: 920 });
   await verifyLayoutModeSwitch(browser);
+  const voiceLog = await verifyVoiceLogDialog(browser);
   const outline = await verifyOutlineAndContextCopy(browser);
   const imports = await verifyExternalImports(browser);
   const mobileOutline = await verifyMobileOutlinePanel(browser);
   const mobile = await verifyViewport(browser, "mobile", { width: 390, height: 844 });
   const mobileLandscape = await verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 });
   console.log("UI verification passed");
-  console.log({ desktop, outline, imports, mobileOutline, mobile, mobileLandscape });
+  console.log({ desktop, voiceLog, outline, imports, mobileOutline, mobile, mobileLandscape });
 } finally {
   await browser.close();
 }

@@ -1,19 +1,35 @@
-import { AudioLines, Bot, Code2, HardDrive, Mic, PenLine, SendHorizonal, Square, Terminal } from "lucide-react";
+import { AudioLines, Bot, Code2, Mic, PenLine, SendHorizonal, Square, Terminal } from "lucide-react";
 import { FormEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, useEffect, useMemo, useRef, useState } from "react";
-import { getCodexOptions, transcribeAudio } from "../ai/bridgeClient";
+import { transcribeAudio } from "../ai/audioTranscriptionClient";
+import { getChatOptions, getCodexOptions } from "../ai/bridgeClient";
 import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceSession, type RealtimeSessionState } from "../ai/realtimeClient";
 import { runTextPartnerTurn } from "../ai/textPartnerClient";
 import { buildVoiceLogContext } from "../ai/voiceLogContext";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
 import { buildAiNodeContextWithAttachments, findInheritedAiDialogSettings, findNode, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
 import { loadPersistedUiState, persistUiStatePatch } from "../uiPersistence";
-import type { AiAttachmentMode, AiContextScope, AiExecutionMode, CodexContinueMode, CodexOptionsResult, CodexReasoningEffort, CodexSandboxMode } from "../types";
+import type {
+  AiAttachmentMode,
+  AiContextScope,
+  AiExecutionMode,
+  ChatOptionsResult,
+  ChatReasoningEffort,
+  ChatServiceId,
+  ClaudePermissionMode,
+  ClaudeReasoningEffort,
+  CodexContinueMode,
+  CodexOptionsResult,
+  CodexReasoningEffort,
+  CodexSandboxMode,
+} from "../types";
 
 type CommandMode = AiExecutionMode | "note";
+type AgentExecutionMode = Extract<AiExecutionMode, "codex" | "claude">;
 type VoiceButtonState = "idle" | "dictation_recording" | "dictation_transcribing" | "voice_connecting" | "voice_ptt" | "voice_responding";
 
 const VOICE_LONG_PRESS_MS = 460;
-const VOICE_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
+const DEFAULT_VOICE_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
+const VOICE_IDLE_TIMEOUT_MS = readVoiceIdleTimeoutMs();
 const CLAUDE_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 const CLAUDE_DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic";
 const CLAUDE_MODEL_PRESETS = [
@@ -22,11 +38,13 @@ const CLAUDE_MODEL_PRESETS = [
   { id: "fable-5", label: "Claude Fable 5", model: "claude-fable-5", baseUrl: CLAUDE_ANTHROPIC_BASE_URL },
   { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", model: "deepseek-v4-pro[1m]", baseUrl: CLAUDE_DEEPSEEK_BASE_URL },
 ] as const;
+const CLAUDE_REASONING_EFFORTS: ClaudeReasoningEffort[] = ["default", "low", "medium", "high", "xhigh", "max"];
+const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
 
 export function CommandDock() {
   const [persistedCommandDraft] = useState(() => loadPersistedUiState()?.commandDraft ?? null);
   const [value, setValue] = useState(() => persistedCommandDraft?.value ?? "");
-  const [mode, setMode] = useState<CommandMode>(() => isCommandMode(persistedCommandDraft?.mode) ? persistedCommandDraft.mode : "openai");
+  const [mode, setMode] = useState<CommandMode>(() => initialCommandMode(persistedCommandDraft?.mode));
   const [voiceButtonState, setVoiceButtonState] = useState<VoiceButtonState>("idle");
   const [voiceState, setVoiceState] = useState<RealtimeSessionState>("closed");
   const [voiceError, setVoiceError] = useState("");
@@ -52,12 +70,15 @@ export function CommandDock() {
   const multiSelectedNodeIds = useAtlasStore((state) => state.multiSelectedNodeIds);
   const aiContextOptions = useAtlasStore((state) => state.aiContextOptions);
   const setAiContextOptions = useAtlasStore((state) => state.setAiContextOptions);
+  const chatSettings = useAtlasStore((state) => state.chatSettings);
+  const setChatSettings = useAtlasStore((state) => state.setChatSettings);
   const codexSettings = useAtlasStore((state) => state.codexSettings);
   const setCodexSettings = useAtlasStore((state) => state.setCodexSettings);
   const openClawSettings = useAtlasStore((state) => state.openClawSettings);
   const setOpenClawSettings = useAtlasStore((state) => state.setOpenClawSettings);
   const claudeSettings = useAtlasStore((state) => state.claudeSettings);
   const setClaudeSettings = useAtlasStore((state) => state.setClaudeSettings);
+  const unreadNotifications = useAtlasStore((state) => state.unreadNotifications);
   const loadAiDialogSettingsForNode = useAtlasStore((state) => state.loadAiDialogSettingsForNode);
   const resetAiDialogSettingsToDefaults = useAtlasStore((state) => state.resetAiDialogSettingsToDefaults);
   const setCommandInputEditing = useAtlasStore((state) => state.setCommandInputEditing);
@@ -74,6 +95,7 @@ export function CommandDock() {
   const scope = aiContextOptions.scope;
   const editableContextControls = mode !== "note" && scope === "custom";
   const [codexOptions, setCodexOptions] = useState<CodexOptionsResult | null>(null);
+  const [chatOptions, setChatOptions] = useState<ChatOptionsResult | null>(null);
   const contextOptionsForRun = useMemo(
     () => normalizeAiContextOptions({ ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds }),
     [aiContextOptions, multiSelectedNodeIds],
@@ -92,6 +114,18 @@ export function CommandDock() {
   const codexEfforts = selectedCodexModel?.supportedReasoningEfforts.length
     ? selectedCodexModel.supportedReasoningEfforts
     : (["low", "medium", "high", "xhigh"] as CodexReasoningEffort[]);
+  const fallbackServices = fallbackChatServices();
+  const chatServiceOptions = chatOptions?.services.length ? chatOptions.services : fallbackServices;
+  const selectedChatService = chatServiceOptions.find((service) => service.id === chatSettings.service) ?? fallbackServices[0];
+  const chatModelOptions = selectedChatService?.models.length
+    ? selectedChatService.models
+    : fallbackChatModelOptions(selectedChatService?.defaultModel ?? chatSettings.model);
+  const selectedChatModel = chatModelOptions.find((option) => option.model === chatSettings.model) ?? chatModelOptions[0];
+  const chatEfforts = selectedChatModel?.supportedReasoningEfforts.length
+    ? selectedChatModel.supportedReasoningEfforts
+    : selectedChatService?.supportedReasoningEfforts.length
+      ? selectedChatService.supportedReasoningEfforts
+      : (["default"] as ChatReasoningEffort[]);
   const selectedClaudePreset = getClaudePresetId(claudeSettings.model, claudeSettings.baseUrl);
 
   const selectedNodeTitle = selectedNode?.title.trim() || "Mind Atlas";
@@ -189,6 +223,25 @@ export function CommandDock() {
 
   useEffect(() => {
     let alive = true;
+    void getChatOptions()
+      .then((options) => {
+        if (!alive) return;
+        setChatOptions(options);
+        const current = useAtlasStore.getState();
+        if (findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId)?.chatSettings) return;
+        const service = options.services.find((item) => item.id === current.chatSettings.service) ?? options.services.find((item) => item.id === options.defaultService) ?? options.services[0];
+        if (!service) return;
+        const model = current.chatSettings.model || service.defaultModel || service.models[0]?.model || "";
+        const effort = service.models.find((item) => item.model === model)?.defaultReasoningEffort ?? service.defaultReasoningEffort;
+        setChatSettings({
+          service: service.id,
+          model,
+          reasoningEffort: effort,
+        });
+      })
+      .catch(() => {
+        if (alive) setChatOptions(null);
+      });
     void getCodexOptions()
       .then((options) => {
         if (!alive) return;
@@ -210,7 +263,7 @@ export function CommandDock() {
     return () => {
       alive = false;
     };
-  }, [setCodexSettings]);
+  }, [setChatSettings, setCodexSettings]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -226,13 +279,13 @@ export function CommandDock() {
       addQuickChildFromInput(trimmed);
       return;
     }
-    if ((mode === "openai" || mode === "local") && isGlobalAiPartnerSurface(atlasRoot, selectedNodeId)) {
-      void runTextPartnerTurn(trimmed, mode, contextOptionsForRun);
+    if (isChatCommandMode(mode) && isGlobalAiPartnerSurface(atlasRoot, selectedNodeId)) {
+      void runTextPartnerTurn(trimmed, chatSettingsForCommandMode(chatSettings, mode), contextOptionsForRun);
       return;
     }
     // Node anchored AI requests must create normal request/result nodes with notification pulses.
     // The global AI Partner log path is limited to the root surface to avoid stealing node runs.
-    void runAiOnSelectedNode(trimmed, mode, contextOptionsForRun);
+    void runAiOnSelectedNode(trimmed, isChatCommandMode(mode) ? (mode === "openai" || mode === "local" ? mode : "chat") : mode, contextOptionsForRun);
   };
 
   const ensureVoicePartnerSession = async () => {
@@ -249,6 +302,7 @@ export function CommandDock() {
         voice: voicePartnerSettings.realtimeVoice,
         summary: voiceSessionSummary,
         voiceLogContext: buildVoiceLogContext(voiceLogEntries),
+        notificationSummary: buildVoiceNotificationSummary(atlasRoot, unreadNotifications),
         onStateChange: (state) => {
           setVoiceState(state);
           setVoiceButtonState((current) => {
@@ -324,6 +378,7 @@ export function CommandDock() {
             provider: "openai",
             model: voicePartnerSettings.realtimeModel,
             prompt: pendingTurn?.prompt,
+            usage: event.usage,
           },
         });
       }
@@ -344,6 +399,11 @@ export function CommandDock() {
         title: "Voice session summary",
         text: summary.text,
         sessionId: summary.sessionId,
+        metadata: {
+          provider: "openai",
+          model: voicePartnerSettings.realtimeModel,
+          usage: event.usage,
+        },
       });
       return;
     }
@@ -561,7 +621,7 @@ export function CommandDock() {
       selectedNodeIds: latest.multiSelectedNodeIds,
     }));
     if (context) {
-      session.updateContext(context, latest.voiceSessionSummary, buildVoiceLogContext(latest.voiceLogEntries));
+      session.updateContext(context, latest.voiceSessionSummary, buildVoiceLogContext(latest.voiceLogEntries), buildVoiceNotificationSummary(latest.atlasRoot, latest.unreadNotifications));
     }
     session.beginPushToTalk();
     setVoiceButtonState("voice_ptt");
@@ -726,11 +786,9 @@ export function CommandDock() {
         )}
       </button>
       <div className="mode-switch" aria-label="AI execution mode">
-        <ModeButton mode="openai" activeMode={mode} onSelect={setMode} />
-        <ModeButton mode="local" activeMode={mode} onSelect={setMode} />
-        <ModeButton mode="codex" activeMode={mode} onSelect={setMode} />
+        <ModeButton mode="chat" activeMode={mode} onSelect={setMode} />
+        <CodeModeButton activeMode={mode} onSelect={setMode} />
         <ModeButton mode="openclaw" activeMode={mode} onSelect={setMode} />
-        <ModeButton mode="claude" activeMode={mode} onSelect={setMode} />
         <ModeButton mode="note" activeMode={mode} onSelect={setMode} />
       </div>
       <select
@@ -764,6 +822,10 @@ export function CommandDock() {
                 ? "Ask Codex from this location"
                 : mode === "openclaw"
                   ? "Ask OpenClaw from this location"
+                  : mode === "claude"
+                    ? "Ask Claude Code from this location"
+                    : mode === "chat"
+                      ? "Chat from this location"
                   : "Ask AI from this location"
           }
         />
@@ -832,8 +894,91 @@ export function CommandDock() {
           />
         </div>
       ) : null}
-      {mode === "codex" ? (
-        <div className="codex-options-row" aria-label="Codex settings">
+      {mode === "chat" ? (
+        <div className="codex-options-row chat-options-row" aria-label="Chat settings">
+          <label className="context-option-field">
+            <span>Service</span>
+            <select
+              value={chatSettings.service}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => {
+                const service = chatServiceOptions.find((item) => item.id === event.target.value) ?? chatServiceOptions[0];
+                if (!service) return;
+                const model = service.defaultModel || service.models[0]?.model || "";
+                const effort = service.models.find((item) => item.model === model)?.defaultReasoningEffort ?? service.defaultReasoningEffort;
+                setChatSettings({ service: service.id, model, reasoningEffort: effort });
+              }}
+            >
+              {chatServiceOptions.map((service) => (
+                <option key={service.id} value={service.id}>
+                  {service.label}{service.configured ? "" : " (not configured)"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="context-option-field">
+            <span>Model</span>
+            <select
+              value={selectedChatModel?.model ?? chatSettings.model}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => {
+                const option = chatModelOptions.find((item) => item.model === event.target.value);
+                setChatSettings({
+                  model: event.target.value,
+                  reasoningEffort: option?.supportedReasoningEfforts.includes(chatSettings.reasoningEffort)
+                    ? chatSettings.reasoningEffort
+                    : option?.defaultReasoningEffort ?? selectedChatService.defaultReasoningEffort,
+                });
+              }}
+            >
+              {chatModelOptions.map((option) => (
+                <option key={`${selectedChatService.id}-${option.model || "default"}`} value={option.model}>
+                  {option.displayName}
+                </option>
+              ))}
+            </select>
+          </label>
+          {chatEfforts.length > 1 ? (
+            <label className="context-option-field">
+              <span>Effort</span>
+              <select
+                value={chatEfforts.includes(chatSettings.reasoningEffort) ? chatSettings.reasoningEffort : selectedChatModel?.defaultReasoningEffort ?? "default"}
+                onFocus={() => setCommandInputEditing(true)}
+                onBlur={() => setCommandInputEditing(false)}
+                onChange={(event) => setChatSettings({ reasoningEffort: event.target.value as ChatReasoningEffort })}
+              >
+                {chatEfforts.map((effort) => (
+                  <option key={effort} value={effort}>
+                    {chatEffortLabel(effort)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+      ) : null}
+      {isAgentCommandMode(mode) ? (
+        <div className={`codex-options-row code-options-row ${mode === "claude" ? "claude-options-row" : ""}`} aria-label="Code settings">
+          <label className="context-option-field">
+            <span>Code</span>
+            <select
+              value={mode}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => {
+                setVoiceError("");
+                setMode(event.target.value as AgentExecutionMode);
+              }}
+              title="Choose the code backend for this node-anchored run."
+            >
+              <option value="codex">Codex</option>
+              <option value="claude">Claude Code</option>
+            </select>
+          </label>
+          {mode === "codex" ? (
+            <>
           <label className="context-option-field">
             <span>Model</span>
             <select
@@ -902,18 +1047,6 @@ export function CommandDock() {
             />
           </label>
           <label className="context-option-field">
-            <span>Web search</span>
-            <select
-              value={codexSettings.webSearch ? "on" : "off"}
-              onFocus={() => setCommandInputEditing(true)}
-              onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setCodexSettings({ webSearch: event.target.value === "on" })}
-            >
-              <option value="off">off</option>
-              <option value="on">on</option>
-            </select>
-          </label>
-          <label className="context-option-field">
             <span>Thread</span>
             <select
               value={codexSettings.continueMode ?? "auto"}
@@ -926,27 +1059,73 @@ export function CommandDock() {
               <option value="new">new</option>
             </select>
           </label>
-          <label className="context-option-field codex-check-field" title="Pass --skip-git-repo-check for a non-Git or not-yet-trusted work root. Default is off.">
-            <span>Skip Git</span>
-            <span className="codex-check-control">
-              <input
-                type="checkbox"
-                checked={codexSettings.skipGitRepoCheck}
-                onFocus={() => setCommandInputEditing(true)}
-                onBlur={() => setCommandInputEditing(false)}
-                onChange={(event) => setCodexSettings({ skipGitRepoCheck: event.target.checked })}
-              />
-            </span>
+            </>
+          ) : (
+            <>
+          <label className="context-option-field">
+            <span>Preset</span>
+            <select
+              value={selectedClaudePreset}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => {
+                const preset = CLAUDE_MODEL_PRESETS.find((item) => item.id === event.target.value);
+                if (preset) setClaudeSettings({ model: preset.model, baseUrl: preset.baseUrl });
+              }}
+              title="Claude Code provider and model preset"
+            >
+              {CLAUDE_MODEL_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                </option>
+              ))}
+              <option value="custom">Custom</option>
+            </select>
           </label>
-          <ContextNumberControl
-            label="Timeout (min)"
-            value={Math.round(codexSettings.timeoutMs / 60000)}
-            min={1}
-            max={120}
-            onChange={(minutes) => setCodexSettings({ timeoutMs: minutes * 60000 })}
-            onFocus={() => setCommandInputEditing(true)}
-            onBlur={() => setCommandInputEditing(false)}
-          />
+          <label className="context-option-field">
+            <span>Effort</span>
+            <select
+              value={claudeSettings.reasoningEffort}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setClaudeSettings({ reasoningEffort: event.target.value as ClaudeReasoningEffort })}
+              title="Claude Code --effort. Leave default to let the bridge and CLI decide."
+            >
+              {CLAUDE_REASONING_EFFORTS.map((effort) => (
+                <option key={effort} value={effort}>
+                  {claudeEffortLabel(effort)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="context-option-field">
+            <span>Permission</span>
+            <select
+              value={claudeSettings.permissionMode}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setClaudeSettings({ permissionMode: event.target.value as ClaudePermissionMode })}
+              title="Claude Code --permission-mode. This is not the same as Codex OS sandboxing."
+            >
+              {CLAUDE_PERMISSION_MODES.map((permissionMode) => (
+                <option key={permissionMode} value={permissionMode}>
+                  {claudePermissionLabel(permissionMode)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="context-option-field codex-workspace-field">
+            <span>Work root</span>
+            <input
+              value={claudeSettings.workspace}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setClaudeSettings({ workspace: event.target.value })}
+              placeholder="optional project path"
+            />
+          </label>
+            </>
+          )}
         </div>
       ) : null}
       {mode === "openclaw" ? (
@@ -1000,69 +1179,6 @@ export function CommandDock() {
             min={1}
             max={120}
             onChange={(minutes) => setOpenClawSettings({ timeoutMs: minutes * 60000 })}
-            onFocus={() => setCommandInputEditing(true)}
-            onBlur={() => setCommandInputEditing(false)}
-          />
-        </div>
-      ) : null}
-      {mode === "claude" ? (
-        <div className="codex-options-row claude-options-row" aria-label="Claude Code settings">
-          <label className="context-option-field">
-            <span>Preset</span>
-            <select
-              value={selectedClaudePreset}
-              onFocus={() => setCommandInputEditing(true)}
-              onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => {
-                const preset = CLAUDE_MODEL_PRESETS.find((item) => item.id === event.target.value);
-                if (preset) setClaudeSettings({ model: preset.model, baseUrl: preset.baseUrl });
-              }}
-              title="Claude Code provider and model preset"
-            >
-              {CLAUDE_MODEL_PRESETS.map((preset) => (
-                <option key={preset.id} value={preset.id}>
-                  {preset.label}
-                </option>
-              ))}
-              <option value="custom">Custom</option>
-            </select>
-          </label>
-          <label className="context-option-field">
-            <span>Model</span>
-            <input
-              value={claudeSettings.model}
-              onFocus={() => setCommandInputEditing(true)}
-              onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setClaudeSettings({ model: event.target.value })}
-              placeholder="bridge env or deepseek-v4-pro[1m]"
-            />
-          </label>
-          <label className="context-option-field">
-            <span>Base URL</span>
-            <input
-              value={claudeSettings.baseUrl}
-              onFocus={() => setCommandInputEditing(true)}
-              onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setClaudeSettings({ baseUrl: event.target.value })}
-              placeholder="bridge env or DeepSeek Anthropic URL"
-            />
-          </label>
-          <label className="context-option-field codex-workspace-field">
-            <span>Work root</span>
-            <input
-              value={claudeSettings.workspace}
-              onFocus={() => setCommandInputEditing(true)}
-              onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setClaudeSettings({ workspace: event.target.value })}
-              placeholder="optional project path"
-            />
-          </label>
-          <ContextNumberControl
-            label="Timeout (min)"
-            value={Math.round(claudeSettings.timeoutMs / 60000)}
-            min={1}
-            max={120}
-            onChange={(minutes) => setClaudeSettings({ timeoutMs: minutes * 60000 })}
             onFocus={() => setCommandInputEditing(true)}
             onBlur={() => setCommandInputEditing(false)}
           />
@@ -1184,7 +1300,7 @@ function ModeButton({
   activeMode: CommandMode;
   onSelect: (mode: CommandMode) => void;
 }) {
-  const Icon = mode === "openai" ? Bot : mode === "local" ? HardDrive : mode === "codex" ? Code2 : mode === "openclaw" ? Terminal : mode === "claude" ? Bot : PenLine;
+  const Icon = mode === "chat" || mode === "openai" ? Bot : mode === "codex" ? Code2 : mode === "openclaw" ? Terminal : mode === "claude" ? Bot : PenLine;
   return (
     <button
       className={activeMode === mode ? "is-active" : ""}
@@ -1200,8 +1316,34 @@ function ModeButton({
   );
 }
 
+function CodeModeButton({
+  activeMode,
+  onSelect,
+}: {
+  activeMode: CommandMode;
+  onSelect: (mode: CommandMode) => void;
+}) {
+  const active = isAgentCommandMode(activeMode);
+  const label = active ? `Code: ${modeLabel(activeMode)}` : "Code";
+  return (
+    <button
+      className={active ? "is-active" : ""}
+      type="button"
+      onClick={() => onSelect(active ? activeMode : "codex")}
+      aria-pressed={active}
+      aria-label={label}
+      title={label}
+    >
+      <Code2 size={14} />
+      <span>Code</span>
+    </button>
+  );
+}
+
 function modeLabel(mode: CommandMode) {
   switch (mode) {
+    case "chat":
+      return "Chat";
     case "openai":
       return "OpenAI";
     case "local":
@@ -1217,6 +1359,132 @@ function modeLabel(mode: CommandMode) {
   }
 }
 
+function readVoiceIdleTimeoutMs() {
+  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+  const raw = env?.VITE_MIND_ATLAS_VOICE_IDLE_TIMEOUT_MS;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return DEFAULT_VOICE_IDLE_TIMEOUT_MS;
+  return Math.min(24 * 60 * 60 * 1000, Math.max(10_000, Math.trunc(value)));
+}
+
+function initialCommandMode(value: unknown): CommandMode {
+  if (value === "openai" || value === "local") return "chat";
+  return isCommandMode(value) ? value : "chat";
+}
+
+function isChatCommandMode(mode: CommandMode): mode is Extract<CommandMode, "chat" | "openai" | "local"> {
+  return mode === "chat" || mode === "openai" || mode === "local";
+}
+
+function isAgentCommandMode(mode: CommandMode): mode is AgentExecutionMode {
+  return mode === "codex" || mode === "claude";
+}
+
+function chatSettingsForCommandMode(settings: ReturnType<typeof useAtlasStore.getState>["chatSettings"], mode: CommandMode) {
+  if (mode === "local") return { ...settings, service: "local" as ChatServiceId, model: "" };
+  if (mode === "openai") return { ...settings, service: "openai" as ChatServiceId };
+  return settings;
+}
+
+function buildVoiceNotificationSummary(
+  atlasRoot: ReturnType<typeof useAtlasStore.getState>["atlasRoot"],
+  unreadNotifications: ReturnType<typeof useAtlasStore.getState>["unreadNotifications"],
+) {
+  const notifications = Object.values(unreadNotifications);
+  if (!notifications.length) return "No unread notifications.";
+  return notifications
+    .slice(0, 8)
+    .map((notification) => {
+      const node = findNode(atlasRoot, notification.nodeId);
+      const title = node?.title || notification.title;
+      const detail = node?.summary || node?.nextDecision || notification.title;
+      return `${notification.kind}: ${title} - ${detail}`;
+    })
+    .join("\n");
+}
+
+function fallbackChatServices(): ChatOptionsResult["services"] {
+  return [
+    {
+      id: "openai",
+      label: "OpenAI",
+      configured: true,
+      defaultModel: "",
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: ["default", "minimal", "low", "medium", "high", "xhigh"],
+      models: fallbackChatModelOptions(""),
+    },
+    {
+      id: "anthropic",
+      label: "Opus",
+      configured: false,
+      defaultModel: "claude-opus-4-8",
+      defaultReasoningEffort: "default",
+      supportedReasoningEfforts: ["default"],
+      models: fallbackChatModelOptions("claude-opus-4-8"),
+    },
+    {
+      id: "deepseek",
+      label: "DeepSeek",
+      configured: false,
+      defaultModel: "deepseek-v4-pro[1m]",
+      defaultReasoningEffort: "default",
+      supportedReasoningEfforts: ["default"],
+      models: fallbackChatModelOptions("deepseek-v4-pro[1m]"),
+    },
+    {
+      id: "local",
+      label: "Local",
+      configured: true,
+      defaultModel: "",
+      defaultReasoningEffort: "default",
+      supportedReasoningEfforts: ["default"],
+      models: [{ model: "", displayName: "Loaded local model", defaultReasoningEffort: "default", supportedReasoningEfforts: ["default"] }],
+    },
+  ];
+}
+
+function fallbackChatModelOptions(model: string): ChatOptionsResult["services"][number]["models"] {
+  return [
+    {
+      model,
+      displayName: model || "Bridge default",
+      defaultReasoningEffort: "default",
+      supportedReasoningEfforts: ["default"],
+    },
+  ];
+}
+
+function chatEffortLabel(effort: ChatReasoningEffort) {
+  if (effort === "default") return "provider default";
+  if (effort === "none") return "none";
+  if (effort === "xhigh") return "extra high";
+  return effort;
+}
+
+function claudeEffortLabel(effort: ClaudeReasoningEffort) {
+  if (effort === "default") return "default";
+  if (effort === "xhigh") return "extra high";
+  return effort;
+}
+
+function claudePermissionLabel(permissionMode: ClaudePermissionMode) {
+  switch (permissionMode) {
+    case "default":
+      return "default";
+    case "acceptEdits":
+      return "accept edits";
+    case "plan":
+      return "plan";
+    case "auto":
+      return "auto";
+    case "dontAsk":
+      return "don't ask";
+    case "bypassPermissions":
+      return "trusted";
+  }
+}
+
 function getClaudePresetId(model: string, baseUrl: string) {
   const normalizedModel = model.trim();
   const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
@@ -1224,7 +1492,7 @@ function getClaudePresetId(model: string, baseUrl: string) {
 }
 
 function isCommandMode(value: unknown): value is CommandMode {
-  return value === "openai" || value === "local" || value === "codex" || value === "openclaw" || value === "claude" || value === "note";
+  return value === "chat" || value === "openai" || value === "local" || value === "codex" || value === "openclaw" || value === "claude" || value === "note";
 }
 
 function isGlobalAiPartnerSurface(atlasRoot: ReturnType<typeof useAtlasStore.getState>["atlasRoot"], selectedNodeId: string) {

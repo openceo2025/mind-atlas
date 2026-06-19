@@ -3,6 +3,7 @@ import type {
   AiResponsePayload,
   AiResponseResult,
   AudioTranscriptionResult,
+  ChatOptionsResult,
   CloudNotebookListResult,
   CloudNotebookSaveResult,
   CodexOptionsResult,
@@ -93,6 +94,11 @@ export async function requestTextPartnerTurn(payload: TextPartnerTurnPayload): P
     body: JSON.stringify(payload),
   });
   return await readJsonResponse<TextPartnerTurnResult>(response);
+}
+
+export async function getChatOptions(): Promise<ChatOptionsResult> {
+  const response = await fetchBridgeGet("/api/chat/options");
+  return await readJsonResponse<ChatOptionsResult>(response);
 }
 
 export async function getCodexOptions(): Promise<CodexOptionsResult> {

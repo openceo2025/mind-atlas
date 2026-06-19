@@ -42,10 +42,21 @@ overriding variables already set by the shell.
 - `MIND_ATLAS_OPENAI_TRANSCRIPTION_MODEL`: dictation transcription model. Defaults to `gpt-4o-transcribe`.
 - `MIND_ATLAS_OPENAI_BASE_URL`: defaults to `https://api.openai.com/v1`.
 - `MIND_ATLAS_OPENAI_MODE`: `responses` by default.
+- `MIND_ATLAS_OPENAI_CHAT_MODELS`: optional comma-separated Chat model list. Defaults include the configured OpenAI model.
 - `MIND_ATLAS_OPENAI_INPUT_USD_PER_1M` / `MIND_ATLAS_OPENAI_OUTPUT_USD_PER_1M`: optional cost-rate inputs for UI estimates.
 - `MIND_ATLAS_LOCAL_BASE_URL`: LM Studio or another OpenAI-compatible local endpoint. Defaults to `http://127.0.0.1:1234/v1`.
 - `MIND_ATLAS_LOCAL_API_KEY`: optional local endpoint key. Defaults to `lm-studio`.
 - `MIND_ATLAS_LOCAL_MAX_OUTPUT_TOKENS`: Local `/chat/completions` output cap. Defaults to `MIND_ATLAS_MAX_OUTPUT_TOKENS`.
+- `MIND_ATLAS_ANTHROPIC_BASE_URL`: optional Chat Opus/Anthropic Messages API base URL. Defaults to `MIND_ATLAS_CLAUDE_ANTHROPIC_BASE_URL`, `ANTHROPIC_BASE_URL`, or `https://api.anthropic.com`.
+- `MIND_ATLAS_ANTHROPIC_API_KEY` / `MIND_ATLAS_ANTHROPIC_AUTH_TOKEN`: optional Chat Opus credentials. Existing `MIND_ATLAS_CLAUDE_ANTHROPIC_API_KEY` and `MIND_ATLAS_CLAUDE_ANTHROPIC_AUTH_TOKEN` also work.
+- `MIND_ATLAS_ANTHROPIC_MODEL`: default Chat Opus model. Defaults to `MIND_ATLAS_CLAUDE_MODEL` or `claude-opus-4-8`.
+- `MIND_ATLAS_ANTHROPIC_MODELS`: optional comma-separated Chat Opus model list.
+- `MIND_ATLAS_ANTHROPIC_MAX_OUTPUT_TOKENS`: Chat Opus output cap. Defaults to `MIND_ATLAS_OPENAI_MAX_OUTPUT_TOKENS`.
+- `MIND_ATLAS_DEEPSEEK_ANTHROPIC_BASE_URL`: optional DeepSeek Anthropic-compatible base URL. Defaults to `https://api.deepseek.com/anthropic`.
+- `MIND_ATLAS_DEEPSEEK_AUTH_TOKEN`: optional DeepSeek Chat key. Existing `MIND_ATLAS_CLAUDE_DEEPSEEK_AUTH_TOKEN` and `DEEPSEEK_API_KEY` also work.
+- `MIND_ATLAS_DEEPSEEK_MODEL`: default DeepSeek Chat model. Defaults to `deepseek-v4-pro[1m]`.
+- `MIND_ATLAS_DEEPSEEK_MODELS`: optional comma-separated DeepSeek Chat model list.
+- `MIND_ATLAS_DEEPSEEK_MAX_OUTPUT_TOKENS`: DeepSeek Chat output cap. Defaults to `MIND_ATLAS_OPENAI_MAX_OUTPUT_TOKENS`.
 - `MIND_ATLAS_WEB_SEARCH_MAX_OUTPUT_TOKENS`: web-search response cap. Defaults to `2048`.
 - Local mode inspects `${MIND_ATLAS_LOCAL_BASE_URL}/models` and uses the first model currently loaded by LM Studio. `MIND_ATLAS_LOCAL_MODEL` is intentionally ignored to avoid auto-loading a model.
 - `MIND_ATLAS_CODEX_BIN`: Codex executable name. Defaults to `codex`.
@@ -77,9 +88,12 @@ error occurs, the bridge automatically retries the run without the broken OS
 sandbox while preserving the requested `read-only` or `workspace-write` policy
 in the Codex instructions. The Codex details node records this as
 `Sandbox recovery`.
-- `MIND_ATLAS_REALTIME_MODEL`: default Realtime model. Defaults to `gpt-realtime`.
+- `MIND_ATLAS_REALTIME_MODEL`: default Realtime model. Defaults to `gpt-realtime-2`.
 - `MIND_ATLAS_REALTIME_VOICE`: default voice.
+- `MIND_ATLAS_REALTIME_REASONING_EFFORT`: Realtime 2 reasoning effort (`default`, `low`, `medium`, or `high`). Defaults to `low` and is only sent for `gpt-realtime-2` style models.
 - `MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL`: Realtime session input transcription model. Defaults to `gpt-4o-transcribe`.
+- `MIND_ATLAS_VOICE_IDLE_TIMEOUT_MS`: Voice Partner idle timeout for `npm run dev:all` and docs. Defaults to one hour.
+- `VITE_MIND_ATLAS_VOICE_IDLE_TIMEOUT_MS`: browser-side Voice Partner idle timeout. Defaults to one hour; set a short value in local verification to exercise idle summary shutdown.
 - `MIND_ATLAS_CLOUD_DIR`: server-side folder for `クラウドへ保存` / `クラウドから読み込み` notebook packages. Defaults to `server-data/notebooks`.
 - `MIND_ATLAS_DEV_HTTPS`: when running `npm run dev:all`, defaults to `true` and generates local HTTPS certificates in `.certs/`.
 - `MIND_ATLAS_BRIDGE_HOST`: bridge bind host. Defaults to `127.0.0.1`; `npm run dev:all` overrides it to `0.0.0.0` for LAN use.
@@ -100,18 +114,23 @@ Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that ne
 
 ## Current AI Surface
 
-- The command dock supports OpenAI, Local, Codex, OpenClaw, and Claude Code modes.
+- The command dock supports Chat, Code, OpenClaw, and Note modes.
+- Chat is the shared non-agent conversation entry. It can target OpenAI, Opus/Anthropic, DeepSeek, or Local from one service/model/effort settings row.
+- Code is the shared workspace-aware CLI entry. Its first setting chooses Codex or Claude Code, then shows that backend's compact settings. Codex exposes model, effort, sandbox, work root, and thread controls. Claude Code exposes preset, effort, permission mode, and work root controls.
 - A user request is saved as a child notebook node first. The provider result is saved as a child of that request.
-- OpenAI uses the Responses API by default.
-- OpenAI image-generation prompts are routed through the Image API and saved as image attachments on the result node.
-- Local mode uses an OpenAI-compatible `/chat/completions` endpoint such as LM Studio.
-- Codex mode runs `codex exec --json` in `workspace-write` sandbox by default. The user-facing answer becomes `Codex final`; run metadata, command logs, and changed-file details are collected into one sibling `Codex details` node.
+- From the root surface, Chat requests are written to the AI Partner log instead of creating notebook nodes. With an active node, Chat creates the same request/result child branch as before.
+- OpenAI Chat uses the Responses API by default and passes supported `reasoning.effort` values when selected.
+- OpenAI image-generation prompts in Chat are routed through the Image API and saved as image attachments on the result node.
+- Opus/Anthropic and DeepSeek Chat use the Anthropic Messages shape through the bridge, including client-side Mind Atlas tool calls routed back through the browser.
+- Local Chat uses an OpenAI-compatible `/chat/completions` endpoint such as LM Studio and the model currently loaded there.
+- Codex under Code mode runs `codex exec --json` in `workspace-write` sandbox by default. The user-facing answer becomes `Codex final`; run metadata, command logs, and changed-file details are collected into one sibling `Codex details` node.
 - OpenClaw mode runs `openclaw agent --local --json --thinking off` through the bridge. The result is saved as a child notebook node, and the OpenClaw session key plus run log path are stored on the request/result branch.
 - OpenClaw `Session: auto` resumes an OpenClaw session key found on the active node path. `Session: new` starts a fresh key for that request.
-- Claude Code mode pipes the Mind Atlas prompt/context into `claude -p --output-format json` through the bridge. The bridge injects the selected model, base URL, and provider-appropriate auth variables into that child process, saves stdout/stderr/metadata under `server-data/claude-runs`, and stores the log path on the request/result branch.
-- The Claude Code settings row includes presets for Bridge env, Claude Opus 4.8, Claude Fable 5, and DeepSeek V4 Pro. Anthropic presets explicitly route to `https://api.anthropic.com`; the DeepSeek preset routes to `https://api.deepseek.com/anthropic`.
+- Claude Code mode pipes the Mind Atlas prompt/context into `claude -p --output-format json` through the bridge. The bridge injects the selected preset, model, base URL, and provider-appropriate auth variables into that child process, saves stdout/stderr/metadata under `server-data/claude-runs`, and stores the log path on the request/result branch.
+- The Claude Code settings include presets for Bridge env, Claude Opus 4.8, Claude Fable 5, and DeepSeek V4 Pro, plus `--effort` and `--permission-mode`. Anthropic presets explicitly route to `https://api.anthropic.com`; the DeepSeek preset routes to `https://api.deepseek.com/anthropic`. Direct model and base URL text fields are intentionally hidden; use bridge environment variables or presets. Claude Code permission mode is not equivalent to Codex OS sandboxing.
 - Command failures inside a normal Codex run are treated as ordinary diagnostic detail, not Mind Atlas error nodes. Error pulses are reserved for Codex invocation failures or explicit approval/error nodes.
-- The Codex settings row has a `Skip Git` checkbox. It is off by default; when enabled, the bridge passes `--skip-git-repo-check` for first runs in a non-Git or not-yet-trusted work root.
+- Codex web search is enabled automatically. The command dock does not show a web-search toggle.
+- The bridge decides `--skip-git-repo-check` automatically before each Codex run. If `git rev-parse --is-inside-work-tree` succeeds in the work root, the flag is not used. If the work root is not a Git repository or Git cannot inspect it, the flag is used.
 - If Codex appears blocked by permissions, Mind Atlas creates a pulsing approval request node. Its child option nodes have centered buttons for approving or denying a retry with `danger-full-access`.
 - Work roots can be selected in the Codex settings row. If left blank, the bridge can infer a work root from context text such as `workspace: c:\path\to\repo` or `作業ルート: c:\path\to\repo`.
 - Running, review, and error states pulse around the affected notebook node.
@@ -126,8 +145,8 @@ Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that ne
 - Mobile notifications can be enabled from the main menu on mobile-like devices. Notification sound, banner display, and vibration are controlled by browser and OS settings, and some mobile browsers only allow notifications for installed web apps.
 - Voice Partner sessions stay warm for one hour after the last interaction. Before idle shutdown, Mind Atlas asks the session for a compact summary and stores it for the next session.
 - Voice Partner conversation logs are global text logs, not notebook nodes. Open `Voice log` from the main menu to review or clear them.
-- The Voice Partner receives guarded Mind Atlas tools for search, focus, selection, node creation/editing, undo/redo, AI dispatch, notifications, and web search. Destructive operations return an approval-required result instead of executing directly.
-- Voice Partner web search is exposed through the bridge and uses the OpenAI Responses API web-search tool server-side.
+- The Voice Partner receives guarded Mind Atlas tools for search, focus, selection, node creation/editing, undo/redo, AI dispatch, notifications, and web search. Destructive operations, bulk edits, notebook import, Codex full-access retry requests, and any browser/OS file-picker action return an approval-required result instead of executing directly. These requests are visible in the AI Partner log with their arguments and remain unexecuted until a human uses the UI deliberately.
+- Voice Partner web search is exposed through the bridge and uses the OpenAI Responses API web-search tool server-side. The bridge returns response text, citations, deduplicated sources, and normalized usage metadata when upstream provides it.
 - The main menu can save rich `.mindatlaspkg` packages to the bridge server folder and load them back from a server-side package list. This is a prototype shared-data feature and does not include user accounts or access control.
 
 ## Rollback

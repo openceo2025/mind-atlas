@@ -1,5 +1,5 @@
 import { createRealtimeCall } from "./bridgeClient";
-import type { AiNodeContext, RealtimeSessionConfig, VoiceSessionSummary } from "../types";
+import type { AiNodeContext, AiUsage, RealtimeSessionConfig, VoiceSessionSummary } from "../types";
 import { executeVoiceTool, getVoiceToolDefinitions } from "../voice/voiceTools";
 
 export type RealtimeSessionState = "connecting" | "live" | "listening" | "responding" | "closed" | "error";
@@ -9,8 +9,8 @@ export type RealtimeClientEvent =
   | { kind: "user_transcript_delta"; text: string }
   | { kind: "user_transcript_done"; text: string }
   | { kind: "assistant_delta"; text: string }
-  | { kind: "assistant_done"; text: string }
-  | { kind: "summary_done"; text: string }
+  | { kind: "assistant_done"; text: string; usage?: AiUsage }
+  | { kind: "summary_done"; text: string; usage?: AiUsage }
   | { kind: "tool_call"; name: string; callId?: string; arguments: string }
   | { kind: "tool_result"; name: string; callId?: string; text: string; ok: boolean }
   | { kind: "raw"; event: unknown }
@@ -18,7 +18,7 @@ export type RealtimeClientEvent =
 
 export interface RealtimeVoiceSession {
   id: string;
-  updateContext: (context: AiNodeContext, summary?: VoiceSessionSummary | null, voiceLogContext?: string) => void;
+  updateContext: (context: AiNodeContext, summary?: VoiceSessionSummary | null, voiceLogContext?: string, notificationSummary?: string) => void;
   beginPushToTalk: () => void;
   endPushToTalk: () => void;
   requestSessionSummaryAndClose: () => Promise<string>;
@@ -33,6 +33,7 @@ interface StartVoicePartnerSessionOptions {
   voice?: string;
   summary?: VoiceSessionSummary | null;
   voiceLogContext?: string;
+  notificationSummary?: string;
   onStateChange?: (state: RealtimeSessionState) => void;
   onEvent?: (event: RealtimeClientEvent) => void;
 }
@@ -48,6 +49,7 @@ export async function startVoicePartnerSession({
   voice,
   summary,
   voiceLogContext,
+  notificationSummary,
   onStateChange,
   onEvent,
 }: StartVoicePartnerSessionOptions): Promise<RealtimeVoiceSession> {
@@ -127,7 +129,7 @@ export async function startVoicePartnerSession({
         content: [
           {
             type: "input_text",
-            text: buildInitialRealtimeMessage(context, summary, voiceLogContext),
+            text: buildInitialRealtimeMessage(context, summary, voiceLogContext, notificationSummary),
           },
         ],
       },
@@ -176,6 +178,7 @@ export async function startVoicePartnerSession({
     voice,
     summary,
     voiceLogContext,
+    notificationSummary,
     tools: getVoiceToolDefinitions(),
   };
   const answerSdp = await createRealtimeCall({ ...session, sdp: offer.sdp });
@@ -293,6 +296,7 @@ export async function startVoicePartnerSession({
     }
 
     if (type === "response.done") {
+      const usage = extractRealtimeUsage(payload);
       responseInProgress = false;
       if (summaryMode) {
         const text = assistantTextBuffer.trim();
@@ -301,12 +305,12 @@ export async function startVoicePartnerSession({
         summaryResolver?.(text);
         summaryResolver = null;
         summaryRejecter = null;
-        onEvent?.({ kind: "summary_done", text });
+        onEvent?.({ kind: "summary_done", text, usage });
         return;
       }
       const text = assistantTextBuffer.trim();
       assistantTextBuffer = "";
-      if (text) onEvent?.({ kind: "assistant_done", text });
+      if (text) onEvent?.({ kind: "assistant_done", text, usage });
       completedToolCallKeys.clear();
       settleAssistantResponseState();
       return;
@@ -366,7 +370,7 @@ export async function startVoicePartnerSession({
   return {
     id: sessionId,
     cancelAssistantResponse,
-    updateContext: (nextContext, nextSummary, nextVoiceLogContext) => {
+    updateContext: (nextContext, nextSummary, nextVoiceLogContext, nextNotificationSummary) => {
       if (stopped) return;
       sendEvent({
         type: "conversation.item.create",
@@ -376,7 +380,7 @@ export async function startVoicePartnerSession({
           content: [
             {
               type: "input_text",
-              text: buildRealtimeContextUpdateMessage(nextContext, nextSummary, nextVoiceLogContext),
+              text: buildRealtimeContextUpdateMessage(nextContext, nextSummary, nextVoiceLogContext, nextNotificationSummary),
             },
           ],
         },
@@ -570,22 +574,24 @@ function normalizeArgumentsForKey(args: string) {
   }
 }
 
-function buildInitialRealtimeMessage(context: AiNodeContext, summary?: VoiceSessionSummary | null, voiceLogContext?: string) {
+function buildInitialRealtimeMessage(context: AiNodeContext, summary?: VoiceSessionSummary | null, voiceLogContext?: string, notificationSummary?: string) {
   return [
     "Mind Atlas Voice Partner session started.",
     `Active node: ${context.selectedNode.title}`,
     summary?.text ? `Previous voice session summary:\n${summary.text}` : "",
+    notificationSummary ? `Notification summary:\n${notificationSummary}` : "",
     voiceLogContext ? `AI Partner log context for global continuity:\n${voiceLogContext}` : "",
     "Wait for push-to-talk speech before taking action. Use tools when the user asks to operate Mind Atlas.",
   ].filter(Boolean).join("\n\n");
 }
 
-function buildRealtimeContextUpdateMessage(context: AiNodeContext, summary?: VoiceSessionSummary | null, voiceLogContext?: string) {
+function buildRealtimeContextUpdateMessage(context: AiNodeContext, summary?: VoiceSessionSummary | null, voiceLogContext?: string, notificationSummary?: string) {
   return [
     "Current Mind Atlas context update for the next push-to-talk turn.",
     `Active node: ${context.selectedNode.title}`,
     `Context scope: ${context.scope}`,
     summary?.text ? `Latest AI Partner summary:\n${summary.text}` : "",
+    notificationSummary ? `Notification summary:\n${notificationSummary}` : "",
     voiceLogContext ? `AI Partner log context:\n${voiceLogContext}` : "",
     "Selected context JSON:",
     JSON.stringify(context, null, 2),
@@ -611,4 +617,28 @@ function extractErrorMessage(payload: Record<string, unknown>) {
     if (typeof message === "string") return message;
   }
   return "Realtime reported an error.";
+}
+
+function extractRealtimeUsage(payload: Record<string, unknown>): AiUsage | undefined {
+  const response = payload.response && typeof payload.response === "object" ? (payload.response as Record<string, unknown>) : payload;
+  const usage = response.usage && typeof response.usage === "object" ? (response.usage as Record<string, unknown>) : undefined;
+  if (!usage) return undefined;
+  const inputTokens = numberValue(usage.input_tokens) ?? numberValue(usage.inputTokens);
+  const outputTokens = numberValue(usage.output_tokens) ?? numberValue(usage.outputTokens);
+  const totalTokens = numberValue(usage.total_tokens) ?? numberValue(usage.totalTokens) ?? addOptional(inputTokens, outputTokens);
+  const normalized: AiUsage = {};
+  if (typeof inputTokens === "number") normalized.inputTokens = inputTokens;
+  if (typeof outputTokens === "number") normalized.outputTokens = outputTokens;
+  if (typeof totalTokens === "number") normalized.totalTokens = totalTokens;
+  return Object.keys(normalized).length ? normalized : undefined;
+}
+
+function numberValue(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function addOptional(left: number | undefined, right: number | undefined) {
+  if (typeof left !== "number" && typeof right !== "number") return undefined;
+  return (left ?? 0) + (right ?? 0);
 }
