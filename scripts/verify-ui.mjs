@@ -356,8 +356,43 @@ async function verifyVoiceLogDialog(browser) {
   return { approvalPending: 1 };
 }
 
-async function seedCompletedOnboarding(page) {
-  await page.addInitScript(() => {
+async function verifyLockedModeGlobalMenu(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page, { aiUnlocked: false });
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+
+  await page.getByLabel("Open atlas menu").click();
+  const menu = page.locator(".global-context-menu");
+  await menu.getByLabel("Layout mode").waitFor();
+  await menu.getByText("Restore from history").waitFor();
+  await menu.getByText("Import text outline").waitFor();
+
+  const aiOnlyItemCount = await menu.getByText("AI Partner log").count();
+  if (aiOnlyItemCount > 0) {
+    throw new Error("Locked mode global menu exposed AI Partner log.");
+  }
+
+  await menu.getByTitle("Tree").click();
+  await page.waitForTimeout(220);
+  await menu.getByText("Restore from history").click();
+  await page.getByRole("dialog", { name: "Restore from history" }).waitFor();
+  await page.getByRole("button", { name: /Close/i }).click();
+
+  await page.getByLabel("Open atlas menu").click();
+  await menu.getByText("Import text outline").click();
+  await page.getByRole("dialog", { name: "Import text outline" }).waitFor();
+
+  await context.close();
+  return { visibleSharedItems: ["Layout", "Restore from history", "Import text outline"] };
+}
+
+async function seedCompletedOnboarding(page, { aiUnlocked = true } = {}) {
+  await page.addInitScript((seed) => {
     const now = new Date().toISOString();
     window.localStorage.setItem(
       "mind-atlas-onboarding-v1",
@@ -371,13 +406,13 @@ async function seedCompletedOnboarding(page) {
         childNodeCreated: true,
         spaceBasicsCompleted: true,
         basicCompleted: true,
-        aiUnlocked: true,
+        aiUnlocked: seed.aiUnlocked,
         titlePromptApplied: true,
         startedAt: now,
         completedAt: now,
       }),
     );
-  });
+  }, { aiUnlocked });
 }
 
 await mkdir(outputDir, { recursive: true });
@@ -386,6 +421,7 @@ const browser = await launchBrowser();
 try {
   const desktop = await verifyViewport(browser, "desktop", { width: 1440, height: 920 });
   await verifyLayoutModeSwitch(browser);
+  const lockedMenu = await verifyLockedModeGlobalMenu(browser);
   const voiceLog = await verifyVoiceLogDialog(browser);
   const outline = await verifyOutlineAndContextCopy(browser);
   const imports = await verifyExternalImports(browser);
@@ -393,7 +429,7 @@ try {
   const mobile = await verifyViewport(browser, "mobile", { width: 390, height: 844 });
   const mobileLandscape = await verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 });
   console.log("UI verification passed");
-  console.log({ desktop, voiceLog, outline, imports, mobileOutline, mobile, mobileLandscape });
+  console.log({ desktop, lockedMenu, voiceLog, outline, imports, mobileOutline, mobile, mobileLandscape });
 } finally {
   await browser.close();
 }
