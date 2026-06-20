@@ -2270,7 +2270,8 @@ function HierarchyNode({
     : mobileLabelScope
     ? mobileLabelVisible
     : isLocalContextNode || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
-  const parentEdgeVisible = !suppressParentEdge && path.length > 2 && hiddenDragEdgeNodeId !== node.id;
+  const [layoutEdgeHidden, setLayoutEdgeHidden] = useState(false);
+  const parentEdgeVisible = !suppressParentEdge && path.length > 2 && hiddenDragEdgeNodeId !== node.id && !layoutEdgeHidden;
   const lowQuality = renderQuality === "low";
   const rootActiveDirectChild = selectedNodeId === path[0]?.id && depth === 1;
   const hitSphereSegments: [number, number] = lowQuality ? [10, 6] : [20, 12];
@@ -2364,6 +2365,7 @@ function HierarchyNode({
     if (dragRef.current) return;
     if (layoutMode === "phyllotaxis" || renderQuality === "low") {
       layoutTransitionRef.current = null;
+      setLayoutEdgeHidden(false);
       applyVisualWorldPosition(worldPosition, parentWorld);
       groupRef.current?.scale.setScalar(1);
       return;
@@ -2373,6 +2375,7 @@ function HierarchyNode({
     const currentWorld = visualWorldRef.current;
     if (distanceBetweenPositions(currentWorld, targetWorld) <= 0.01) {
       layoutTransitionRef.current = null;
+      setLayoutEdgeHidden(false);
       applyVisualWorldPosition(targetWorld, parentWorld);
       groupRef.current?.scale.setScalar(isNodeLayoutVisible ? 1 : 0.56);
       return;
@@ -2396,6 +2399,7 @@ function HierarchyNode({
       duration: LAYOUT_MOTION_DURATION_SECONDS,
       kind: transitionKind,
     };
+    setLayoutEdgeHidden(true);
   }, [
     isEnteringLayout,
     isNodeLayoutVisible,
@@ -2424,6 +2428,7 @@ function HierarchyNode({
       layoutTransitionRef.current = null;
       applyVisualWorldPosition(transition.targetWorld, getVisualParentWorld(path, transition.parentWorld));
       groupRef.current?.scale.setScalar(transition.kind === "exit" ? 0.56 : 1);
+      setLayoutEdgeHidden(false);
     }
   });
 
