@@ -83,9 +83,10 @@ async function verifyLayoutModeSwitch(browser) {
   await seedCompletedOnboarding(page);
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
-  await page.getByLabel("Open atlas menu").click();
   for (const label of ["Tree", "Mind map", "Hub emphasis", "Phyllotaxis"]) {
+    await page.getByLabel("Open atlas menu").click();
     await page.getByTitle(label).click();
+    await page.locator(".global-context-menu").waitFor({ state: "detached" });
     await page.waitForTimeout(220);
     const hasCanvas = await page.locator("canvas").evaluate((canvas) => {
       const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
@@ -378,7 +379,9 @@ async function verifyLockedModeGlobalMenu(browser) {
   }
 
   await menu.getByTitle("Tree").click();
+  await menu.waitFor({ state: "detached" });
   await page.waitForTimeout(220);
+  await page.getByLabel("Open atlas menu").click();
   await menu.getByText("Restore from history").click();
   await page.getByRole("dialog", { name: "Restore from history" }).waitFor();
   await page.getByRole("button", { name: /Close/i }).click();

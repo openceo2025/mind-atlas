@@ -769,6 +769,7 @@ export default function App() {
   const handleLayoutModeChange = (mode: AtlasLayoutMode) => {
     setLayoutMode(mode);
     persistUiStatePatch({ ...latestUiStateRef.current, layoutMode: mode });
+    setMenuOpen(false);
   };
 
   const handleOpenOutlineEditor = () => {
