@@ -2,6 +2,7 @@ import { AudioLines, Bot, Code2, Mic, PenLine, SendHorizonal, Square, Terminal }
 import { FormEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, useEffect, useMemo, useRef, useState } from "react";
 import { transcribeAudio } from "../ai/audioTranscriptionClient";
 import { getChatOptions, getCodexOptions } from "../ai/bridgeClient";
+import { runOpenClawPartnerTurn } from "../ai/openClawPartnerClient";
 import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceSession, type RealtimeSessionState } from "../ai/realtimeClient";
 import { runTextPartnerTurn } from "../ai/textPartnerClient";
 import { buildVoiceLogContext } from "../ai/voiceLogContext";
@@ -281,6 +282,10 @@ export function CommandDock() {
     }
     if (isChatCommandMode(mode)) {
       void runTextPartnerTurn(trimmed, chatSettingsForCommandMode(chatSettings, mode), contextOptionsForRun);
+      return;
+    }
+    if (mode === "openclaw" && selectedNodeId === atlasRoot.id) {
+      void runOpenClawPartnerTurn(trimmed, openClawSettings);
       return;
     }
     // Agent CLI requests stay on the node-anchored path and do not receive Mind Atlas tool access.
@@ -1130,16 +1135,6 @@ export function CommandDock() {
       {mode === "openclaw" ? (
         <div className="codex-options-row openclaw-options-row" aria-label="OpenClaw settings">
           <label className="context-option-field">
-            <span>Model</span>
-            <input
-              value={openClawSettings.model}
-              onFocus={() => setCommandInputEditing(true)}
-              onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setOpenClawSettings({ model: event.target.value })}
-              placeholder="OpenClaw default"
-            />
-          </label>
-          <label className="context-option-field">
             <span>Agent</span>
             <input
               value={openClawSettings.agent}
@@ -1147,16 +1142,6 @@ export function CommandDock() {
               onBlur={() => setCommandInputEditing(false)}
               onChange={(event) => setOpenClawSettings({ agent: event.target.value })}
               placeholder="default"
-            />
-          </label>
-          <label className="context-option-field codex-workspace-field">
-            <span>Work root</span>
-            <input
-              value={openClawSettings.workspace}
-              onFocus={() => setCommandInputEditing(true)}
-              onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setOpenClawSettings({ workspace: event.target.value })}
-              placeholder="optional project path"
             />
           </label>
           <label className="context-option-field">

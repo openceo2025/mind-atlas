@@ -115,6 +115,13 @@ requests use the same Mind Atlas context and tool definitions as the previous
 OpenAI/Local entry. With an active node, the reply is saved as a child request
 branch. From the root surface, the request and reply go to the AI Partner log.
 
+For OpenClaw mode, start the local bridge and use the OpenClaw settings row for
+agent, session, and timeout controls. Mind Atlas does not override the OpenClaw
+model or work root; it uses the defaults configured in OpenClaw. From the root
+surface, OpenClaw replies are written to the AI Partner log. With a non-root
+node selected, OpenClaw creates the same request/result branch as other
+node-anchored AI runs.
+
 For Code mode on Windows, choose either Codex or Claude Code from the Code
 settings row. To use Claude Code, install Claude Code and point the bridge at
 the Windows executable:

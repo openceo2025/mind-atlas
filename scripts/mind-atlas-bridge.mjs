@@ -51,10 +51,8 @@ let codexOptionsCache = null;
 let codexSearchFlagSupportCache = null;
 
 const openClawBin = resolveOpenClawBin(process.env.MIND_ATLAS_OPENCLAW_BIN ?? "openclaw");
-const openClawModel = process.env.MIND_ATLAS_OPENCLAW_MODEL ?? "";
 const openClawThinking = "off";
 const openClawAgent = process.env.MIND_ATLAS_OPENCLAW_AGENT ?? "";
-const openClawWorkspace = process.env.MIND_ATLAS_OPENCLAW_WORKSPACE ?? "";
 const openClawTimeoutMs = Number(process.env.MIND_ATLAS_OPENCLAW_TIMEOUT_MS ?? 10 * 60 * 1000);
 const openClawPromptCharLimit = readPositiveIntEnv("MIND_ATLAS_OPENCLAW_PROMPT_CHAR_LIMIT", 24_000);
 const openClawDisabled = process.env.MIND_ATLAS_OPENCLAW_DISABLED === "true";
@@ -228,7 +226,7 @@ const server = createBridgeServer(async (request, response) => {
             id: "openclaw",
             label: "OpenClaw CLI",
             configured: !openClawDisabled,
-            model: openClawModel || "openclaw-default",
+            model: "openclaw-default",
             detail: `${openClawBin}; ${openClawThinking}; ${openClawAgent || "default-agent"}`,
           },
           {
@@ -444,7 +442,6 @@ async function createAiResponse(payload) {
     return await createOpenClawResponse({
       prompt,
       context,
-      model: stringOr(payload?.model, openClawModel),
       openclaw: payload?.openclaw ?? {},
       startedAt,
     });
@@ -1261,9 +1258,9 @@ async function saveCodexResponseLog(logPath, response) {
   }
 }
 
-async function createOpenClawResponse({ prompt, context, model, openclaw, startedAt }) {
+async function createOpenClawResponse({ prompt, context, openclaw, startedAt }) {
   if (openClawDisabled) throw new BridgeError(503, "OpenClaw CLI is disabled");
-  const settings = normalizeOpenClawSettings(openclaw, model, context);
+  const settings = normalizeOpenClawSettings(openclaw);
   const openClawPrompt = buildOpenClawPrompt(prompt, context, settings);
   const result = await runOpenClaw(openClawPrompt, settings);
   const durationMs = Date.now() - startedAt;
@@ -1315,7 +1312,6 @@ async function runOpenClaw(prompt, settings) {
     "--session-key",
     sessionKey,
   ];
-  if (settings.model) args.push("--model", settings.model);
   if (settings.agent) args.push("--agent", settings.agent);
 
   const commandSpec = buildOpenClawCommand(args);
@@ -1348,6 +1344,7 @@ function buildOpenClawCommand(args) {
 }
 
 function buildOpenClawPrompt(prompt, context, settings) {
+  const rootSurfaceRun = context?.selectedNode?.id === "atlas-root" && context?.scope === "minimal";
   const contextSummary = JSON.stringify({
     selectedNode: context?.selectedNode,
     selectedNodes: context?.selectedNodes,
@@ -1358,12 +1355,20 @@ function buildOpenClawPrompt(prompt, context, settings) {
   }, null, 2);
   return [
     "You are OpenClaw CLI invoked from Mind Atlas.",
-    "Mind Atlas is a spatial tree notebook. This is a node-anchored run: use only the explicit node context below, plus files/tools you can access through OpenClaw.",
-    "Return a concise final answer suitable for saving as a child Mind Atlas node.",
+    rootSurfaceRun
+      ? "Mind Atlas is a spatial tree notebook. This is a root-surface AI Partner run: use the user request, OpenClaw defaults, and only the minimal root context below."
+      : "Mind Atlas is a spatial tree notebook. This is a node-anchored run: use only the explicit node context below, plus files/tools you can access through OpenClaw.",
+    rootSurfaceRun
+      ? "Return a concise final answer suitable for saving in the AI Partner log."
+      : "Return a concise final answer suitable for saving as a child Mind Atlas node.",
     "Do not change OpenClaw or LM Studio configuration unless the user explicitly asks for that in this prompt.",
-    settings.workspace ? `User-selected work root: ${settings.workspace}` : "No Mind Atlas work root was provided; use the OpenClaw agent default workspace if it has one.",
+    "Mind Atlas did not override the OpenClaw work root; use the OpenClaw agent default workspace if it has one.",
     settings.agent ? `OpenClaw agent: ${settings.agent}` : "OpenClaw agent: default",
-    settings.resumeSessionKey ? `Continuing OpenClaw session key: ${settings.resumeSessionKey}` : "Starting a new OpenClaw session key for this branch.",
+    settings.resumeSessionKey
+      ? `Continuing OpenClaw session key: ${settings.resumeSessionKey}`
+      : rootSurfaceRun
+        ? "Starting a new OpenClaw session key for this AI Partner turn."
+        : "Starting a new OpenClaw session key for this branch.",
     "",
     "# User request",
     prompt,
@@ -1373,14 +1378,13 @@ function buildOpenClawPrompt(prompt, context, settings) {
   ].join("\n");
 }
 
-function normalizeOpenClawSettings(input, model, context) {
-  const workspace = stringOr(input?.workspace, stringOr(extractWorkspaceFromContext(context), openClawWorkspace));
+function normalizeOpenClawSettings(input) {
   const continueMode = input?.continueMode === "new" ? "new" : "auto";
   return {
-    model: stringOr(input?.model, model || openClawModel),
+    model: "",
     thinking: openClawThinking,
     agent: stringOr(input?.agent, openClawAgent),
-    workspace,
+    workspace: "",
     timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input.timeoutMs) : openClawTimeoutMs,
     continueMode,
     resumeSessionKey: continueMode === "new" ? "" : stringOr(input?.resumeSessionKey, ""),

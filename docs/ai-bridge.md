@@ -68,9 +68,7 @@ overriding variables already set by the shell.
 - `MIND_ATLAS_CODEX_MODELS`: optional comma-separated model override when `codex debug models` is unavailable.
 - `MIND_ATLAS_CODEX_TIMEOUT_MS`: Codex execution timeout in milliseconds. Defaults to 60 minutes.
 - `MIND_ATLAS_OPENCLAW_BIN`: OpenClaw executable. Defaults to `openclaw`; on Windows the bridge also auto-detects the user npm OpenClaw entrypoint.
-- `MIND_ATLAS_OPENCLAW_MODEL`: optional OpenClaw model override. Leave blank to use the OpenClaw default, such as the model already configured for LM Studio.
 - `MIND_ATLAS_OPENCLAW_AGENT`: optional OpenClaw agent id. Leave blank to use the OpenClaw default agent.
-- `MIND_ATLAS_OPENCLAW_WORKSPACE`: optional work root hint passed into the OpenClaw prompt. The bridge does not modify OpenClaw workspace configuration.
 - `MIND_ATLAS_OPENCLAW_TIMEOUT_MS`: OpenClaw execution timeout in milliseconds. Defaults to 10 minutes.
 - `MIND_ATLAS_CLAUDE_BIN`: Claude Code executable. Defaults to `claude`. On Windows, the WinGet link path is usually `C:\Users\<you>\AppData\Local\Microsoft\WinGet\Links\claude.exe`.
 - `MIND_ATLAS_CLAUDE_MODEL`: default Claude Code model. The command dock can override this per run with presets for `claude-opus-4-8`, `claude-fable-5`, and `deepseek-v4-pro[1m]`.
@@ -124,7 +122,7 @@ Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that ne
 - Opus/Anthropic and DeepSeek Chat use the Anthropic Messages shape through the bridge, including client-side Mind Atlas tool calls routed back through the browser.
 - Local Chat uses an OpenAI-compatible `/chat/completions` endpoint such as LM Studio and the model currently loaded there.
 - Codex under Code mode runs `codex exec --json` in `workspace-write` sandbox by default. The user-facing answer becomes `Codex final`; run metadata, command logs, and changed-file details are collected into one sibling `Codex details` node.
-- OpenClaw mode runs `openclaw agent --local --json --thinking off` through the bridge. The result is saved as a child notebook node, and the OpenClaw session key plus run log path are stored on the request/result branch.
+- OpenClaw mode runs `openclaw agent --local --json --thinking off` through the bridge. Mind Atlas does not pass a model override or work root; OpenClaw uses its own configured defaults. From the root surface, OpenClaw replies are written to the AI Partner log instead of creating notebook nodes. With a non-root node selected, the result is saved as a child notebook node, and the OpenClaw session key plus run log path are stored on the request/result branch.
 - OpenClaw `Session: auto` resumes an OpenClaw session key found on the active node path. `Session: new` starts a fresh key for that request.
 - Claude Code mode pipes the Mind Atlas prompt/context into `claude -p --output-format json` through the bridge. The bridge injects the selected preset, model, base URL, and provider-appropriate auth variables into that child process, saves stdout/stderr/metadata under `server-data/claude-runs`, and stores the log path on the request/result branch.
 - The Claude Code settings include presets for Bridge env, Claude Opus 4.8, Claude Fable 5, and DeepSeek V4 Pro, plus `--effort` and `--permission-mode`. Anthropic presets explicitly route to `https://api.anthropic.com`; the DeepSeek preset routes to `https://api.deepseek.com/anthropic`. Direct model and base URL text fields are intentionally hidden; use bridge environment variables or presets. Claude Code permission mode is not equivalent to Codex OS sandboxing.

@@ -1744,12 +1744,6 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           throw new Error(`Codex is already running for this work root: ${codexSettingsForRun.workspace || "(default workspace)"}\nActive run: ${conflict.id}`);
         }
       }
-      if (mode === "openclaw" && openClawSettingsForRun) {
-        const conflict = findActiveOpenClawRunForWorkspace(get().aiRuns, openClawSettingsForRun.workspace, runId);
-        if (conflict) {
-          throw new Error(`OpenClaw is already running for this work root: ${openClawSettingsForRun.workspace || "(default OpenClaw workspace)"}\nActive run: ${conflict.id}`);
-        }
-      }
       if (mode === "claude" && claudeSettingsForRun) {
         const conflict = findActiveClaudeRunForWorkspace(get().aiRuns, claudeSettingsForRun.workspace, runId);
         if (conflict) {
@@ -4144,11 +4138,11 @@ function buildCodexSettingsForRun(settings: CodexSettings, context: AiNodeContex
 }
 
 function buildOpenClawSettingsForRun(settings: OpenClawSettings, context: AiNodeContext) {
-  const workspaceFromContext = inferCodexWorkspaceFromContext(context);
   const continueMode = settings.continueMode ?? "auto";
   return normalizeOpenClawSettings({
     ...settings,
-    workspace: settings.workspace.trim() || workspaceFromContext,
+    model: "",
+    workspace: "",
     continueMode,
     resumeSessionKey: continueMode === "auto" ? settings.resumeSessionKey || inferOpenClawSessionKeyFromContext(context) : "",
   });
@@ -4259,16 +4253,6 @@ function findActiveCodexRunForWorkspace(aiRuns: Record<string, AiRun>, workspace
   );
 }
 
-function findActiveOpenClawRunForWorkspace(aiRuns: Record<string, AiRun>, workspace: string, excludeRunId?: string) {
-  const normalizedWorkspace = normalizeWorkspaceKey(workspace);
-  return Object.values(aiRuns).find((run) =>
-    run.id !== excludeRunId &&
-    run.mode === "openclaw" &&
-    run.status === "running" &&
-    normalizeWorkspaceKey(run.workspace ?? "") === normalizedWorkspace
-  );
-}
-
 function findActiveClaudeRunForWorkspace(aiRuns: Record<string, AiRun>, workspace: string, excludeRunId?: string) {
   const normalizedWorkspace = normalizeWorkspaceKey(workspace);
   return Object.values(aiRuns).find((run) =>
@@ -4310,10 +4294,10 @@ function normalizeOpenClawSettings(settings: Partial<OpenClawSettings>): OpenCla
   return {
     ...DEFAULT_OPENCLAW_SETTINGS,
     ...settings,
-    model: (settings.model ?? "").trim(),
+    model: "",
     thinking: "off",
     agent: (settings.agent ?? "").trim(),
-    workspace: (settings.workspace ?? "").trim(),
+    workspace: "",
     timeoutMs: clampInteger(settings.timeoutMs ?? DEFAULT_OPENCLAW_SETTINGS.timeoutMs, 30_000, 120 * 60_000),
     continueMode,
     resumeSessionKey: continueMode === "new" ? "" : (settings.resumeSessionKey ?? "").trim(),
