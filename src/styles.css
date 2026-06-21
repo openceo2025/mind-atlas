@@ -3754,10 +3754,6 @@ button:disabled,
     --mobile-panel-height: min(14dvh, 116px);
   }
 
-  .app-shell:has(.mobile-workspace-panel[data-active-tab="outline"]) {
-    --mobile-panel-height: min(74dvh, calc(var(--app-height) - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
-  }
-
   .app-shell[data-focus-panel="closed"]:has(.mobile-workspace-panel[data-active-tab="editor"]) {
     --mobile-panel-height: 46px;
   }
@@ -3826,40 +3822,6 @@ button:disabled,
   .desktop-operation-toolbar,
   .operation-panel-desktop {
     display: none;
-  }
-
-  .mobile-outline-slot[aria-hidden="false"] {
-    display: block;
-    min-height: 0;
-    height: 100%;
-  }
-
-  .mobile-outline-slot .outline-editor-shell {
-    position: static;
-    inset: auto;
-    z-index: auto;
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
-    border: 1px solid rgba(219, 234, 211, 0.13);
-    border-radius: 8px;
-    grid-template-rows: auto minmax(0, 1fr) auto;
-  }
-
-  .mobile-outline-slot .outline-editor-header {
-    padding: 10px;
-  }
-
-  .mobile-outline-slot .outline-editor-body {
-    padding: 10px 8px;
-  }
-
-  .mobile-outline-slot .outline-mobile-toolbar {
-    position: static;
-    z-index: auto;
-    display: grid;
-    margin: 0 8px 8px;
   }
 
   .panel-preview-frame {
@@ -4183,46 +4145,8 @@ button:disabled,
     display: grid;
   }
 
-  .mobile-workspace-panel[data-active-tab="outline"] {
-    width: min(560px, 62vw);
-  }
-
   .mobile-workspace-panel[data-active-tab="operation"] {
     width: min(292px, 34vw);
-  }
-
-  .mobile-outline-slot[aria-hidden="false"] {
-    display: block;
-    min-height: 0;
-    height: 100%;
-  }
-
-  .mobile-outline-slot .outline-editor-shell {
-    position: static;
-    inset: auto;
-    z-index: auto;
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
-    border: 1px solid rgba(219, 234, 211, 0.13);
-    border-radius: 8px;
-    grid-template-rows: auto minmax(0, 1fr) auto;
-  }
-
-  .mobile-outline-slot .outline-editor-header {
-    padding: 10px;
-  }
-
-  .mobile-outline-slot .outline-editor-body {
-    padding: 10px 8px;
-  }
-
-  .mobile-outline-slot .outline-mobile-toolbar {
-    position: static;
-    z-index: auto;
-    display: grid;
-    margin: 0 8px 8px;
   }
 
   .focus-panel {

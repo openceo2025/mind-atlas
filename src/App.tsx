@@ -145,7 +145,7 @@ export default function App() {
   const onboarding = useOnboarding();
   const showCommandDock = onboarding.showAiFeatures && shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport);
   const effectiveMobilePanelTab: MobilePanelTab = getEffectiveMobilePanelTab(mobilePanelTab, showCommandDock, outlineEditorOpen);
-  const showWorkspacePanel = outlineEditorOpen || showCommandDock || selectedNodeId !== atlasRoot.id || (onboarding.showMainChrome && mobileWorkspacePanelRevealed);
+  const showWorkspacePanel = !outlineEditorOpen && (showCommandDock || selectedNodeId !== atlasRoot.id || (onboarding.showMainChrome && mobileWorkspacePanelRevealed));
   const focusPanelOpen = outlineEditorOpen || selectedNodeId !== atlasRoot.id;
   const operationTargets = useMemo(() => getOperationTargets(selectedPath), [selectedPath]);
   const operationActions = useMemo<OperationAction[]>(
@@ -875,8 +875,8 @@ export default function App() {
   const handleOpenOutlineEditor = () => {
     setOutlineEditorRootId(selectedNodeId);
     setOutlineEditorOpen(true);
-    setMobilePanelTab("outline");
-    setRenderWorkspacePanel(true);
+    setMobileWorkspacePanelRevealed(false);
+    setRenderWorkspacePanel(false);
     setMenuOpen(false);
   };
 
@@ -1204,19 +1204,17 @@ export default function App() {
           <div className="mobile-panel-slot mobile-operation-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "operation"}>
             <OperationPanel actions={operationActions} variant="mobile" />
           </div>
-          <div className="mobile-panel-slot mobile-outline-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "outline"}>
-            {outlineEditorOpen ? (
-              <OutlineEditor
-                root={outlineEditorRoot}
-                selectedNodeId={findNode(outlineEditorRoot, selectedNodeId) ? selectedNodeId : outlineEditorRoot.id}
-                onClose={handleCloseOutlineEditor}
-                onFocusNode={selectNodeInPlace}
-                onApplyOutline={applyOutlineSubtree}
-                onUpdateNodeLive={updateNodeLive}
-              />
-            ) : null}
-          </div>
         </section>
+      ) : null}
+      {outlineEditorOpen ? (
+        <OutlineEditor
+          root={outlineEditorRoot}
+          selectedNodeId={findNode(outlineEditorRoot, selectedNodeId) ? selectedNodeId : outlineEditorRoot.id}
+          onClose={handleCloseOutlineEditor}
+          onFocusNode={selectNodeInPlace}
+          onApplyOutline={applyOutlineSubtree}
+          onUpdateNodeLive={updateNodeLive}
+        />
       ) : null}
       {textImportOpen ? (
         <TextImportModal

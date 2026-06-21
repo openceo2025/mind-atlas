@@ -347,38 +347,62 @@ async function verifyOutlineAndContextCopy(browser) {
 }
 
 async function verifyMobileOutlinePanel(browser) {
-  const context = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    ignoreHTTPSErrors: true,
-  });
-  const page = await context.newPage();
-  await seedCompletedOnboarding(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
-  await page.waitForSelector("canvas");
+  const results = {};
+  for (const viewportCase of [
+    { name: "portrait", viewport: { width: 390, height: 844 } },
+    { name: "landscape", viewport: { width: 844, height: 390 } },
+  ]) {
+    const context = await browser.newContext({
+      viewport: viewportCase.viewport,
+      ignoreHTTPSErrors: true,
+      isMobile: true,
+      hasTouch: true,
+    });
+    const page = await context.newPage();
+    await seedCompletedOnboarding(page);
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.waitForSelector("canvas");
 
-  await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("Outline").click();
-  const outlinePanel = page.locator('.mobile-workspace-panel[data-active-tab="outline"] .mobile-outline-slot[aria-hidden="false"] .outline-editor-shell');
-  await outlinePanel.waitFor();
-  const panelStats = await outlinePanel.evaluate((shell) => {
-    const styles = window.getComputedStyle(shell);
-    const rect = shell.getBoundingClientRect();
-    return {
-      position: styles.position,
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-    };
-  });
-  if (panelStats.position === "fixed") {
-    throw new Error(`Mobile outline editor escaped the workspace panel: ${JSON.stringify(panelStats)}`);
+    await page.getByLabel("Open atlas menu").click();
+    await page.locator(".global-context-menu").getByTitle("Outline").click();
+    const outlinePanel = page.locator(".outline-editor-shell");
+    await outlinePanel.waitFor();
+    const panelStats = await outlinePanel.evaluate((shell) => {
+      const styles = window.getComputedStyle(shell);
+      const rect = shell.getBoundingClientRect();
+      const visibleWorkspacePanels = Array.from(document.querySelectorAll(".mobile-workspace-panel")).filter((panel) => {
+        const panelStyle = window.getComputedStyle(panel);
+        const panelRect = panel.getBoundingClientRect();
+        return panelStyle.display !== "none" && panelStyle.visibility !== "hidden" && panelRect.width > 0 && panelRect.height > 0;
+      }).length;
+      return {
+        position: styles.position,
+        inset: styles.inset,
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        visibleWorkspacePanels,
+        insideWorkspacePanel: Boolean(shell.closest(".mobile-workspace-panel")),
+      };
+    });
+    if (panelStats.position !== "fixed" || panelStats.insideWorkspacePanel || panelStats.visibleWorkspacePanels > 0) {
+      throw new Error(`Mobile ${viewportCase.name} outline editor was not a full-screen surface: ${JSON.stringify(panelStats)}`);
+    }
+    if (
+      Math.abs(panelStats.x) > 1 ||
+      Math.abs(panelStats.y) > 1 ||
+      Math.abs(panelStats.width - panelStats.viewportWidth) > 2 ||
+      Math.abs(panelStats.height - panelStats.viewportHeight) > 2
+    ) {
+      throw new Error(`Mobile ${viewportCase.name} outline editor did not fill the viewport: ${JSON.stringify(panelStats)}`);
+    }
+    results[viewportCase.name] = panelStats;
+    await context.close();
   }
-  if (panelStats.width > panelStats.viewportWidth || panelStats.height > panelStats.viewportHeight) {
-    throw new Error(`Mobile outline editor overflowed the viewport: ${JSON.stringify(panelStats)}`);
-  }
-  await context.close();
-  return panelStats;
+  return results;
 }
 
 async function verifyMobileGlobalMenuScroll(browser) {
