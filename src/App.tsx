@@ -1,6 +1,6 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { Bell, BellOff, CloudDownload, CloudUpload, Download, FileText, GitBranch, History, ListTree, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
-import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CloudDownload, CloudUpload, Download, FileText, GitBranch, History, ListTree, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
+import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
 import { CommandDock } from "./components/CommandDock";
@@ -17,27 +17,39 @@ import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
 import { getAtlasLayoutModeLabel, type AtlasLayoutMode } from "./layout/atlasLayout";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
-import type { AtlasNode, CloudNotebookEntry, NotificationPulse, VoiceLogEntry, VoicePartnerSettings } from "./types";
+import type { AtlasNode, CloudNotebookEntry, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
 import type { NotebookPersistenceStatus, NotebookSnapshot } from "./notebookPersistence";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const WORKSPACE_PANEL_EXIT_MS = 960;
 const RENDER_QUALITY_STORAGE_KEY = "mind-atlas-render-quality";
+const ROOT_COMMAND_MAX_ZOOM = 1.08;
 const DEFAULT_DATASET_TITLE = "Mind Atlas";
 const IMPORT_ACCEPT_TYPES = ".mindatlas,.mindatlaspkg,.md,.markdown,.opml,.mm,application/mindatlas+json,application/x-mindatlas-package,text/markdown,text/plain,text/xml,application/xml";
-const LAYOUT_MODE_OPTIONS: Array<{ mode: AtlasLayoutMode; icon: "orbit" | "tree" | "mind" | "hub" }> = [
+const MODE_OPTIONS: Array<{ mode: AtlasLayoutMode; icon: "orbit" | "tree" | "mind" }> = [
   { mode: "phyllotaxis", icon: "orbit" },
   { mode: "tree", icon: "tree" },
   { mode: "mind-map", icon: "mind" },
-  { mode: "hub-emphasis", icon: "hub" },
 ];
 const UNIVERSE_TITLE_PLACEHOLDER_ALIASES = [
   "Name this universe.",
   "この宇宙に名前をつけてみましょう",
   "この宇宙に名前を付けてみましょう",
 ];
-type MobilePanelTab = "command" | "editor" | "outline";
+const KEYBOARD_OVERLAY_INPUT_SELECTOR =
+  ".command-dock input, .command-dock textarea, .command-dock select, .node-body-input, .space-title-editor, .space-body-editor";
+const SPACE_LABEL_KEYBOARD_SELECTOR = ".space-title-editor, .space-body-editor";
+type MobilePanelTab = "command" | "editor" | "operation" | "outline";
 type MergeChoice = "current" | "incoming";
+
+type OperationAction = {
+  id: string;
+  label: string;
+  shortcut: string;
+  icon: ReactNode;
+  disabled?: boolean;
+  onClick: () => void;
+};
 
 interface MergePreviewBlock {
   key: string;
@@ -57,6 +69,7 @@ interface MergePreviewState {
 export default function App() {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
+  const viewport = useAtlasStore((state) => state.viewport);
   const focusNode = useAtlasStore((state) => state.focusNode);
   const selectNodeInPlace = useAtlasStore((state) => state.selectNodeInPlace);
   const showNotificationSnoozePrompt = useAtlasStore((state) => state.showNotificationSnoozePrompt);
@@ -64,6 +77,9 @@ export default function App() {
   const updateNodeLive = useAtlasStore((state) => state.updateNodeLive);
   const exportNotebook = useAtlasStore((state) => state.exportNotebook);
   const importNotebook = useAtlasStore((state) => state.importNotebook);
+  const saveNotebookNow = useAtlasStore((state) => state.saveNotebookNow);
+  const addSiblingNode = useAtlasStore((state) => state.addSiblingNode);
+  const addChildNode = useAtlasStore((state) => state.addChildNode);
   const applyOutlineSubtree = useAtlasStore((state) => state.applyOutlineSubtree);
   const resetNotebook = useAtlasStore((state) => state.resetNotebook);
   const undo = useAtlasStore((state) => state.undo);
@@ -121,18 +137,87 @@ export default function App() {
   const [mergePreview, setMergePreview] = useState<MergePreviewState | null>(null);
   const [dragImportActive, setDragImportActive] = useState(false);
   const mobilePortraitBreadcrumb = useMobilePortraitBreadcrumbLayout();
+  const mobileOperationSurface = useMobileOperationSurface();
   const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
   const selectedNode = selectedPath[selectedPath.length - 1] ?? atlasRoot;
   const outlineEditorRoot = outlineEditorRootId ? findNode(atlasRoot, outlineEditorRootId) ?? selectedNode : selectedNode;
   const onboarding = useOnboarding();
-  const effectiveMobilePanelTab: MobilePanelTab = outlineEditorOpen && mobilePanelTab === "outline"
-    ? "outline"
-    : onboarding.showAiFeatures
-      ? mobilePanelTab === "outline" ? "command" : mobilePanelTab
-      : "editor";
-  const showWorkspacePanel = outlineEditorOpen || onboarding.showAiFeatures || selectedNodeId !== atlasRoot.id || (onboarding.showMainChrome && mobileWorkspacePanelRevealed);
+  const showCommandDock = onboarding.showAiFeatures && shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport);
+  const effectiveMobilePanelTab: MobilePanelTab = getEffectiveMobilePanelTab(mobilePanelTab, showCommandDock, outlineEditorOpen);
+  const showWorkspacePanel = outlineEditorOpen || showCommandDock || selectedNodeId !== atlasRoot.id || (onboarding.showMainChrome && mobileWorkspacePanelRevealed);
   const focusPanelOpen = outlineEditorOpen || selectedNodeId !== atlasRoot.id;
+  const operationTargets = useMemo(() => getOperationTargets(selectedPath), [selectedPath]);
+  const operationActions = useMemo<OperationAction[]>(
+    () => [
+      {
+        id: "add-child",
+        label: "Add child",
+        shortcut: "Tab",
+        icon: <GitBranch size={18} />,
+        onClick: () => addChildNode(selectedNodeId),
+      },
+      {
+        id: "add-sibling",
+        label: "Add sibling",
+        shortcut: "Enter",
+        icon: <Plus size={18} />,
+        disabled: selectedNodeId === atlasRoot.id,
+        onClick: () => addSiblingNode(selectedNodeId),
+      },
+      {
+        id: "parent-layer",
+        label: "Go to parent layer",
+        shortcut: "up",
+        icon: <ArrowUp size={18} />,
+        disabled: !operationTargets.parentId,
+        onClick: () => {
+          if (operationTargets.parentId) focusNode(operationTargets.parentId);
+        },
+      },
+      {
+        id: "child-layer",
+        label: "Go to child layer",
+        shortcut: "down",
+        icon: <ArrowDown size={18} />,
+        disabled: !operationTargets.childId,
+        onClick: () => {
+          if (operationTargets.childId) focusNode(operationTargets.childId);
+        },
+      },
+      {
+        id: "previous-sibling",
+        label: "Go to previous sibling",
+        shortcut: "left",
+        icon: <ArrowLeft size={18} />,
+        disabled: !operationTargets.previousSiblingId,
+        onClick: () => {
+          if (operationTargets.previousSiblingId) focusNode(operationTargets.previousSiblingId);
+        },
+      },
+      {
+        id: "next-sibling",
+        label: "Go to next sibling",
+        shortcut: "right",
+        icon: <ArrowRight size={18} />,
+        disabled: !operationTargets.nextSiblingId,
+        onClick: () => {
+          if (operationTargets.nextSiblingId) focusNode(operationTargets.nextSiblingId);
+        },
+      },
+    ],
+    [
+      addChildNode,
+      addSiblingNode,
+      atlasRoot.id,
+      focusNode,
+      operationTargets.childId,
+      operationTargets.nextSiblingId,
+      operationTargets.parentId,
+      operationTargets.previousSiblingId,
+      selectedNodeId,
+    ],
+  );
   const [renderWorkspacePanel, setRenderWorkspacePanel] = useState(showWorkspacePanel);
   const appClassName = [
     "app-shell",
@@ -267,13 +352,19 @@ export default function App() {
   useEffect(() => {
     const revealMobileWorkspacePanel = () => {
       if (!isMobileWorkspacePanelRevealTarget()) return;
+      if (!onboarding.showMainChrome) return;
+      const state = useAtlasStore.getState();
+      if (onboarding.showAiFeatures && !shouldShowCommandDock(state.atlasRoot.id, state.selectedNodeId, state.viewport)) {
+        setMobileWorkspacePanelRevealed(false);
+        return;
+      }
       setMobileWorkspacePanelRevealed(true);
-      if (onboarding.showAiFeatures) setMobilePanelTab("command");
+      setMobilePanelTab(onboarding.showAiFeatures ? "command" : "operation");
       setRenderWorkspacePanel(true);
     };
     window.addEventListener(UNIVERSE_BACKGROUND_CLICK_EVENT, revealMobileWorkspacePanel);
     return () => window.removeEventListener(UNIVERSE_BACKGROUND_CLICK_EVENT, revealMobileWorkspacePanel);
-  }, [onboarding.showAiFeatures]);
+  }, [onboarding.showAiFeatures, onboarding.showMainChrome]);
 
   useEffect(() => {
     if (selectedNodeId !== atlasRoot.id) {
@@ -282,12 +373,18 @@ export default function App() {
   }, [atlasRoot.id, selectedNodeId]);
 
   useEffect(() => {
+    if (onboarding.showAiFeatures && !showCommandDock) setMobileWorkspacePanelRevealed(false);
+  }, [onboarding.showAiFeatures, showCommandDock]);
+
+  useEffect(() => {
     persistTheme(theme);
   }, [theme]);
 
   useEffect(() => {
     persistRenderQualityPreference(renderQuality);
   }, [renderQuality]);
+
+  usePreventBrowserViewportGestures();
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
@@ -306,7 +403,7 @@ export default function App() {
 
   useEffect(() => {
     if (onboarding.showAiFeatures || mobilePanelTab !== "command") return;
-    setMobilePanelTab("editor");
+    setMobilePanelTab("operation");
   }, [mobilePanelTab, onboarding.showAiFeatures]);
 
   useEffect(() => {
@@ -376,8 +473,9 @@ export default function App() {
     };
   }, [recoverCompletedCodexRuns]);
 
-  const handleExportLight = () => {
+  const handleExportLight = async () => {
     try {
+      await saveNotebookNow();
       const blob = new Blob([exportNotebook()], { type: "application/mindatlas+json" });
       downloadBlob(blob, `${datasetFileName(atlasRoot.title)}.mindatlas`);
       setMenuOpen(false);
@@ -391,6 +489,7 @@ export default function App() {
   const handleExportPackage = async () => {
     let result: NotebookPackageResult;
     try {
+      await saveNotebookNow();
       result = await createNotebookPackage(atlasRoot, attachmentPreviewUrls);
     } catch (error) {
       const fallback = confirmJsonOnlyPackageFallback(atlasRoot, "Package export failed.", error);
@@ -406,6 +505,7 @@ export default function App() {
     try {
       setCloudError("");
       setCloudStatus("Saving to cloud...");
+      await saveNotebookNow();
       let result: NotebookPackageResult;
       try {
         result = await createNotebookPackage(atlasRoot, attachmentPreviewUrls);
@@ -872,10 +972,10 @@ export default function App() {
                 </button>
               </div>
             </div>
-            <div className="context-menu-section" aria-label="Layout mode">
-              <span className="context-menu-section-title">Layout</span>
-              <div className="theme-choice-row layout-choice-row">
-                {LAYOUT_MODE_OPTIONS.map((option) => (
+            <div className="context-menu-section" aria-label="Mode">
+              <span className="context-menu-section-title">Mode</span>
+              <div className="theme-choice-row mode-choice-row">
+                {MODE_OPTIONS.map((option) => (
                   <button
                     key={option.mode}
                     className={layoutMode === option.mode ? "is-active" : ""}
@@ -888,6 +988,16 @@ export default function App() {
                     {getAtlasLayoutModeLabel(option.mode)}
                   </button>
                 ))}
+                <button
+                  className={outlineEditorOpen ? "is-active" : ""}
+                  type="button"
+                  onClick={handleOpenOutlineEditor}
+                  aria-pressed={outlineEditorOpen}
+                  title="Outline"
+                >
+                  <PenLine size={15} />
+                  Outline
+                </button>
               </div>
             </div>
             <div className="undo-redo-row" aria-label="History actions">
@@ -935,13 +1045,6 @@ export default function App() {
               <span>
                 Enter fullscreen
                 <small>hide browser bars</small>
-              </span>
-            </button>
-            <button type="button" onClick={handleOpenOutlineEditor}>
-              <PenLine size={15} />
-              <span>
-                Outline editor
-                <small>{selectedNode.title || "active subtree"}</small>
               </span>
             </button>
             <button
@@ -1037,6 +1140,7 @@ export default function App() {
       ) : null}
 
       {onboarding.showMainChrome ? <Minimap /> : null}
+      {onboarding.showMainChrome && !mobileOperationSurface ? <OperationPanel actions={operationActions} variant="desktop" /> : null}
       {renderWorkspacePanel ? (
         <section
           className={`mobile-workspace-panel ${showWorkspacePanel ? "is-open" : "is-closing"}`}
@@ -1044,7 +1148,7 @@ export default function App() {
           aria-label="Mobile workspace"
         >
           <div className="mobile-workspace-tabs" role="tablist" aria-label="Workspace panel">
-            {onboarding.showAiFeatures ? (
+            {showCommandDock ? (
               <button
                 className={effectiveMobilePanelTab === "command" ? "is-active" : ""}
                 type="button"
@@ -1053,7 +1157,7 @@ export default function App() {
                 onClick={() => setMobilePanelTab("command")}
               >
                 <MessageSquareText size={15} />
-                <span>Command</span>
+                <span>AI</span>
               </button>
             ) : null}
             <button
@@ -1065,6 +1169,16 @@ export default function App() {
             >
               <PenLine size={15} />
               <span>Editor</span>
+            </button>
+            <button
+              className={effectiveMobilePanelTab === "operation" ? "is-active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={effectiveMobilePanelTab === "operation"}
+              onClick={() => setMobilePanelTab("operation")}
+            >
+              <Settings2 size={15} />
+              <span>Operation</span>
             </button>
             {outlineEditorOpen ? (
               <button
@@ -1079,13 +1193,16 @@ export default function App() {
               </button>
             ) : null}
           </div>
-          {onboarding.showAiFeatures ? (
+          {showCommandDock ? (
             <div className="mobile-panel-slot mobile-command-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "command"}>
               <CommandDock />
             </div>
           ) : null}
           <div className="mobile-panel-slot mobile-editor-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "editor"}>
             <FocusPanel theme={theme} />
+          </div>
+          <div className="mobile-panel-slot mobile-operation-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "operation"}>
+            <OperationPanel actions={operationActions} variant="mobile" />
           </div>
           <div className="mobile-panel-slot mobile-outline-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "outline"}>
             {outlineEditorOpen ? (
@@ -1424,7 +1541,7 @@ function VoiceSettingsDialog({
   );
 }
 
-function LayoutModeIcon({ icon }: { icon: "orbit" | "tree" | "mind" | "hub" }) {
+function LayoutModeIcon({ icon }: { icon: "orbit" | "tree" | "mind" }) {
   switch (icon) {
     case "orbit":
       return <Orbit size={15} />;
@@ -1432,9 +1549,47 @@ function LayoutModeIcon({ icon }: { icon: "orbit" | "tree" | "mind" | "hub" }) {
       return <GitBranch size={15} />;
     case "mind":
       return <Network size={15} />;
-    case "hub":
-      return <Radio size={15} />;
   }
+}
+
+function OperationPanel({ actions, variant }: { actions: OperationAction[]; variant: "desktop" | "mobile" }) {
+  return (
+    <nav className={`operation-panel operation-panel-${variant}`} aria-label="Node operations">
+      {actions.map((action) => (
+        <button
+          key={action.id}
+          className="operation-button"
+          type="button"
+          onClick={action.onClick}
+          disabled={action.disabled}
+          title={`${action.label} (${action.shortcut})`}
+          aria-label={action.label}
+        >
+          {action.icon}
+          <small>{action.shortcut}</small>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function getEffectiveMobilePanelTab(tab: MobilePanelTab, showCommandDock: boolean, outlineEditorOpen: boolean): MobilePanelTab {
+  if (tab === "outline") return outlineEditorOpen ? "outline" : showCommandDock ? "command" : "operation";
+  if (tab === "command") return showCommandDock ? "command" : "operation";
+  return tab;
+}
+
+function getOperationTargets(path: AtlasNode[]) {
+  const node = path.at(-1);
+  const parent = path.length > 1 ? path[path.length - 2] : null;
+  const siblings = parent?.children ?? [];
+  const siblingIndex = node ? siblings.findIndex((sibling) => sibling.id === node.id) : -1;
+  return {
+    parentId: parent?.id ?? null,
+    childId: node?.children[0]?.id ?? null,
+    previousSiblingId: siblingIndex > 0 ? siblings[siblingIndex - 1]?.id ?? null : null,
+    nextSiblingId: siblingIndex >= 0 ? siblings[siblingIndex + 1]?.id ?? null : null,
+  };
 }
 
 function VoiceLogDialog({
@@ -1840,7 +1995,12 @@ function loadRenderQualityPreference(): RenderQuality {
   if (typeof window === "undefined") return "high";
   const stored = window.localStorage.getItem(RENDER_QUALITY_STORAGE_KEY);
   if (isRenderQuality(stored)) return stored;
-  return isMobileRenderQualityTarget() ? "low" : "high";
+  return "high";
+}
+
+function shouldShowCommandDock(rootId: string, selectedNodeId: string, viewport: ViewportState) {
+  if (selectedNodeId !== rootId) return true;
+  return Number.isFinite(viewport.zoom) && viewport.zoom <= ROOT_COMMAND_MAX_ZOOM;
 }
 
 function persistRenderQualityPreference(quality: RenderQuality) {
@@ -1873,15 +2033,6 @@ function isMobileNotificationTarget() {
   const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
   const narrowViewport = window.matchMedia?.("(max-width: 980px)").matches ?? false;
   return mobileUa || (coarsePointer && narrowViewport);
-}
-
-function isMobileRenderQualityTarget() {
-  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
-  const mobileUa = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
-  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
-  const shortSide = Math.min(window.innerWidth, window.innerHeight);
-  const longSide = Math.max(window.innerWidth, window.innerHeight);
-  return (mobileUa || coarsePointer) && shortSide <= 620 && longSide <= 980;
 }
 
 function mobileNotificationStatusLabel(
@@ -1971,8 +2122,9 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
 
     const prepareKeyboardOverlay = (target: EventTarget | null) => {
       if (!(target instanceof HTMLElement)) return;
-      const spaceLabelTarget = target.closest(".space-body-editor");
-      if (!target.closest(".command-dock input, .command-dock textarea, .command-dock select, .space-body-editor")) return;
+      const spaceLabelTarget = target.closest(SPACE_LABEL_KEYBOARD_SELECTOR);
+      if (!target.closest(KEYBOARD_OVERLAY_INPUT_SELECTOR)) return;
+      if (spaceLabelTarget instanceof HTMLElement && spaceLabelTarget.dataset.selected !== "true") return;
       if (!isMobileKeyboardOverlayTarget(stableHeightRef.current)) return;
       keyboardOverlayPreparedUntilRef.current = Date.now() + 4000;
       rememberStableHeight();
@@ -2022,6 +2174,8 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
         document.documentElement.setAttribute("data-keyboard-overlay-portrait", "true");
         if (isSpaceLabelKeyboardTargetActive()) {
           document.documentElement.setAttribute("data-keyboard-overlay-space-label", "true");
+        } else {
+          document.documentElement.removeAttribute("data-keyboard-overlay-space-label");
         }
       }
 
@@ -2116,7 +2270,7 @@ function getFallbackKeyboardBottomOffset(stableHeight: number) {
 
 function isKeyboardOverlayTextTargetActive() {
   const activeElement = document.activeElement;
-  return activeElement instanceof HTMLElement && Boolean(activeElement.closest(".command-dock input, .command-dock textarea, .command-dock select, .space-body-editor"));
+  return activeElement instanceof HTMLElement && Boolean(activeElement.closest(KEYBOARD_OVERLAY_INPUT_SELECTOR));
 }
 
 function isCommandKeyboardTargetActive() {
@@ -2126,7 +2280,7 @@ function isCommandKeyboardTargetActive() {
 
 function isSpaceLabelKeyboardTargetActive() {
   const activeElement = document.activeElement;
-  return activeElement instanceof HTMLElement && Boolean(activeElement.closest(".space-body-editor"));
+  return activeElement instanceof HTMLElement && Boolean(activeElement.closest(SPACE_LABEL_KEYBOARD_SELECTOR));
 }
 
 function isKeyboardViewportLikelyOpen(stableHeight: number | null) {
@@ -2199,12 +2353,54 @@ function useMobilePortraitBreadcrumbLayout() {
   return matches;
 }
 
+function useMobileOperationSurface() {
+  const [matches, setMatches] = useState(() => isMobileOperationSurfaceTarget());
+
+  useEffect(() => {
+    const update = () => setMatches(isMobileOperationSurfaceTarget());
+    const queries = [
+      window.matchMedia?.("(pointer: coarse)"),
+      window.matchMedia?.("(hover: none)"),
+      window.matchMedia?.("(max-width: 980px)"),
+      window.matchMedia?.("(max-height: 620px)"),
+      window.matchMedia?.("(orientation: portrait)"),
+    ].filter((query): query is MediaQueryList => Boolean(query));
+    update();
+    queries.forEach((query) => query.addEventListener?.("change", update));
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      queries.forEach((query) => query.removeEventListener?.("change", update));
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
+
+  return matches;
+}
+
 function isMobilePortraitBreadcrumbTarget() {
   if (typeof window === "undefined") return false;
   if (document.documentElement.getAttribute("data-keyboard-overlay-portrait") === "true") return true;
   const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
   const narrowPortrait = window.matchMedia?.("(max-width: 980px) and (orientation: portrait)").matches ?? false;
   return coarsePointer && narrowPortrait;
+}
+
+function isMobileOperationSurfaceTarget() {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const hoverNone = window.matchMedia?.("(hover: none)").matches ?? false;
+  const narrowViewport = window.matchMedia?.("(max-width: 980px)").matches ?? false;
+  const shortViewport = window.matchMedia?.("(max-height: 620px)").matches ?? false;
+  const mobileUa = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+  const touchDevice = navigator.maxTouchPoints > 0;
+  const shortSide = Math.min(window.innerWidth, window.innerHeight);
+  const longSide = Math.max(window.innerWidth, window.innerHeight);
+  const compactViewport = narrowViewport || shortViewport;
+  const phoneOrSmallTabletViewport = compactViewport || (shortSide <= 820 && longSide <= 1366);
+  if (mobileUa || coarsePointer) return phoneOrSmallTabletViewport;
+  return hoverNone && (touchDevice || compactViewport) && phoneOrSmallTabletViewport;
 }
 
 function isMobileWorkspacePanelRevealTarget() {
@@ -2228,36 +2424,18 @@ function DatasetTitleInput({
   const [draftTitle, setDraftTitle] = useState(storedTitle);
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const touchEditTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (editing) return;
     setDraftTitle(storedTitle);
   }, [editing, storedTitle]);
 
-  useEffect(
-    () => () => {
-      if (touchEditTimerRef.current !== null) {
-        window.clearTimeout(touchEditTimerRef.current);
-      }
-    },
-    [],
-  );
-
-  const clearTouchEditTimer = () => {
-    if (touchEditTimerRef.current === null) return;
-    window.clearTimeout(touchEditTimerRef.current);
-    touchEditTimerRef.current = null;
-  };
-
   const handlePointerDown = (event: ReactPointerEvent<HTMLInputElement>) => {
     if (event.pointerType === "mouse" || editing) return;
     event.preventDefault();
-    clearTouchEditTimer();
-    touchEditTimerRef.current = window.setTimeout(() => {
-      touchEditTimerRef.current = null;
+    window.requestAnimationFrame(() => {
       inputRef.current?.focus({ preventScroll: true });
-    }, 520);
+    });
   };
 
   return (
@@ -2267,9 +2445,6 @@ function DatasetTitleInput({
       value={draftTitle}
       placeholder={placeholderTitle}
       onPointerDown={handlePointerDown}
-      onPointerUp={clearTouchEditTimer}
-      onPointerCancel={clearTouchEditTimer}
-      onPointerLeave={clearTouchEditTimer}
       onContextMenu={(event) => {
         if (!editing) event.preventDefault();
       }}
@@ -2289,6 +2464,37 @@ function DatasetTitleInput({
       aria-label="Dataset name"
     />
   );
+}
+
+function usePreventBrowserViewportGestures() {
+  useEffect(() => {
+    const preventDefault = (event: Event) => event.preventDefault();
+    const preventViewportTouchMove = (event: TouchEvent) => {
+      if (shouldAllowNativeTouchScroll(event.target)) return;
+      event.preventDefault();
+    };
+    const preventCtrlWheelZoom = (event: WheelEvent) => {
+      if (event.ctrlKey) event.preventDefault();
+    };
+
+    document.addEventListener("gesturestart", preventDefault, { passive: false, capture: true });
+    document.addEventListener("gesturechange", preventDefault, { passive: false, capture: true });
+    document.addEventListener("gestureend", preventDefault, { passive: false, capture: true });
+    document.addEventListener("touchmove", preventViewportTouchMove, { passive: false, capture: true });
+    window.addEventListener("wheel", preventCtrlWheelZoom, { passive: false, capture: true });
+    return () => {
+      document.removeEventListener("gesturestart", preventDefault, { capture: true });
+      document.removeEventListener("gesturechange", preventDefault, { capture: true });
+      document.removeEventListener("gestureend", preventDefault, { capture: true });
+      document.removeEventListener("touchmove", preventViewportTouchMove, { capture: true });
+      window.removeEventListener("wheel", preventCtrlWheelZoom, { capture: true });
+    };
+  }, []);
+}
+
+function shouldAllowNativeTouchScroll(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest("textarea, .context-menu, .surface-context-menu, .status-context-menu, .reminder-context-menu, .focus-panel, .event-strip, .voice-log-dialog, .notebook-history-dialog, .text-import-dialog, .merge-preview-dialog, .cloud-load-dialog, .voice-settings-dialog, .outline-editor-panel, .mobile-workspace-panel"));
 }
 
 function isUniverseTitlePlaceholder(title: string, placeholderTitle: string) {

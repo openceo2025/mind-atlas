@@ -54,6 +54,10 @@ const LAYOUT_MOTION_STAGGER_SECONDS = 0.036;
 const LAYOUT_MOTION_MAX_STAGGER_SECONDS = 0.24;
 const LAYOUT_VISIBILITY_HOLD_MS = 1700;
 const LAYOUT_BACKSTAGE_Z_OFFSET = -430;
+const GENERATED_LAYOUT_MAX_CAMERA_DISTANCE = 1800;
+const GENERATED_LAYOUT_MOBILE_MAX_CAMERA_DISTANCE = 6400;
+const GENERATED_LAYOUT_MOBILE_FIT_PADDING = 1.55;
+const GENERATED_LAYOUT_MOBILE_LANDSCAPE_FIT_PADDING = 1.38;
 const MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER = 3;
 const VISIBLE_DESCENDANT_DEPTH = 5;
 const GENERATED_LAYOUT_VISIBLE_DESCENDANT_DEPTH = VISIBLE_DESCENDANT_DEPTH;
@@ -75,11 +79,14 @@ const FOCUS_WAVE_STEP_MS = 500;
 const FOCUS_WAVE_DURATION_MS = 1000;
 const DRAG_BOUNDARY_TUBE_RADIUS = 0.55;
 const DRAG_BOUNDARY_INNER_TUBE_RADIUS = 0.24;
-const PINCH_WHEEL_SCALE = 3.4;
 const NOTIFICATION_PULSE_DURATION_MS = 8200;
 const MAX_ANIMATED_NOTIFICATION_PULSES = 5;
 const NODE_VISIBILITY_CHECK_MS = 250;
 const NODE_SCREEN_MARGIN_NDC = 1.18;
+const CAMERA_CULL_CHECK_MS = 120;
+const CAMERA_CULL_HOLD_MS = 900;
+const CAMERA_CULL_MARGIN_NDC = 1.72;
+const CAMERA_CULL_MOBILE_MARGIN_NDC = 2.24;
 const VR_TILT_DEAD_ZONE_DEGREES = 7.2;
 const VR_TILT_MAX_DEGREES = 22;
 const VR_TILT_PAN_X_PIXELS_PER_SECOND = 220;
@@ -129,6 +136,11 @@ type UniversePanDeltaDetail = {
 type VisualNodeHandle = {
   setWorldPosition: (worldPosition: Vec3Tuple, parentWorldOverride?: Vec3Tuple) => void;
   getWorldPosition: () => Vec3Tuple;
+};
+
+type NodeRenderMeta = {
+  node: AtlasNode;
+  pathIds: string[];
 };
 
 type NodeContextMenuState = {
@@ -454,7 +466,7 @@ function isKeyboardComposing(event: KeyboardEvent) {
 
 function getSpaceEditorNodeIdFromTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return null;
-  const editor = target.closest("textarea.space-body-editor");
+  const editor = target.closest("textarea.space-title-editor, textarea.space-body-editor");
   return editor instanceof HTMLTextAreaElement ? editor.dataset.nodeId ?? null : null;
 }
 
@@ -558,15 +570,15 @@ function NotificationPulseLayer({
   const tickNotificationPulses = useAtlasStore((state) => state.tickNotificationPulses);
   const lastPruneRef = useRef(0);
   const { size } = useThree();
-  const layoutViewport: AtlasLayoutViewport = isMobilePortraitCamera(size.width, size.height) ? "mobile-portrait" : "desktop";
+  const layoutViewport = getGeneratedLayoutViewport(layoutMode, size.width, size.height);
   const renderablePulses = useMemo(
     () => pulses.filter((pulse) => pulse.nodeId !== atlasRoot.id && Boolean(findNode(atlasRoot, pulse.nodeId))),
     [atlasRoot, pulses],
   );
   const animatedPulses = useMemo(() => selectAnimatedNotificationPulses(renderablePulses, renderQuality), [renderablePulses, renderQuality]);
   const layoutFrame = useMemo(
-    () => deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport: layoutViewport }),
-    [atlasRoot, layoutMode, layoutViewport, selectedNodeId],
+    () => deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport: layoutViewport, viewportWidth: size.width, viewportHeight: size.height }),
+    [atlasRoot, layoutMode, layoutViewport, selectedNodeId, size.height, size.width],
   );
 
   useFrame(() => {
@@ -771,7 +783,7 @@ function NavigationController({
   const wheelSuppressUntilRef = useRef(0);
   const onboardingFastFocusSuppressUntilRef = useRef(0);
   const backgroundClickRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
-  const pinchRef = useRef<{ distance: number; center: { x: number; y: number } } | null>(null);
+  const multiTouchRef = useRef(false);
   const nodeVisibilityRef = useRef<NodeVisibilityState>({ lastCheckedAt: 0, allOffscreen: null });
   const vrBaselineRef = useRef<VrOrientationSample | null>(null);
   const vrOrientationRef = useRef<VrOrientationSample | null>(null);
@@ -855,36 +867,22 @@ function NavigationController({
       handleWheelDelta(event.deltaY);
     };
     const handleTouchStart = (event: TouchEvent) => {
-      if (event.touches.length !== 2) {
-        pinchRef.current = null;
+      if (event.touches.length < 2) {
+        multiTouchRef.current = false;
         return;
       }
       event.preventDefault();
       dragRef.current = null;
       setBirthEffect(null);
-      pinchRef.current = {
-        distance: touchDistance(event.touches[0], event.touches[1]),
-        center: touchCenter(event.touches[0], event.touches[1]),
-      };
+      multiTouchRef.current = true;
     };
     const handleTouchMove = (event: TouchEvent) => {
-      if (event.touches.length !== 2 || !pinchRef.current) return;
+      if (event.touches.length < 2 || !multiTouchRef.current) return;
       event.preventDefault();
-      const nextDistance = touchDistance(event.touches[0], event.touches[1]);
-      const nextCenter = touchCenter(event.touches[0], event.touches[1]);
-      const deltaDistance = nextDistance - pinchRef.current.distance;
-      const deltaX = nextCenter.x - pinchRef.current.center.x;
-      const deltaY = nextCenter.y - pinchRef.current.center.y;
-      pinchRef.current.distance = nextDistance;
-      pinchRef.current.center = nextCenter;
-      handleWheelDelta(-deltaDistance * PINCH_WHEEL_SCALE);
-      applyPanDelta(deltaX, deltaY);
-      markVrManualPan(deltaX, deltaY);
     };
     const handleTouchEnd = (event: TouchEvent) => {
       if (event.touches.length < 2) {
-        if (vrManualPanPendingRef.current) recenterVrBaseline();
-        pinchRef.current = null;
+        multiTouchRef.current = false;
       }
     };
 
@@ -904,34 +902,51 @@ function NavigationController({
 
   useEffect(() => {
     if (!focusRequest) return;
-    const layoutViewport = isMobilePortraitCamera(size.width, size.height, keyboardPortraitLock) ? "mobile-portrait" : "desktop";
+    const layoutViewport = getGeneratedLayoutViewport(layoutMode, size.width, size.height, keyboardPortraitLock);
     const generatedLayoutActive = layoutMode !== "phyllotaxis";
-    const targetVector = getFocusTargetVector(atlasRoot, layoutMode, focusRequest, layoutViewport);
+    const mobileGeneratedLayout = generatedLayoutActive && layoutViewport !== "desktop";
+    const generatedLayoutFocus = generatedLayoutActive
+      ? getGeneratedLayoutFocusView(atlasRoot, layoutMode, focusRequest.nodeId ?? atlasRoot.id, layoutViewport, {
+          centerBounds: mobileGeneratedLayout,
+          viewportWidth: size.width,
+          viewportHeight: size.height,
+        })
+      : null;
+    const targetVector = generatedLayoutFocus?.target ?? getFocusTargetVector(atlasRoot, layoutMode, focusRequest, layoutViewport);
     const targetDirection = generatedLayoutActive
       ? new Vector3(0, 0, -1)
       : targetVector.lengthSq() > 0.001
         ? targetVector.clone().normalize()
         : new Vector3(0, 0, -1);
     const targetAngles = directionToYawPitch(targetDirection);
-    const generatedFocusDiameter = generatedLayoutActive
-      ? getGeneratedLayoutFocusDiameter(atlasRoot, layoutMode, focusRequest.nodeId ?? atlasRoot.id, layoutViewport)
-      : focusRequest.diameter;
-    const targetDistance = getCameraDistanceForDiameter(
-      Math.max(focusRequest.diameter, generatedFocusDiameter),
-      size.height,
-      perspective.fov,
-      generatedLayoutActive ? 1800 : 620,
-    );
+    const generatedFocusDiameter = generatedLayoutFocus?.diameter ?? focusRequest.diameter;
+    const targetDiameter = Math.max(focusRequest.diameter, generatedFocusDiameter);
+    const targetDistance =
+      mobileGeneratedLayout
+        ? getGeneratedLayoutMobileCameraDistance(targetDiameter, size.height, perspective.fov, layoutViewport)
+        : getCameraDistanceForDiameter(
+            targetDiameter,
+            size.height,
+            perspective.fov,
+            generatedLayoutActive ? GENERATED_LAYOUT_MAX_CAMERA_DISTANCE : 620,
+          );
     const targetRadius = generatedLayoutActive ? Math.abs(targetVector.z) : targetVector.length();
     const targetIsRoot = !generatedLayoutActive && focusRequest.nodeId === atlasRoot.id;
+    const focusDistance = generatedLayoutActive ? targetDistance : targetDistance * (mobileLandscapeCamera ? MOBILE_LANDSCAPE_FOCUS_DISTANCE_MULTIPLIER : 1);
+    const generatedMaxCameraDistance = mobileGeneratedLayout ? GENERATED_LAYOUT_MOBILE_MAX_CAMERA_DISTANCE : GENERATED_LAYOUT_MAX_CAMERA_DISTANCE;
     const targetOffset =
-      targetIsRoot && mobileCamera
+      generatedLayoutActive
+        ? clamp(targetRadius - focusDistance, targetRadius - generatedMaxCameraDistance, MAX_CAMERA_OFFSET)
+        : targetIsRoot && mobileCamera
         ? getInitialCameraOffset(mobilePortraitCamera)
         : getFocusTargetOffset(
             targetRadius,
-            targetDistance * (mobileLandscapeCamera ? MOBILE_LANDSCAPE_FOCUS_DISTANCE_MULTIPLIER : 1),
+            focusDistance,
             false,
           );
+    const generatedMobilePanYOffset = mobileGeneratedLayout
+      ? getGeneratedLayoutMobilePanYOffset(focusDistance, size.height, perspective.fov, layoutViewport)
+      : 0;
     const current = yawPitchRef.current;
 
     transitionRef.current = {
@@ -944,13 +959,13 @@ function NavigationController({
       targetPitch: clamp(targetAngles.pitch, -FOCUS_PITCH_LIMIT, FOCUS_PITCH_LIMIT),
       targetOffset,
       targetPanX: generatedLayoutActive ? targetVector.x : 0,
-      targetPanY: generatedLayoutActive ? targetVector.y : 0,
+      targetPanY: generatedLayoutActive ? targetVector.y + generatedMobilePanYOffset : 0,
       elapsed: 0,
       duration: renderQuality === "low" ? LOW_QUALITY_MOTION_DURATION_SECONDS : LAYOUT_MOTION_DURATION_SECONDS,
       nonce: focusRequest.nonce,
       nodeId: focusRequest.nodeId ?? "",
     };
-  }, [atlasRoot, focusRequest, keyboardPortraitLock, layoutMode, mobileCamera, mobileLandscapeCamera, mobilePortraitCamera, perspective.fov, renderQuality, size.height, size.width]);
+  }, [atlasRoot, focusRequest, keyboardPortraitLock, layoutMode, mobileCamera, mobileLandscapeCamera, perspective.fov, renderQuality, size.height, size.width]);
 
   useEffect(() => {
     if (initialCenteredRef.current) return;
@@ -1012,11 +1027,11 @@ function NavigationController({
       setBirthEffect(null);
     }
 
-    const visibilityViewport: AtlasLayoutViewport = isMobilePortraitCamera(size.width, size.height, keyboardPortraitLock) ? "mobile-portrait" : "desktop";
+    const visibilityViewport = getGeneratedLayoutViewport(layoutMode, size.width, size.height, keyboardPortraitLock);
     reportNodeVisibility(atlasRoot, perspective, nodeVisibilityRef.current, visibilityViewport);
 
     const drag = dragRef.current;
-    if (drag?.mode === "hold" && drag.canBirth && !drag.created) {
+    if (layoutMode === "phyllotaxis" && drag?.mode === "hold" && drag.canBirth && !drag.created) {
       const heldFor = performance.now() - drag.startedAt;
       if (heldFor >= HOLD_TO_BIRTH_MS) {
         drag.created = true;
@@ -1030,7 +1045,7 @@ function NavigationController({
         });
       }
     }
-    if (drag?.mode === "hold" && !drag.canBirth && !drag.blockedBirthHintEmitted) {
+    if (layoutMode === "phyllotaxis" && drag?.mode === "hold" && !drag.canBirth && !drag.blockedBirthHintEmitted) {
       const heldFor = performance.now() - drag.startedAt;
       if (heldFor >= ROOT_BIRTH_BLOCKED_HINT_MS) {
         drag.blockedBirthHintEmitted = true;
@@ -1038,7 +1053,7 @@ function NavigationController({
       }
     }
 
-    if (vrPanEnabled && !transitionRef.current && !dragRef.current && !pinchRef.current) {
+    if (vrPanEnabled && !transitionRef.current && !dragRef.current && !multiTouchRef.current) {
       applyVrTiltPan(delta);
     }
 
@@ -1073,7 +1088,7 @@ function NavigationController({
     window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_INTERACTION_EVENT));
     (event.target as Element | null)?.setPointerCapture?.(event.pointerId);
     backgroundClickRef.current = event.button === 0 ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY } : null;
-    const canBirth = canStartRootBirth(yawPitchRef.current.offset, size.height, perspective.fov);
+    const canBirth = layoutMode === "phyllotaxis" && canStartRootBirth(yawPitchRef.current.offset, size.height, perspective.fov);
     const direction = directionFromRay(event.ray, NOTEBOOK_FIRST_SHELL_RADIUS);
     setMobileRaycastMode({ kind: "space-drag" });
 
@@ -1221,7 +1236,9 @@ function NavigationController({
       backgroundClick?.pointerId === event.pointerId &&
       Math.hypot(event.clientX - backgroundClick.x, event.clientY - backgroundClick.y) <= 6
     ) {
-      useAtlasStore.getState().clearMultiSelection();
+      const store = useAtlasStore.getState();
+      store.clearMultiSelection();
+      store.selectNodeInPlace(store.atlasRoot.id);
       window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_CLICK_EVENT));
     }
     backgroundClickRef.current = null;
@@ -1251,6 +1268,14 @@ function NavigationController({
 
     const zoomOutState = wheelZoomOutRef.current;
     const zoomInState = wheelZoomInRef.current;
+    if (layoutMode === "tree") {
+      // Tree is a flat generated layout, so wheel input should remain pure zoom.
+      zoomOutState.amount = 0;
+      zoomOutState.startedAt = 0;
+      zoomInState.amount = 0;
+      zoomInState.startedAt = 0;
+      return;
+    }
     const suppressActiveSwitch = isAutoFocusSuppressed();
     if (suppressOnboardingFastFocus) {
       zoomOutState.amount = 0;
@@ -1786,7 +1811,8 @@ function NotebookNodes({
   const focusRequest = useAtlasStore((state) => state.focusRequest);
   const focusNonce = focusRequest?.nonce ?? 0;
   const mobileLabelScope = useMobilePerformanceMode();
-  const { size } = useThree();
+  const { camera, size } = useThree();
+  const perspective = camera as PerspectiveCamera;
   const [focusWaveStartedAt, setFocusWaveStartedAt] = useState(() => performance.now());
   const [renderSelectedNodeId, setRenderSelectedNodeId] = useState(selectedNodeId);
   const selectedPath = findNodePath(atlasRoot, renderSelectedNodeId) ?? findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
@@ -1810,10 +1836,38 @@ function NotebookNodes({
     if (!commandInputEditing || activeCommandMode === "note") return new Set<string>();
     return new Set(getAiContextNodeIds(atlasRoot, selectedNodeId, { ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds }));
   }, [activeCommandMode, aiContextOptions, atlasRoot, commandInputEditing, multiSelectedNodeIds, selectedNodeId]);
-  const layoutViewport = isMobilePortraitCamera(size.width, size.height) ? "mobile-portrait" : "desktop";
+  const nodeRenderMetaById = useMemo(() => buildNodeRenderMeta(atlasRoot), [atlasRoot]);
+  const mandatoryRenderNodeIds = useMemo(
+    () =>
+      buildMandatoryRenderNodeIds(
+        atlasRoot.id,
+        nodeRenderMetaById,
+        [
+          selectedNodeId,
+          renderSelectedNodeId,
+          cameraFocusNodeId,
+          ...multiSelectedNodeIds,
+          ...notificationPulses.map((pulse) => pulse.nodeId),
+          ...aiContextPreviewNodeIds,
+          activeNotificationSnoozePrompt?.nodeId ?? null,
+        ],
+      ),
+    [
+      activeNotificationSnoozePrompt?.nodeId,
+      aiContextPreviewNodeIds,
+      atlasRoot.id,
+      cameraFocusNodeId,
+      multiSelectedNodeIds,
+      nodeRenderMetaById,
+      notificationPulses,
+      renderSelectedNodeId,
+      selectedNodeId,
+    ],
+  );
+  const layoutViewport = getGeneratedLayoutViewport(layoutMode, size.width, size.height);
   const layoutFrame = useMemo(
-    () => deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport: layoutViewport }),
-    [atlasRoot, layoutMode, layoutViewport, selectedNodeId],
+    () => deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport: layoutViewport, viewportWidth: size.width, viewportHeight: size.height }),
+    [atlasRoot, layoutMode, layoutViewport, selectedNodeId, size.height, size.width],
   );
   const currentLayoutPositions = layoutFrame.positions;
   const currentVisibleNodeIds = layoutFrame.visibleIds;
@@ -1822,6 +1876,12 @@ function NotebookNodes({
   const retainedLayoutPositionsRef = useRef<Map<string, Vec3>>(new Map());
   const visibilityTimeoutsRef = useRef<number[]>([]);
   const [exitingNodeIds, setExitingNodeIds] = useState<Set<string>>(() => new Set());
+  const cameraCullStateRef = useRef<{ lastCheckedAt: number; retainedUntil: Map<string, number> }>({
+    lastCheckedAt: 0,
+    retainedUntil: new Map(),
+  });
+  const cameraVisibleNodeIdsRef = useRef<Set<string> | null>(null);
+  const [cameraVisibleNodeIds, setCameraVisibleNodeIds] = useState<Set<string> | null>(null);
 
   useEffect(
     () => () => {
@@ -1875,7 +1935,7 @@ function NotebookNodes({
     previousLayoutPositionsRef.current = currentLayoutPositions;
   }, [currentLayoutPositions, currentVisibleNodeIds, layoutMode, renderQuality]);
 
-  const renderVisibleNodeIds = useMemo(
+  const layoutRenderNodeIds = useMemo(
     () => {
       if (layoutMode === "phyllotaxis" || renderQuality === "low") return currentVisibleNodeIds;
       return new Set([...currentVisibleNodeIds, ...exitingNodeIds]);
@@ -1893,6 +1953,41 @@ function NotebookNodes({
     layoutMode === "phyllotaxis" || renderQuality === "low" || !previousVisibleNodeIdsRef.current
       ? new Set<string>()
       : new Set([...currentVisibleNodeIds].filter((id) => !previousVisibleNodeIdsRef.current?.has(id)));
+
+  useEffect(() => {
+    cameraCullStateRef.current.retainedUntil.clear();
+    cameraVisibleNodeIdsRef.current = null;
+    setCameraVisibleNodeIds(null);
+  }, [atlasRoot, layoutMode, renderQuality]);
+
+  useFrame(() => {
+    const now = performance.now();
+    const cullState = cameraCullStateRef.current;
+    if (now - cullState.lastCheckedAt < CAMERA_CULL_CHECK_MS) return;
+    cullState.lastCheckedAt = now;
+
+    const nextVisibleNodeIds = buildCameraCulledNodeIds({
+      camera: perspective,
+      candidateNodeIds: layoutRenderNodeIds,
+      mandatoryNodeIds: mandatoryRenderNodeIds,
+      marginNdc: mobileLabelScope ? CAMERA_CULL_MOBILE_MARGIN_NDC : CAMERA_CULL_MARGIN_NDC,
+      nodeRenderMetaById,
+      now,
+      positions: layoutPositions,
+      previousNodeIds: cameraVisibleNodeIdsRef.current,
+      retainedUntil: cullState.retainedUntil,
+      rootId: atlasRoot.id,
+    });
+
+    if (areSetsEqual(cameraVisibleNodeIdsRef.current, nextVisibleNodeIds)) return;
+    cameraVisibleNodeIdsRef.current = nextVisibleNodeIds;
+    setCameraVisibleNodeIds(nextVisibleNodeIds);
+  });
+
+  const renderVisibleNodeIds = useMemo(
+    () => mergeCameraRenderNodeIds(layoutRenderNodeIds, cameraVisibleNodeIds, mandatoryRenderNodeIds, atlasRoot.id),
+    [atlasRoot.id, cameraVisibleNodeIds, layoutRenderNodeIds, mandatoryRenderNodeIds],
+  );
 
   useEffect(() => {
     if (findNode(atlasRoot, renderSelectedNodeId)) return;
@@ -2122,6 +2217,134 @@ function buildLowQualityRenderPaths(root: AtlasNode, selectedNodeId: string, not
   return entries;
 }
 
+function buildNodeRenderMeta(root: AtlasNode) {
+  const metaById = new Map<string, NodeRenderMeta>();
+  const visit = (node: AtlasNode, pathIds: string[]) => {
+    const nextPathIds = [...pathIds, node.id];
+    metaById.set(node.id, {
+      node,
+      pathIds: nextPathIds,
+    });
+    node.children.forEach((child) => visit(child, nextPathIds));
+  };
+  visit(root, []);
+  return metaById;
+}
+
+function buildMandatoryRenderNodeIds(rootId: string, metaById: Map<string, NodeRenderMeta>, nodeIds: Array<string | null | undefined> | Set<string>) {
+  const ids = new Set<string>();
+  for (const nodeId of nodeIds) {
+    if (!nodeId) continue;
+    addNodePathRenderIds(ids, metaById, nodeId);
+  }
+  ids.delete(rootId);
+  return ids;
+}
+
+function buildCameraCulledNodeIds({
+  camera,
+  candidateNodeIds,
+  mandatoryNodeIds,
+  marginNdc,
+  nodeRenderMetaById,
+  now,
+  positions,
+  previousNodeIds,
+  retainedUntil,
+  rootId,
+}: {
+  camera: PerspectiveCamera;
+  candidateNodeIds: Set<string>;
+  mandatoryNodeIds: Set<string>;
+  marginNdc: number;
+  nodeRenderMetaById: Map<string, NodeRenderMeta>;
+  now: number;
+  positions: Map<string, Vec3>;
+  previousNodeIds: Set<string> | null;
+  retainedUntil: Map<string, number>;
+  rootId: string;
+}) {
+  const nextNodeIds = new Set<string>();
+  const projected = new Vector3();
+  const forward = new Vector3();
+  const toNode = new Vector3();
+  camera.updateMatrixWorld();
+  camera.updateProjectionMatrix();
+  camera.getWorldDirection(forward);
+
+  for (const nodeId of candidateNodeIds) {
+    const position = positions.get(nodeId);
+    if (!position) continue;
+    toNode.set(position[0], position[1], position[2]).sub(camera.position);
+    if (toNode.dot(forward) <= -NOTEBOOK_NODE_RADIUS) continue;
+    projected.set(position[0], position[1], position[2]).project(camera);
+    if (!isProjectedPositionInsideCullMargin(projected, marginNdc)) continue;
+    addNodePathRenderIds(nextNodeIds, nodeRenderMetaById, nodeId);
+  }
+
+  for (const nodeId of mandatoryNodeIds) {
+    if (!candidateNodeIds.has(nodeId)) continue;
+    addNodePathRenderIds(nextNodeIds, nodeRenderMetaById, nodeId);
+  }
+
+  if (previousNodeIds) {
+    for (const nodeId of previousNodeIds) {
+      if (nodeId === rootId || nextNodeIds.has(nodeId) || !candidateNodeIds.has(nodeId) || !nodeRenderMetaById.has(nodeId)) {
+        retainedUntil.delete(nodeId);
+        continue;
+      }
+      const expiresAt = retainedUntil.get(nodeId) ?? now + CAMERA_CULL_HOLD_MS;
+      if (expiresAt <= now) {
+        retainedUntil.delete(nodeId);
+        continue;
+      }
+      retainedUntil.set(nodeId, expiresAt);
+      nextNodeIds.add(nodeId);
+    }
+  }
+
+  nextNodeIds.delete(rootId);
+  return nextNodeIds;
+}
+
+function mergeCameraRenderNodeIds(
+  layoutNodeIds: Set<string>,
+  cameraNodeIds: Set<string> | null,
+  mandatoryNodeIds: Set<string>,
+  rootId: string,
+) {
+  if (!cameraNodeIds) return layoutNodeIds;
+  const merged = new Set<string>();
+  for (const nodeId of layoutNodeIds) {
+    if (nodeId === rootId) continue;
+    if (cameraNodeIds.has(nodeId) || mandatoryNodeIds.has(nodeId)) merged.add(nodeId);
+  }
+  return merged;
+}
+
+function addNodePathRenderIds(target: Set<string>, metaById: Map<string, NodeRenderMeta>, nodeId: string) {
+  const meta = metaById.get(nodeId);
+  if (!meta) return;
+  meta.pathIds.forEach((pathId) => target.add(pathId));
+}
+
+function isProjectedPositionInsideCullMargin(projected: Vector3, marginNdc: number) {
+  return (
+    projected.z >= -1 &&
+    projected.z <= 1 &&
+    Math.abs(projected.x) <= marginNdc &&
+    Math.abs(projected.y) <= marginNdc
+  );
+}
+
+function areSetsEqual(left: Set<string> | null, right: Set<string>) {
+  if (!left || left.size !== right.size) return false;
+  for (const item of left) {
+    if (!right.has(item)) return false;
+  }
+  return true;
+}
+
 function getLayoutPosition(layoutPositions: Map<string, Vec3>, nodeId: string): Vec3 {
   return layoutPositions.get(nodeId) ?? [0, 0, 0];
 }
@@ -2270,6 +2493,7 @@ function HierarchyNode({
     : mobileLabelScope
     ? mobileLabelVisible
     : isLocalContextNode || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
+  const interactiveLabelVisible = !mobileLabelScope || isSelected || isMultiSelected || isAiContextPreviewNode;
   const [layoutEdgeHidden, setLayoutEdgeHidden] = useState(false);
   const parentEdgeVisible = !suppressParentEdge && path.length > 2 && hiddenDragEdgeNodeId !== node.id && !layoutEdgeHidden;
   const lowQuality = renderQuality === "low";
@@ -2913,49 +3137,99 @@ function HierarchyNode({
 
       {labelVisible ? (
         <Html center position={[0, -radius - 14, 16]} transform={false} zIndexRange={[2, 0]}>
-          <SpaceNodeEditor
-            node={node}
-            isSelected={isSelected || isMultiSelected}
-            onSelect={() => selectNodeInPlace(node.id)}
-            onChange={(body) =>
-              updateNode(node.id, {
-                body,
-                summary: body.split("\n").find(Boolean) ?? "Empty notebook node.",
-              })
-            }
-          />
+          {interactiveLabelVisible ? (
+            <SpaceNodeEditor
+              node={node}
+              isSelected={isSelected || isMultiSelected}
+              isPrimarySelected={isSelected}
+              onSelect={() => selectNodeInPlace(node.id)}
+              onFocusNode={() => focusNode(node.id)}
+              onChange={(title) =>
+                updateNode(node.id, {
+                  title,
+                })
+              }
+            />
+          ) : (
+            <SpaceNodePreview
+              node={node}
+              isSelected={isSelected || isMultiSelected}
+              onFocusNode={() => focusNode(node.id)}
+            />
+          )}
         </Html>
       ) : null}
     </group>
   );
 }
 
+function SpaceNodePreview({
+  node,
+  isSelected,
+  onFocusNode,
+}: {
+  node: AtlasNode;
+  isSelected: boolean;
+  onFocusNode: () => void;
+}) {
+  const text = node.title.trim() || "ここに記入";
+  return (
+    <div
+      className={`node-text-card node-text-preview space-title-preview space-body-preview ${isSelected ? "is-selected" : ""}`}
+      data-node-id={node.id}
+      role="button"
+      tabIndex={0}
+      aria-label={`${node.title || "Node"} title preview`}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        onFocusNode();
+      }}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        onFocusNode();
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
 function SpaceNodeEditor({
   node,
   isSelected,
+  isPrimarySelected,
   onSelect,
+  onFocusNode,
   onChange,
 }: {
   node: AtlasNode;
   isSelected: boolean;
+  isPrimarySelected: boolean;
   onSelect: () => void;
-  onChange: (body: string) => void;
+  onFocusNode: () => void;
+  onChange: (title: string) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
+  const suppressMobileEditClickRef = useRef(false);
   const titleEditRequestId = useAtlasStore((state) => state.titleEditRequestId);
   const consumeTitleEditRequest = useAtlasStore((state) => state.consumeTitleEditRequest);
-  const displayBody = node.body || "";
-  const [draftBody, setDraftBody] = useState(displayBody);
+  const displayTitle = node.title || "";
+  const [draftTitle, setDraftTitle] = useState(displayTitle);
 
   useLayoutEffect(() => {
     resizeTextarea(textareaRef.current);
-  }, [draftBody]);
+  }, [draftTitle]);
 
   useEffect(() => {
     if (composingRef.current) return;
-    setDraftBody(displayBody);
-  }, [displayBody, node.id]);
+    setDraftTitle(displayTitle);
+  }, [displayTitle, node.id]);
 
   useEffect(() => {
     if (titleEditRequestId !== node.id) return;
@@ -2983,17 +3257,31 @@ function SpaceNodeEditor({
   return (
     <textarea
       ref={textareaRef}
-      className={`node-text-card node-text-editor space-body-editor ${isSelected ? "is-selected" : ""}`}
+      className={`node-text-card node-text-editor space-title-editor space-body-editor ${isSelected ? "is-selected" : ""}`}
       data-node-id={node.id}
-      value={draftBody}
+      data-selected={isPrimarySelected ? "true" : "false"}
+      value={draftTitle}
       rows={1}
-      placeholder="..."
+      placeholder="ここに記入"
       onPointerDown={(event) => {
         event.stopPropagation();
+        if (isMobilePointerEvent(event) && !isPrimarySelected) {
+          event.preventDefault();
+          suppressMobileEditClickRef.current = true;
+          onFocusNode();
+          event.currentTarget.blur();
+          return;
+        }
         onSelect();
       }}
       onClick={(event) => {
         event.stopPropagation();
+        if (suppressMobileEditClickRef.current) {
+          suppressMobileEditClickRef.current = false;
+          event.preventDefault();
+          event.currentTarget.blur();
+          return;
+        }
         onSelect();
       }}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -3008,16 +3296,16 @@ function SpaceNodeEditor({
           const textarea = event.currentTarget;
           const start = textarea.selectionStart;
           const end = textarea.selectionEnd;
-          const nextBody = `${draftBody.slice(0, start)}\t${draftBody.slice(end)}`;
-          setDraftBody(nextBody);
-          onChange(nextBody);
+          const nextTitle = `${draftTitle.slice(0, start)}\t${draftTitle.slice(end)}`;
+          setDraftTitle(nextTitle);
+          onChange(nextTitle);
           window.requestAnimationFrame(() => {
             textarea.setSelectionRange(start + 1, start + 1);
             resizeTextarea(textarea);
           });
           return;
         }
-        if (event.key === "Enter" && !event.shiftKey && !event.altKey) {
+        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
           event.preventDefault();
           onChange(event.currentTarget.value);
           event.currentTarget.blur();
@@ -3034,26 +3322,30 @@ function SpaceNodeEditor({
       }}
       onCompositionEnd={(event) => {
         composingRef.current = false;
-        const nextBody = event.currentTarget.value;
-        setDraftBody(nextBody);
-        onChange(nextBody);
+        const nextTitle = event.currentTarget.value;
+        setDraftTitle(nextTitle);
+        onChange(nextTitle);
         resizeTextarea(event.currentTarget);
       }}
       onChange={(event) => {
-        const nextBody = event.target.value;
-        setDraftBody(nextBody);
+        const nextTitle = event.target.value;
+        setDraftTitle(nextTitle);
         if (!composingRef.current && !isInputComposing(event.nativeEvent)) {
-          onChange(nextBody);
+          onChange(nextTitle);
         }
         resizeTextarea(event.currentTarget);
       }}
-      aria-label={`${node.title} body`}
+      aria-label={`${node.title || "Node"} title`}
     />
   );
 }
 
 function isInputComposing(event: Event) {
   return event instanceof InputEvent && event.isComposing;
+}
+
+function isMobilePointerEvent(event: { pointerType?: string }) {
+  return event.pointerType === "touch" || event.pointerType === "pen";
 }
 
 function resizeTextarea(textarea: HTMLTextAreaElement | null) {
@@ -4342,16 +4634,37 @@ function getFocusTargetVector(
   return position ? new Vector3(...position) : new Vector3(focusRequest.x, focusRequest.y, focusRequest.z);
 }
 
-function getGeneratedLayoutFocusDiameter(
+function getGeneratedLayoutFocusView(
   root: AtlasNode,
   layoutMode: AtlasLayoutMode,
   focusNodeId: string,
   viewport: AtlasLayoutViewport,
+  {
+    centerBounds,
+    viewportWidth,
+    viewportHeight,
+  }: {
+    centerBounds: boolean;
+    viewportWidth: number;
+    viewportHeight: number;
+  },
 ) {
-  const frame = deriveAtlasLayoutFrame(root, layoutMode, undefined, { focusNodeId, viewport });
+  const frame = deriveAtlasLayoutFrame(root, layoutMode, undefined, { focusNodeId, viewport, viewportWidth, viewportHeight });
+  const focusPosition = frame.positions.get(focusNodeId);
+  const fallbackZ = frame.planeZ ?? focusPosition?.[2] ?? 0;
+  const boundsCenter = new Vector3(
+    (frame.bounds.minX + frame.bounds.maxX) / 2,
+    (frame.bounds.minY + frame.bounds.maxY) / 2,
+    fallbackZ,
+  );
+  const target = centerBounds ? boundsCenter : focusPosition ? new Vector3(...focusPosition) : boundsCenter;
   const width = frame.bounds.maxX - frame.bounds.minX + NOTEBOOK_NODE_RADIUS * 7;
   const height = frame.bounds.maxY - frame.bounds.minY + NOTEBOOK_NODE_RADIUS * 8;
-  return Math.max(width, height, NOTEBOOK_NODE_RADIUS * 10);
+  const aspect = Math.max(0.1, viewportWidth / Math.max(1, viewportHeight));
+  return {
+    target,
+    diameter: Math.max(height, width / aspect, NOTEBOOK_NODE_RADIUS * 10),
+  };
 }
 
 function getCameraDistanceForDiameter(diameter: number, viewportHeight: number, fov: number, maxDistance = 620) {
@@ -4359,6 +4672,24 @@ function getCameraDistanceForDiameter(diameter: number, viewportHeight: number, 
   const verticalFov = (fov * Math.PI) / 180;
   const distance = targetWorldHeight / (2 * Math.tan(verticalFov / 2));
   return Math.min(maxDistance, Math.max(42, distance * Math.max(0.72, 920 / Math.max(viewportHeight, 1))));
+}
+
+function getGeneratedLayoutMobileCameraDistance(diameter: number, viewportHeight: number, fov: number, viewport: AtlasLayoutViewport) {
+  const verticalFov = (fov * Math.PI) / 180;
+  const padding = viewport === "mobile-landscape" ? GENERATED_LAYOUT_MOBILE_LANDSCAPE_FIT_PADDING : GENERATED_LAYOUT_MOBILE_FIT_PADDING;
+  const targetWorldHeight = Math.max(diameter * padding, NOTEBOOK_NODE_RADIUS * 9);
+  const distance = targetWorldHeight / (2 * Math.tan(verticalFov / 2));
+  return clamp(distance, 180, GENERATED_LAYOUT_MOBILE_MAX_CAMERA_DISTANCE);
+}
+
+function getGeneratedLayoutMobilePanYOffset(distance: number, viewportHeight: number, fov: number, viewport: AtlasLayoutViewport) {
+  if (viewport === "desktop") return 0;
+  const worldPerPixel = getWorldUnitsPerPixel(distance, viewportHeight, fov);
+  const upwardShiftPx =
+    viewport === "mobile-portrait"
+      ? viewportHeight * 0.23 + 28
+      : Math.max(18, viewportHeight * 0.06);
+  return -upwardShiftPx * worldPerPixel;
 }
 
 function getWorldUnitsPerPixel(distance: number, viewportHeight: number, fov: number) {
@@ -4399,12 +4730,23 @@ function isMobilePortraitCamera(width: number, height: number, keyboardPortraitL
   return coarsePointer || touchDevice || mobileUa;
 }
 
+function getGeneratedLayoutViewport(
+  _layoutMode: AtlasLayoutMode,
+  width: number,
+  height: number,
+  keyboardPortraitLock = false,
+): AtlasLayoutViewport {
+  if (isMobilePortraitCamera(width, height, keyboardPortraitLock)) return "mobile-portrait";
+  if (isMobileLandscapeCamera(width, height, keyboardPortraitLock)) return "mobile-landscape";
+  return "desktop";
+}
+
 function isMobileCamera(width: number, height: number) {
   if (typeof window === "undefined" || typeof navigator === "undefined") return false;
   const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
   const touchDevice = navigator.maxTouchPoints > 0;
   const mobileUa = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
-  return (coarsePointer || touchDevice || mobileUa) && Math.min(width, height) <= 620 && Math.max(width, height) <= 980;
+  return (coarsePointer || touchDevice || mobileUa) && Math.min(width, height) <= 820 && Math.max(width, height) <= 1180;
 }
 
 function isMobileLandscapeCamera(width: number, height: number, keyboardPortraitLock = false) {
@@ -4483,17 +4825,6 @@ function normalizeVrTilt(value: number) {
   );
   const eased = normalized * normalized * (3 - 2 * normalized);
   return Math.sign(value) * eased;
-}
-
-function touchDistance(a: Touch, b: Touch) {
-  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-}
-
-function touchCenter(a: Touch, b: Touch) {
-  return {
-    x: (a.clientX + b.clientX) / 2,
-    y: (a.clientY + b.clientY) / 2,
-  };
 }
 
 function getDepthFade(index: number) {

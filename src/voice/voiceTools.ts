@@ -26,7 +26,7 @@ type VoiceToolSpec = RealtimeToolDefinition & {
 };
 
 const scopeValues: AiContextScope[] = ["minimal", "focused", "subtree", "neighborhood", "selected", "custom"];
-const aiModes: AiExecutionMode[] = ["chat", "openai", "local", "codex", "openclaw", "claude"];
+const toolCapableAiModes: AiExecutionMode[] = ["chat", "openai", "local"];
 const statuses: WorkStatus[] = ["running", "needs_review", "waiting", "blocked", "error", "done"];
 const runAiPurposes = ["node_ai_run", "persistent_result", "delegate_to_node_context"] as const;
 
@@ -310,7 +310,7 @@ const toolSpecs: VoiceToolSpec[] = [
     type: "function",
     name: "run_ai_from_active_node",
     description:
-      "Run a separate node-anchored AI job from the active node. This creates AI request/result celestial nodes under the active node and is NOT for answering the current global conversation. Use only when the user explicitly asks to run Chat, Codex, OpenClaw, or Claude Code on a specific node, delegate work to that node context, or create a persistent node-based AI result. Do not use this tool for listing, picking up, summarizing, inspecting, searching, checking notifications, or answering from existing Mind Atlas state; use search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and answer directly instead.",
+      "Run a separate node-anchored Chat/OpenAI/Local AI job from the active node. This creates AI request/result celestial nodes under the active node and is NOT for answering the current global conversation. Do not use this for Codex, OpenClaw, or Claude Code; those agent CLI modes are intentionally excluded from Mind Atlas tool orchestration. Use only when the user explicitly asks to delegate a tool-capable chat model to a specific node context or create a persistent node-based chat result. Do not use this tool for listing, picking up, summarizing, inspecting, searching, checking notifications, or answering from existing Mind Atlas state; use search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and answer directly instead.",
     parameters: objectSchema({
       prompt: {
         type: "string",
@@ -318,8 +318,8 @@ const toolSpecs: VoiceToolSpec[] = [
       },
       mode: {
         type: "string",
-        enum: aiModes,
-        description: "Provider for the separate node-based run.",
+        enum: toolCapableAiModes,
+        description: "Tool-capable chat provider for the separate node-based run. Codex, OpenClaw, and Claude Code are not allowed here.",
       },
       scope: { type: "string", enum: scopeValues },
       purpose: {
@@ -351,7 +351,7 @@ const toolSpecs: VoiceToolSpec[] = [
         );
       }
       const prompt = stringArg(args, "prompt");
-      const mode = enumArg(args, "mode", aiModes);
+      const mode = enumArg(args, "mode", toolCapableAiModes);
       const scope = optionalEnumArg(args, "scope", scopeValues);
       const state = useAtlasStore.getState();
       await state.runAiOnSelectedNode(prompt, mode, scope ? normalizeAiContextOptions({ ...state.aiContextOptions, scope }) : state.aiContextOptions);

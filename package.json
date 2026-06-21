@@ -12,6 +12,7 @@
     "preview": "vite preview --configLoader runner",
     "typecheck": "tsc -b",
     "verify:context": "node --experimental-strip-types scripts/verify-context-assembly.ts",
+    "verify:title-maintenance": "node --experimental-strip-types scripts/verify-title-maintenance.ts",
     "verify:layout": "node --experimental-strip-types scripts/verify-layout.ts",
     "verify:ui": "node scripts/verify-ui.mjs"
   },

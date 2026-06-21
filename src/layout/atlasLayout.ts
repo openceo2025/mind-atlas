@@ -1,13 +1,15 @@
 import type { AtlasNode } from "../types";
 
 export type Vec3 = [number, number, number];
-export type AtlasLayoutMode = "phyllotaxis" | "tree" | "mind-map" | "hub-emphasis";
+export type AtlasLayoutMode = "phyllotaxis" | "tree" | "mind-map";
 export type AtlasPositionOverrides = Map<string, Vec3> | Record<string, Vec3 | undefined>;
-export type AtlasLayoutViewport = "desktop" | "mobile-portrait";
+export type AtlasLayoutViewport = "desktop" | "mobile-portrait" | "mobile-landscape";
 
 export interface AtlasLayoutOptions {
   focusNodeId?: string;
   viewport?: AtlasLayoutViewport;
+  viewportWidth?: number;
+  viewportHeight?: number;
 }
 
 export interface AtlasLayoutFrame {
@@ -33,14 +35,46 @@ const TREE_DESKTOP_Y_GAP = 190;
 const TREE_MOBILE_ACTIVE_X = -170;
 const TREE_MOBILE_X_GAP = 235;
 const TREE_MOBILE_Y_GAP = 150;
+const TREE_MOBILE_LANDSCAPE_ACTIVE_Y = 32;
+const TREE_MOBILE_LANDSCAPE_Y_GAP = 132;
 const MIND_MAP_MIN_CHILD_RADIUS = 180;
 const MIND_MAP_MAX_CHILD_RADIUS = 350;
 const MIND_MAP_SIBLING_SCREEN_GAP = 118;
+const MIND_MAP_MOBILE_MIN_CHILD_RADIUS = 132;
+const MIND_MAP_MOBILE_MAX_CHILD_RADIUS = 260;
+const MIND_MAP_MOBILE_SIBLING_SCREEN_GAP = 86;
 const TREE_NODE_GAP = 190;
-const TREE_SUBTREE_GAP = 120;
 const FOCUS_LAYOUT_MAX_DESCENDANT_DEPTH = 5;
+const TREE_SIBLING_SPAN_VIEWPORT_RATIO = 0.9;
+const TREE_MOBILE_SIBLING_SPAN_VIEWPORT_RATIO = 0.68;
+const TREE_MOBILE_LANDSCAPE_SIBLING_SPAN_VIEWPORT_RATIO = 0.72;
+const TREE_DESKTOP_MIN_SIBLING_SPAN = 560;
+const TREE_DESKTOP_MAX_SIBLING_SPAN = 1280;
+const TREE_MOBILE_MIN_SIBLING_SPAN = 320;
+const TREE_MOBILE_MAX_SIBLING_SPAN = 640;
+const TREE_MOBILE_LANDSCAPE_MIN_SIBLING_SPAN = 420;
+const TREE_MOBILE_LANDSCAPE_MAX_SIBLING_SPAN = 760;
 const MIND_MAP_RING_GAP = 235;
+const MIND_MAP_MOBILE_RING_GAP = 170;
 const MIND_MAP_PARENT_SECTOR = Math.PI / 3;
+
+type TreeLayoutMetrics = {
+  active: Vec3;
+  sideways: boolean;
+  xGap: number;
+  yGap: number;
+  siblingSpan: number;
+};
+
+type MindMapLayoutMetrics = {
+  minChildRadius: number;
+  maxChildRadius: number;
+  siblingScreenGap: number;
+  ringGap: number;
+  siblingGap: number;
+  siblingYOffset: number;
+  ancestorGap: number;
+};
 
 export function deriveAtlasLayout(
   tree: AtlasNode,
@@ -79,11 +113,6 @@ export function deriveAtlasLayoutFrame(
       planeZ = FOCUS_LAYOUT_PLANE_Z;
       break;
     }
-    case "hub-emphasis": {
-      positions = deriveHubEmphasisLayout(tree, overrides, options);
-      visibleIds = new Set(positions.keys());
-      break;
-    }
   }
 
   return {
@@ -114,20 +143,19 @@ function deriveTreeLayout(tree: AtlasNode, options: AtlasLayoutOptions): Map<str
   const positions = new Map<string, Vec3>();
   const focusPath = findAtlasNodePath(tree, options.focusNodeId ?? tree.id) ?? [tree];
   const focusNode = focusPath[focusPath.length - 1] ?? tree;
-  const portrait = options.viewport === "mobile-portrait";
-  const active: Vec3 = portrait ? [TREE_MOBILE_ACTIVE_X, 0, FOCUS_LAYOUT_PLANE_Z] : [0, TREE_ACTIVE_Y, FOCUS_LAYOUT_PLANE_Z];
+  const metrics = getTreeLayoutMetrics(options);
 
   if (focusNode.id === tree.id) {
-    positions.set(tree.id, active);
-    layoutTreeChildren(tree.children, active, 1, portrait, FOCUS_LAYOUT_MAX_DESCENDANT_DEPTH, positions);
+    positions.set(tree.id, metrics.active);
+    layoutTreeChildren(tree.children, metrics.active, 1, metrics, FOCUS_LAYOUT_MAX_DESCENDANT_DEPTH, positions);
     return positions;
   }
 
-  positions.set(focusNode.id, active);
-  layoutAncestorChain(focusPath, active, portrait, positions);
+  positions.set(focusNode.id, metrics.active);
+  layoutAncestorChain(focusPath, metrics, positions);
   const parent = focusPath.length > 1 ? focusPath[focusPath.length - 2] : null;
-  if (parent) layoutTreeSiblings(parent.children, focusNode.id, active, portrait, positions);
-  layoutTreeChildren(focusNode.children, active, 1, portrait, FOCUS_LAYOUT_MAX_DESCENDANT_DEPTH, positions);
+  if (parent) layoutTreeSiblings(parent.children, focusNode.id, metrics, positions);
+  layoutTreeChildren(focusNode.children, metrics.active, 1, metrics, FOCUS_LAYOUT_MAX_DESCENDANT_DEPTH, positions);
   return positions;
 }
 
@@ -135,39 +163,23 @@ function deriveMindMapLayout(tree: AtlasNode, options: AtlasLayoutOptions): Map<
   const positions = new Map<string, Vec3>();
   const focusPath = findAtlasNodePath(tree, options.focusNodeId ?? tree.id) ?? [tree];
   const focusNode = focusPath[focusPath.length - 1] ?? tree;
+  const metrics = getMindMapLayoutMetrics(options.viewport);
   const focusPosition: Vec3 = [0, 0, FOCUS_LAYOUT_PLANE_Z];
   positions.set(focusNode.id, focusPosition);
 
   const parent = focusPath.length > 1 ? focusPath[focusPath.length - 2] : null;
   if (parent) {
-    const parentPosition: Vec3 = [0, getMindMapChildRadius(1, 1), FOCUS_LAYOUT_PLANE_Z];
+    const parentPosition: Vec3 = [0, getMindMapChildRadius(1, 1, metrics), FOCUS_LAYOUT_PLANE_Z];
     positions.set(parent.id, parentPosition);
-    placeMindMapAncestorChain(focusPath.slice(0, -2), parentPosition, positions);
-    placeMindMapSiblings(parent.children.filter((node) => node.id !== focusNode.id), parentPosition, positions);
+    placeMindMapAncestorChain(focusPath.slice(0, -2), parentPosition, metrics, positions);
+    placeMindMapSiblings(parent.children.filter((node) => node.id !== focusNode.id), parentPosition, metrics, positions);
   }
 
   const availableStart = parent ? -Math.PI / 2 - (Math.PI * 2 - MIND_MAP_PARENT_SECTOR) / 2 : -Math.PI / 2;
   const availableEnd = parent ? -Math.PI / 2 + (Math.PI * 2 - MIND_MAP_PARENT_SECTOR) / 2 : availableStart + Math.PI * 2;
-  placeMindMapSector(focusNode.children, focusPosition, availableStart, availableEnd, 1, positions);
+  placeMindMapSector(focusNode.children, focusPosition, availableStart, availableEnd, 1, metrics, positions);
   if (focusNode.id === tree.id) {
-    placeMindMapSector(tree.children, focusPosition, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2, 1, positions);
-  }
-  return positions;
-}
-
-function deriveHubEmphasisLayout(tree: AtlasNode, overrides: AtlasPositionOverrides, options: AtlasLayoutOptions): Map<string, Vec3> {
-  const phyllotaxisPositions = derivePhyllotaxisLayout(tree, overrides);
-  const positions = new Map<string, Vec3>([[tree.id, [0, 0, 0]]]);
-  const nodes = flattenAtlasNodes(tree).filter((node) => node.id !== tree.id);
-  const focusNodeId = options.focusNodeId ?? tree.id;
-  const focusDirection = focusNodeId === tree.id ? [0, 0, -1] as Vec3 : normalize(phyllotaxisPositions.get(focusNodeId) ?? [0, 0, -1]);
-  const tierByNodeId = rankNodesIntoConnectionTiers(nodes);
-
-  for (const node of nodes) {
-    const freeDirection = normalize(phyllotaxisPositions.get(node.id) ?? [0, 0, -1]);
-    const centeredDirection = rotateDirectionBetween(freeDirection, focusDirection, [0, 0, -1]);
-    const tier = tierByNodeId.get(node.id) ?? 10;
-    positions.set(node.id, scale(centeredDirection, getShellRadius(tier)));
+    placeMindMapSector(tree.children, focusPosition, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2, 1, metrics, positions);
   }
   return positions;
 }
@@ -237,13 +249,11 @@ export function getAtlasLayoutModeLabel(mode: AtlasLayoutMode) {
       return "Tree";
     case "mind-map":
       return "Mind map";
-    case "hub-emphasis":
-      return "Hub emphasis";
   }
 }
 
 export function isAtlasLayoutMode(value: unknown): value is AtlasLayoutMode {
-  return value === "phyllotaxis" || value === "tree" || value === "mind-map" || value === "hub-emphasis";
+  return value === "phyllotaxis" || value === "tree" || value === "mind-map";
 }
 
 export function getShellRadius(depth: number) {
@@ -289,58 +299,118 @@ function layoutTreeChildren(
   children: AtlasNode[],
   parentPosition: Vec3,
   depth: number,
-  portrait: boolean,
+  metrics: TreeLayoutMetrics,
   depthRemaining: number,
   positions: Map<string, Vec3>,
 ) {
   if (!children.length || depthRemaining <= 0) return;
 
-  const childWidths = children.map((child) => getVisibleTreeWidth(child, depthRemaining - 1));
-  const totalWidth = childWidths.reduce((sum, width) => sum + width, 0) + TREE_SUBTREE_GAP * Math.max(0, children.length - 1);
-  let cursor = -totalWidth / 2;
+  const offsets = getTreeSiblingOffsets(children.length, metrics.siblingSpan);
 
   children.forEach((child, index) => {
-    const width = childWidths[index] ?? TREE_NODE_GAP;
-    const laneOffset = cursor + width / 2;
-    cursor += width + TREE_SUBTREE_GAP;
-    const childPosition = treeOffset(parentPosition, depth, laneOffset, portrait);
+    const laneOffset = offsets[index] ?? 0;
+    const childPosition = treeOffset(parentPosition, laneOffset, metrics);
     positions.set(child.id, childPosition);
-    layoutTreeChildren(child.children, childPosition, depth + 1, portrait, depthRemaining - 1, positions);
+    layoutTreeChildren(child.children, childPosition, depth + 1, metrics, depthRemaining - 1, positions);
   });
 }
 
-function layoutTreeSiblings(siblings: AtlasNode[], focusNodeId: string, active: Vec3, portrait: boolean, positions: Map<string, Vec3>) {
+function layoutTreeSiblings(siblings: AtlasNode[], focusNodeId: string, metrics: TreeLayoutMetrics, positions: Map<string, Vec3>) {
   const visibleSiblings = siblings.filter((node) => node.id !== focusNodeId);
   if (!visibleSiblings.length) return;
   const focusIndex = siblings.findIndex((node) => node.id === focusNodeId);
+  const offsets = getTreeSiblingOffsets(siblings.length, metrics.siblingSpan);
+  const focusOffset = offsets[focusIndex] ?? 0;
   visibleSiblings.forEach((sibling) => {
     const index = siblings.findIndex((node) => node.id === sibling.id);
-    const offset = (index - focusIndex) * TREE_NODE_GAP;
-    positions.set(sibling.id, portrait ? [active[0], active[1] - offset, FOCUS_LAYOUT_PLANE_Z] : [active[0] + offset, active[1], FOCUS_LAYOUT_PLANE_Z]);
+    const offset = (offsets[index] ?? 0) - focusOffset;
+    positions.set(sibling.id, metrics.sideways
+      ? [metrics.active[0], metrics.active[1] - offset, FOCUS_LAYOUT_PLANE_Z]
+      : [metrics.active[0] + offset, metrics.active[1], FOCUS_LAYOUT_PLANE_Z]);
   });
 }
 
-function layoutAncestorChain(path: AtlasNode[], active: Vec3, portrait: boolean, positions: Map<string, Vec3>) {
+function layoutAncestorChain(path: AtlasNode[], metrics: TreeLayoutMetrics, positions: Map<string, Vec3>) {
   const ancestors = path.slice(0, -1).reverse();
   ancestors.forEach((ancestor, index) => {
     const level = index + 1;
-    const position: Vec3 = portrait
-      ? [active[0] - level * TREE_MOBILE_X_GAP, active[1], FOCUS_LAYOUT_PLANE_Z]
-      : [active[0], active[1] + level * TREE_DESKTOP_Y_GAP, FOCUS_LAYOUT_PLANE_Z];
+    const position: Vec3 = metrics.sideways
+      ? [metrics.active[0] - level * metrics.xGap, metrics.active[1], FOCUS_LAYOUT_PLANE_Z]
+      : [metrics.active[0], metrics.active[1] + level * metrics.yGap, FOCUS_LAYOUT_PLANE_Z];
     positions.set(ancestor.id, position);
   });
 }
 
-function treeOffset(parentPosition: Vec3, depth: number, laneOffset: number, portrait: boolean): Vec3 {
-  return portrait
-    ? [parentPosition[0] + TREE_MOBILE_X_GAP, parentPosition[1] - laneOffset, FOCUS_LAYOUT_PLANE_Z]
-    : [parentPosition[0] + laneOffset, parentPosition[1] - TREE_DESKTOP_Y_GAP, FOCUS_LAYOUT_PLANE_Z];
+function treeOffset(parentPosition: Vec3, laneOffset: number, metrics: TreeLayoutMetrics): Vec3 {
+  return metrics.sideways
+    ? [parentPosition[0] + metrics.xGap, parentPosition[1] - laneOffset, FOCUS_LAYOUT_PLANE_Z]
+    : [parentPosition[0] + laneOffset, parentPosition[1] - metrics.yGap, FOCUS_LAYOUT_PLANE_Z];
 }
 
-function getVisibleTreeWidth(node: AtlasNode, depthRemaining: number): number {
-  if (depthRemaining <= 0 || !node.children.length) return TREE_NODE_GAP;
-  const childrenWidth = node.children.reduce((sum, child) => sum + getVisibleTreeWidth(child, depthRemaining - 1), 0);
-  return Math.max(TREE_NODE_GAP, childrenWidth + TREE_SUBTREE_GAP * Math.max(0, node.children.length - 1));
+function getTreeLayoutMetrics(options: AtlasLayoutOptions): TreeLayoutMetrics {
+  if (options.viewport === "mobile-portrait") {
+    return {
+      active: [TREE_MOBILE_ACTIVE_X, 0, FOCUS_LAYOUT_PLANE_Z],
+      sideways: true,
+      xGap: TREE_MOBILE_X_GAP,
+      yGap: TREE_MOBILE_Y_GAP,
+      siblingSpan: getTreeSiblingSpan(options, "mobile-portrait"),
+    };
+  }
+  if (options.viewport === "mobile-landscape") {
+    return {
+      active: [0, TREE_MOBILE_LANDSCAPE_ACTIVE_Y, FOCUS_LAYOUT_PLANE_Z],
+      sideways: false,
+      xGap: TREE_DESKTOP_X_GAP,
+      yGap: TREE_MOBILE_LANDSCAPE_Y_GAP,
+      siblingSpan: getTreeSiblingSpan(options, "mobile-landscape"),
+    };
+  }
+  return {
+    active: [0, TREE_ACTIVE_Y, FOCUS_LAYOUT_PLANE_Z],
+    sideways: false,
+    xGap: TREE_DESKTOP_X_GAP,
+    yGap: TREE_DESKTOP_Y_GAP,
+    siblingSpan: getTreeSiblingSpan(options, "desktop"),
+  };
+}
+
+function getTreeSiblingSpan(options: AtlasLayoutOptions, viewport: AtlasLayoutViewport) {
+  const viewportCrossAxis = viewport === "mobile-portrait" ? options.viewportHeight : options.viewportWidth;
+  const fallback =
+    viewport === "mobile-portrait"
+      ? TREE_MOBILE_MAX_SIBLING_SPAN
+      : viewport === "mobile-landscape"
+      ? TREE_MOBILE_LANDSCAPE_MAX_SIBLING_SPAN
+      : TREE_DESKTOP_MAX_SIBLING_SPAN;
+  const min =
+    viewport === "mobile-portrait"
+      ? TREE_MOBILE_MIN_SIBLING_SPAN
+      : viewport === "mobile-landscape"
+      ? TREE_MOBILE_LANDSCAPE_MIN_SIBLING_SPAN
+      : TREE_DESKTOP_MIN_SIBLING_SPAN;
+  const max =
+    viewport === "mobile-portrait"
+      ? TREE_MOBILE_MAX_SIBLING_SPAN
+      : viewport === "mobile-landscape"
+      ? TREE_MOBILE_LANDSCAPE_MAX_SIBLING_SPAN
+      : TREE_DESKTOP_MAX_SIBLING_SPAN;
+  const ratio =
+    viewport === "mobile-portrait"
+      ? TREE_MOBILE_SIBLING_SPAN_VIEWPORT_RATIO
+      : viewport === "mobile-landscape"
+      ? TREE_MOBILE_LANDSCAPE_SIBLING_SPAN_VIEWPORT_RATIO
+      : TREE_SIBLING_SPAN_VIEWPORT_RATIO;
+  const viewportSpan = Number.isFinite(viewportCrossAxis) && viewportCrossAxis ? viewportCrossAxis * ratio : fallback;
+  return clampNumber(viewportSpan, min, max);
+}
+
+function getTreeSiblingOffsets(count: number, siblingSpan: number) {
+  if (count <= 0) return [];
+  if (count === 1) return [0];
+  const gap = siblingSpan / Math.max(1, count - 1);
+  const start = -siblingSpan / 2;
+  return Array.from({ length: count }, (_, index) => start + index * gap);
 }
 
 function placeMindMapSector(
@@ -349,6 +419,7 @@ function placeMindMapSector(
   startAngle: number,
   endAngle: number,
   depth: number,
+  metrics: MindMapLayoutMetrics,
   positions: Map<string, Vec3>,
 ) {
   if (!nodes.length || depth > FOCUS_LAYOUT_MAX_DESCENDANT_DEPTH) return;
@@ -357,7 +428,7 @@ function placeMindMapSector(
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
   const available = endAngle - startAngle;
   let cursor = startAngle;
-  const radius = getMindMapChildRadius(nodes.length, depth);
+  const radius = getMindMapChildRadius(nodes.length, depth, metrics);
 
   nodes.forEach((node, index) => {
     const sector = available * ((weights[index] ?? 1) / totalWeight);
@@ -368,51 +439,57 @@ function placeMindMapSector(
       FOCUS_LAYOUT_PLANE_Z,
     ];
     positions.set(node.id, position);
-    placeMindMapSector(node.children, position, cursor, cursor + sector, depth + 1, positions);
+    placeMindMapSector(node.children, position, cursor, cursor + sector, depth + 1, metrics, positions);
     cursor += sector;
   });
 }
 
-function placeMindMapSiblings(siblings: AtlasNode[], parentPosition: Vec3, positions: Map<string, Vec3>) {
+function placeMindMapSiblings(siblings: AtlasNode[], parentPosition: Vec3, metrics: MindMapLayoutMetrics, positions: Map<string, Vec3>) {
   if (!siblings.length) return;
-  const gap = 58;
-  const start = -((siblings.length - 1) * gap) / 2;
+  const start = -((siblings.length - 1) * metrics.siblingGap) / 2;
   siblings.forEach((sibling, index) => {
-    positions.set(sibling.id, [parentPosition[0] + start + index * gap, parentPosition[1] + 74, FOCUS_LAYOUT_PLANE_Z]);
+    positions.set(sibling.id, [parentPosition[0] + start + index * metrics.siblingGap, parentPosition[1] + metrics.siblingYOffset, FOCUS_LAYOUT_PLANE_Z]);
   });
 }
 
-function placeMindMapAncestorChain(ancestors: AtlasNode[], parentPosition: Vec3, positions: Map<string, Vec3>) {
+function placeMindMapAncestorChain(ancestors: AtlasNode[], parentPosition: Vec3, metrics: MindMapLayoutMetrics, positions: Map<string, Vec3>) {
   ancestors.reverse().forEach((ancestor, index) => {
-    positions.set(ancestor.id, [parentPosition[0], parentPosition[1] + (index + 1) * 150, FOCUS_LAYOUT_PLANE_Z]);
+    positions.set(ancestor.id, [parentPosition[0], parentPosition[1] + (index + 1) * metrics.ancestorGap, FOCUS_LAYOUT_PLANE_Z]);
   });
 }
 
-function getMindMapChildRadius(siblingCount: number, depth: number) {
-  const countRadius = (Math.max(1, siblingCount) * MIND_MAP_SIBLING_SCREEN_GAP) / (Math.PI * 2);
-  const depthNudge = Math.min(80, Math.max(0, depth - 1) * MIND_MAP_RING_GAP);
-  return Math.min(MIND_MAP_MAX_CHILD_RADIUS + depthNudge, Math.max(MIND_MAP_MIN_CHILD_RADIUS + depthNudge, countRadius + depthNudge));
+function getMindMapChildRadius(siblingCount: number, depth: number, metrics: MindMapLayoutMetrics) {
+  const countRadius = (Math.max(1, siblingCount) * metrics.siblingScreenGap) / (Math.PI * 2);
+  const depthNudge = Math.min(80, Math.max(0, depth - 1) * metrics.ringGap);
+  return Math.min(metrics.maxChildRadius + depthNudge, Math.max(metrics.minChildRadius + depthNudge, countRadius + depthNudge));
+}
+
+function getMindMapLayoutMetrics(viewport: AtlasLayoutViewport = "desktop"): MindMapLayoutMetrics {
+  if (viewport === "mobile-portrait" || viewport === "mobile-landscape") {
+    return {
+      minChildRadius: MIND_MAP_MOBILE_MIN_CHILD_RADIUS,
+      maxChildRadius: MIND_MAP_MOBILE_MAX_CHILD_RADIUS,
+      siblingScreenGap: MIND_MAP_MOBILE_SIBLING_SCREEN_GAP,
+      ringGap: MIND_MAP_MOBILE_RING_GAP,
+      siblingGap: 44,
+      siblingYOffset: 58,
+      ancestorGap: 118,
+    };
+  }
+  return {
+    minChildRadius: MIND_MAP_MIN_CHILD_RADIUS,
+    maxChildRadius: MIND_MAP_MAX_CHILD_RADIUS,
+    siblingScreenGap: MIND_MAP_SIBLING_SCREEN_GAP,
+    ringGap: MIND_MAP_RING_GAP,
+    siblingGap: 58,
+    siblingYOffset: 74,
+    ancestorGap: 150,
+  };
 }
 
 function getVisibleMindMapLeafWeight(node: AtlasNode, depthRemaining: number): number {
   if (depthRemaining <= 0 || !node.children.length) return 1;
   return node.children.reduce((sum, child) => sum + getVisibleMindMapLeafWeight(child, depthRemaining - 1), 0);
-}
-
-function rankNodesIntoConnectionTiers(nodes: AtlasNode[]) {
-  const tiers = new Map<string, number>();
-  if (!nodes.length) return tiers;
-
-  const ranked = [...nodes].sort((a, b) => b.children.length - a.children.length || a.id.localeCompare(b.id));
-  ranked.forEach((node, index) => {
-    const tier = clampInteger(Math.floor((index / ranked.length) * 10) + 1, 1, 10);
-    tiers.set(node.id, tier);
-  });
-  return tiers;
-}
-
-function flattenAtlasNodes(tree: AtlasNode): AtlasNode[] {
-  return [tree, ...tree.children.flatMap((child) => flattenAtlasNodes(child))];
 }
 
 function findAtlasNodePath(root: AtlasNode, id: string): AtlasNode[] | null {
@@ -440,30 +517,6 @@ function getLayoutBounds(positions: Map<string, Vec3>, visibleIds: Set<string>) 
     minZ: Math.min(...visiblePositions.map((position) => position[2])),
     maxZ: Math.max(...visiblePositions.map((position) => position[2])),
   };
-}
-
-function rotateDirectionBetween(vector: Vec3, from: Vec3, to: Vec3) {
-  const normalizedFrom = normalize(from);
-  const normalizedTo = normalize(to);
-  const axis = cross(normalizedFrom, normalizedTo);
-  const sin = vectorLength(axis);
-  const cos = clamp(dot(normalizedFrom, normalizedTo), -1, 1);
-  if (sin <= 0.000001) {
-    if (cos > 0) return vector;
-    return rotateAroundAxis(vector, tangentBasis(normalizedFrom).tangentA, Math.PI);
-  }
-
-  return rotateAroundAxis(vector, scale(axis, 1 / sin), Math.atan2(sin, cos));
-}
-
-function rotateAroundAxis(vector: Vec3, axis: Vec3, angle: number): Vec3 {
-  const normalizedAxis = normalize(axis);
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  return add(
-    add(scale(vector, cos), scale(cross(normalizedAxis, vector), sin)),
-    scale(normalizedAxis, dot(normalizedAxis, vector) * (1 - cos)),
-  );
 }
 
 function getPhyllotaxisChildDirection(parentDirection: Vec3, depth: number, siblingCount: number, childIndex: number, parentId: string): Vec3 {
@@ -528,6 +581,10 @@ function clampLocalOffset(position: Vec3, limit: number): Vec3 {
   return [position[0] * scaleToLimit, position[1] * scaleToLimit, 0];
 }
 
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function tangentBasis(parentDirection: Vec3) {
   const forward = normalize(parentDirection);
   const reference: Vec3 = Math.abs(forward[1]) > 0.86 ? [1, 0, 0] : [0, 1, 0];
@@ -553,22 +610,6 @@ function add(a: Vec3, b: Vec3): Vec3 {
 
 function scale(vector: Vec3, amount: number): Vec3 {
   return [vector[0] * amount, vector[1] * amount, vector[2] * amount];
-}
-
-function dot(a: Vec3, b: Vec3) {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
-function vectorLength(vector: Vec3) {
-  return Math.hypot(vector[0], vector[1], vector[2]);
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function clampInteger(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 function cross(a: Vec3, b: Vec3): Vec3 {

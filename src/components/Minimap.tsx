@@ -1,5 +1,5 @@
-import { useMemo, useRef } from "react";
-import type { PointerEvent as ReactPointerEvent, Touch as ReactTouch, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from "react";
+import { useMemo } from "react";
+import type { PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from "react";
 import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT } from "../events";
 import { deriveAtlasLayoutFrame } from "../layout/atlasLayout";
 import { useAtlasStore } from "../store/atlasStore";
@@ -10,7 +10,6 @@ export function Minimap() {
   const layoutMode = useAtlasStore((state) => state.layoutMode);
   const viewport = useAtlasStore((state) => state.viewport);
   const focusNode = useAtlasStore((state) => state.focusNode);
-  const pinchRef = useRef<{ distance: number } | null>(null);
   const positions = useMemo(
     () => {
       const frame = deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId });
@@ -64,9 +63,7 @@ export function Minimap() {
       navigateFromClientPoint(event.touches[0].clientX, event.touches[0].clientY);
       return;
     }
-    if (event.touches.length === 2) {
-      pinchRef.current = { distance: touchDistance(event.touches[0], event.touches[1]) };
-    }
+    event.preventDefault();
   };
 
   const handleTouchMove = (event: ReactTouchEvent<HTMLDivElement>) => {
@@ -75,15 +72,6 @@ export function Minimap() {
       navigateFromClientPoint(event.touches[0].clientX, event.touches[0].clientY);
       return;
     }
-    if (event.touches.length !== 2 || !pinchRef.current) return;
-    const nextDistance = touchDistance(event.touches[0], event.touches[1]);
-    const deltaDistance = nextDistance - pinchRef.current.distance;
-    pinchRef.current.distance = nextDistance;
-    window.dispatchEvent(new CustomEvent(MINIMAP_ZOOM_EVENT, { detail: { deltaY: -deltaDistance * 3 } }));
-  };
-
-  const handleTouchEnd = (event: ReactTouchEvent<HTMLDivElement>) => {
-    if (event.touches.length < 2) pinchRef.current = null;
   };
 
   return (
@@ -95,8 +83,6 @@ export function Minimap() {
         onWheel={handleWheel}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onTouchCancel={handleTouchEnd}
       >
         {positions.map(({ node, position }) => {
           const projected = projectHemisphere(position);
@@ -141,10 +127,6 @@ function directionToYawPitch(direction: [number, number, number]) {
     yaw: Math.atan2(x, -z),
     pitch: Math.asin(clamp(y, -1, 1)),
   };
-}
-
-function touchDistance(a: ReactTouch, b: ReactTouch) {
-  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 }
 
 function projectHemisphere(position: [number, number, number]) {

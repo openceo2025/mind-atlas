@@ -42,6 +42,16 @@ const treeLayout = deriveAtlasLayout(root, "tree");
 assert.ok((treeLayout.get("alpha-1")?.[1] ?? 0) < (treeLayout.get("alpha")?.[1] ?? 0), "tree children should be below parents");
 assert.ok((treeLayout.get("alpha-1")?.[0] ?? 0) < (treeLayout.get("gamma")?.[0] ?? 0), "tree layout should preserve sibling order");
 
+const denseTreeRoot = node("atlas-root", "Dense", [
+  node("dense-alpha", "Dense Alpha", Array.from({ length: 36 }, (_, index) => node(`dense-alpha-${index}`, `Dense Alpha ${index}`))),
+  node("dense-beta", "Dense Beta"),
+  node("dense-gamma", "Dense Gamma"),
+]);
+const denseTreeLayout = deriveAtlasLayout(denseTreeRoot, "tree", undefined, { viewportWidth: 1000, viewportHeight: 800 });
+assertVecClose(denseTreeLayout.get("dense-alpha"), [-450, 92 - 190, -1320], "tree root children should use fixed viewport-derived sibling width");
+assertVecClose(denseTreeLayout.get("dense-beta"), [0, 92 - 190, -1320], "tree root siblings should be evenly distributed within the fixed width");
+assertVecClose(denseTreeLayout.get("dense-gamma"), [450, 92 - 190, -1320], "tree descendant count should not expand root sibling width");
+
 const focusedTreeLayout = deriveAtlasLayout(root, "tree", undefined, { focusNodeId: "alpha" });
 assertVecClose(focusedTreeLayout.get("alpha"), [0, 92, -1320], "tree focused node should be centered in the 2D plane");
 assert.ok((focusedTreeLayout.get("atlas-root")?.[1] ?? 0) > (focusedTreeLayout.get("alpha")?.[1] ?? 0), "tree focused parent should be above active node");
@@ -59,9 +69,20 @@ assert.ok((mobileTreeLayout.get("alpha-1")?.[0] ?? 0) > (mobileTreeLayout.get("a
 assert.ok((mobileTreeLayout.get("atlas-root")?.[0] ?? 0) < (mobileTreeLayout.get("alpha")?.[0] ?? 0), "mobile tree parent should be to the left of active node");
 assert.equal(mobileTreeLayout.get("alpha")?.[2], mobileTreeLayout.get("alpha-1")?.[2], "mobile tree layout should be flat");
 
+const mobileLandscapeTreeLayout = deriveAtlasLayout(root, "tree", undefined, { focusNodeId: "alpha", viewport: "mobile-landscape", viewportWidth: 844, viewportHeight: 390 });
+assert.ok((mobileLandscapeTreeLayout.get("alpha-1")?.[1] ?? 0) < (mobileLandscapeTreeLayout.get("alpha")?.[1] ?? 0), "mobile landscape tree children should stay below parents");
+assert.ok((mobileLandscapeTreeLayout.get("atlas-root")?.[1] ?? 0) > (mobileLandscapeTreeLayout.get("alpha")?.[1] ?? 0), "mobile landscape tree parent should stay above active node");
+assert.ok(
+  Math.abs((mobileLandscapeTreeLayout.get("alpha-1")?.[1] ?? 0) - (mobileLandscapeTreeLayout.get("alpha")?.[1] ?? 0)) < 190,
+  "mobile landscape tree should use a tighter vertical gap than desktop",
+);
+
 const mindMapLayout = deriveAtlasLayout(root, "mind-map");
 assert.ok(distanceFromRoot(mindMapLayout.get("alpha")) < distanceFromRoot(mindMapLayout.get("alpha-1")), "mind map descendants should move outward");
 assert.equal(JSON.stringify([...mindMapLayout.entries()]), JSON.stringify([...deriveAtlasLayout(root, "mind-map").entries()]), "mind map layout should be deterministic");
+
+const mobileMindMapLayout = deriveAtlasLayout(root, "mind-map", undefined, { viewport: "mobile-portrait" });
+assert.ok(distanceFromRoot(mobileMindMapLayout.get("alpha")) < distanceFromRoot(mindMapLayout.get("alpha")), "mobile mind map should use a tighter first ring than desktop");
 
 const focusedMindMapLayout = deriveAtlasLayout(root, "mind-map", undefined, { focusNodeId: "alpha" });
 assertVecClose(focusedMindMapLayout.get("alpha"), [0, 0, -1320], "mind map focused node should be centered in the 2D plane");
@@ -71,27 +92,6 @@ assert.ok(focusedMindMapFrame.visibleIds.has("alpha"));
 assert.ok(focusedMindMapFrame.visibleIds.has("atlas-root"), "mind map should show focused parent");
 assert.ok(focusedMindMapFrame.visibleIds.has("beta"), "mind map should show focused siblings near parent context");
 assertMinDistance(focusedMindMapFrame, 46, "mind map visible nodes should not collapse onto each other");
-
-const taggedRoot = cloneTree(root);
-findNode(taggedRoot, "alpha")?.tags.push("shared");
-findNode(taggedRoot, "alpha-1")?.tags.push("shared");
-findNode(taggedRoot, "alpha-2")?.tags.push("shared");
-findNode(taggedRoot, "gamma")?.tags.push("other");
-const hubLayout = deriveAtlasLayout(taggedRoot, "hub-emphasis");
-assert.ok(distanceFromRoot(hubLayout.get("alpha")) < distanceFromRoot(hubLayout.get("gamma")), "hub emphasis should pull resonant hubs inward");
-const focusedHubLayout = deriveAtlasLayout(taggedRoot, "hub-emphasis", undefined, { focusNodeId: "alpha" });
-assertVecClose(focusedHubLayout.get("alpha"), [0, 0, -360], "hub focused node should rotate to the front tier");
-assert.ok(distanceFromRoot(focusedHubLayout.get("alpha")) < distanceFromRoot(focusedHubLayout.get("gamma")), "hub focused layout should keep child-count tiers");
-
-const outlierRoot = node("atlas-root", "Outlier", [
-  node("huge", "Huge", Array.from({ length: 100 }, (_, index) => node(`huge-${index}`, `Huge ${index}`))),
-  ...Array.from({ length: 19 }, (_, index) => node(`peer-${index}`, `Peer ${index}`, Array.from({ length: index % 4 }, (_, childIndex) => node(`peer-${index}-${childIndex}`, `Peer ${index}.${childIndex}`)))),
-]);
-const outlierHubLayout = deriveAtlasLayout(outlierRoot, "hub-emphasis");
-const peerTiers = outlierRoot.children
-  .filter((node) => node.id.startsWith("peer-"))
-  .map((node) => tierFromDistance(outlierHubLayout.get(node.id)));
-assert.ok(new Set(peerTiers).size > 3, "hub tiers should be rank-distributed instead of collapsing all non-outliers to the back");
 
 console.log("Layout verification passed");
 
@@ -187,12 +187,6 @@ function assertVecClose(actual: Vec3 | undefined, expected: Vec3 | undefined, me
 function distanceFromRoot(position: Vec3 | undefined) {
   assert.ok(position, "missing position");
   return Math.hypot(position[0], position[1], position[2]);
-}
-
-function tierFromDistance(position: Vec3 | undefined) {
-  assert.ok(position, "missing position");
-  const distance = Math.hypot(position[0], position[1], position[2]);
-  return Math.round((distance - 360) / 340) + 1;
 }
 
 function assertMinDistance(frame: ReturnType<typeof deriveAtlasLayoutFrame>, minDistance: number, message: string) {

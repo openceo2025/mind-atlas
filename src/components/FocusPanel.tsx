@@ -357,7 +357,7 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
               summary: event.target.value.split("\n").find(Boolean) ?? "Empty notebook node.",
             })
           }
-          placeholder={isRoot ? "Your atlas home note." : "Write the thought, prompt, or context here."}
+          placeholder={isRoot ? "Atlas memo." : "Memo, details, or context."}
           aria-label="Node body"
         />
         <button

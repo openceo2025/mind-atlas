@@ -62,6 +62,7 @@ export async function savePersistedNotebook(root: AtlasNode) {
     tx.objectStore(META_STORE).put({ key: CURRENT_KEY, root, updatedAt: now, generation } satisfies StoredCurrentNotebook);
     tx.objectStore(SNAPSHOT_STORE).put(snapshot);
     await waitForTransaction(tx);
+    writeLegacyNotebookRecovery(root);
     await pruneSnapshots(db);
     return snapshotMetadata(snapshot);
   } finally {
@@ -132,6 +133,20 @@ export function loadLegacyNotebook() {
   const raw = window.localStorage.getItem(LEGACY_NOTEBOOK_STORAGE_KEY);
   if (!raw) return null;
   return JSON.parse(raw) as AtlasNode;
+}
+
+export function writeLegacyNotebookRecovery(root: AtlasNode) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LEGACY_NOTEBOOK_STORAGE_KEY, JSON.stringify(root));
+  } catch (error) {
+    console.warn("Legacy notebook recovery cache could not be updated. Removing stale recovery cache.", error);
+    try {
+      window.localStorage.removeItem(LEGACY_NOTEBOOK_STORAGE_KEY);
+    } catch {
+      // Best effort only. IndexedDB remains the source of truth.
+    }
+  }
 }
 
 function createSnapshot(root: AtlasNode, generation: number, createdAt: string, sizeBytes: number): StoredNotebookSnapshot {

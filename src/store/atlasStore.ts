@@ -24,16 +24,16 @@ import {
   type AtlasLayoutMode,
 } from "../layout/atlasLayout";
 import { sanitizeNotebookForExport } from "../notebookExport";
+import { hydrateMissingNodeTitlesFromBodies } from "../titleMaintenance";
 import {
   clearPersistedNotebook,
-  LEGACY_NOTEBOOK_STORAGE_KEY,
   listNotebookSnapshots,
-  loadLegacyNotebook,
   loadPersistedNotebook,
   migrateLegacyNotebookIfNeeded,
   requestDurableNotebookStorage,
   restoreNotebookSnapshot,
   savePersistedNotebook,
+  writeLegacyNotebookRecovery,
   type NotebookPersistenceStatus,
   type NotebookSnapshot,
 } from "../notebookPersistence";
@@ -73,7 +73,6 @@ import type {
   WorkStatus,
 } from "../types";
 
-const NOTEBOOK_STORAGE_KEY = LEGACY_NOTEBOOK_STORAGE_KEY;
 const UNREAD_NOTIFICATIONS_STORAGE_KEY = "mind-atlas-unread-notifications-v1";
 const NOTIFICATION_READ_STATE_STORAGE_KEY = "mind-atlas-notification-read-state-v1";
 const VOICE_LOG_STORAGE_KEY = "mind-atlas-voice-log-v1";
@@ -207,7 +206,7 @@ type NodeReminderUpdateResult = {
   failed: Array<{ nodeId: string; reason: string }>;
 };
 
-const initialAtlasRoot = loadStoredNotebook() ?? atlasRoot;
+const initialAtlasRoot = atlasRoot;
 const initialVoiceLogEntries = loadStoredVoiceLog();
 const initialVoiceLogLastSeenAt = loadStoredVoiceLogLastSeenAt(initialVoiceLogEntries);
 
@@ -300,6 +299,7 @@ interface AtlasStore {
   applyOutlineSubtree: (rootId: string, outline: OutlineNodeInput, options?: { focusKey?: string }) => void;
   resetNotebook: () => void;
   saveNotebook: () => void;
+  saveNotebookNow: () => Promise<void>;
   undo: () => void;
   redo: () => void;
   selectWorkArea: (id: string) => void;
@@ -1479,7 +1479,10 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     }));
   },
 
-  saveNotebook: () => persistNotebook(get().atlasRoot),
+  saveNotebook: () => {
+    void persistNotebook(get().atlasRoot);
+  },
+  saveNotebookNow: () => persistNotebook(get().atlasRoot),
 
   undo: () => {
     const state = get();
@@ -2435,6 +2438,7 @@ async function initializeNotebookPersistence() {
     const migratedRoot = await migrateLegacyNotebookIfNeeded(initialAtlasRoot);
     const persistedRoot = migratedRoot ? ensureNotebookNode(migratedRoot) : await loadPersistedNotebook();
     const currentRoot = persistedRoot ? repairDuplicateNodeIds(ensureNotebookNode(persistedRoot)).root : null;
+    if (currentRoot) writeLegacyNotebookRecovery(currentRoot);
     useAtlasStore.setState((state) => {
       if (!currentRoot) {
         return {
@@ -2460,6 +2464,7 @@ async function initializeNotebookPersistence() {
     });
     await useAtlasStore.getState().refreshNotebookSnapshots();
     await useAtlasStore.getState().restoreAttachmentPreviews();
+    scheduleMissingTitleMaintenance(MISSING_TITLE_MAINTENANCE_STARTUP_DELAY_MS);
   } catch (error) {
     const message = notebookPersistenceErrorMessage("Notebook persistence could not start.", error);
     console.error(message, error);
@@ -2601,22 +2606,6 @@ function selectionFromNode(node: AtlasNode): Selection {
   return { kind: "node", id: node.id };
 }
 
-function loadStoredNotebook() {
-  if (typeof window === "undefined") return null;
-  try {
-    const legacyRoot = loadLegacyNotebook();
-    if (!legacyRoot) return null;
-    const repair = repairDuplicateNodeIds(ensureNotebookNode(legacyRoot));
-    if (repair.repairedIds.length) {
-      persistNotebook(repair.root);
-      console.warn(`Mind Atlas repaired ${repair.repairedIds.length} duplicate node id(s) from local storage.`);
-    }
-    return repair.root;
-  } catch {
-    return null;
-  }
-}
-
 function loadStoredUnreadNotifications(): Record<string, UnreadNotification> {
   if (typeof window === "undefined") return {};
   const raw = window.localStorage.getItem(UNREAD_NOTIFICATIONS_STORAGE_KEY);
@@ -2718,16 +2707,24 @@ function createInitialNotebook() {
   return ensureNotebookNode(JSON.parse(JSON.stringify(atlasRoot)) as AtlasNode);
 }
 
-function persistNotebook(root: AtlasNode) {
-  if (typeof window === "undefined") return;
+function persistNotebook(root: AtlasNode): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
   queuedNotebookSaveRoot = root;
-  if (notebookSaveRunning) return;
-  notebookSaveRunning = true;
-  void flushQueuedNotebookSave();
+  scheduleMissingTitleMaintenance();
+  if (!notebookSaveRunning) {
+    notebookSaveRunning = true;
+    void flushQueuedNotebookSave();
+  }
+  return waitForNotebookSaveIdle();
 }
+
+const MISSING_TITLE_MAINTENANCE_IDLE_MS = 18_000;
+const MISSING_TITLE_MAINTENANCE_STARTUP_DELAY_MS = 1_200;
 
 let queuedNotebookSaveRoot: AtlasNode | null = null;
 let notebookSaveRunning = false;
+let missingTitleMaintenanceTimer: number | null = null;
+let notebookSaveWaiters: Array<() => void> = [];
 
 async function flushQueuedNotebookSave() {
   try {
@@ -2747,8 +2744,59 @@ async function flushQueuedNotebookSave() {
     if (queuedNotebookSaveRoot) {
       notebookSaveRunning = true;
       void flushQueuedNotebookSave();
+    } else {
+      resolveNotebookSaveWaiters();
     }
   }
+}
+
+function waitForNotebookSaveIdle() {
+  if (!notebookSaveRunning && !queuedNotebookSaveRoot) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    notebookSaveWaiters.push(resolve);
+  });
+}
+
+function resolveNotebookSaveWaiters() {
+  const waiters = notebookSaveWaiters;
+  notebookSaveWaiters = [];
+  waiters.forEach((resolve) => resolve());
+}
+
+function scheduleMissingTitleMaintenance(delayMs = MISSING_TITLE_MAINTENANCE_IDLE_MS) {
+  if (typeof window === "undefined") return;
+  if (missingTitleMaintenanceTimer !== null) {
+    window.clearTimeout(missingTitleMaintenanceTimer);
+  }
+  missingTitleMaintenanceTimer = window.setTimeout(() => {
+    missingTitleMaintenanceTimer = null;
+    runMissingTitleMaintenance();
+  }, delayMs);
+}
+
+function runMissingTitleMaintenance() {
+  if (isMissingTitleMaintenanceBlockedByActiveElement()) {
+    scheduleMissingTitleMaintenance();
+    return;
+  }
+
+  const state = useAtlasStore.getState();
+  const result = hydrateMissingNodeTitlesFromBodies(state.atlasRoot);
+  if (!result.changedNodeIds.length) return;
+
+  let applied = false;
+  useAtlasStore.setState((current) => {
+    if (current.atlasRoot !== state.atlasRoot) return {};
+    applied = true;
+    return { atlasRoot: result.root };
+  });
+  if (applied) persistNotebook(result.root);
+}
+
+function isMissingTitleMaintenanceBlockedByActiveElement() {
+  if (typeof document === "undefined") return false;
+  const activeElement = document.activeElement;
+  return activeElement instanceof HTMLElement && Boolean(activeElement.closest(".space-title-editor, input[aria-label='Node title']"));
 }
 
 function persistUnreadNotifications(unreadNotifications: Record<string, UnreadNotification>) {

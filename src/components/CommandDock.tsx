@@ -279,12 +279,11 @@ export function CommandDock() {
       addQuickChildFromInput(trimmed);
       return;
     }
-    if (isChatCommandMode(mode) && isGlobalAiPartnerSurface(atlasRoot, selectedNodeId)) {
+    if (isChatCommandMode(mode)) {
       void runTextPartnerTurn(trimmed, chatSettingsForCommandMode(chatSettings, mode), contextOptionsForRun);
       return;
     }
-    // Node anchored AI requests must create normal request/result nodes with notification pulses.
-    // The global AI Partner log path is limited to the root surface to avoid stealing node runs.
+    // Agent CLI requests stay on the node-anchored path and do not receive Mind Atlas tool access.
     void runAiOnSelectedNode(trimmed, isChatCommandMode(mode) ? (mode === "openai" || mode === "local" ? mode : "chat") : mode, contextOptionsForRun);
   };
 
@@ -1493,10 +1492,6 @@ function getClaudePresetId(model: string, baseUrl: string) {
 
 function isCommandMode(value: unknown): value is CommandMode {
   return value === "chat" || value === "openai" || value === "local" || value === "codex" || value === "openclaw" || value === "claude" || value === "note";
-}
-
-function isGlobalAiPartnerSurface(atlasRoot: ReturnType<typeof useAtlasStore.getState>["atlasRoot"], selectedNodeId: string) {
-  return selectedNodeId === atlasRoot.id;
 }
 
 function scopeLabel(scope: AiContextScope) {
