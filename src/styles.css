@@ -662,6 +662,9 @@ h1 {
   top: 18px;
   right: 370px;
   z-index: 7;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   animation: chrome-slide-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
@@ -762,6 +765,47 @@ h1 {
 .text-import-dialog {
   width: min(680px, calc(100vw - 32px));
   color: #edf7e8;
+}
+
+.shared-notebook-dialog {
+  width: min(460px, calc(100vw - 32px));
+  color: #edf7e8;
+}
+
+.shared-notebook-dialog p {
+  margin: 0;
+  color: rgba(237, 247, 232, 0.76);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.shared-notebook-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.shared-notebook-actions button {
+  min-height: 36px;
+  border: 1px solid rgba(219, 234, 211, 0.16);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #edf7e8;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.shared-notebook-actions button.primary-button {
+  border-color: rgba(141, 245, 207, 0.42);
+  background: rgba(141, 245, 207, 0.16);
+  color: #fff4c5;
+}
+
+.shared-notebook-actions button:disabled {
+  cursor: default;
+  opacity: 0.58;
 }
 
 .text-import-dialog textarea {
@@ -928,10 +972,15 @@ h1 {
 }
 
 .app-shell[data-theme="dark"] .text-import-dialog,
-.app-shell[data-theme="dark"] .merge-preview-dialog {
+.app-shell[data-theme="dark"] .merge-preview-dialog,
+.app-shell[data-theme="dark"] .shared-notebook-dialog {
   border-color: rgba(18, 35, 55, 0.18);
   background: rgba(255, 255, 255, 0.96);
   color: #111827;
+}
+
+.app-shell[data-theme="dark"] .shared-notebook-dialog p {
+  color: #53657a;
 }
 
 .app-shell[data-theme="dark"] .text-import-dialog textarea {
@@ -3161,7 +3210,8 @@ button:disabled,
 }
 
 .app-shell[data-theme="light"] .text-import-dialog,
-.app-shell[data-theme="light"] .merge-preview-dialog {
+.app-shell[data-theme="light"] .merge-preview-dialog,
+.app-shell[data-theme="light"] .shared-notebook-dialog {
   color: #17283e;
 }
 

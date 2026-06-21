@@ -1,5 +1,5 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CloudDownload, CloudUpload, Download, FileText, GitBranch, History, ListTree, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CloudDownload, CloudUpload, Download, FileText, GitBranch, History, ListTree, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Share2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
 import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
@@ -11,6 +11,7 @@ import { UniverseCanvas } from "./components/UniverseCanvas";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
 import { detectImportFormat, importExternalNotebookFile, importMarkdownText } from "./notebookImport";
 import { createNotebookJsonPackage, createNotebookPackage, importNotebookPackage, type NotebookPackageResult } from "./notebookPackage";
+import { createSharedNotebookLink, readSharedNotebookFromUrl, removeSharedNotebookHash } from "./notebookShare";
 import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
 import type { OutlineNodeInput } from "./outline/atlasOutline";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
@@ -135,6 +136,9 @@ export default function App() {
   const [textImportOpen, setTextImportOpen] = useState(false);
   const [textImportValue, setTextImportValue] = useState("");
   const [mergePreview, setMergePreview] = useState<MergePreviewState | null>(null);
+  const [sharedNotebookRoot, setSharedNotebookRoot] = useState<AtlasNode | null>(null);
+  const [sharedNotebookImporting, setSharedNotebookImporting] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
   const [dragImportActive, setDragImportActive] = useState(false);
   const mobilePortraitBreadcrumb = useMobilePortraitBreadcrumbLayout();
   const mobileOperationSurface = useMobileOperationSurface();
@@ -253,6 +257,8 @@ export default function App() {
     setCloudLoadOpen(false);
     setTextImportOpen(false);
     setMergePreview(null);
+    removeSharedNotebookHash();
+    setSharedNotebookRoot(null);
     setOutlineEditorOpen(false);
     setOutlineEditorRootId(null);
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
@@ -260,6 +266,17 @@ export default function App() {
 
   useVisualViewportHeight(commandInputEditing);
   useMobileBackButtonGuard({ closeOverlays: closeMobileBackOverlays });
+
+  useEffect(() => {
+    try {
+      const sharedRoot = readSharedNotebookFromUrl();
+      if (sharedRoot) setSharedNotebookRoot(sharedRoot);
+    } catch (error) {
+      console.error("Failed to read shared Mind Atlas URL", error);
+      window.alert(importErrorMessage("Shared Mind Atlas link could not be read.", error));
+      removeSharedNotebookHash();
+    }
+  }, []);
 
   useEffect(() => {
     if (uiRestoreAppliedRef.current) return;
@@ -556,6 +573,64 @@ export default function App() {
     setRestoreHistoryOpen(true);
     setMenuOpen(false);
     void refreshNotebookSnapshots();
+  };
+
+  const handleShareNotebook = async () => {
+    if (shareBusy) return;
+    try {
+      setShareBusy(true);
+      setContextCopyStatus("Creating share link...");
+      await saveNotebookNow();
+      const share = await createSharedNotebookLink(atlasRoot);
+      const shareTitle = atlasRoot.title || "Mind Atlas";
+      const shareText = "Mind Atlas universe";
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: shareTitle,
+            text: shareText,
+            url: share.url,
+          });
+          setContextCopyStatus("Share sheet opened.");
+          return;
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            setContextCopyStatus("");
+            return;
+          }
+          console.warn("Native share failed. Falling back to clipboard.", error);
+        }
+      }
+      await copyTextToClipboard(share.url);
+      setContextCopyStatus(`Share link copied. ${share.encodedLength.toLocaleString()} URL chars / ${share.nodeCount.toLocaleString()} nodes.`);
+    } catch (error) {
+      const message = exportErrorMessage("Share link creation failed.", error);
+      console.error(message, error);
+      setContextCopyStatus("");
+      window.alert(message);
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const handleImportSharedNotebook = async () => {
+    if (!sharedNotebookRoot || sharedNotebookImporting) return;
+    try {
+      setSharedNotebookImporting(true);
+      importNotebook(sharedNotebookRoot, sharedNotebookRoot.title || "Shared Mind Atlas", {});
+      removeSharedNotebookHash();
+      setSharedNotebookRoot(null);
+    } catch (error) {
+      console.error("Shared Mind Atlas import failed", error);
+      window.alert(importErrorMessage("Shared Mind Atlas import failed.", error));
+    } finally {
+      setSharedNotebookImporting(false);
+    }
+  };
+
+  const handleDismissSharedNotebook = () => {
+    removeSharedNotebookHash();
+    setSharedNotebookRoot(null);
   };
 
   const handleLoadCloudNotebook = async (entry: CloudNotebookEntry) => {
@@ -946,6 +1021,16 @@ export default function App() {
 
       {onboarding.showMainChrome ? (
       <div ref={globalMenuRef} className="global-menu" aria-label="Atlas actions">
+        <button
+          className="icon-button"
+          type="button"
+          onClick={handleShareNotebook}
+          disabled={shareBusy}
+          aria-label="Share atlas"
+          title="Share atlas"
+        >
+          <Share2 size={18} />
+        </button>
         <button className="icon-button" type="button" onClick={() => setMenuOpen((open) => !open)} aria-label="Open atlas menu">
           <MoreHorizontal size={19} />
         </button>
@@ -1272,6 +1357,13 @@ export default function App() {
           onLoad={handleLoadCloudNotebook}
         />
       ) : null}
+      {sharedNotebookRoot ? (
+        <SharedNotebookDialog
+          importing={sharedNotebookImporting}
+          onImport={handleImportSharedNotebook}
+          onClose={handleDismissSharedNotebook}
+        />
+      ) : null}
     </main>
   );
 }
@@ -1319,6 +1411,43 @@ function TextImportModal({
           <button type="button" onClick={onAppendChildren} disabled={!canImport}>Append as children</button>
           <button type="button" onClick={onPreviewMerge} disabled={!canImport}>Preview merge</button>
         </footer>
+      </section>
+    </div>
+  );
+}
+
+function SharedNotebookDialog({
+  importing,
+  onImport,
+  onClose,
+}: {
+  importing: boolean;
+  onImport: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="notebook-history-dialog shared-notebook-dialog" role="dialog" aria-modal="true" aria-label="Shared Mind Atlas" onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <strong>Shared Mind Atlas</strong>
+            <span>This link contains titles, body text, positions, colors, textures, and tree structure only.</span>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close shared atlas import">
+            <X size={16} />
+          </button>
+        </header>
+        <p>
+          Importing will replace the current universe in this browser. Node IDs and metadata are regenerated on import.
+        </p>
+        <div className="shared-notebook-actions">
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary-button" type="button" onClick={onImport} disabled={importing}>
+            {importing ? "Importing..." : "Import shared atlas"}
+          </button>
+        </div>
       </section>
     </div>
   );
@@ -2726,6 +2855,23 @@ function downloadBlob(blob: Blob, fileName: string) {
   anchor.download = fileName;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("Clipboard write is not available in this browser.");
 }
 
 function exportErrorMessage(prefix: string, error: unknown) {

@@ -1008,6 +1008,64 @@ async function verifyVoiceLogDialog(browser) {
   return { approvalPending: 1 };
 }
 
+async function verifyShareNotebookLink(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+    permissions: ["clipboard-read", "clipboard-write"],
+  });
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "share", { value: undefined, configurable: true });
+  });
+  await seedCompletedOnboarding(page);
+  await seedSingleChildNotebook(page);
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  await page.getByLabel("Share atlas").click();
+  const sharedUrl = await waitForClipboardText(page, (text) => text.includes("#mindatlas="));
+  if (!sharedUrl.startsWith(baseUrl) || !sharedUrl.includes("#mindatlas=")) {
+    throw new Error(`Share atlas did not create a Mind Atlas URL: ${sharedUrl.slice(0, 120)}`);
+  }
+  if (sharedUrl.includes("verify-child") || sharedUrl.includes("Verify Child")) {
+    throw new Error("Share atlas URL leaked source node ids or plain title text.");
+  }
+
+  const receiver = await context.newPage();
+  await seedCompletedOnboarding(receiver);
+  await receiver.goto(sharedUrl, { waitUntil: "networkidle" });
+  await receiver.getByRole("dialog", { name: "Shared Mind Atlas" }).waitFor();
+  await receiver.getByRole("button", { name: "Import shared atlas" }).click();
+  await receiver.waitForSelector("textarea.space-title-editor", { state: "visible" });
+  await receiver.waitForFunction(() =>
+    [...document.querySelectorAll("textarea.space-title-editor")].some((editor) => editor.value === "Verify Child"),
+  );
+  const imported = await receiver.evaluate(() => {
+    const editor = [...document.querySelectorAll("textarea.space-title-editor")].find((item) => item.value === "Verify Child");
+    return {
+      title: editor?.value ?? "",
+      id: editor?.getAttribute("data-node-id") ?? "",
+      hash: window.location.hash,
+    };
+  });
+  if (imported.title !== "Verify Child" || imported.id === "verify-child" || imported.hash) {
+    throw new Error(`Shared atlas import did not restore and clear URL hash: ${JSON.stringify(imported)}`);
+  }
+  await context.close();
+  return { urlCharacters: sharedUrl.length };
+}
+
+async function waitForClipboardText(page, predicate, timeoutMs = 5000) {
+  const startedAt = Date.now();
+  let latest = "";
+  while (Date.now() - startedAt < timeoutMs) {
+    latest = await page.evaluate(() => navigator.clipboard.readText().catch(() => ""));
+    if (predicate(latest)) return latest;
+    await page.waitForTimeout(120);
+  }
+  throw new Error(`Timed out waiting for clipboard text. Latest: ${latest.slice(0, 120)}`);
+}
+
 async function verifyLockedModeGlobalMenu(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 820 },
@@ -1383,6 +1441,7 @@ try {
   await verifyIndexedDbCurrentBeatsStaleLegacyCache(browser);
   const lockedMenu = await verifyLockedModeGlobalMenu(browser);
   const voiceLog = await verifyVoiceLogDialog(browser);
+  const shareLink = await verifyShareNotebookLink(browser);
   const outline = await verifyOutlineAndContextCopy(browser);
   const imports = await verifyExternalImports(browser);
   const mobileOutline = await verifyMobileOutlinePanel(browser);
@@ -1396,7 +1455,7 @@ try {
   const mobile = await verifyViewport(browser, "mobile", { width: 390, height: 844 });
   const mobileLandscape = await verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 });
   console.log("UI verification passed");
-  console.log({ desktop, lockedMenu, voiceLog, outline, imports, mobileOutline, mobileGlobalMenuScroll, mobileGeneratedLayout, treeWheelZoom, operationControls, commandDock, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+  console.log({ desktop, lockedMenu, voiceLog, shareLink, outline, imports, mobileOutline, mobileGlobalMenuScroll, mobileGeneratedLayout, treeWheelZoom, operationControls, commandDock, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
 } finally {
   await browser.close();
 }
