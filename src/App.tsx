@@ -10,6 +10,7 @@ import { OutlineEditor } from "./components/OutlineEditor";
 import { UniverseCanvas } from "./components/UniverseCanvas";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
 import { detectImportFormat, importExternalNotebookFile, importMarkdownText } from "./notebookImport";
+import { createAtlasImageShareData, createAtlasShareImage } from "./notebookImageShare";
 import { createNotebookJsonPackage, createNotebookPackage, importNotebookPackage, type NotebookPackageResult } from "./notebookPackage";
 import { createSharedNotebookLink, readSharedNotebookFromUrl, removeSharedNotebookHash } from "./notebookShare";
 import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
@@ -111,6 +112,7 @@ export default function App() {
   const [pageActive, setPageActive] = useState(() => isPageRuntimeActive());
   const [menuOpen, setMenuOpen] = useState(false);
   const globalMenuRef = useRef<HTMLDivElement | null>(null);
+  const universeShareTargetRef = useRef<HTMLElement | null>(null);
   const [voiceLogOpen, setVoiceLogOpen] = useState(false);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
   const [restoreHistoryOpen, setRestoreHistoryOpen] = useState(false);
@@ -240,11 +242,11 @@ export default function App() {
         .slice(0, 8),
     [atlasRoot, unreadNotifications],
   );
-  const unreadTextPartnerEntries = useMemo(
-    () => voiceLogEntries.filter((entry) => isUnreadTextPartnerEntry(entry, voiceLogLastSeenAt)),
+  const unreadPartnerEntries = useMemo(
+    () => voiceLogEntries.filter((entry) => isUnreadPartnerEntry(entry, voiceLogLastSeenAt)),
     [voiceLogEntries, voiceLogLastSeenAt],
   );
-  const latestTextPartnerEntry = unreadTextPartnerEntries.at(-1);
+  const latestPartnerEntry = unreadPartnerEntries.at(-1);
   const uiPersistenceReadyRef = useRef(false);
   const uiRestoreAppliedRef = useRef(false);
   const latestUiStateRef = useRef<Omit<Partial<PersistedUiState>, "version" | "savedAt">>({});
@@ -575,22 +577,19 @@ export default function App() {
     void refreshNotebookSnapshots();
   };
 
-  const handleShareNotebook = async () => {
+  const handleShareNotebookImage = async () => {
     if (shareBusy) return;
     try {
       setShareBusy(true);
-      setContextCopyStatus("Creating share link...");
-      await saveNotebookNow();
-      const share = await createSharedNotebookLink(atlasRoot);
+      setContextCopyStatus("Preparing share image...");
+      const target = universeShareTargetRef.current;
+      if (!target) throw new Error("The universe view is not ready.");
       const shareTitle = atlasRoot.title || "Mind Atlas";
-      const shareText = "Mind Atlas universe";
-      if (navigator.share) {
+      const image = await createAtlasShareImage(target, shareTitle, theme);
+      const shareData = createAtlasImageShareData(image, shareTitle);
+      if (navigator.share && navigator.canShare?.({ files: [image] })) {
         try {
-          await navigator.share({
-            title: shareTitle,
-            text: shareText,
-            url: share.url,
-          });
+          await navigator.share(shareData);
           setContextCopyStatus("Share sheet opened.");
           return;
         } catch (error) {
@@ -598,13 +597,33 @@ export default function App() {
             setContextCopyStatus("");
             return;
           }
-          console.warn("Native share failed. Falling back to clipboard.", error);
+          console.warn("Native image share failed. Downloading the image instead.", error);
         }
       }
-      await copyTextToClipboard(share.url);
-      setContextCopyStatus(`Share link copied. ${share.encodedLength.toLocaleString()} URL chars / ${share.nodeCount.toLocaleString()} nodes.`);
+      downloadBlob(image, image.name);
+      setContextCopyStatus("Share image downloaded.");
     } catch (error) {
-      const message = exportErrorMessage("Share link creation failed.", error);
+      const message = exportErrorMessage("Image share failed.", error);
+      console.error(message, error);
+      setContextCopyStatus("");
+      window.alert(message);
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const handleCreateSharedNotebookLink = async () => {
+    if (shareBusy) return;
+    setMenuOpen(false);
+    try {
+      setShareBusy(true);
+      setContextCopyStatus("Creating embedded-data URL...");
+      await saveNotebookNow();
+      const share = await createSharedNotebookLink(atlasRoot);
+      await copyTextToClipboard(share.url);
+      setContextCopyStatus(`Embedded-data URL copied. ${share.encodedLength.toLocaleString()} URL chars / ${share.nodeCount.toLocaleString()} nodes.`);
+    } catch (error) {
+      const message = exportErrorMessage("Embedded-data URL creation failed.", error);
       console.error(message, error);
       setContextCopyStatus("");
       window.alert(message);
@@ -978,6 +997,7 @@ export default function App() {
         layoutMode={layoutMode}
         pageActive={pageActive}
         initialCameraPose={persistedUiState?.cameraPose ?? null}
+        shareTargetRef={universeShareTargetRef}
       />
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
       {onboarding.message ? (
@@ -1009,8 +1029,8 @@ export default function App() {
               />
               <UnreadNotificationLinks
                 items={unreadNotificationLinks}
-                voiceLogEntry={latestTextPartnerEntry}
-                voiceLogUnreadCount={unreadTextPartnerEntries.length}
+                voiceLogEntry={latestPartnerEntry}
+                voiceLogUnreadCount={unreadPartnerEntries.length}
                 onFocus={handleFocusNotification}
                 onOpenVoiceLog={handleOpenVoiceLog}
               />
@@ -1024,10 +1044,10 @@ export default function App() {
         <button
           className="icon-button"
           type="button"
-          onClick={handleShareNotebook}
+          onClick={handleShareNotebookImage}
           disabled={shareBusy}
-          aria-label="Share atlas"
-          title="Share atlas"
+          aria-label="Share atlas image"
+          title="Share atlas image"
         >
           <Share2 size={18} />
         </button>
@@ -1099,7 +1119,7 @@ export default function App() {
                   <MessageSquareText size={15} />
                   <span>
                     AI Partner log
-                    <small>{voiceLogUnreadLabel(unreadTextPartnerEntries.length, voiceLogEntries.length)}</small>
+                    <small>{voiceLogUnreadLabel(unreadPartnerEntries.length, voiceLogEntries.length)}</small>
                   </span>
                 </button>
                 <button type="button" onClick={handleRestartRealtime}>
@@ -1178,6 +1198,13 @@ export default function App() {
               <span>
                 Export with files
                 <small>.mindatlaspkg / includes images and video</small>
+              </span>
+            </button>
+            <button type="button" onClick={handleCreateSharedNotebookLink} disabled={shareBusy}>
+              <Share2 size={15} />
+              <span>
+                Create embedded-data URL
+                <small>copy atlas data inside a link</small>
               </span>
             </button>
             <button type="button" onClick={handleOpenRestoreHistory}>
@@ -2706,9 +2733,9 @@ function UnreadNotificationLinks({
   );
 }
 
-function isUnreadTextPartnerEntry(entry: VoiceLogEntry, lastSeenAt: string) {
+function isUnreadPartnerEntry(entry: VoiceLogEntry, lastSeenAt: string) {
   if (entry.role !== "assistant" && entry.role !== "error") return false;
-  if (!entry.sessionId?.startsWith("text-partner-")) return false;
+  if (!entry.sessionId?.startsWith("text-partner-") && !entry.sessionId?.startsWith("openclaw-partner-")) return false;
   if (typeof entry.metadata?.responseNodeId === "string" && entry.metadata.responseNodeId) return false;
   const entryTime = new Date(entry.createdAt).getTime();
   const seenTime = new Date(lastSeenAt).getTime();

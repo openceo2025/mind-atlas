@@ -1,7 +1,7 @@
 import { Html, Line } from "@react-three/drei";
 import { Canvas, ThreeEvent, createPortal, useFrame, useThree } from "@react-three/fiber";
 import { ClipboardCopy, ClipboardPaste, Copy, MoveUp, Scissors, Trash2 } from "lucide-react";
-import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   AdditiveBlending,
   BackSide,
@@ -312,6 +312,7 @@ export function UniverseCanvas({
   layoutMode,
   pageActive,
   initialCameraPose,
+  shareTargetRef,
 }: {
   theme: AtlasTheme;
   vrPanEnabled: boolean;
@@ -319,6 +320,7 @@ export function UniverseCanvas({
   layoutMode: AtlasLayoutMode;
   pageActive: boolean;
   initialCameraPose: PersistedCameraPose | null;
+  shareTargetRef?: RefObject<HTMLElement | null>;
 }) {
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeContextMenuState | null>(null);
   const mobilePerformanceMode = useMobilePerformanceMode();
@@ -424,7 +426,7 @@ export function UniverseCanvas({
   }, []);
 
   return (
-    <section className="universe-shell" aria-label="Mind Atlas universe view">
+    <section ref={shareTargetRef} className="universe-shell" aria-label="Mind Atlas universe view">
       <Canvas
         camera={{ position: [0, 0, INITIAL_CAMERA_OFFSET], fov: CAMERA_FOV, near: 0.1, far: 120000 }}
         dpr={canvasDpr}

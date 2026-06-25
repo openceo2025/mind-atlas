@@ -290,7 +290,6 @@ function sanitizeOpenClawSettings(value: unknown): OpenClawSettings | undefined 
   return {
     model: safeString(value.model, ""),
     thinking: "off",
-    agent: safeString(value.agent, ""),
     workspace: safeString(value.workspace, ""),
     timeoutMs: safeInteger(value.timeoutMs, 10 * 60 * 1000),
     continueMode: value.continueMode === "new" ? "new" : "auto",

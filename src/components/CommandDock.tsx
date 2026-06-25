@@ -1,7 +1,7 @@
 import { AudioLines, Bot, Code2, Mic, PenLine, SendHorizonal, Square, Terminal } from "lucide-react";
 import { FormEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, useEffect, useMemo, useRef, useState } from "react";
 import { transcribeAudio } from "../ai/audioTranscriptionClient";
-import { getChatOptions, getCodexOptions } from "../ai/bridgeClient";
+import { getChatOptions, getCodexOptions, getOpenClawOptions } from "../ai/bridgeClient";
 import { runOpenClawPartnerTurn } from "../ai/openClawPartnerClient";
 import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceSession, type RealtimeSessionState } from "../ai/realtimeClient";
 import { runTextPartnerTurn } from "../ai/textPartnerClient";
@@ -9,6 +9,7 @@ import { buildVoiceLogContext } from "../ai/voiceLogContext";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
 import { buildAiNodeContextWithAttachments, findInheritedAiDialogSettings, findNode, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
 import { loadPersistedUiState, persistUiStatePatch } from "../uiPersistence";
+import { ProviderUsagePanel } from "./ProviderUsagePanel";
 import type {
   AiAttachmentMode,
   AiContextScope,
@@ -22,6 +23,7 @@ import type {
   CodexOptionsResult,
   CodexReasoningEffort,
   CodexSandboxMode,
+  OpenClawOptionsResult,
 } from "../types";
 
 type CommandMode = AiExecutionMode | "note";
@@ -97,6 +99,7 @@ export function CommandDock() {
   const editableContextControls = mode !== "note" && scope === "custom";
   const [codexOptions, setCodexOptions] = useState<CodexOptionsResult | null>(null);
   const [chatOptions, setChatOptions] = useState<ChatOptionsResult | null>(null);
+  const [openClawOptions, setOpenClawOptions] = useState<OpenClawOptionsResult | null>(null);
   const contextOptionsForRun = useMemo(
     () => normalizeAiContextOptions({ ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds }),
     [aiContextOptions, multiSelectedNodeIds],
@@ -128,6 +131,9 @@ export function CommandDock() {
       ? selectedChatService.supportedReasoningEfforts
       : (["default"] as ChatReasoningEffort[]);
   const selectedClaudePreset = getClaudePresetId(claudeSettings.model, claudeSettings.baseUrl);
+  const openClawModelOptions = openClawOptions?.models.length
+    ? openClawOptions.models
+    : [{ model: "", displayName: "OpenClaw default" }];
 
   const selectedNodeTitle = selectedNode?.title.trim() || "Mind Atlas";
 
@@ -261,10 +267,24 @@ export function CommandDock() {
       .catch(() => {
         if (alive) setCodexOptions(null);
       });
+    void getOpenClawOptions()
+      .then((options) => {
+        if (!alive) return;
+        setOpenClawOptions(options);
+      })
+      .catch(() => {
+        if (alive) setOpenClawOptions(null);
+      });
     return () => {
       alive = false;
     };
   }, [setChatSettings, setCodexSettings]);
+
+  useEffect(() => {
+    if (!openClawOptions?.models.length) return;
+    if (openClawOptions.models.some((option) => option.model === openClawSettings.model)) return;
+    setOpenClawSettings({ model: openClawOptions.defaultModel || openClawOptions.models[0].model });
+  }, [openClawOptions, openClawSettings.model, setOpenClawSettings]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -1135,14 +1155,20 @@ export function CommandDock() {
       {mode === "openclaw" ? (
         <div className="codex-options-row openclaw-options-row" aria-label="OpenClaw settings">
           <label className="context-option-field">
-            <span>Agent</span>
-            <input
-              value={openClawSettings.agent}
+            <span>Model</span>
+            <select
+              aria-label="OpenClaw model"
+              value={openClawSettings.model}
               onFocus={() => setCommandInputEditing(true)}
               onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setOpenClawSettings({ agent: event.target.value })}
-              placeholder="default"
-            />
+              onChange={(event) => setOpenClawSettings({ model: event.target.value })}
+            >
+              {openClawModelOptions.map((option) => (
+                <option key={option.model || "openclaw-default"} value={option.model}>
+                  {openClawModelLabel(option)}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="context-option-field">
             <span>Session</span>
@@ -1158,6 +1184,7 @@ export function CommandDock() {
             </select>
           </label>
           <ContextNumberControl
+            className="openclaw-timeout-field"
             label="Timeout (min)"
             value={Math.round(openClawSettings.timeoutMs / 60000)}
             min={1}
@@ -1168,11 +1195,13 @@ export function CommandDock() {
           />
         </div>
       ) : null}
+      {mode !== "note" ? <ProviderUsagePanel /> : null}
     </form>
   );
 }
 
 function ContextNumberControl({
+  className,
   label,
   value,
   min,
@@ -1181,6 +1210,7 @@ function ContextNumberControl({
   onFocus,
   onBlur,
 }: {
+  className?: string;
   label: string;
   value: number;
   min: number;
@@ -1190,7 +1220,7 @@ function ContextNumberControl({
   onBlur?: () => void;
 }) {
   return (
-    <label className="context-option-field">
+    <label className={["context-option-field", className].filter(Boolean).join(" ")}>
       <span>{label}</span>
       <input
         type="number"
@@ -1207,6 +1237,11 @@ function ContextNumberControl({
       />
     </label>
   );
+}
+
+function openClawModelLabel(option: OpenClawOptionsResult["models"][number]) {
+  if (!option.model) return option.displayName;
+  return option.displayName === option.model ? option.model : `${option.displayName} (${option.model})`;
 }
 
 function getSupportedDictationMimeType() {

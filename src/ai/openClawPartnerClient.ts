@@ -41,7 +41,7 @@ export async function runOpenClawPartnerTurn(prompt: string, settings: OpenClawS
       provider: "openclaw",
       context,
       openclaw: {
-        agent: settings.agent,
+        model: settings.model,
         continueMode: settings.continueMode,
         resumeSessionKey: settings.resumeSessionKey,
         timeoutMs: settings.timeoutMs,

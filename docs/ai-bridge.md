@@ -57,6 +57,7 @@ overriding variables already set by the shell.
 - `MIND_ATLAS_DEEPSEEK_MODEL`: default DeepSeek Chat model. Defaults to `deepseek-v4-pro[1m]`.
 - `MIND_ATLAS_DEEPSEEK_MODELS`: optional comma-separated DeepSeek Chat model list.
 - `MIND_ATLAS_DEEPSEEK_MAX_OUTPUT_TOKENS`: DeepSeek Chat output cap. Defaults to `MIND_ATLAS_OPENAI_MAX_OUTPUT_TOKENS`.
+- `MIND_ATLAS_DEEPSEEK_BALANCE_BASE_URL`: DeepSeek native balance API base URL. Defaults to `https://api.deepseek.com`.
 - `MIND_ATLAS_WEB_SEARCH_MAX_OUTPUT_TOKENS`: web-search response cap. Defaults to `2048`.
 - Local mode inspects `${MIND_ATLAS_LOCAL_BASE_URL}/models` and uses the first model currently loaded by LM Studio. `MIND_ATLAS_LOCAL_MODEL` is intentionally ignored to avoid auto-loading a model.
 - `MIND_ATLAS_CODEX_BIN`: Codex executable name. Defaults to `codex`.
@@ -113,6 +114,7 @@ Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that ne
 ## Current AI Surface
 
 - The command dock supports Chat, Code, OpenClaw, and Note modes.
+- The AI modes include a compact selectable usage panel. OpenAI Codex 5-hour and 7-day remaining percentages come from `codex app-server` `account/rateLimits/read`; DeepSeek balance comes from `GET /user/balance`. Anthropic's Claude Console organization-credit value has no public balance API and is not shown. The panel selection is browser-local and supports multiple metrics.
 - Chat is the shared non-agent conversation entry. It can target OpenAI, Opus/Anthropic, DeepSeek, or Local from one service/model/effort settings row.
 - Code is the shared workspace-aware CLI entry. Its first setting chooses Codex or Claude Code, then shows that backend's compact settings. Codex exposes model, effort, sandbox, work root, and thread controls. Claude Code exposes preset, effort, permission mode, and work root controls.
 - A user request is saved as a child notebook node first. The provider result is saved as a child of that request.
@@ -122,7 +124,7 @@ Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that ne
 - Opus/Anthropic and DeepSeek Chat use the Anthropic Messages shape through the bridge, including client-side Mind Atlas tool calls routed back through the browser.
 - Local Chat uses an OpenAI-compatible `/chat/completions` endpoint such as LM Studio and the model currently loaded there.
 - Codex under Code mode runs `codex exec --json` in `workspace-write` sandbox by default. The user-facing answer becomes `Codex final`; run metadata, command logs, and changed-file details are collected into one sibling `Codex details` node.
-- OpenClaw mode runs `openclaw agent --local --json --thinking off` through the bridge. Mind Atlas does not pass a model override or work root; OpenClaw uses its own configured defaults. From the root surface, OpenClaw replies are written to the AI Partner log instead of creating notebook nodes. With a non-root node selected, the result is saved as a child notebook node, and the OpenClaw session key plus run log path are stored on the request/result branch.
+- OpenClaw mode reads available configured models from `openclaw models list --json` and runs `openclaw agent --local --json --thinking off --model <selected-model>` through the bridge. Mind Atlas does not pass a work root, so OpenClaw uses its configured workspace behavior. From the root surface, OpenClaw replies are written to the AI Partner log and raise an unread notification instead of creating notebook nodes. With a non-root node selected, the result is saved as a child notebook node, and the OpenClaw session key plus run log path are stored on the request/result branch.
 - OpenClaw `Session: auto` resumes an OpenClaw session key found on the active node path. `Session: new` starts a fresh key for that request.
 - Claude Code mode pipes the Mind Atlas prompt/context into `claude -p --output-format json` through the bridge. The bridge injects the selected preset, model, base URL, and provider-appropriate auth variables into that child process, saves stdout/stderr/metadata under `server-data/claude-runs`, and stores the log path on the request/result branch.
 - The Claude Code settings include presets for Bridge env, Claude Opus 4.8, Claude Fable 5, and DeepSeek V4 Pro, plus `--effort` and `--permission-mode`. Anthropic presets explicitly route to `https://api.anthropic.com`; the DeepSeek preset routes to `https://api.deepseek.com/anthropic`. Direct model and base URL text fields are intentionally hidden; use bridge environment variables or presets. Claude Code permission mode is not equivalent to Codex OS sandboxing.
@@ -134,6 +136,7 @@ Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that ne
 - Running, review, and error states pulse around the affected notebook node.
 - Completed or failed background work emits a wider notification pulse from the result location.
 - Usage metadata is stored on runs and result nodes. Cost estimates appear only when per-token rates are configured.
+- `GET /api/provider-usage` returns the normalized provider metrics used by the command dock. Add `?refresh=1` to bypass the 45-second bridge cache.
 - When an upstream response appears to hit the configured bridge output cap, Mind Atlas appends a bridge note to the result body and includes `maxOutputTokens`, `finishReason`, and `outputLimitHit` in usage metadata.
 - Short-clicking the microphone button records dictation, transcribes it with `gpt-4o-transcribe`, and inserts the transcript into the prompt field.
 - Long-pressing the microphone button starts a push-to-talk WebRTC Realtime Voice Partner session through the bridge. The browser receives only a short-lived ephemeral Realtime key.

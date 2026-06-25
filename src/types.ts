@@ -144,7 +144,6 @@ export interface CodexSettings {
 export interface OpenClawSettings {
   model: string;
   thinking: OpenClawThinkingLevel;
-  agent: string;
   workspace: string;
   timeoutMs: number;
   continueMode?: CodexContinueMode;
@@ -212,6 +211,44 @@ export interface CodexOptionsResult {
   defaultReasoningEffort: CodexReasoningEffort;
   defaultWorkspace: string;
   defaultSandbox: CodexSandboxMode;
+  defaultTimeoutMs: number;
+}
+
+export type ProviderUsageMetricKind = "rate_limit" | "balance";
+
+export interface ProviderUsageMetric {
+  id: string;
+  vendor: string;
+  vendorLabel: string;
+  kind: ProviderUsageMetricKind;
+  label: string;
+  available: boolean;
+  displayValue: string;
+  value?: number;
+  unit?: string;
+  barPercent?: number;
+  resetAt?: string;
+  detail?: string;
+  source: string;
+  defaultVisible?: boolean;
+}
+
+export interface ProviderUsageResult {
+  fetchedAt: string;
+  metrics: ProviderUsageMetric[];
+}
+
+export interface OpenClawModelOption {
+  model: string;
+  displayName: string;
+  input?: string;
+  contextWindow?: number;
+  local?: boolean;
+}
+
+export interface OpenClawOptionsResult {
+  models: OpenClawModelOption[];
+  defaultModel: string;
   defaultTimeoutMs: number;
 }
 

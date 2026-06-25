@@ -1,5 +1,5 @@
 import { chromium } from "@playwright/test";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 
 const baseUrl = process.env.MIND_ATLAS_URL ?? "http://127.0.0.1:5173";
 const outputDir = "artifacts/screenshots";
@@ -752,6 +752,97 @@ async function verifyCommandDockAndMobileTextTap(browser) {
   };
 }
 
+async function verifyProviderUsagePanel(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  await page.route("**/api/provider-usage*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        fetchedAt: "2026-06-25T04:00:00.000Z",
+        metrics: [
+          {
+            id: "openai-rate-primary",
+            vendor: "openai",
+            vendorLabel: "OPENAI",
+            kind: "rate_limit",
+            label: "CODEX 5H",
+            available: true,
+            displayValue: "76%",
+            value: 76,
+            unit: "%",
+            barPercent: 76,
+            resetAt: "2026-06-25T05:30:00.000Z",
+            source: "codex",
+            defaultVisible: true,
+          },
+          {
+            id: "openai-rate-secondary",
+            vendor: "openai",
+            vendorLabel: "OPENAI",
+            kind: "rate_limit",
+            label: "CODEX 7D",
+            available: true,
+            displayValue: "63%",
+            value: 63,
+            unit: "%",
+            barPercent: 63,
+            resetAt: "2026-06-28T08:00:00.000Z",
+            source: "codex",
+            defaultVisible: true,
+          },
+          {
+            id: "deepseek-balance",
+            vendor: "deepseek",
+            vendorLabel: "DEEPSEEK",
+            kind: "balance",
+            label: "BALANCE",
+            available: true,
+            displayValue: "USD 19.39",
+            value: 19.39,
+            unit: "USD",
+            barPercent: 100,
+            source: "api",
+            defaultVisible: true,
+          },
+        ],
+      }),
+    });
+  });
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  const panel = page.getByLabel("AI provider usage");
+  await panel.waitFor();
+  const panelText = await panel.innerText();
+  for (const expected of ["OPENAI", "CODEX 5H", "76%", "DEEPSEEK", "USD 19.39"]) {
+    if (!panelText.includes(expected)) throw new Error(`Provider usage panel missing ${expected}: ${panelText}`);
+  }
+  const initialMetricCount = await page.locator(".provider-usage-metric").count();
+  if (initialMetricCount !== 3) throw new Error(`Expected three provider usage metrics, got ${initialMetricCount}`);
+
+  await page.getByRole("button", { name: "Select provider usage metrics" }).click();
+  const selector = page.getByLabel("Provider usage metric selection");
+  await selector.waitFor();
+  await page.screenshot({ path: `${outputDir}/provider-usage.png`, fullPage: true });
+  const deepSeekToggle = page.locator(".provider-usage-selector label").filter({ hasText: "DEEPSEEK" }).locator('input[type="checkbox"]');
+  await deepSeekToggle.uncheck();
+  const filteredMetricCount = await page.locator(".provider-usage-metric").count();
+  if (filteredMetricCount !== 2) throw new Error(`Provider usage metric selection did not filter rows: ${filteredMetricCount}`);
+
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByLabel("AI provider usage").waitFor();
+  const persistedMetricCount = await page.locator(".provider-usage-metric").count();
+  if (persistedMetricCount !== 2) throw new Error(`Provider usage selection did not persist: ${persistedMetricCount}`);
+
+  await context.close();
+  return { initialMetricCount, filteredMetricCount, persistedMetricCount };
+}
+
 async function verifyMobileEditorKeyboardOverlay(browser) {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -957,6 +1048,20 @@ async function verifyVoiceLogDialog(browser) {
   });
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
+  await page.route("**/api/openclaw/options", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        models: [
+          { model: "deepseek/deepseek-v4-pro", displayName: "DeepSeek V4 Pro", input: "text", contextWindow: 200000, local: false },
+          { model: "lmstudio/qwen/qwen3.6-27b", displayName: "Qwen 3.6 27B", input: "text+image", contextWindow: 65536, local: true },
+        ],
+        defaultModel: "deepseek/deepseek-v4-pro",
+        defaultTimeoutMs: 600000,
+      }),
+    });
+  });
   await page.addInitScript(() => {
     const now = new Date().toISOString();
     window.localStorage.setItem(
@@ -978,23 +1083,43 @@ async function verifyVoiceLogDialog(browser) {
             executed: false,
           },
         },
+        {
+          id: "verify-openclaw-partner",
+          role: "assistant",
+          title: "AI Partner (OpenClaw)",
+          text: "OpenClaw root reply ready.",
+          sessionId: "openclaw-partner-verify",
+          createdAt: now,
+          metadata: {
+            provider: "openclaw",
+            model: "deepseek/deepseek-v4-pro",
+          },
+        },
       ]),
     );
     window.localStorage.setItem(
       "mind-atlas-voice-summary-v1",
       JSON.stringify({ text: "Verification summary", createdAt: now, sessionId: "verify-session" }),
     );
+    window.localStorage.setItem("mind-atlas-voice-log-last-seen-v1", "2000-01-01T00:00:00.000Z");
   });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
-  await page.getByLabel("Open atlas menu").click();
-  await page.getByText("AI Partner log").click();
+  const openClawNotification = page.locator(".unread-notification-link.is-voice-log");
+  await openClawNotification.waitFor();
+  const openClawNotificationText = await openClawNotification.innerText();
+  const openClawNotificationTitle = await openClawNotification.getAttribute("title");
+  if (openClawNotificationTitle !== "AI Partner (OpenClaw)") {
+    throw new Error(`OpenClaw AI Partner reply did not create an unread notification: ${openClawNotificationTitle ?? openClawNotificationText}`);
+  }
+  await openClawNotification.click();
   await page.getByRole("dialog", { name: "AI Partner log" }).waitFor();
   const dialogText = await page.getByRole("dialog", { name: "AI Partner log" }).innerText();
   for (const expected of [
-    "1 entries / 1 approval pending",
+    "2 entries / 1 approval pending",
     "Latest summary",
     "Verification summary",
+    "OpenClaw root reply ready.",
     "Human approval required. This tool request was logged but not executed.",
     "approval: voice-approval-verify",
     "executed: false",
@@ -1004,11 +1129,27 @@ async function verifyVoiceLogDialog(browser) {
       throw new Error(`Voice log dialog is missing ${expected}: ${dialogText}`);
     }
   }
+  await page.getByLabel("Close AI Partner log").click();
+  await page.getByRole("button", { name: "OpenClaw" }).click();
+  const modelSelect = page.getByLabel("OpenClaw model");
+  await modelSelect.waitFor();
+  const modelOptions = await modelSelect.locator("option").allTextContents();
+  if (modelOptions.length !== 2 || !modelOptions.some((option) => option.includes("Qwen 3.6 27B"))) {
+    throw new Error(`OpenClaw model selector did not use available models: ${JSON.stringify(modelOptions)}`);
+  }
+  const agentInputCount = await page.locator('.openclaw-options-row input[placeholder="default"]').count();
+  if (agentInputCount > 0) {
+    throw new Error("OpenClaw settings still expose the obsolete Agent input.");
+  }
+  const timeoutWidth = await page.locator(".openclaw-timeout-field input").evaluate((input) => input.getBoundingClientRect().width);
+  if (timeoutWidth > 100) {
+    throw new Error(`OpenClaw timeout input is too wide: ${timeoutWidth}px`);
+  }
   await context.close();
-  return { approvalPending: 1 };
+  return { approvalPending: 1, openClawNotification: true, openClawModels: modelOptions.length, timeoutWidth: Math.round(timeoutWidth) };
 }
 
-async function verifyShareNotebookLink(browser) {
+async function verifyShareFlows(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 820 },
     ignoreHTTPSErrors: true,
@@ -1016,19 +1157,77 @@ async function verifyShareNotebookLink(browser) {
   });
   const page = await context.newPage();
   await page.addInitScript(() => {
-    Object.defineProperty(navigator, "share", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "canShare", {
+      value: (data) => Array.isArray(data?.files) && data.files.length === 1 && data.files[0]?.type === "image/png",
+      configurable: true,
+    });
+    Object.defineProperty(navigator, "share", {
+      value: async (data) => {
+        const file = data.files?.[0];
+        const bitmap = file ? await createImageBitmap(file) : null;
+        const dataUrl = file
+          ? await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result);
+              reader.onerror = () => reject(reader.error);
+              reader.readAsDataURL(file);
+            })
+          : "";
+        window.__mindAtlasImageShare = {
+          fileName: file?.name ?? "",
+          fileType: file?.type ?? "",
+          fileSize: file?.size ?? 0,
+          width: bitmap?.width ?? 0,
+          height: bitmap?.height ?? 0,
+          title: data.title ?? "",
+          text: data.text ?? "",
+        };
+        window.__mindAtlasImageShareDataUrl = dataUrl;
+        bitmap?.close();
+      },
+      configurable: true,
+    });
   });
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page);
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
-  await page.getByLabel("Share atlas").click();
+  await page.getByLabel("Share atlas image").click();
+  await page.waitForFunction(() => Boolean(window.__mindAtlasImageShare));
+  const imageShare = await page.evaluate(() => window.__mindAtlasImageShare);
+  if (
+    imageShare.fileType !== "image/png"
+    || imageShare.fileSize < 10_000
+    || imageShare.width < 1000
+    || imageShare.height < 600
+    || !imageShare.text.includes("https://mind-atlas.org/")
+    || !imageShare.text.includes("#MindAtlas")
+  ) {
+    throw new Error(`Share atlas image did not produce a usable social image: ${JSON.stringify(imageShare)}`);
+  }
+  const shareImageDataUrl = await page.evaluate(() => window.__mindAtlasImageShareDataUrl);
+  await writeFile(`${outputDir}/share-atlas.png`, Buffer.from(shareImageDataUrl.split(",")[1], "base64"));
+
+  await page.getByLabel("Open atlas menu").click();
+  await page.getByRole("button", { name: /Create embedded-data URL/ }).click();
   const sharedUrl = await waitForClipboardText(page, (text) => text.includes("#mindatlas="));
   if (!sharedUrl.startsWith(baseUrl) || !sharedUrl.includes("#mindatlas=")) {
-    throw new Error(`Share atlas did not create a Mind Atlas URL: ${sharedUrl.slice(0, 120)}`);
+    throw new Error(`Embedded-data URL action did not create a Mind Atlas URL: ${sharedUrl.slice(0, 120)}`);
   }
   if (sharedUrl.includes("verify-child") || sharedUrl.includes("Verify Child")) {
-    throw new Error("Share atlas URL leaked source node ids or plain title text.");
+    throw new Error("Embedded-data URL leaked source node ids or plain title text.");
+  }
+
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "share", { value: undefined, configurable: true });
+    Object.defineProperty(navigator, "canShare", { value: undefined, configurable: true });
+  });
+  const fallbackDownloadPromise = page.waitForEvent("download");
+  await page.getByLabel("Share atlas image").click();
+  const fallbackDownload = await fallbackDownloadPromise;
+  const fallbackFileName = fallbackDownload.suggestedFilename();
+  if (!fallbackFileName.endsWith(".png")) {
+    throw new Error(`Unsupported native sharing did not fall back to a PNG download: ${fallbackFileName}`);
   }
 
   const receiver = await context.newPage();
@@ -1052,7 +1251,13 @@ async function verifyShareNotebookLink(browser) {
     throw new Error(`Shared atlas import did not restore and clear URL hash: ${JSON.stringify(imported)}`);
   }
   await context.close();
-  return { urlCharacters: sharedUrl.length };
+  return {
+    imageWidth: imageShare.width,
+    imageHeight: imageShare.height,
+    imageBytes: imageShare.fileSize,
+    fallbackFileName,
+    urlCharacters: sharedUrl.length,
+  };
 }
 
 async function waitForClipboardText(page, predicate, timeoutMs = 5000) {
@@ -1434,28 +1639,36 @@ await mkdir(outputDir, { recursive: true });
 
 const browser = await launchBrowser();
 try {
-  const desktop = await verifyViewport(browser, "desktop", { width: 1440, height: 920 });
-  await verifyLayoutModeSwitch(browser);
-  await verifyGeneratedLayoutBlocksBackgroundBirth(browser);
-  await verifyStartupMissingTitleMaintenance(browser);
-  await verifyIndexedDbCurrentBeatsStaleLegacyCache(browser);
-  const lockedMenu = await verifyLockedModeGlobalMenu(browser);
-  const voiceLog = await verifyVoiceLogDialog(browser);
-  const shareLink = await verifyShareNotebookLink(browser);
-  const outline = await verifyOutlineAndContextCopy(browser);
-  const imports = await verifyExternalImports(browser);
-  const mobileOutline = await verifyMobileOutlinePanel(browser);
-  const mobileGlobalMenuScroll = await verifyMobileGlobalMenuScroll(browser);
-  const mobileGeneratedLayout = await verifyMobileGeneratedLayoutVisibility(browser);
-  const treeWheelZoom = await verifyTreeWheelZoomDoesNotAutoFocus(browser);
-  const operationControls = await verifyOperationControls(browser);
-  const commandDock = await verifyCommandDockAndMobileTextTap(browser);
-  const mobileEditorKeyboard = await verifyMobileEditorKeyboardOverlay(browser);
-  const cameraScopedRendering = await verifyCameraScopedRendering(browser);
-  const mobile = await verifyViewport(browser, "mobile", { width: 390, height: 844 });
-  const mobileLandscape = await verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 });
-  console.log("UI verification passed");
-  console.log({ desktop, lockedMenu, voiceLog, shareLink, outline, imports, mobileOutline, mobileGlobalMenuScroll, mobileGeneratedLayout, treeWheelZoom, operationControls, commandDock, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+  if (process.argv[2] === "share") {
+    const shareFlows = await verifyShareFlows(browser);
+    console.log("Share UI verification passed");
+    console.log({ shareFlows });
+    process.exitCode = 0;
+  } else {
+    const desktop = await verifyViewport(browser, "desktop", { width: 1440, height: 920 });
+    await verifyLayoutModeSwitch(browser);
+    await verifyGeneratedLayoutBlocksBackgroundBirth(browser);
+    await verifyStartupMissingTitleMaintenance(browser);
+    await verifyIndexedDbCurrentBeatsStaleLegacyCache(browser);
+    const lockedMenu = await verifyLockedModeGlobalMenu(browser);
+    const voiceLog = await verifyVoiceLogDialog(browser);
+    const shareFlows = await verifyShareFlows(browser);
+    const outline = await verifyOutlineAndContextCopy(browser);
+    const imports = await verifyExternalImports(browser);
+    const mobileOutline = await verifyMobileOutlinePanel(browser);
+    const mobileGlobalMenuScroll = await verifyMobileGlobalMenuScroll(browser);
+    const mobileGeneratedLayout = await verifyMobileGeneratedLayoutVisibility(browser);
+    const treeWheelZoom = await verifyTreeWheelZoomDoesNotAutoFocus(browser);
+    const operationControls = await verifyOperationControls(browser);
+    const commandDock = await verifyCommandDockAndMobileTextTap(browser);
+    const providerUsage = await verifyProviderUsagePanel(browser);
+    const mobileEditorKeyboard = await verifyMobileEditorKeyboardOverlay(browser);
+    const cameraScopedRendering = await verifyCameraScopedRendering(browser);
+    const mobile = await verifyViewport(browser, "mobile", { width: 390, height: 844 });
+    const mobileLandscape = await verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 });
+    console.log("UI verification passed");
+    console.log({ desktop, lockedMenu, voiceLog, shareFlows, outline, imports, mobileOutline, mobileGlobalMenuScroll, mobileGeneratedLayout, treeWheelZoom, operationControls, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+  }
 } finally {
   await browser.close();
 }

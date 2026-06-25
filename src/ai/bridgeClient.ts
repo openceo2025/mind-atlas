@@ -10,6 +10,8 @@ import type {
   CodexRunRecoveryRequest,
   CodexRunRecoveryResult,
   GitPushResult,
+  OpenClawOptionsResult,
+  ProviderUsageResult,
   RealtimeSessionConfig,
   TextPartnerTurnPayload,
   TextPartnerTurnResult,
@@ -104,6 +106,16 @@ export async function getChatOptions(): Promise<ChatOptionsResult> {
 export async function getCodexOptions(): Promise<CodexOptionsResult> {
   const response = await fetchBridgeGet("/api/codex/options");
   return await readJsonResponse<CodexOptionsResult>(response);
+}
+
+export async function getOpenClawOptions(): Promise<OpenClawOptionsResult> {
+  const response = await fetchBridgeGet("/api/openclaw/options");
+  return await readJsonResponse<OpenClawOptionsResult>(response);
+}
+
+export async function getProviderUsage(forceRefresh = false): Promise<ProviderUsageResult> {
+  const response = await fetchBridgeGet(`/api/provider-usage${forceRefresh ? "?refresh=1" : ""}`);
+  return await readJsonResponse<ProviderUsageResult>(response);
 }
 
 export async function recoverCodexRun(payload: CodexRunRecoveryRequest): Promise<CodexRunRecoveryResult> {

@@ -49,6 +49,7 @@ const codexModelsOverride = process.env.MIND_ATLAS_CODEX_MODELS ?? "";
 const codexLogDir = resolve(process.env.MIND_ATLAS_CODEX_LOG_DIR ?? join(process.cwd(), "server-data", "codex-runs"));
 let codexOptionsCache = null;
 let codexSearchFlagSupportCache = null;
+let providerUsageCache = null;
 
 const openClawBin = resolveOpenClawBin(process.env.MIND_ATLAS_OPENCLAW_BIN ?? "openclaw");
 const openClawThinking = "off";
@@ -57,6 +58,7 @@ const openClawTimeoutMs = Number(process.env.MIND_ATLAS_OPENCLAW_TIMEOUT_MS ?? 1
 const openClawPromptCharLimit = readPositiveIntEnv("MIND_ATLAS_OPENCLAW_PROMPT_CHAR_LIMIT", 24_000);
 const openClawDisabled = process.env.MIND_ATLAS_OPENCLAW_DISABLED === "true";
 const openClawLogDir = resolve(process.env.MIND_ATLAS_OPENCLAW_LOG_DIR ?? join(process.cwd(), "server-data", "openclaw-runs"));
+let openClawOptionsCache = null;
 
 const claudeBin = process.env.MIND_ATLAS_CLAUDE_BIN ?? "claude";
 const claudeModel = process.env.MIND_ATLAS_CLAUDE_MODEL ?? process.env.ANTHROPIC_MODEL ?? "";
@@ -83,6 +85,7 @@ const deepSeekChatAuthToken = process.env.MIND_ATLAS_DEEPSEEK_AUTH_TOKEN ?? clau
 const deepSeekChatDefaultModel = process.env.MIND_ATLAS_DEEPSEEK_MODEL ?? "deepseek-v4-pro[1m]";
 const deepSeekChatModels = parseStringList(process.env.MIND_ATLAS_DEEPSEEK_MODELS, [deepSeekChatDefaultModel, "deepseek-v4-pro[1m]", "deepseek-v4-flash"]);
 const deepSeekChatMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_DEEPSEEK_MAX_OUTPUT_TOKENS", openAiMaxOutputTokens);
+const deepSeekBalanceBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_DEEPSEEK_BALANCE_BASE_URL ?? "https://api.deepseek.com");
 
 const realtimeModel = process.env.MIND_ATLAS_REALTIME_MODEL ?? "gpt-realtime-2";
 const realtimeVoice = process.env.MIND_ATLAS_REALTIME_VOICE ?? "marin";
@@ -105,6 +108,11 @@ process.on("unhandledRejection", (reason) => {
 function resolveCodexBin(configuredBin, useWsl) {
   const value = String(configuredBin || "codex").trim() || "codex";
   if (useWsl) return value;
+  if (process.platform === "win32" && value.toLowerCase() === "codex") {
+    if (hasNonWindowsAppsCodexOnPath()) return value;
+    const discovered = findVsCodeCodexBin();
+    if (discovered) return discovered;
+  }
   if (!looksLikePath(value) || existsSync(value)) return value;
 
   const discovered = findVsCodeCodexBin();
@@ -117,6 +125,15 @@ function resolveCodexBin(configuredBin, useWsl) {
   console.warn(`Configured MIND_ATLAS_CODEX_BIN was not found: ${value}`);
   console.warn("Falling back to 'codex' from PATH.");
   return "codex";
+}
+
+function hasNonWindowsAppsCodexOnPath() {
+  const pathEntries = String(process.env.PATH ?? "").split(";");
+  return pathEntries.some((entry) => {
+    const directory = entry.trim();
+    if (!directory || /\\WindowsApps(?:\\|$)/i.test(directory)) return false;
+    return ["codex.exe", "codex.cmd", "codex"].some((name) => existsSync(join(directory, name)));
+  });
 }
 
 function looksLikePath(value) {
@@ -250,6 +267,18 @@ const server = createBridgeServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/chat/options") {
       const result = createChatOptionsResponse();
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/provider-usage") {
+      const result = await createProviderUsageResponse(url.searchParams.get("refresh") === "1");
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/openclaw/options") {
+      const result = await createOpenClawOptionsResponse();
       sendJson(response, 200, result);
       return;
     }
@@ -968,6 +997,220 @@ function createChatOptionsResponse() {
   };
 }
 
+async function createProviderUsageResponse(forceRefresh = false) {
+  const cacheIsFresh = providerUsageCache && Date.now() - providerUsageCache.createdAt < 45_000;
+  if (!forceRefresh && cacheIsFresh) return providerUsageCache.value;
+
+  const [openAiMetrics, deepSeekMetrics] = await Promise.all([
+    createOpenAiRateLimitMetrics(),
+    createDeepSeekBalanceMetrics(),
+  ]);
+  const value = {
+    fetchedAt: new Date().toISOString(),
+    metrics: [
+      ...openAiMetrics,
+      ...deepSeekMetrics,
+    ],
+  };
+  providerUsageCache = { createdAt: Date.now(), value };
+  return value;
+}
+
+async function createOpenAiRateLimitMetrics() {
+  try {
+    const response = await readCodexAppServerRateLimits();
+    const snapshot = response?.rateLimitsByLimitId?.codex ?? response?.rateLimits;
+    return [
+      createOpenAiRateLimitMetric("openai-rate-primary", snapshot?.primary, "CODEX 5H", snapshot?.planType),
+      createOpenAiRateLimitMetric("openai-rate-secondary", snapshot?.secondary, "CODEX 7D", snapshot?.planType),
+    ];
+  } catch {
+    return [
+      createUnavailableProviderMetric("openai-rate-primary", "openai", "OPENAI", "rate_limit", "CODEX 5H", "codex", "Codex rate limits unavailable"),
+      createUnavailableProviderMetric("openai-rate-secondary", "openai", "OPENAI", "rate_limit", "CODEX 7D", "codex", "Codex rate limits unavailable"),
+    ];
+  }
+}
+
+function createOpenAiRateLimitMetric(id, window, fallbackLabel, planType) {
+  const usedPercent = numberOrUndefined(window?.usedPercent);
+  if (usedPercent === undefined) {
+    return createUnavailableProviderMetric(id, "openai", "OPENAI", "rate_limit", fallbackLabel, "codex", "Codex rate limit window unavailable");
+  }
+  const remainingPercent = clampNumber(100 - usedPercent, 0, 100);
+  return {
+    id,
+    vendor: "openai",
+    vendorLabel: "OPENAI",
+    kind: "rate_limit",
+    label: formatRateLimitWindowLabel(window?.windowDurationMins, fallbackLabel),
+    available: true,
+    displayValue: `${Math.round(remainingPercent)}%`,
+    value: remainingPercent,
+    unit: "%",
+    barPercent: remainingPercent,
+    resetAt: unixSecondsToIso(window?.resetsAt),
+    detail: planType ? `Codex ${String(planType).toUpperCase()} plan remaining` : "Codex remaining rate limit",
+    source: "codex",
+    defaultVisible: true,
+  };
+}
+
+async function createDeepSeekBalanceMetrics() {
+  if (!deepSeekChatAuthToken) {
+    return [
+      createUnavailableProviderMetric(
+        "deepseek-balance",
+        "deepseek",
+        "DEEPSEEK",
+        "balance",
+        "BALANCE",
+        "api",
+        "DeepSeek API key not configured",
+      ),
+    ];
+  }
+  try {
+    const upstream = await fetch(`${deepSeekBalanceBaseUrl}/user/balance`, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${deepSeekChatAuthToken}`,
+      },
+    });
+    if (!upstream.ok) throw new Error(`DeepSeek balance failed with ${upstream.status}`);
+    const data = await upstream.json();
+    const balanceInfos = Array.isArray(data?.balance_infos) ? data.balance_infos : [];
+    const balance = balanceInfos.find((item) => String(item?.currency).toUpperCase() === "USD") ?? balanceInfos[0];
+    const totalBalance = numberOrUndefined(balance?.total_balance);
+    if (!balance || totalBalance === undefined) throw new Error("DeepSeek balance payload was empty");
+    const currency = String(balance.currency || "USD").toUpperCase();
+    const granted = numberOrUndefined(balance.granted_balance);
+    const toppedUp = numberOrUndefined(balance.topped_up_balance);
+    return [{
+      id: "deepseek-balance",
+      vendor: "deepseek",
+      vendorLabel: "DEEPSEEK",
+      kind: "balance",
+      label: "BALANCE",
+      available: data?.is_available === true,
+      displayValue: `${currency} ${formatBalance(totalBalance)}`,
+      value: totalBalance,
+      unit: currency,
+      barPercent: data?.is_available === true && totalBalance > 0 ? 100 : 0,
+      detail: [
+        granted !== undefined ? `granted ${currency} ${formatBalance(granted)}` : "",
+        toppedUp !== undefined ? `topped up ${currency} ${formatBalance(toppedUp)}` : "",
+      ].filter(Boolean).join("; "),
+      source: "api",
+      defaultVisible: true,
+    }];
+  } catch {
+    return [
+      createUnavailableProviderMetric(
+        "deepseek-balance",
+        "deepseek",
+        "DEEPSEEK",
+        "balance",
+        "BALANCE",
+        "api",
+        "DeepSeek balance unavailable",
+      ),
+    ];
+  }
+}
+
+function createUnavailableProviderMetric(id, vendor, vendorLabel, kind, label, source, detail) {
+  return {
+    id,
+    vendor,
+    vendorLabel,
+    kind,
+    label,
+    available: false,
+    displayValue: "N/A",
+    barPercent: 0,
+    detail,
+    source,
+    defaultVisible: true,
+  };
+}
+
+function formatRateLimitWindowLabel(durationMinutes, fallbackLabel) {
+  const minutes = numberOrUndefined(durationMinutes);
+  if (minutes === undefined || minutes <= 0) return fallbackLabel;
+  if (minutes % (24 * 60) === 0) return `CODEX ${minutes / (24 * 60)}D`;
+  if (minutes % 60 === 0) return `CODEX ${minutes / 60}H`;
+  return `CODEX ${minutes}M`;
+}
+
+function unixSecondsToIso(value) {
+  const seconds = numberOrUndefined(value);
+  if (seconds === undefined) return undefined;
+  const date = new Date(seconds * 1000);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+}
+
+function formatBalance(value) {
+  return Number(value).toFixed(2);
+}
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+async function createOpenClawOptionsResponse() {
+  const fallback = createFallbackOpenClawOptions();
+  if (openClawDisabled) return fallback;
+  const cacheIsFresh = openClawOptionsCache && Date.now() - openClawOptionsCache.createdAt < 60_000;
+  if (cacheIsFresh) return openClawOptionsCache.value;
+
+  try {
+    const commandSpec = buildOpenClawCommand(["models", "list", "--json"]);
+    const result = await runProcess(commandSpec.command, commandSpec.args, "", 15_000, process.cwd());
+    if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `OpenClaw models exited with ${result.exitCode}`);
+    const parsed = parseJsonText(result.stdout);
+    const listedModels = Array.isArray(parsed?.models) ? parsed.models : [];
+    const models = listedModels
+      .filter((model) => model?.available !== false && model?.missing !== true)
+      .map(normalizeOpenClawModelOption)
+      .filter(Boolean);
+    const taggedDefault = listedModels.find((model) => Array.isArray(model?.tags) && model.tags.includes("default"));
+    const taggedDefaultModel = stringOr(taggedDefault?.key, "");
+    const value = {
+      ...fallback,
+      models: models.length ? models : fallback.models,
+      defaultModel: models.some((model) => model.model === taggedDefaultModel)
+        ? taggedDefaultModel
+        : models[0]?.model ?? fallback.defaultModel,
+    };
+    openClawOptionsCache = { createdAt: Date.now(), value };
+    return value;
+  } catch {
+    openClawOptionsCache = { createdAt: Date.now(), value: fallback };
+    return fallback;
+  }
+}
+
+function createFallbackOpenClawOptions() {
+  return {
+    models: [],
+    defaultModel: "",
+    defaultTimeoutMs: openClawTimeoutMs,
+  };
+}
+
+function normalizeOpenClawModelOption(model) {
+  const key = stringOr(model?.key, "");
+  if (!key) return null;
+  return {
+    model: key,
+    displayName: stringOr(model?.name, key),
+    input: stringOr(model?.input, ""),
+    contextWindow: numberOrUndefined(model?.contextWindow),
+    local: model?.local === true,
+  };
+}
+
 function createChatModelOptions(models, defaultReasoningEffort, supportedReasoningEfforts) {
   return Array.from(new Set(models.map((model) => String(model || "").trim()).filter(Boolean)))
     .map((model) => ({
@@ -1312,6 +1555,7 @@ async function runOpenClaw(prompt, settings) {
     "--session-key",
     sessionKey,
   ];
+  if (settings.model) args.push("--model", settings.model);
   if (settings.agent) args.push("--agent", settings.agent);
 
   const commandSpec = buildOpenClawCommand(args);
@@ -1363,6 +1607,7 @@ function buildOpenClawPrompt(prompt, context, settings) {
       : "Return a concise final answer suitable for saving as a child Mind Atlas node.",
     "Do not change OpenClaw or LM Studio configuration unless the user explicitly asks for that in this prompt.",
     "Mind Atlas did not override the OpenClaw work root; use the OpenClaw agent default workspace if it has one.",
+    settings.model ? `OpenClaw model override: ${settings.model}` : "OpenClaw model: configured default",
     settings.agent ? `OpenClaw agent: ${settings.agent}` : "OpenClaw agent: default",
     settings.resumeSessionKey
       ? `Continuing OpenClaw session key: ${settings.resumeSessionKey}`
@@ -1381,7 +1626,7 @@ function buildOpenClawPrompt(prompt, context, settings) {
 function normalizeOpenClawSettings(input) {
   const continueMode = input?.continueMode === "new" ? "new" : "auto";
   return {
-    model: "",
+    model: stringOr(input?.model, ""),
     thinking: openClawThinking,
     agent: stringOr(input?.agent, openClawAgent),
     workspace: "",
@@ -2447,6 +2692,104 @@ function truncateText(value, maxLength) {
 function truncateFromStart(value, maxLength) {
   const text = String(value);
   return text.length > maxLength ? `[Earlier context truncated]\n${text.slice(text.length - maxLength)}` : text;
+}
+
+function readCodexAppServerRateLimits() {
+  if (codexDisabled) return Promise.reject(new Error("Codex is disabled"));
+  return new Promise((resolvePromise, rejectPromise) => {
+    const command = codexUseWsl ? "wsl" : codexBin;
+    const args = codexUseWsl ? [codexBin, "app-server"] : ["app-server"];
+    let child;
+    try {
+      child = spawn(command, args, {
+        cwd: normalizeProcessCwd(codexWorkspace),
+        env: process.env,
+        windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (error) {
+      rejectPromise(error);
+      return;
+    }
+
+    let settled = false;
+    let initialized = false;
+    let stdoutBuffer = "";
+    const timer = setTimeout(() => finish(new Error("Codex rate limit request timed out")), 10_000);
+
+    const send = (message) => {
+      if (settled || child.stdin.destroyed) return;
+      child.stdin.write(`${JSON.stringify(message)}\n`);
+    };
+
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        child.stdin.end();
+        child.kill();
+      } catch {
+        // best effort cleanup
+      }
+      if (error) rejectPromise(error);
+      else resolvePromise(value);
+    };
+
+    const processLine = (line) => {
+      const message = parseJsonText(line);
+      if (!message || typeof message !== "object") return;
+      if (message.id === 1 && !initialized) {
+        if (message.error) {
+          finish(new Error(stringOr(message.error?.message, "Codex app-server initialization failed")));
+          return;
+        }
+        initialized = true;
+        send({ method: "initialized", params: {} });
+        send({ method: "account/rateLimits/read", id: 2 });
+        return;
+      }
+      if (message.id === 2) {
+        if (message.error) {
+          finish(new Error(stringOr(message.error?.message, "Codex rate limits unavailable")));
+          return;
+        }
+        finish(null, message.result);
+      }
+    };
+
+    child.stdout.on("data", (chunk) => {
+      stdoutBuffer += chunk.toString();
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? "";
+      lines.map((line) => line.trim()).filter(Boolean).forEach(processLine);
+    });
+    child.stdin.on("error", (error) => finish(error));
+    child.stdout.on("error", (error) => finish(error));
+    child.stderr.on("data", () => {
+      // Drain app-server diagnostics without exposing account details.
+    });
+    child.stderr.on("error", () => {
+      // Rate-limit data comes from stdout; stderr is diagnostics only.
+    });
+    child.on("error", (error) => finish(error));
+    child.on("close", () => {
+      if (stdoutBuffer.trim()) processLine(stdoutBuffer.trim());
+      if (!settled) finish(new Error("Codex app-server closed before returning rate limits"));
+    });
+
+    send({
+      method: "initialize",
+      id: 1,
+      params: {
+        clientInfo: {
+          name: "mind_atlas",
+          title: "Mind Atlas",
+          version: "0.1.1",
+        },
+      },
+    });
+  });
 }
 
 function runProcess(command, args, stdin, timeoutMs, cwd, env = process.env) {

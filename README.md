@@ -26,7 +26,8 @@ Current version: `0.1.1`
 - Sends the focused node context to a local AI bridge and saves each user request plus provider result as child notebook nodes.
 - Saves OpenAI-generated images as attachments on the provider result node.
 - Groups OpenAI, Opus/Anthropic, DeepSeek, and LM Studio/OpenAI-compatible local models under one Chat entry for non-agent conversation.
-- Groups Codex CLI and Claude Code under one Code entry, while OpenClaw remains a separate agent-style bridge mode.
+- Groups Codex CLI and Claude Code under one Code entry, while OpenClaw remains a separate model-selectable agent-style bridge mode.
+- Shows selectable OpenAI Codex rate-limit windows and DeepSeek balance bars inside the AI command dock.
 - Saves and loads rich `.mindatlaspkg` notebook packages through the local bridge's server-side notebook folder.
 - Expands Codex runs into spatial child nodes for summaries, commands, changed files, approval prompts, and final output.
 - Sends OpenClaw requests through the local bridge and stores the OpenClaw result, session key, and log path on the request branch.
@@ -138,6 +139,10 @@ MIND_ATLAS_CLAUDE_BIN=C:\Users\<you>\AppData\Local\Microsoft\WinGet\Links\claude
 MIND_ATLAS_CLAUDE_ANTHROPIC_API_KEY=sk-ant-...
 MIND_ATLAS_CLAUDE_DEEPSEEK_AUTH_TOKEN=sk-...
 ```
+
+Anthropic does not expose the Claude Console organization-credit balance
+through a public API, so Mind Atlas does not display or request a manually
+entered Anthropic balance.
 
 To start only Vite for LAN testing without the AI bridge:
 

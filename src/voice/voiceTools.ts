@@ -56,7 +56,6 @@ const toolSpecs: VoiceToolSpec[] = [
         openClawSettings: {
           model: state.openClawSettings.model,
           thinking: state.openClawSettings.thinking,
-          agent: state.openClawSettings.agent,
           workspace: state.openClawSettings.workspace,
           timeoutMs: state.openClawSettings.timeoutMs,
           continueMode: state.openClawSettings.continueMode,

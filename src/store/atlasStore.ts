@@ -117,7 +117,6 @@ const DEFAULT_CODEX_SETTINGS: CodexSettings = {
 const DEFAULT_OPENCLAW_SETTINGS: OpenClawSettings = {
   model: "",
   thinking: "off",
-  agent: "",
   workspace: "",
   timeoutMs: 10 * 60 * 1000,
   continueMode: "auto",
@@ -4141,7 +4140,6 @@ function buildOpenClawSettingsForRun(settings: OpenClawSettings, context: AiNode
   const continueMode = settings.continueMode ?? "auto";
   return normalizeOpenClawSettings({
     ...settings,
-    model: "",
     workspace: "",
     continueMode,
     resumeSessionKey: continueMode === "auto" ? settings.resumeSessionKey || inferOpenClawSessionKeyFromContext(context) : "",
@@ -4294,9 +4292,8 @@ function normalizeOpenClawSettings(settings: Partial<OpenClawSettings>): OpenCla
   return {
     ...DEFAULT_OPENCLAW_SETTINGS,
     ...settings,
-    model: "",
+    model: (settings.model ?? "").trim(),
     thinking: "off",
-    agent: (settings.agent ?? "").trim(),
     workspace: "",
     timeoutMs: clampInteger(settings.timeoutMs ?? DEFAULT_OPENCLAW_SETTINGS.timeoutMs, 30_000, 120 * 60_000),
     continueMode,
