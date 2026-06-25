@@ -136,6 +136,43 @@ async function verifyGeneratedLayoutBlocksBackgroundBirth(browser) {
   await context.close();
 }
 
+async function verifyKonamiUnlockSequence(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const page = await context.newPage();
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+
+  await enterKonamiSequence(page);
+  await page.waitForFunction(() => {
+    const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
+    if (!raw) return false;
+    const progress = JSON.parse(raw);
+    return progress.basicCompleted === true && progress.aiUnlocked === false;
+  });
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await enterKonamiSequence(page);
+  await page.waitForFunction(() => {
+    const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
+    if (!raw) return false;
+    return JSON.parse(raw).aiUnlocked === true;
+  });
+  await page.getByLabel("Open atlas menu").click();
+  await page.locator(".global-context-menu").getByText("AI Partner log").waitFor();
+
+  await context.close();
+  return { tutorialSkipped: true, aiUnlocked: true };
+}
+
+async function enterKonamiSequence(page) {
+  for (const key of ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"]) {
+    await page.keyboard.press(key);
+  }
+}
+
 async function findCanvasBackgroundPoint(page, label) {
   const box = await page.locator("canvas").boundingBox();
   if (!box) throw new Error(`Missing canvas box while testing ${label} background birth`);
@@ -1686,6 +1723,7 @@ try {
     const desktop = await verifyViewport(browser, "desktop", { width: 1440, height: 920 });
     await verifyLayoutModeSwitch(browser);
     await verifyGeneratedLayoutBlocksBackgroundBirth(browser);
+    const konamiUnlock = await verifyKonamiUnlockSequence(browser);
     await verifyStartupMissingTitleMaintenance(browser);
     await verifyIndexedDbCurrentBeatsStaleLegacyCache(browser);
     const lockedMenu = await verifyLockedModeGlobalMenu(browser);
@@ -1705,7 +1743,7 @@ try {
     const mobile = await verifyViewport(browser, "mobile", { width: 390, height: 844 });
     const mobileLandscape = await verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 });
     console.log("UI verification passed");
-    console.log({ desktop, lockedMenu, voiceLog, shareFlows, outline, imports, mobileOutline, mobileGlobalMenuScroll, mobileGeneratedLayout, treeWheelZoom, operationControls, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+    console.log({ desktop, konamiUnlock, lockedMenu, voiceLog, shareFlows, outline, imports, mobileOutline, mobileGlobalMenuScroll, mobileGeneratedLayout, treeWheelZoom, operationControls, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
   }
 } finally {
   await browser.close();

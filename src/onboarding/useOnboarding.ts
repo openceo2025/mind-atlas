@@ -237,7 +237,7 @@ export function useOnboarding(): OnboardingState {
     };
     window.addEventListener("keydown", handleKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
-  }, [persistProgress, progress.aiUnlocked, text]);
+  }, [persistProgress, progress.aiUnlocked, progress.basicCompleted, progress.firstRun, text]);
 
   useEffect(() => {
     if (!noticeMessageId) return;
