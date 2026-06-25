@@ -10,6 +10,11 @@ Public site: https://mind-atlas.org
 
 Current version: `0.1.1`
 
+Mind Atlas is open source under `AGPL-3.0-only`. The project accepts
+community contributions under the [Contributor License Agreement](CLA.md).
+The Mind Atlas name and official branding are governed separately by the
+[trademark policy](TRADEMARKS.md).
+
 ## What This Prototype Does
 
 - Renders a fixed-orientation 2.5D universe view with pan, zoom, focus, and semantic drill-down.
@@ -236,8 +241,33 @@ See [docs/ai-bridge.md](docs/ai-bridge.md) for AI bridge setup and Realtime note
 
 The public repository should include source, configuration, documentation, and the GitHub Pages workflow. It should not include dependency folders, generated builds, logs, or verification screenshots.
 
-See the upload list at the end of this preparation pass for the exact file set.
+## Contributing
+
+Issues, forks, experiments, and pull requests are welcome. Before opening a
+pull request, read [CONTRIBUTING.md](CONTRIBUTING.md) and agree to the
+[Contributor License Agreement](CLA.md) in the pull request template.
+
+Contributors retain copyright in their contributions while granting the
+project the rights needed to distribute the open-source edition, offer
+commercial licenses, and transfer the project as part of a future business or
+asset transaction. Project decision-making and succession are described in
+[GOVERNANCE.md](GOVERNANCE.md).
 
 ## License
 
-MIT License. See [LICENSE](./LICENSE).
+The source code in this repository is licensed under the
+[GNU Affero General Public License v3.0 only](LICENSE).
+
+Modified versions offered to users over a network must provide those users
+access to the corresponding source as required by AGPL section 13.
+
+The AGPL does not grant rights to the Mind Atlas name, logo, domain, or other
+brand identifiers. See [TRADEMARKS.md](TRADEMARKS.md).
+
+Organizations that need to embed, redistribute, or operate modified Mind Atlas
+without AGPL obligations may request separate commercial terms. See
+[COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
+
+The intended boundary between the community edition and future proprietary
+Pro/Team services is documented in
+[docs/licensing-and-commercial-boundary.md](docs/licensing-and-commercial-boundary.md).

@@ -1366,6 +1366,12 @@ async function verifyLockedModeGlobalMenu(browser) {
   if (aiOnlyItemCount > 0) {
     throw new Error("Locked mode global menu exposed AI Partner log.");
   }
+  const sourceLink = menu.getByRole("link", { name: "Source code and license" });
+  const sourceHref = await sourceLink.getAttribute("href");
+  const sourceText = await sourceLink.innerText();
+  if (sourceHref !== "https://github.com/openceo2025/mind-atlas" || !sourceText.includes("AGPL-3.0-only")) {
+    throw new Error(`Source/license link is incorrect: ${sourceHref} / ${sourceText}`);
+  }
 
   await menu.getByTitle("Tree").click();
   await menu.waitFor({ state: "detached" });
@@ -1380,7 +1386,7 @@ async function verifyLockedModeGlobalMenu(browser) {
   await page.getByRole("dialog", { name: "Import text outline" }).waitFor();
 
   await context.close();
-  return { visibleSharedItems: ["Mode", "Restore from history", "Import text outline"] };
+  return { visibleSharedItems: ["Mode", "Restore from history", "Import text outline", "Source code & legal"] };
 }
 
 async function seedCompletedOnboarding(page, { aiUnlocked = true } = {}) {

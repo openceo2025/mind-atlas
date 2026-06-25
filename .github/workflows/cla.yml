@@ -1,0 +1,49 @@
+name: CLA
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  agreement:
+    if: github.actor != 'dependabot[bot]' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify CLA attestation
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71
+        with:
+          script: |
+            const body = context.payload.pull_request.body || "";
+            const login = context.payload.pull_request.user.login;
+            const escapedLogin = login.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+            const agreedToCla =
+              /-\s*\[[xX]\]\s*I have read and agree to \[CLA\.md\]\([^)]+\)\./.test(body);
+            const confirmedAuthority =
+              /-\s*\[[xX]\]\s*I represent that I have the right and authority to submit every contribution included in this pull request under the CLA\./.test(body);
+            const signedByAuthor = new RegExp(
+              `CLA signature:\\s*@${escapedLogin}(?:\\s|$)`,
+              "i",
+            ).test(body);
+
+            const missing = [];
+            if (!agreedToCla) missing.push("check the CLA agreement box");
+            if (!confirmedAuthority) missing.push("check the authority representation box");
+            if (!signedByAuthor) missing.push(`set the CLA signature to @${login}`);
+
+            if (missing.length) {
+              core.setFailed(
+                `CLA attestation incomplete: ${missing.join("; ")}. Edit the pull request body and keep the wording from the template.`,
+              );
+              return;
+            }
+
+            core.notice(`CLA attestation accepted from @${login}.`);

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Changed the project license from MIT to `AGPL-3.0-only`.
+- Added a trademark policy, contributor guide, contributor license agreement,
+  commercial licensing notice, and documented open-source/commercial boundary.
+- Added an automated pull-request CLA check and an in-app source/license link.
+
 ## 0.1.1 - 2026-05-04
 
 ### Added

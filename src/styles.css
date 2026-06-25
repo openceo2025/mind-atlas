@@ -1033,7 +1033,8 @@ h1 {
 }
 
 .context-menu button,
-.context-menu label {
+.context-menu label,
+.context-menu a.context-menu-link {
   position: relative;
   display: flex;
   align-items: center;
@@ -1048,10 +1049,12 @@ h1 {
   color: #dfeade;
   cursor: pointer;
   text-align: left;
+  text-decoration: none;
 }
 
 .context-menu button:hover,
-.context-menu label:hover {
+.context-menu label:hover,
+.context-menu a.context-menu-link:hover {
   background: rgba(141, 245, 207, 0.09);
 }
 
@@ -1067,13 +1070,15 @@ h1 {
   cursor: not-allowed;
 }
 
-.context-menu button span {
+.context-menu button span,
+.context-menu a.context-menu-link span {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.context-menu button small {
+.context-menu button small,
+.context-menu a.context-menu-link small {
   color: #9fb5a9;
   font-size: 11px;
   line-height: 1.2;
@@ -1081,6 +1086,7 @@ h1 {
 
 .context-menu button > svg,
 .context-menu label > svg,
+.context-menu a.context-menu-link > svg,
 .cloud-package-button > svg,
 .icon-button > svg,
 .send-button > svg {
@@ -3511,6 +3517,7 @@ button:disabled,
 
 .app-shell[data-theme="light"] .context-menu-section-title,
 .app-shell[data-theme="light"] .context-menu button small,
+.app-shell[data-theme="light"] .context-menu a.context-menu-link small,
 .app-shell[data-theme="light"] .surface-context-menu span,
 .app-shell[data-theme="light"] .appearance-controls label,
 .app-shell[data-theme="light"] .muted,
