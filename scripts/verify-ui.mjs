@@ -101,21 +101,28 @@ async function verifyLayoutModeSwitch(browser) {
 }
 
 async function verifyGeneratedLayoutBlocksBackgroundBirth(browser) {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
+  const page = await context.newPage();
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page);
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
+  await page.evaluate(() => {
+    window.__mindAtlasVerifyBackgroundInteractions = 0;
+    window.addEventListener("mindatlas:universe-background-interaction", () => {
+      window.__mindAtlasVerifyBackgroundInteractions += 1;
+    });
+  });
 
   for (const label of ["Tree", "Mind map"]) {
     await page.getByLabel("Open atlas menu").click();
     await page.getByTitle(label).click();
     await page.locator(".global-context-menu").waitFor({ state: "detached" });
-    await page.waitForTimeout(260);
+    await page.waitForTimeout(900);
+    const backgroundPoint = await findCanvasBackgroundPoint(page, label);
+    await page.waitForTimeout(180);
     const beforeCount = await readPersistedNodeCount(page);
-    const box = await page.locator("canvas").boundingBox();
-    if (!box) throw new Error(`Missing canvas box while testing ${label} background birth`);
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.move(backgroundPoint.x, backgroundPoint.y);
     await page.mouse.down();
     await page.waitForTimeout(1720);
     await page.mouse.up();
@@ -126,7 +133,38 @@ async function verifyGeneratedLayoutBlocksBackgroundBirth(browser) {
     }
   }
 
-  await page.close();
+  await context.close();
+}
+
+async function findCanvasBackgroundPoint(page, label) {
+  const box = await page.locator("canvas").boundingBox();
+  if (!box) throw new Error(`Missing canvas box while testing ${label} background birth`);
+  const candidates = [
+    [0.78, 0.24],
+    [0.22, 0.24],
+    [0.82, 0.5],
+    [0.18, 0.5],
+    [0.72, 0.68],
+    [0.28, 0.68],
+  ];
+
+  for (const [xRatio, yRatio] of candidates) {
+    const point = {
+      x: box.x + box.width * xRatio,
+      y: box.y + box.height * yRatio,
+    };
+    const beforeInteractions = await readBackgroundInteractionCount(page);
+    await page.mouse.click(point.x, point.y);
+    await page.waitForTimeout(80);
+    const afterInteractions = await readBackgroundInteractionCount(page);
+    if (afterInteractions > beforeInteractions) return point;
+  }
+
+  throw new Error(`Could not find an interactive canvas background point for ${label}`);
+}
+
+function readBackgroundInteractionCount(page) {
+  return page.evaluate(() => window.__mindAtlasVerifyBackgroundInteractions ?? 0);
 }
 
 async function verifyStartupMissingTitleMaintenance(browser) {
