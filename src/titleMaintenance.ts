@@ -2,6 +2,8 @@ import type { AtlasNode } from "./types";
 
 const AUTO_TITLE_EXCERPT_MAX_GRAPHEMES = 24;
 const MISSING_TITLE_PREFIX = "untitle";
+export const NODE_TITLE_PLACEHOLDER = "ここに入力";
+const LEGACY_NODE_TITLE_PLACEHOLDERS = new Set(["無題", "ここに入力", "ここに記入"]);
 
 export interface MissingTitleHydrationResult {
   root: AtlasNode;
@@ -16,16 +18,23 @@ export function hydrateMissingNodeTitlesFromBodies(root: AtlasNode, updatedAt = 
   function hydrateNode(node: AtlasNode): AtlasNode {
     const children = node.children.map(hydrateNode);
     const title = createTitleExcerptFromBody(node.body);
-    const shouldHydrateTitle = isMissingNodeTitle(node.title) && title;
-    if (!shouldHydrateTitle && children.every((child, index) => child === node.children[index])) {
+    const titleIsMissing = isMissingNodeTitle(node.title);
+    const shouldHydrateTitle = titleIsMissing && title;
+    const shouldClearPlaceholderTitle = titleIsMissing && !title && Boolean((node.title ?? "").trim());
+    if (!shouldHydrateTitle && !shouldClearPlaceholderTitle && children.every((child, index) => child === node.children[index])) {
       return node;
     }
-    if (shouldHydrateTitle) changedNodeIds.push(node.id);
+    if (shouldHydrateTitle || shouldClearPlaceholderTitle) changedNodeIds.push(node.id);
     return {
       ...node,
-      title: shouldHydrateTitle ? title : node.title,
-      subtitle: shouldHydrateTitle && isMissingNodeTitle(node.subtitle) ? title : node.subtitle,
-      updatedAt: shouldHydrateTitle ? updatedAt : node.updatedAt,
+      title: shouldHydrateTitle ? title : shouldClearPlaceholderTitle ? "" : node.title,
+      subtitle:
+        shouldHydrateTitle && isMissingNodeTitle(node.subtitle)
+          ? title
+          : shouldClearPlaceholderTitle && isMissingNodeTitle(node.subtitle)
+            ? ""
+            : node.subtitle,
+      updatedAt: shouldHydrateTitle || shouldClearPlaceholderTitle ? updatedAt : node.updatedAt,
       children,
     };
   }
@@ -44,7 +53,7 @@ export function createTitleExcerptFromBody(body: string, maxGraphemes = AUTO_TIT
 
 export function isMissingNodeTitle(title: string | undefined) {
   const normalized = (title ?? "").trim().toLowerCase();
-  return normalized === "" || normalized.startsWith(MISSING_TITLE_PREFIX);
+  return normalized === "" || normalized.startsWith(MISSING_TITLE_PREFIX) || LEGACY_NODE_TITLE_PLACEHOLDERS.has((title ?? "").trim());
 }
 
 function cleanTitleExcerptSource(line: string) {

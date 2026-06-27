@@ -421,6 +421,100 @@ async function verifyOutlineAndContextCopy(browser) {
   };
 }
 
+async function verifyOutlineCollapseAndDeletionSafety(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  await seedNestedNotebook(page, { selectedNodeId: "atlas-root", renderQuality: "low" });
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector('textarea.space-title-editor[data-node-id="nested-parent"]', { state: "visible" });
+  const rootLabel = await page.locator('textarea.space-title-editor[data-node-id="nested-parent"]').inputValue();
+  if (rootLabel !== "Nested Parent") {
+    throw new Error(`Root child title label should remain visible in low quality root overview: ${rootLabel}`);
+  }
+
+  await page.getByLabel("Open atlas menu").click();
+  await page.locator(".global-context-menu").getByTitle("Outline").click();
+  await page.waitForSelector(".outline-editor-shell");
+  const initialOutlineValues = await readOutlineTitleValues(page);
+  if (!initialOutlineValues.includes("Nested Parent") || !initialOutlineValues.includes("Nested Child")) {
+    throw new Error(`Nested outline seed did not render all rows: ${JSON.stringify(initialOutlineValues)}`);
+  }
+
+  await page.getByRole("button", { name: /Collapse all/i }).click();
+  await page.waitForFunction(
+    () => ![...document.querySelectorAll('input[aria-label="Node title"]')].some((input) => input.value === "Nested Child"),
+  );
+  const collapsedOutlineValues = await readOutlineTitleValues(page);
+  if (!collapsedOutlineValues.includes("Nested Parent") || collapsedOutlineValues.includes("Nested Child")) {
+    throw new Error(`Collapse all should hide descendants but keep top-level rows: ${JSON.stringify(collapsedOutlineValues)}`);
+  }
+
+  await page.getByRole("button", { name: /Expand all/i }).click();
+  await page.waitForFunction(
+    () => [...document.querySelectorAll('input[aria-label="Node title"]')].some((input) => input.value === "Nested Child"),
+  );
+  const expandedCount = await page.locator('input[aria-label="Node title"]').count();
+  await page.locator('input[aria-label="Node title"]').first().click();
+  await page.keyboard.press("Control+Shift+Enter");
+  await page.waitForFunction(
+    (count) => document.querySelectorAll('input[aria-label="Node title"]').length > count,
+    expandedCount,
+  );
+  const newOutlineInput = page.locator('input[aria-label="Node title"]').last();
+  const newOutlineState = await newOutlineInput.evaluate((input) => ({
+    value: input.value,
+    placeholder: input.getAttribute("placeholder"),
+  }));
+  if (newOutlineState.value !== "" || newOutlineState.placeholder !== "ここに入力") {
+    throw new Error(`New outline nodes should store an empty title and show a placeholder: ${JSON.stringify(newOutlineState)}`);
+  }
+  await page.getByRole("button", { name: /Close/i }).click();
+  await page.locator('textarea.space-title-editor[data-node-id="nested-parent"]').click();
+  await page.waitForTimeout(80);
+
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  await page.keyboard.press("Backspace");
+  await page.waitForTimeout(150);
+  if (!(await page.locator('[data-node-id="nested-parent"]').count())) {
+    throw new Error("Backspace deleted the selected node.");
+  }
+
+  let dismissedDeleteDialog = "";
+  page.once("dialog", async (dialog) => {
+    dismissedDeleteDialog = dialog.message();
+    await dialog.dismiss();
+  });
+  await page.keyboard.press("Delete");
+  await page.waitForTimeout(150);
+  if (!dismissedDeleteDialog.includes("Nested Parent") || !(await page.locator('[data-node-id="nested-parent"]').count())) {
+    throw new Error(`Delete should confirm before removing a node with descendants: ${dismissedDeleteDialog}`);
+  }
+
+  let acceptedDeleteDialog = "";
+  page.once("dialog", async (dialog) => {
+    acceptedDeleteDialog = dialog.message();
+    await dialog.accept();
+  });
+  await page.keyboard.press("Delete");
+  await page.waitForFunction(() => !document.querySelector('[data-node-id="nested-parent"]'));
+  if (!acceptedDeleteDialog.includes("1 child node")) {
+    throw new Error(`Delete confirmation should describe the descendant count: ${acceptedDeleteDialog}`);
+  }
+
+  await context.close();
+  return {
+    collapsedVisibleRows: collapsedOutlineValues.length,
+    placeholder: newOutlineState.placeholder,
+    deleteDialog: acceptedDeleteDialog,
+  };
+}
+
 async function verifyMobileOutlinePanel(browser) {
   const results = {};
   for (const viewportCase of [
@@ -810,7 +904,7 @@ async function verifyCommandDockAndMobileTextTap(browser) {
   await desktopPage.waitForSelector('textarea.space-title-editor[data-node-id="verify-child"]', { state: "visible" });
   await desktopPage.waitForTimeout(700);
   const desktopLabelState = await readCommandDockProbe(desktopPage);
-  if (desktopLabelState.editorValue !== "Verify Child" || desktopLabelState.editorPlaceholder !== "ここに記入") {
+  if (desktopLabelState.editorValue !== "Verify Child" || desktopLabelState.editorPlaceholder !== "ここに入力") {
     throw new Error(`Desktop canvas editor should edit title with the new placeholder: ${JSON.stringify(desktopLabelState)}`);
   }
   await desktopPage.click('textarea.space-title-editor[data-node-id="verify-child"]');
@@ -1470,6 +1564,77 @@ async function seedSingleChildNotebook(page, layoutMode = "phyllotaxis") {
   }, { root, now, layoutMode });
 }
 
+async function seedNestedNotebook(page, { selectedNodeId = "atlas-root", layoutMode = "phyllotaxis", renderQuality = "high" } = {}) {
+  const now = new Date().toISOString();
+  const baseFields = {
+    author: "human",
+    status: "waiting",
+    texture: "speckled",
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    nextDecision: "",
+    tags: [],
+    position: [0, 0, 0],
+  };
+  const root = {
+    id: "atlas-root",
+    kind: "root",
+    nodeType: "note",
+    title: "Nested Root",
+    subtitle: "Nested Root",
+    body: "Nested root body",
+    color: "#8df5cf",
+    radius: 80,
+    summary: "Nested root",
+    ...baseFields,
+    children: [
+      {
+        id: "nested-parent",
+        kind: "thread",
+        nodeType: "human_prompt",
+        title: "Nested Parent",
+        subtitle: "Nested Parent",
+        body: "Parent body",
+        color: "#94a3ff",
+        radius: 48,
+        summary: "Nested parent",
+        ...baseFields,
+        children: [
+          {
+            id: "nested-child",
+            kind: "thread",
+            nodeType: "human_prompt",
+            title: "Nested Child",
+            subtitle: "Nested Child",
+            body: "Child body",
+            color: "#f0a06d",
+            radius: 48,
+            summary: "Nested child",
+            ...baseFields,
+            children: [],
+          },
+        ],
+      },
+    ],
+  };
+  await page.addInitScript((seed) => {
+    window.localStorage.setItem("mind-atlas-notebook-v2", JSON.stringify(seed.root));
+    window.localStorage.setItem(
+      "mind-atlas-ui-state-v1",
+      JSON.stringify({
+        version: 1,
+        savedAt: seed.now,
+        selectedNodeId: seed.selectedNodeId,
+        viewport: { x: 0, y: 0, zoom: 0.92 },
+        renderQuality: seed.renderQuality,
+        layoutMode: seed.layoutMode,
+        mobilePanelTab: "command",
+      }),
+    );
+  }, { root, now, selectedNodeId, layoutMode, renderQuality });
+}
+
 async function seedMissingTitleNotebook(page) {
   const now = new Date().toISOString();
   const baseFields = {
@@ -1706,6 +1871,10 @@ function readCommandDockProbe(page) {
   });
 }
 
+function readOutlineTitleValues(page) {
+  return page.locator('input[aria-label="Node title"]').evaluateAll((inputs) => inputs.map((input) => input.value));
+}
+
 function readPersistedNodeCount(page) {
   return page.evaluate(() => {
     const stored = window.localStorage.getItem("mind-atlas-notebook-v2");
@@ -1736,6 +1905,7 @@ try {
     const voiceLog = await verifyVoiceLogDialog(browser);
     const shareFlows = await verifyShareFlows(browser);
     const outline = await verifyOutlineAndContextCopy(browser);
+    const outlineSafety = await verifyOutlineCollapseAndDeletionSafety(browser);
     const imports = await verifyExternalImports(browser);
     const mobileOutline = await verifyMobileOutlinePanel(browser);
     const mobileGlobalMenuScroll = await verifyMobileGlobalMenuScroll(browser);
@@ -1749,7 +1919,7 @@ try {
     const mobile = await verifyViewport(browser, "mobile", { width: 390, height: 844 });
     const mobileLandscape = await verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 });
     console.log("UI verification passed");
-    console.log({ desktop, konamiUnlock, lockedMenu, voiceLog, shareFlows, outline, imports, mobileOutline, mobileGlobalMenuScroll, mobileGeneratedLayout, treeWheelZoom, operationControls, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+    console.log({ desktop, konamiUnlock, lockedMenu, voiceLog, shareFlows, outline, outlineSafety, imports, mobileOutline, mobileGlobalMenuScroll, mobileGeneratedLayout, treeWheelZoom, operationControls, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
   }
 } finally {
   await browser.close();

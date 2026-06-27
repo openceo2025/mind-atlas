@@ -842,7 +842,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
   },
 
-  addRootNodeAt: (position, title = "Untitled node") => {
+  addRootNodeAt: (position, title = "") => {
     const state = get();
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
     const aiDialogSettings = createInheritedAiDialogSettings([state.atlasRoot], state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
@@ -885,7 +885,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const child = createNotebookNode(
       parentId,
       parent.children.length,
-      options.title ?? (initialBody ? titleFromBody(initialBody) : "Untitled node"),
+      options.title ?? (initialBody ? titleFromBody(initialBody) : ""),
       initialBody,
       {
         position: childPosition,
@@ -943,7 +943,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const inheritedCodexLogPath = inferCodexLogPathFromNodePath(parentPath);
     const children = drafts.map((draft, offset) => {
       const body = draft.body;
-      const title = draft.title || (body ? titleFromBody(body) : "Untitled node");
+      const title = draft.title || (body ? titleFromBody(body) : "");
       const child = createNotebookNode(parentId, startIndex + offset, title, body, {
         aiDialogSettings: inheritedAiDialogSettings,
         codexThreadId: inheritedCodexThreadId,
@@ -1155,7 +1155,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const insertIndex = parent.children.length;
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
     const inheritedAiDialogSettings = createInheritedAiDialogSettings(path.slice(0, -1), state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
-    const sibling = createNotebookNode(parent.id, parent.children.length, "Untitled branch", "", {
+    const sibling = createNotebookNode(parent.id, parent.children.length, "", "", {
       aiDialogSettings: inheritedAiDialogSettings,
       codexThreadId: inferCodexThreadIdFromNodePath(path.slice(0, -1)),
       codexLogPath: inferCodexLogPathFromNodePath(path.slice(0, -1)),
@@ -4897,7 +4897,7 @@ function countDescendants(node: AtlasNode): number {
 
 function titleFromBody(body: string) {
   const firstLine = body.split("\n").find((line) => line.trim())?.trim() ?? "";
-  return truncateText(firstLine || "Untitled node", 48).replace(/\n\[truncated\]$/, "...");
+  return firstLine ? truncateText(firstLine, 48).replace(/\n\[truncated\]$/, "...") : "";
 }
 
 function truncateText(value: string, maxLength: number) {

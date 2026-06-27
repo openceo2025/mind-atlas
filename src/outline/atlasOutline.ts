@@ -1,6 +1,7 @@
 import type { AtlasNode } from "../types";
+import { NODE_TITLE_PLACEHOLDER } from "../titleMaintenance";
 
-export const OUTLINE_UNTITLED_TITLE = "無題";
+export const OUTLINE_UNTITLED_TITLE = NODE_TITLE_PLACEHOLDER;
 
 export type OutlineDraftNode = {
   key: string;
@@ -40,7 +41,7 @@ export function outlineDraftToInput(node: OutlineDraftNode): OutlineNodeInput {
   };
 }
 
-export function createBlankOutlineDraft(parentKey: string, title = OUTLINE_UNTITLED_TITLE): OutlineDraftNode {
+export function createBlankOutlineDraft(parentKey: string, title = ""): OutlineDraftNode {
   return {
     key: `outline-draft-${Date.now()}-${Math.random().toString(36).slice(2)}-${parentKey}`,
     title,
@@ -181,7 +182,7 @@ function insertAt<T>(items: T[], index: number, item: T) {
 }
 
 function normalizeOutlineTitle(title: string) {
-  return title.replace(/\s+/g, " ").trim() || OUTLINE_UNTITLED_TITLE;
+  return title.replace(/\s+/g, " ").trim();
 }
 
 function normalizeOutlineBody(body: string) {

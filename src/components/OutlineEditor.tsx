@@ -148,7 +148,7 @@ export function OutlineEditor({ root, selectedNodeId, onClose, onFocusNode, onAp
           <button type="button" onClick={() => setCollapsedNodeIds(new Set())}>
             <ChevronsDown size={17} /> Expand all
           </button>
-          <button type="button" onClick={() => setCollapsedNodeIds(new Set(collectOutlineIds(draftRoot)))}>
+          <button type="button" onClick={() => setCollapsedNodeIds(new Set(collectCollapsibleOutlineIds(draftRoot, false)))}>
             <ChevronsUp size={17} /> Collapse all
           </button>
         </div>
@@ -235,7 +235,7 @@ function OutlineNodeEditor({
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
   const isActive = activeKey === node.key;
   const hiddenCount = node.collapsed ? countDraftDescendants(node) : 0;
-  const bodyHidden = node.collapsed;
+  const subtreeHidden = node.collapsed;
 
   return (
     <section className={`outline-node-row ${isActive ? "is-active" : ""}`} data-depth={depth} data-outline-node-id={node.id ?? node.key}>
@@ -245,7 +245,7 @@ function OutlineNodeEditor({
           className="outline-fold-button"
           type="button"
           onClick={() => onToggleCollapsed(node.key)}
-          aria-label={node.collapsed ? "Show node body" : "Hide node body"}
+          aria-label={node.collapsed ? "Expand node" : "Collapse node"}
         >
           {node.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
         </button>
@@ -255,6 +255,7 @@ function OutlineNodeEditor({
           onFocus={() => onActivate(node.key)}
           onChange={(event) => onUpdate(node.key, { title: event.target.value })}
           onBlur={() => onEndEdit(node.key)}
+          placeholder={OUTLINE_UNTITLED_TITLE}
           aria-label="Node title"
         />
         <div className="outline-line-actions">
@@ -306,11 +307,11 @@ function OutlineNodeEditor({
       </div>
       {node.collapsed ? (
         <div className="outline-collapsed-note" style={{ "--outline-depth": depth } as CSSProperties}>
-          body hidden{hiddenCount ? ` / ${hiddenCount} child node${hiddenCount === 1 ? "" : "s"} still editable` : ""}
+          collapsed{hiddenCount ? ` / ${hiddenCount} descendant${hiddenCount === 1 ? "" : "s"} hidden` : ""}
         </div>
       ) : null}
       <>
-        {bodyHidden ? null : (
+        {subtreeHidden ? null : (
           <div className="outline-body-row" onFocusCapture={() => onActivate(node.key)}>
             <div className="outline-indent-gutter" aria-hidden="true" style={{ "--outline-depth": depth } as CSSProperties} />
             <textarea
@@ -329,23 +330,25 @@ function OutlineNodeEditor({
             />
           </div>
         )}
-        <div className={`outline-children ${bodyHidden ? "is-title-only" : ""}`}>
-          {node.children.map((child) => (
-            <OutlineNodeEditor
-              key={child.key}
-              node={child}
-              root={root}
-              depth={depth + 1}
-              activeKey={activeKey}
-              onActivate={onActivate}
-              onUpdate={onUpdate}
-              onEndEdit={onEndEdit}
-              onToggleCollapsed={onToggleCollapsed}
-              onCopy={onCopy}
-              onCommand={onCommand}
-            />
-          ))}
-        </div>
+        {subtreeHidden ? null : (
+          <div className="outline-children">
+            {node.children.map((child) => (
+              <OutlineNodeEditor
+                key={child.key}
+                node={child}
+                root={root}
+                depth={depth + 1}
+                activeKey={activeKey}
+                onActivate={onActivate}
+                onUpdate={onUpdate}
+                onEndEdit={onEndEdit}
+                onToggleCollapsed={onToggleCollapsed}
+                onCopy={onCopy}
+                onCommand={onCommand}
+              />
+            ))}
+          </div>
+        )}
       </>
     </section>
   );
@@ -384,8 +387,9 @@ function applyCollapsedState(node: OutlineDraftNode, collapsedNodeIds: Set<strin
   };
 }
 
-function collectOutlineIds(node: OutlineDraftNode): string[] {
-  return [node.id ?? node.key, ...node.children.flatMap(collectOutlineIds)];
+function collectCollapsibleOutlineIds(node: OutlineDraftNode, includeSelf = true): string[] {
+  const self = includeSelf && node.children.length ? [node.id ?? node.key] : [];
+  return [...self, ...node.children.flatMap((child) => collectCollapsibleOutlineIds(child))];
 }
 
 function expandPath(root: AtlasNode, nodeId: string, collapsedNodeIds: Set<string>) {

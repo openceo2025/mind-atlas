@@ -35,6 +35,7 @@ import { buildContextCopy, CONTEXT_COPY_PRESETS, copyContextMarkdown, type Conte
 import { createNodeClipboardText, nodeTreeHasAttachments, parseNodeClipboardText } from "../nodeClipboard";
 import { emitOnboardingEvent, getOnboardingCurrentSpaceStep } from "../onboarding/useOnboarding";
 import type { AtlasTheme } from "../theme";
+import { NODE_TITLE_PLACEHOLDER } from "../titleMaintenance";
 import { isPersistedCameraPose, persistUiStatePatch, type PersistedCameraPose } from "../uiPersistence";
 import type { AtlasNode, NotificationPulse, NotificationPulseKind } from "../types";
 import { getStatusColor } from "../utils/status";
@@ -383,12 +384,16 @@ export function UniverseCanvas({
         return;
       }
 
-      if ((event.key === "Backspace" || event.key === "Delete") && !isEditableShortcutTarget(event.target)) {
+      if (event.key === "Delete" && !isEditableShortcutTarget(event.target)) {
         const store = useAtlasStore.getState();
-        if (store.selectedNodeId === store.atlasRoot.id) return;
+        const selectedNode = findNode(store.atlasRoot, store.selectedNodeId);
+        if (!selectedNode || selectedNode.id === store.atlasRoot.id) return;
         event.preventDefault();
         event.stopPropagation();
-        store.deleteNode(store.selectedNodeId);
+        event.stopImmediatePropagation();
+        if (confirmNodeDeletion(selectedNode)) {
+          store.deleteNode(selectedNode.id);
+        }
         setNodeContextMenu(null);
         return;
       }
@@ -512,6 +517,18 @@ function isInteractiveShortcutTarget(target: EventTarget | null) {
 
 function isArrowNavigationKey(key: string) {
   return key === "ArrowUp" || key === "ArrowDown" || key === "ArrowLeft" || key === "ArrowRight";
+}
+
+function confirmNodeDeletion(node: AtlasNode) {
+  const descendantCount = countNodeDescendants(node);
+  if (descendantCount <= 0) return true;
+  const title = node.title.trim() || "this node";
+  const childLabel = descendantCount === 1 ? "child node" : "child nodes";
+  return window.confirm(`Delete "${title}" and ${descendantCount} ${childLabel}? You can restore it with Undo.`);
+}
+
+function countNodeDescendants(node: AtlasNode): number {
+  return node.children.reduce((count, child) => count + 1 + countNodeDescendants(child), 0);
 }
 
 function getLayoutKeyboardNavigationKey(layoutMode: AtlasLayoutMode, key: string) {
@@ -1471,10 +1488,7 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
   if (!menu || !node || node.id === atlasRoot.id) return null;
 
   const handleDelete = () => {
-    if (node.children.length > 0) {
-      const confirmed = window.confirm("子どもも全て削除されます。よろしいですか？");
-      if (!confirmed) return;
-    }
+    if (!confirmNodeDeletion(node)) return;
     deleteNode(node.id);
     onClose();
   };
@@ -1848,6 +1862,7 @@ function NotebookNodes({
           selectedNodeId,
           renderSelectedNodeId,
           cameraFocusNodeId,
+          ...(rootIsSelected ? atlasRoot.children.map((child) => child.id) : []),
           ...multiSelectedNodeIds,
           ...notificationPulses.map((pulse) => pulse.nodeId),
           ...aiContextPreviewNodeIds,
@@ -1857,12 +1872,14 @@ function NotebookNodes({
     [
       activeNotificationSnoozePrompt?.nodeId,
       aiContextPreviewNodeIds,
+      atlasRoot.children,
       atlasRoot.id,
       cameraFocusNodeId,
       multiSelectedNodeIds,
       nodeRenderMetaById,
       notificationPulses,
       renderSelectedNodeId,
+      rootIsSelected,
       selectedNodeId,
     ],
   );
@@ -2460,6 +2477,8 @@ function HierarchyNode({
   const activeAncestorDistance =
     typeof activePathIndex === "number" ? selectedPathLength - 1 - activePathIndex : null;
   const isDirectChildOfSelected = parentId === selectedNodeId;
+  const isRootDirectChild = depth === 1 && parentId === path[0]?.id;
+  const rootDirectTitleVisible = isRootDirectChild && Boolean(node.title.trim());
   const isDirectParentOfSelected = activeAncestorDistance === 1;
   const isActiveAncestor = activeAncestorDistance !== null && activeAncestorDistance > 0;
   const isActiveSibling = selectedParentId !== null && parentId === selectedParentId && !isSelected;
@@ -2488,13 +2507,13 @@ function HierarchyNode({
       node.children.some((child) => hasAiContextPreviewNode(child, aiContextPreviewNodeIds)) ||
       layoutMode !== "phyllotaxis");
   const isLocalContextNode = isSelected || isMultiSelected || aiContextPreviewNodeIds.has(node.id) || isActiveAncestor || isActiveSibling || isDirectChildOfSelected;
-  const mobileLabelVisible = isSelected || isDirectChildOfSelected;
-  const lowQualityLabelVisible = isSelected || isDirectChildOfSelected;
+  const mobileLabelVisible = isSelected || isDirectChildOfSelected || rootDirectTitleVisible;
+  const lowQualityLabelVisible = isSelected || isDirectChildOfSelected || rootDirectTitleVisible;
   const labelVisible = renderQuality === "low"
     ? lowQualityLabelVisible
     : mobileLabelScope
     ? mobileLabelVisible
-    : isLocalContextNode || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
+    : isLocalContextNode || rootDirectTitleVisible || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
   const interactiveLabelVisible = !mobileLabelScope || isSelected || isMultiSelected || isAiContextPreviewNode;
   const [layoutEdgeHidden, setLayoutEdgeHidden] = useState(false);
   const parentEdgeVisible = !suppressParentEdge && path.length > 2 && hiddenDragEdgeNodeId !== node.id && !layoutEdgeHidden;
@@ -2696,7 +2715,7 @@ function HierarchyNode({
     const childWorld = clampWorldForDepth(pointerWorld, depth + 1, drag.currentWorld, childCount);
     const angle = Math.atan2(tearVector[1], tearVector[0]);
     const childId = addChildNode(node.id, "", {
-      title: "Untitled node",
+      title: "",
       position: childWorld,
       insertIndex: angleToInsertIndex(angle, childCount),
       focus: false,
@@ -3174,7 +3193,7 @@ function SpaceNodePreview({
   isSelected: boolean;
   onFocusNode: () => void;
 }) {
-  const text = node.title.trim() || "ここに記入";
+  const text = node.title.trim() || NODE_TITLE_PLACEHOLDER;
   return (
     <div
       className={`node-text-card node-text-preview space-title-preview space-body-preview ${isSelected ? "is-selected" : ""}`}
@@ -3264,7 +3283,7 @@ function SpaceNodeEditor({
       data-selected={isPrimarySelected ? "true" : "false"}
       value={draftTitle}
       rows={1}
-      placeholder="ここに記入"
+      placeholder={NODE_TITLE_PLACEHOLDER}
       onPointerDown={(event) => {
         event.stopPropagation();
         if (isMobilePointerEvent(event) && !isPrimarySelected) {
