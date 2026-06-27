@@ -42,6 +42,9 @@ export type OnboardingState = {
   showRootPulse: boolean;
   showAiFeatures: boolean;
   shouldApplyUniverseTitlePrompt: boolean;
+  startTutorialMode: () => void;
+  completeTutorial: () => void;
+  setAiFeaturesUnlocked: (unlocked: boolean) => void;
   markUniverseTitlePromptApplied: () => void;
 };
 
@@ -90,6 +93,47 @@ export function useOnboarding(): OnboardingState {
   const markUniverseTitlePromptApplied = useCallback(() => {
     persistProgress((current) => (current.titlePromptApplied ? current : { ...current, titlePromptApplied: true }));
   }, [persistProgress]);
+
+  const startTutorialMode = useCallback(() => {
+    const next = newUserProgress();
+    saveProgress(next);
+    setProgress(next);
+    setRootHelpLevel(0);
+    setRootDeadlineAt(Date.now() + ROOT_DISCOVERY_WAIT_MS);
+    setSpacePromptStep(null);
+    setSpacePromptDeadline(null);
+    setNoticeMessageId(null);
+    setAllNodesOffscreen(false);
+    setCameraResetHintVisible(false);
+  }, []);
+
+  const completeTutorial = useCallback(() => {
+    const completedAt = new Date().toISOString();
+    persistProgress((current) => ({
+      ...current,
+      rootNodeCreated: true,
+      pan: true,
+      zoom: true,
+      nodeDrag: true,
+      childNodeCreated: true,
+      spaceBasicsCompleted: true,
+      basicCompleted: true,
+      completedAt: current.completedAt ?? completedAt,
+    }));
+    setRootHelpLevel(0);
+    setSpacePromptStep(null);
+    setSpacePromptDeadline(null);
+    setAllNodesOffscreen(false);
+    setCameraResetHintVisible(false);
+    setNoticeMessageId("basic.complete");
+  }, [persistProgress]);
+
+  const setAiFeaturesUnlocked = useCallback(
+    (unlocked: boolean) => {
+      persistProgress((current) => (current.aiUnlocked === unlocked ? current : { ...current, aiUnlocked: unlocked }));
+    },
+    [persistProgress],
+  );
 
   const markSpaceStep = useCallback(
     (stepId: SpaceStepId) => {
@@ -205,24 +249,7 @@ export function useOnboarding(): OnboardingState {
         if (matched === KONAMI_SEQUENCE.length) {
           matched = 0;
           if (progress.firstRun && !progress.basicCompleted) {
-            const completedAt = new Date().toISOString();
-            persistProgress((current) => ({
-              ...current,
-              rootNodeCreated: true,
-              pan: true,
-              zoom: true,
-              nodeDrag: true,
-              childNodeCreated: true,
-              spaceBasicsCompleted: true,
-              basicCompleted: true,
-              completedAt: current.completedAt ?? completedAt,
-            }));
-            setRootHelpLevel(0);
-            setSpacePromptStep(null);
-            setSpacePromptDeadline(null);
-            setAllNodesOffscreen(false);
-            setCameraResetHintVisible(false);
-            setNoticeMessageId("basic.complete");
+            completeTutorial();
             return;
           }
           if (progress.aiUnlocked) return;
@@ -237,7 +264,7 @@ export function useOnboarding(): OnboardingState {
     };
     window.addEventListener("keydown", handleKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
-  }, [persistProgress, progress.aiUnlocked, progress.basicCompleted, progress.firstRun, text]);
+  }, [completeTutorial, persistProgress, progress.aiUnlocked, progress.basicCompleted, progress.firstRun, text]);
 
   useEffect(() => {
     if (!noticeMessageId) return;
@@ -271,6 +298,9 @@ export function useOnboarding(): OnboardingState {
     showRootPulse: progress.firstRun && !progress.rootNodeCreated,
     showAiFeatures: progress.aiUnlocked,
     shouldApplyUniverseTitlePrompt: progress.firstRun && progress.spaceBasicsCompleted && !progress.titlePromptApplied,
+    startTutorialMode,
+    completeTutorial,
+    setAiFeaturesUnlocked,
     markUniverseTitlePromptApplied,
   };
 }

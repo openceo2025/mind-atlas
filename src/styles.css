@@ -423,6 +423,7 @@ button {
   inset: 0;
   touch-action: none;
   overscroll-behavior: none;
+  transition: bottom 180ms ease;
 }
 
 .top-bar {
@@ -530,6 +531,31 @@ h1 {
 
 .atlas-logo-crumb {
   color: #dbe8d8 !important;
+}
+
+.tutorial-skip-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  max-width: min(72vw, 260px);
+  border: 1px solid rgba(219, 234, 211, 0.22);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: rgba(6, 10, 8, 0.62);
+  color: #dfeade;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+  pointer-events: auto;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(16px);
+}
+
+.tutorial-skip-button:hover {
+  border-color: rgba(141, 245, 207, 0.45);
+  background: rgba(141, 245, 207, 0.11);
+  color: #effff8;
 }
 
 .unread-notification-links {
@@ -1099,6 +1125,11 @@ h1 {
 
 .context-menu .destructive-menu-button:hover {
   background: rgba(255, 135, 104, 0.14);
+}
+
+.context-menu .tutorial-mode-button {
+  touch-action: manipulation;
+  user-select: none;
 }
 
 .context-menu input[type="file"] {
@@ -3341,6 +3372,19 @@ button:disabled,
   color: #0b58a8 !important;
 }
 
+.app-shell[data-theme="light"] .tutorial-skip-button {
+  border-color: rgba(53, 104, 164, 0.24);
+  background: rgba(255, 255, 255, 0.82);
+  color: #284b72;
+  box-shadow: 0 10px 28px rgba(55, 90, 130, 0.14);
+}
+
+.app-shell[data-theme="light"] .tutorial-skip-button:hover {
+  border-color: rgba(24, 100, 190, 0.44);
+  background: rgba(232, 244, 255, 0.92);
+  color: #0b58a8;
+}
+
 .app-shell[data-theme="light"] .unread-notification-link {
   border-color: rgba(53, 104, 164, 0.22);
   background: rgba(255, 255, 255, 0.8);
@@ -4050,6 +4094,7 @@ button:disabled,
     max-height: calc(var(--app-height) - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     pointer-events: none;
     transition:
+      bottom 180ms ease,
       opacity 620ms cubic-bezier(0.22, 1, 0.36, 1),
       transform 620ms cubic-bezier(0.22, 1, 0.36, 1);
     animation: mobile-panel-rise-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -4692,6 +4737,20 @@ button:disabled,
     height: var(--app-height);
   }
 
+  :root[data-keyboard-overlay-input="true"] .universe-shell {
+    bottom: min(
+      calc(var(--keyboard-bottom-offset) + var(--keyboard-panel-height, var(--mobile-panel-height)) + 24px + env(safe-area-inset-bottom)),
+      calc(var(--app-height) - 132px - env(safe-area-inset-top))
+    );
+  }
+
+  :root[data-keyboard-overlay-space-label="true"] .universe-shell {
+    bottom: min(
+      calc(var(--keyboard-bottom-offset) + 12px + env(safe-area-inset-bottom)),
+      calc(var(--app-height) - 132px - env(safe-area-inset-top))
+    );
+  }
+
   :root[data-keyboard-overlay-input="true"] .app-shell:has(.mobile-workspace-panel[data-active-tab="command"]) {
     --mobile-panel-height: min(360px, max(276px, calc(var(--app-height) - var(--keyboard-bottom-offset) - 64px - env(safe-area-inset-top) - env(safe-area-inset-bottom))));
   }
@@ -4739,6 +4798,10 @@ button:disabled,
     height: var(--keyboard-panel-height, var(--mobile-panel-height));
     max-height: var(--keyboard-panel-height, calc(var(--app-height) - var(--keyboard-bottom-offset) - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
     pointer-events: none;
+    transition:
+      bottom 180ms ease,
+      opacity 620ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 620ms cubic-bezier(0.22, 1, 0.36, 1);
     animation: mobile-panel-rise-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 

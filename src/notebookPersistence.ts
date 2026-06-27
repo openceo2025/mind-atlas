@@ -95,6 +95,9 @@ export async function restoreNotebookSnapshot(id: string) {
 }
 
 export async function clearPersistedNotebook() {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(LEGACY_NOTEBOOK_STORAGE_KEY);
+  }
   const db = await openNotebookDb();
   if (!db) return;
   try {

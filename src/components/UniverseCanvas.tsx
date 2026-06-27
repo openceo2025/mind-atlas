@@ -76,6 +76,8 @@ const ZOOM_OUT_PARENT_COOLDOWN_MS = 340;
 const ZOOM_OUT_DETECTION_WINDOW_MS = 260;
 const ZOOM_OUT_AMOUNT_THRESHOLD = 130;
 const ZOOM_OUT_MIN_DURATION_MS = 60;
+const PINCH_ZOOM_WHEEL_SCALE = 1.8;
+const PINCH_MIN_DISTANCE_DELTA_PX = 0.5;
 const FOCUS_WAVE_STEP_MS = 500;
 const FOCUS_WAVE_DURATION_MS = 1000;
 const DRAG_BOUNDARY_TUBE_RADIUS = 0.55;
@@ -132,6 +134,10 @@ type SpaceDragState = {
 type UniversePanDeltaDetail = {
   deltaX: number;
   deltaY: number;
+};
+
+type PinchGestureState = {
+  lastDistance: number;
 };
 
 type VisualNodeHandle = {
@@ -803,6 +809,7 @@ function NavigationController({
   const onboardingFastFocusSuppressUntilRef = useRef(0);
   const backgroundClickRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const multiTouchRef = useRef(false);
+  const pinchGestureRef = useRef<PinchGestureState | null>(null);
   const nodeVisibilityRef = useRef<NodeVisibilityState>({ lastCheckedAt: 0, allOffscreen: null });
   const vrBaselineRef = useRef<VrOrientationSample | null>(null);
   const vrOrientationRef = useRef<VrOrientationSample | null>(null);
@@ -888,21 +895,37 @@ function NavigationController({
     const handleTouchStart = (event: TouchEvent) => {
       if (event.touches.length < 2) {
         multiTouchRef.current = false;
+        pinchGestureRef.current = null;
         return;
       }
       event.preventDefault();
       dragRef.current = null;
+      backgroundClickRef.current = null;
       setBirthEffect(null);
       multiTouchRef.current = true;
+      pinchGestureRef.current = { lastDistance: getTouchDistance(event.touches) };
     };
     const handleTouchMove = (event: TouchEvent) => {
       if (event.touches.length < 2 || !multiTouchRef.current) return;
       event.preventDefault();
+      const distance = getTouchDistance(event.touches);
+      const pinchGesture = pinchGestureRef.current;
+      if (!pinchGesture) {
+        pinchGestureRef.current = { lastDistance: distance };
+        return;
+      }
+      const distanceDelta = distance - pinchGesture.lastDistance;
+      pinchGesture.lastDistance = distance;
+      if (Math.abs(distanceDelta) < PINCH_MIN_DISTANCE_DELTA_PX) return;
+      handleWheelDelta(-distanceDelta * PINCH_ZOOM_WHEEL_SCALE, { allowLayerNavigation: false });
     };
     const handleTouchEnd = (event: TouchEvent) => {
-      if (event.touches.length < 2) {
-        multiTouchRef.current = false;
+      if (event.touches.length >= 2) {
+        pinchGestureRef.current = { lastDistance: getTouchDistance(event.touches) };
+        return;
       }
+      multiTouchRef.current = false;
+      pinchGestureRef.current = null;
     };
 
     element.addEventListener("wheel", handleDomWheel, { passive: false });
@@ -1269,7 +1292,8 @@ function NavigationController({
     }
   };
 
-  const handleWheelDelta = (deltaY: number) => {
+  const handleWheelDelta = (deltaY: number, options: { allowLayerNavigation?: boolean } = {}) => {
+    const allowLayerNavigation = options.allowLayerNavigation ?? true;
     const now = performance.now();
     if (now < wheelSuppressUntilRef.current) return;
     const onboardingSpaceStep = getOnboardingCurrentSpaceStep();
@@ -1287,8 +1311,8 @@ function NavigationController({
 
     const zoomOutState = wheelZoomOutRef.current;
     const zoomInState = wheelZoomInRef.current;
-    if (layoutMode === "tree") {
-      // Tree is a flat generated layout, so wheel input should remain pure zoom.
+    if (!allowLayerNavigation || layoutMode === "tree") {
+      // Tree is a flat generated layout, and pinch input should remain pure zoom.
       zoomOutState.amount = 0;
       zoomOutState.startedAt = 0;
       zoomInState.amount = 0;
@@ -4576,6 +4600,13 @@ function getVisualParentWorld(path: AtlasNode[], fallback: Vec3Tuple): Vec3Tuple
   const parent = path.length > 1 ? path[path.length - 2] : null;
   if (!parent || parent.id === path[0]?.id) return fallback;
   return visualNodeHandles.get(parent.id)?.getWorldPosition() ?? fallback;
+}
+
+function getTouchDistance(touches: TouchList) {
+  const first = touches[0];
+  const second = touches[1];
+  if (!first || !second) return 0;
+  return Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
 }
 
 function directionToYawPitch(direction: Vector3) {

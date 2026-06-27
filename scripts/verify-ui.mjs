@@ -167,6 +167,34 @@ async function verifyKonamiUnlockSequence(browser) {
   return { tutorialSkipped: true, aiUnlocked: true };
 }
 
+async function verifyTutorialSkipButton(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    ignoreHTTPSErrors: true,
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+
+  const skipButton = page.getByRole("button", { name: "チュートリアルをスキップ" });
+  await skipButton.waitFor();
+  await skipButton.click();
+  await page.waitForFunction(() => {
+    const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
+    if (!raw) return false;
+    const progress = JSON.parse(raw);
+    return progress.basicCompleted === true && progress.spaceBasicsCompleted === true && progress.aiUnlocked === false;
+  });
+  await page.getByLabel("Open atlas menu").waitFor();
+  const remainingSkipButtons = await page.getByRole("button", { name: "チュートリアルをスキップ" }).count();
+  if (remainingSkipButtons > 0) throw new Error("Tutorial skip button remained visible after completion.");
+
+  await context.close();
+  return { completed: true, aiUnlocked: false };
+}
+
 async function enterKonamiSequence(page) {
   for (const key of ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"]) {
     await page.keyboard.press(key);
@@ -592,9 +620,28 @@ async function verifyMobileGlobalMenuScroll(browser) {
     const menu = document.querySelector(".global-context-menu");
     const canvas = document.querySelector("canvas");
     if (!menu || !canvas) return { ok: false, reason: "missing menu or canvas" };
-    const menuEvent = new Event("touchmove", { bubbles: true, cancelable: true });
+    const createTouchEvent = (type, target, points) => {
+      const touches = points.map((point) => new Touch({
+        identifier: point.id,
+        target,
+        clientX: point.x,
+        clientY: point.y,
+        screenX: point.x,
+        screenY: point.y,
+        pageX: point.x,
+        pageY: point.y,
+      }));
+      return new TouchEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        touches,
+        targetTouches: touches,
+        changedTouches: touches,
+      });
+    };
+    const menuEvent = createTouchEvent("touchmove", menu, [{ id: 1, x: 22, y: 22 }]);
     menu.dispatchEvent(menuEvent);
-    const canvasEvent = new Event("touchmove", { bubbles: true, cancelable: true });
+    const canvasEvent = createTouchEvent("touchmove", canvas, [{ id: 1, x: 120, y: 180 }]);
     canvas.dispatchEvent(canvasEvent);
     return {
       ok: !menuEvent.defaultPrevented && canvasEvent.defaultPrevented,
@@ -607,6 +654,77 @@ async function verifyMobileGlobalMenuScroll(browser) {
   }
   await context.close();
   return touchMoveState;
+}
+
+async function verifyMobileCanvasPinchZoom(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    ignoreHTTPSErrors: true,
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  await page.waitForTimeout(1100);
+
+  const pinchState = await page.evaluate(async () => {
+    const canvas = document.querySelector("canvas");
+    if (!canvas) return { ok: false, reason: "missing canvas" };
+    const createTouchEvent = (type, points) => {
+      const touches = points.map((point) => new Touch({
+        identifier: point.id,
+        target: canvas,
+        clientX: point.x,
+        clientY: point.y,
+        screenX: point.x,
+        screenY: point.y,
+        pageX: point.x,
+        pageY: point.y,
+      }));
+      return new TouchEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        touches,
+        targetTouches: touches,
+        changedTouches: touches,
+      });
+    };
+    const readOffset = () => {
+      const raw = window.localStorage.getItem("mind-atlas-ui-state-v1");
+      if (!raw) return 0;
+      return JSON.parse(raw).cameraPose?.offset ?? 0;
+    };
+    const beforeOffset = readOffset();
+    const startEvent = createTouchEvent("touchstart", [
+      { id: 1, x: 150, y: 360 },
+      { id: 2, x: 240, y: 360 },
+    ]);
+    canvas.dispatchEvent(startEvent);
+    const moveEvent = createTouchEvent("touchmove", [
+      { id: 1, x: 90, y: 360 },
+      { id: 2, x: 300, y: 360 },
+    ]);
+    canvas.dispatchEvent(moveEvent);
+    const endEvent = createTouchEvent("touchend", []);
+    canvas.dispatchEvent(endEvent);
+    await new Promise((resolve) => window.setTimeout(resolve, 80));
+    const afterOffset = readOffset();
+    return {
+      ok: moveEvent.defaultPrevented && afterOffset > beforeOffset + 20,
+      beforeOffset,
+      afterOffset,
+      startDefaultPrevented: startEvent.defaultPrevented,
+      moveDefaultPrevented: moveEvent.defaultPrevented,
+    };
+  });
+  if (!pinchState.ok) {
+    throw new Error(`Mobile canvas pinch zoom did not update the camera: ${JSON.stringify(pinchState)}`);
+  }
+
+  await context.close();
+  return pinchState;
 }
 
 async function verifyMobileGeneratedLayoutVisibility(browser) {
@@ -1032,15 +1150,50 @@ async function verifyMobileEditorKeyboardOverlay(browser) {
   await page.getByRole("tab", { name: "Editor" }).click();
   const bodyInput = page.locator('.mobile-editor-slot[aria-hidden="false"] .node-body-input');
   await bodyInput.waitFor();
+  await page.waitForTimeout(1250);
+  const shellRectBeforeKeyboard = await readUniverseShellRect(page);
+  const titleCenterBeforeKeyboard = await readVerifyChildTitleCenterY(page);
+  await bodyInput.evaluate((element) => {
+    element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 1001, pointerType: "touch" }));
+  });
+  await page.waitForTimeout(140);
+  const preFocusState = await page.evaluate(() => ({
+    activeClassName: document.activeElement instanceof HTMLElement ? document.activeElement.className : null,
+    keyboardOverlay: document.documentElement.getAttribute("data-keyboard-overlay-input"),
+  }));
+  const shellRectAfterPointerDown = await readUniverseShellRect(page);
+  if (preFocusState.keyboardOverlay === "true" || shellRectAfterPointerDown.height < shellRectBeforeKeyboard.height - 4) {
+    throw new Error(`Mobile keyboard overlay moved before textarea focus: ${JSON.stringify({ preFocusState, shellRectBeforeKeyboard, shellRectAfterPointerDown })}`);
+  }
   await bodyInput.tap();
   await page.waitForFunction(() => document.documentElement.getAttribute("data-keyboard-overlay-input") === "true");
-  const overlayState = await page.evaluate(() => {
+  await page.waitForFunction(
+    ({ beforeHeight, beforeY }) => {
+      const element =
+        document.querySelector('textarea.space-title-editor[data-node-id="verify-child"]') ??
+        document.querySelector('.space-title-preview[data-node-id="verify-child"]');
+      const shell = document.querySelector(".universe-shell");
+      if (!(shell instanceof HTMLElement)) return false;
+      if (!(element instanceof HTMLElement)) return false;
+      const shellRect = shell.getBoundingClientRect();
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      return shellRect.height < beforeHeight - 120 && rect.y + rect.height / 2 < beforeY - 36;
+    },
+    { beforeHeight: shellRectBeforeKeyboard.height, beforeY: titleCenterBeforeKeyboard },
+    { timeout: 2500 },
+  );
+  const titleCenterDuringKeyboard = await readVerifyChildTitleCenterY(page);
+  const shellRectDuringKeyboard = await readUniverseShellRect(page);
+  const overlayState = {
+    ...(await page.evaluate(() => {
     const panel = document.querySelector(".mobile-workspace-panel");
     const panelRect = panel?.getBoundingClientRect();
     const minimap = document.querySelector(".minimap");
     return {
       keyboardOverlay: document.documentElement.getAttribute("data-keyboard-overlay-input"),
       keyboardPortrait: document.documentElement.getAttribute("data-keyboard-overlay-portrait"),
+      keyboardState: document.documentElement.getAttribute("data-keyboard-state"),
       spaceLabelOverlay: document.documentElement.getAttribute("data-keyboard-overlay-space-label"),
       keyboardBottomOffset: document.documentElement.style.getPropertyValue("--keyboard-bottom-offset"),
       panelTab: panel?.getAttribute("data-active-tab") ?? null,
@@ -1055,7 +1208,12 @@ async function verifyMobileEditorKeyboardOverlay(browser) {
       activeClassName: document.activeElement instanceof HTMLElement ? document.activeElement.className : null,
       minimapDisplay: minimap ? window.getComputedStyle(minimap).display : null,
     };
-  });
+    })),
+    shellRectBeforeKeyboard,
+    shellRectDuringKeyboard,
+    titleCenterBeforeKeyboard,
+    titleCenterDuringKeyboard,
+  };
   if (overlayState.keyboardOverlay !== "true" || overlayState.keyboardPortrait !== "true") {
     throw new Error(`Editor body input did not enter mobile keyboard overlay mode: ${JSON.stringify(overlayState)}`);
   }
@@ -1068,9 +1226,67 @@ async function verifyMobileEditorKeyboardOverlay(browser) {
   if (overlayState.minimapDisplay !== "none") {
     throw new Error(`Minimap should stay hidden while editor keyboard overlay is active: ${JSON.stringify(overlayState)}`);
   }
+  if (overlayState.titleCenterDuringKeyboard >= overlayState.titleCenterBeforeKeyboard - 36) {
+    throw new Error(`Universe target did not move upward for mobile keyboard overlay: ${JSON.stringify(overlayState)}`);
+  }
+  if (overlayState.shellRectDuringKeyboard.height >= overlayState.shellRectBeforeKeyboard.height - 120) {
+    throw new Error(`Universe shell did not shrink for mobile keyboard overlay: ${JSON.stringify(overlayState)}`);
+  }
+  if (overlayState.panelRect && overlayState.shellRectDuringKeyboard.bottom > overlayState.panelRect.y + 2) {
+    throw new Error(`Universe shell should end above the mobile editor panel: ${JSON.stringify(overlayState)}`);
+  }
+  if (
+    overlayState.titleCenterDuringKeyboard < overlayState.shellRectDuringKeyboard.y ||
+    overlayState.titleCenterDuringKeyboard > overlayState.shellRectDuringKeyboard.bottom
+  ) {
+    throw new Error(`Edited node should remain inside the shrunken universe shell: ${JSON.stringify(overlayState)}`);
+  }
+  await bodyInput.evaluate((element) => element.blur());
+  await page.waitForFunction(() => document.documentElement.getAttribute("data-keyboard-overlay-input") !== "true", undefined, { timeout: 3500 });
+  const settledState = await page.evaluate(() => ({
+    keyboardOverlay: document.documentElement.getAttribute("data-keyboard-overlay-input"),
+    keyboardPortrait: document.documentElement.getAttribute("data-keyboard-overlay-portrait"),
+    keyboardState: document.documentElement.getAttribute("data-keyboard-state"),
+    keyboardBottomOffset: document.documentElement.style.getPropertyValue("--keyboard-bottom-offset"),
+    keyboardPanelWidth: document.documentElement.style.getPropertyValue("--keyboard-panel-width"),
+    keyboardPanelHeight: document.documentElement.style.getPropertyValue("--keyboard-panel-height"),
+  }));
+  if (settledState.keyboardOverlay === "true" || settledState.keyboardPortrait === "true" || settledState.keyboardState) {
+    throw new Error(`Mobile keyboard overlay state did not clear after focus left: ${JSON.stringify(settledState)}`);
+  }
+  if (settledState.keyboardBottomOffset !== "0px" || settledState.keyboardPanelWidth || settledState.keyboardPanelHeight) {
+    throw new Error(`Mobile keyboard overlay metrics did not reset after focus left: ${JSON.stringify(settledState)}`);
+  }
   await context.close();
 
-  return overlayState;
+  return { overlayState, settledState };
+}
+
+async function readVerifyChildTitleCenterY(page) {
+  return page.evaluate(() => {
+    const element =
+      document.querySelector('textarea.space-title-editor[data-node-id="verify-child"]') ??
+      document.querySelector('.space-title-preview[data-node-id="verify-child"]');
+    if (!(element instanceof HTMLElement)) throw new Error("Missing verify child label for keyboard camera check.");
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) throw new Error("Verify child label was not visible for keyboard camera check.");
+    return rect.y + rect.height / 2;
+  });
+}
+
+async function readUniverseShellRect(page) {
+  return page.evaluate(() => {
+    const shell = document.querySelector(".universe-shell");
+    if (!(shell instanceof HTMLElement)) throw new Error("Missing universe shell for keyboard layout check.");
+    const rect = shell.getBoundingClientRect();
+    return {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      bottom: Math.round(rect.bottom),
+    };
+  });
 }
 
 async function verifyCameraScopedRendering(browser) {
@@ -1455,6 +1671,7 @@ async function verifyLockedModeGlobalMenu(browser) {
   await menu.getByLabel("Mode", { exact: true }).waitFor();
   await menu.getByText("Restore from history").waitFor();
   await menu.getByText("Import text outline").waitFor();
+  await menu.getByText("Tutorial mode").waitFor();
 
   const aiOnlyItemCount = await menu.getByText("AI Partner log").count();
   if (aiOnlyItemCount > 0) {
@@ -1480,7 +1697,101 @@ async function verifyLockedModeGlobalMenu(browser) {
   await page.getByRole("dialog", { name: "Import text outline" }).waitFor();
 
   await context.close();
-  return { visibleSharedItems: ["Mode", "Restore from history", "Import text outline", "Source code & legal"] };
+  return { visibleSharedItems: ["Mode", "Restore from history", "Import text outline", "Tutorial mode", "Source code & legal"] };
+}
+
+async function verifyTutorialModeMenuActions(browser) {
+  const clickContext = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const clickPage = await clickContext.newPage();
+  await seedCompletedOnboarding(clickPage, { aiUnlocked: true });
+  await clickPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await clickPage.waitForSelector("canvas");
+  const originalCount = await addTutorialVerificationChild(clickPage);
+
+  await clickPage.getByLabel("Open atlas menu").click();
+  let menu = clickPage.locator(".global-context-menu");
+  const tutorialButton = menu.getByRole("button", { name: /Tutorial mode/ });
+  await tutorialButton.waitFor();
+  clickPage.once("dialog", (dialog) => dialog.dismiss());
+  await tutorialButton.click();
+  await clickPage.waitForTimeout(160);
+  const countAfterCancel = await readPersistedNodeCount(clickPage);
+  if (countAfterCancel !== originalCount) {
+    throw new Error(`Tutorial cancel changed notebook node count: before=${originalCount}, after=${countAfterCancel}`);
+  }
+
+  clickPage.once("dialog", (dialog) => dialog.accept());
+  await tutorialButton.click();
+  await clickPage.waitForFunction(() => {
+    const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
+    if (!raw) return false;
+    const progress = JSON.parse(raw);
+    return progress.firstRun === true && progress.rootNodeCreated === false && progress.aiUnlocked === false;
+  });
+  await clickPage.waitForFunction(() => !window.localStorage.getItem("mind-atlas-notebook-v2"));
+  await clickPage.locator(".onboarding-center-pulse").waitFor();
+  await clickContext.close();
+
+  const longPressContext = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const longPressPage = await longPressContext.newPage();
+  await seedCompletedOnboarding(longPressPage, { aiUnlocked: true });
+  await longPressPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await longPressPage.waitForSelector("canvas");
+  const countBeforeLongPress = await addTutorialVerificationChild(longPressPage);
+
+  await longPressPage.getByLabel("Open atlas menu").click();
+  menu = longPressPage.locator(".global-context-menu");
+  await longPressMenuButton(longPressPage, menu.getByRole("button", { name: /Tutorial mode/ }));
+  await longPressPage.waitForFunction(() => {
+    const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
+    return raw ? JSON.parse(raw).aiUnlocked === false : false;
+  });
+  if ((await readPersistedNodeCount(longPressPage)) !== countBeforeLongPress) {
+    throw new Error("Tutorial long press reset notebook while locking AI mode.");
+  }
+
+  await longPressPage.getByLabel("Open atlas menu").click();
+  menu = longPressPage.locator(".global-context-menu");
+  const lockedAiItemCount = await menu.getByText("AI Partner log").count();
+  if (lockedAiItemCount > 0) throw new Error("Tutorial long press did not hide AI-only menu items.");
+  await longPressMenuButton(longPressPage, menu.getByRole("button", { name: /Tutorial mode/ }));
+  await longPressPage.waitForFunction(() => {
+    const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
+    return raw ? JSON.parse(raw).aiUnlocked === true : false;
+  });
+  await longPressPage.getByLabel("Open atlas menu").click();
+  await longPressPage.locator(".global-context-menu").getByText("AI Partner log").waitFor();
+  await longPressContext.close();
+
+  return { tutorialResetConfirmed: true, hiddenAiToggle: true };
+}
+
+async function addTutorialVerificationChild(page) {
+  await page.locator(".operation-panel-desktop").getByRole("button", { name: "Add child" }).click();
+  await page.waitForFunction(() => {
+    const stored = window.localStorage.getItem("mind-atlas-notebook-v2");
+    if (!stored) return false;
+    const countNodes = (node) => 1 + (node.children ?? []).reduce((sum, child) => sum + countNodes(child), 0);
+    return countNodes(JSON.parse(stored)) >= 2;
+  });
+  return readPersistedNodeCount(page);
+}
+
+async function longPressMenuButton(page, locator) {
+  await locator.waitFor();
+  await locator.scrollIntoViewIfNeeded();
+  const box = await locator.boundingBox();
+  if (!box) throw new Error("Could not locate menu button for long press.");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(920);
+  await page.mouse.up();
 }
 
 async function seedCompletedOnboarding(page, { aiUnlocked = true } = {}) {
@@ -1899,9 +2210,11 @@ try {
     await verifyLayoutModeSwitch(browser);
     await verifyGeneratedLayoutBlocksBackgroundBirth(browser);
     const konamiUnlock = await verifyKonamiUnlockSequence(browser);
+    const tutorialSkip = await verifyTutorialSkipButton(browser);
     await verifyStartupMissingTitleMaintenance(browser);
     await verifyIndexedDbCurrentBeatsStaleLegacyCache(browser);
     const lockedMenu = await verifyLockedModeGlobalMenu(browser);
+    const tutorialMode = await verifyTutorialModeMenuActions(browser);
     const voiceLog = await verifyVoiceLogDialog(browser);
     const shareFlows = await verifyShareFlows(browser);
     const outline = await verifyOutlineAndContextCopy(browser);
@@ -1909,6 +2222,7 @@ try {
     const imports = await verifyExternalImports(browser);
     const mobileOutline = await verifyMobileOutlinePanel(browser);
     const mobileGlobalMenuScroll = await verifyMobileGlobalMenuScroll(browser);
+    const mobileCanvasPinchZoom = await verifyMobileCanvasPinchZoom(browser);
     const mobileGeneratedLayout = await verifyMobileGeneratedLayoutVisibility(browser);
     const treeWheelZoom = await verifyTreeWheelZoomDoesNotAutoFocus(browser);
     const operationControls = await verifyOperationControls(browser);
@@ -1919,7 +2233,7 @@ try {
     const mobile = await verifyViewport(browser, "mobile", { width: 390, height: 844 });
     const mobileLandscape = await verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 });
     console.log("UI verification passed");
-    console.log({ desktop, konamiUnlock, lockedMenu, voiceLog, shareFlows, outline, outlineSafety, imports, mobileOutline, mobileGlobalMenuScroll, mobileGeneratedLayout, treeWheelZoom, operationControls, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+    console.log({ desktop, konamiUnlock, tutorialSkip, lockedMenu, tutorialMode, voiceLog, shareFlows, outline, outlineSafety, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileGeneratedLayout, treeWheelZoom, operationControls, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
   }
 } finally {
   await browser.close();
