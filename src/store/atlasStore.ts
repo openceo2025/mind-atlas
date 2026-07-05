@@ -24,6 +24,17 @@ import {
   type AtlasLayoutMode,
 } from "../layout/atlasLayout";
 import { sanitizeNotebookForExport } from "../notebookExport";
+import {
+  CONTEXT_BUDGET_PRESETS,
+  buildContextPlan,
+  buildSlimLegacyContext,
+  renderAgentContextPrompt,
+  renderAgentDeltaPrompt,
+  resolveAgentSession,
+  type AgentKind,
+  type AgentSessionResolution,
+  type ContextPlan,
+} from "../context/contextEngine";
 import { hydrateMissingNodeTitlesFromBodies } from "../titleMaintenance";
 import {
   clearPersistedNotebook,
@@ -129,6 +140,9 @@ const DEFAULT_CLAUDE_SETTINGS: ClaudeSettings = {
   permissionMode: "default",
   workspace: "",
   timeoutMs: 60 * 60 * 1000,
+  continueMode: "auto",
+  resumeSessionId: "",
+  forkSession: false,
 };
 const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   service: "openai",
@@ -249,6 +263,8 @@ interface AtlasStore {
   toggleMultiSelectedNode: (id: string) => void;
   clearMultiSelection: () => void;
   setAiContextOptions: (patch: Partial<AiContextOptions>) => void;
+  forceNewAgentSession: boolean;
+  requestNewAgentSession: (enabled?: boolean) => void;
   setChatSettings: (patch: Partial<ChatSettings>) => void;
   setCodexSettings: (patch: Partial<CodexSettings>) => void;
   setOpenClawSettings: (patch: Partial<OpenClawSettings>) => void;
@@ -342,6 +358,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   selectedNodeId: "atlas-root",
   multiSelectedNodeIds: [],
   aiContextOptions: DEFAULT_AI_CONTEXT_OPTIONS,
+  forceNewAgentSession: false,
   chatSettings: DEFAULT_CHAT_SETTINGS,
   codexSettings: DEFAULT_CODEX_SETTINGS,
   openClawSettings: DEFAULT_OPENCLAW_SETTINGS,
@@ -427,6 +444,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   clearMultiSelection: () => set({ multiSelectedNodeIds: [], cameraFocusNodeId: null }),
 
+  requestNewAgentSession: (enabled = true) => {
+    set({ forceNewAgentSession: enabled });
+  },
   setAiContextOptions: (patch) => {
     set((state) => ({
       ...withAiDialogSettingsSaved(state, {
@@ -1685,13 +1705,25 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (mode === "codex" && !requestAiDialogSettings.codexSettings.workspace.trim()) {
       return;
     }
+    // Session continuation is decided automatically before the request node is
+    // inserted, so the divergence check sees the tree as the user left it.
+    const forceNewSession = state.forceNewAgentSession;
+    const session = resolveAgentSessionForRun(state.atlasRoot, sourceNodeId, mode, requestAiDialogSettings, forceNewSession);
+    if (forceNewSession) set({ forceNewAgentSession: false });
     const requestNode = createAiRequestNode(sourceNodeId, sourceParent.children.length, runId, mode, trimmed, {
       aiDialogSettings: requestAiDialogSettings,
-      codexThreadId: getCodexThreadIdForNewChild(sourcePath, requestAiDialogSettings),
+      codexThreadId:
+        mode === "codex"
+          ? (session?.action === "continue" ? session.resumeId : undefined)
+          : getCodexThreadIdForNewChild(sourcePath, requestAiDialogSettings),
       codexLogPath: inferCodexLogPathFromNodePath(sourcePath),
-      openClawSessionKey: getOpenClawSessionKeyForNewChild(sourcePath, requestAiDialogSettings),
+      openClawSessionKey:
+        mode === "openclaw"
+          ? (session?.action === "continue" ? session.resumeId : undefined)
+          : getOpenClawSessionKeyForNewChild(sourcePath, requestAiDialogSettings),
       openClawLogPath: inferOpenClawLogPathFromNodePath(sourcePath),
       claudeLogPath: inferClaudeLogPathFromNodePath(sourcePath),
+      claudeSessionId: mode === "claude" ? (session?.action === "continue" ? session.resumeId : undefined) : inferClaudeSessionIdFromNodePath(sourcePath),
       usedNodeIds,
     });
 
@@ -1734,12 +1766,17 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
 
     try {
-      const context = await buildAiNodeContextWithAttachments(state.atlasRoot, sourceNodeId, contextOptions);
-      if (!context) throw new Error("AI context could not be built.");
-      notifyAiContextTruncated(mode, context.stats);
-      const codexSettingsForRun = mode === "codex" ? buildCodexSettingsForRun(requestAiDialogSettings.codexSettings, context) : undefined;
-      const openClawSettingsForRun = mode === "openclaw" ? buildOpenClawSettingsForRun(requestAiDialogSettings.openClawSettings, context) : undefined;
-      const claudeSettingsForRun = mode === "claude" ? buildClaudeSettingsForRun(requestAiDialogSettings.claudeSettings, context) : undefined;
+      const budget = session
+        ? CONTEXT_BUDGET_PRESETS.agent
+        : chatSettingsForRun?.service === "local"
+          ? CONTEXT_BUDGET_PRESETS.local
+          : CONTEXT_BUDGET_PRESETS.chat;
+      const plan = buildContextPlan(state.atlasRoot, sourceNodeId, { ...budget, pinnedNodeIds: state.multiSelectedNodeIds });
+      const context = buildSlimLegacyContext(state.atlasRoot, sourceNodeId);
+      if (!plan || !context) throw new Error("AI context could not be built.");
+      const codexSettingsForRun = mode === "codex" && session ? buildCodexSettingsForRun(requestAiDialogSettings.codexSettings, sourcePath, session) : undefined;
+      const openClawSettingsForRun = mode === "openclaw" && session ? buildOpenClawSettingsForRun(requestAiDialogSettings.openClawSettings, session) : undefined;
+      const claudeSettingsForRun = mode === "claude" && session ? buildClaudeSettingsForRun(requestAiDialogSettings.claudeSettings, sourcePath, session) : undefined;
       if (mode === "codex" && codexSettingsForRun) {
         const conflict = findActiveCodexRunForWorkspace(get().aiRuns, codexSettingsForRun.workspace, runId);
         if (conflict) {
@@ -1756,10 +1793,17 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         ...activeRun,
         provider: chatSettingsForRun ? chatProvider(chatSettingsForRun) : activeRun.provider,
         modelId: chatSettingsForRun?.model ?? codexSettingsForRun?.model ?? openClawSettingsForRun?.model ?? claudeSettingsForRun?.model ?? activeRun.modelId,
-        contextStats: context.stats,
+        contextStats: {
+          ...context.stats,
+          estimatedInputTokens: plan.stats.estimatedTokens,
+          includedNodeCount: plan.stats.includedNodeCount,
+          truncated: plan.stats.truncated,
+        },
         workspace: codexSettingsForRun?.workspace ?? openClawSettingsForRun?.workspace ?? claudeSettingsForRun?.workspace,
         codexThreadId: codexSettingsForRun?.resumeThreadId,
         openClawSessionKey: openClawSettingsForRun?.resumeSessionKey || openClawSettingsForRun?.sessionKey,
+        claudeSessionId: claudeSettingsForRun?.resumeSessionId,
+        sessionInfo: session,
       };
       set((current) => ({
         aiRuns: { ...current.aiRuns, [runId]: activeRun },
@@ -1768,6 +1812,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       const result = await requestAiResponse({
         prompt: trimmed,
         context,
+        contextText: plan.contextText,
+        chatMessages: chatSettingsForRun ? [...plan.conversation, { role: "user", content: trimmed }] : undefined,
+        agentPrompt: session ? renderAgentContextPrompt(plan, trimmed) : undefined,
+        agentDeltaPrompt: session && session.action !== "new" ? renderAgentDeltaPrompt(state.atlasRoot, sourceNodeId, trimmed) : undefined,
+        session,
         provider: mode,
         model: chatSettingsForRun?.model ?? codexSettingsForRun?.model ?? openClawSettingsForRun?.model ?? claudeSettingsForRun?.model,
         chat: chatSettingsForRun,
@@ -1836,6 +1885,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
                   openClawSessionKey: result.openClawSessionKey ?? parent.openClawSessionKey,
                   openClawLogPath: result.openClawLogPath ?? parent.openClawLogPath,
                   claudeLogPath: result.claudeLogPath ?? parent.claudeLogPath,
+                  claudeSessionId: result.claudeSessionId ?? parent.claudeSessionId,
                   usedNodeIds: collectNodeIdSet(current.atlasRoot),
                 },
               ),
@@ -1875,6 +1925,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           openClawSessionKey: result.openClawSessionKey ?? node.openClawSessionKey,
           openClawLogPath: result.openClawLogPath ?? node.openClawLogPath,
           claudeLogPath: result.claudeLogPath ?? node.claudeLogPath,
+          claudeSessionId: result.claudeSessionId ?? node.claudeSessionId,
           children: [...node.children, ...children],
           }),
         );
@@ -1913,6 +1964,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
               openClawSessionKey: result.openClawSessionKey,
               openClawLogPath: result.openClawLogPath,
               claudeLogPath: result.claudeLogPath,
+              claudeSessionId: result.claudeSessionId,
+              sessionInfo: result.sessionInfo ?? session,
             },
           },
         };
@@ -2135,9 +2188,14 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       };
     });
 
-    const context = await buildAiNodeContextWithAttachments(state.atlasRoot, action.sourceNodeId, action.contextOptions);
-    if (!context) return;
-    notifyAiContextTruncated("codex", context.stats);
+    const retryPlan = buildContextPlan(state.atlasRoot, action.sourceNodeId, CONTEXT_BUDGET_PRESETS.agent);
+    const context = buildSlimLegacyContext(state.atlasRoot, action.sourceNodeId);
+    if (!retryPlan || !context) return;
+    // The retry continues the failed run's own thread when one was recorded,
+    // so Codex keeps what it already attempted before the permission block.
+    const retrySession: AgentSessionResolution = codexSettings.resumeThreadId
+      ? { action: "continue", resumeId: codexSettings.resumeThreadId, reason: "full-access-retry" }
+      : { action: "new", reason: "full-access-retry" };
     const initialRun: AiRun = {
       id: runId,
       nodeId: action.sourceNodeId,
@@ -2160,6 +2218,10 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       const result = await requestAiResponse({
         prompt: action.prompt,
         context,
+        contextText: retryPlan.contextText,
+        agentPrompt: renderAgentContextPrompt(retryPlan, action.prompt),
+        agentDeltaPrompt: retrySession.action === "continue" ? renderAgentDeltaPrompt(state.atlasRoot, action.sourceNodeId, action.prompt) : undefined,
+        session: retrySession,
         provider: "codex",
         model: codexSettings.model,
         codex: {
@@ -3358,6 +3420,7 @@ function createNotebookNode(
     openClawSessionKey?: string;
     openClawLogPath?: string;
     claudeLogPath?: string;
+    claudeSessionId?: string;
     usedNodeIds?: Set<string>;
   } = {},
 ): AtlasNode {
@@ -3389,6 +3452,7 @@ function createNotebookNode(
     openClawSessionKey: options.openClawSessionKey,
     openClawLogPath: options.openClawLogPath,
     claudeLogPath: options.claudeLogPath,
+    claudeSessionId: options.claudeSessionId,
     children: [],
   };
 }
@@ -3407,6 +3471,7 @@ function createAiRequestNode(
     openClawSessionKey?: string;
     openClawLogPath?: string;
     claudeLogPath?: string;
+    claudeSessionId?: string;
     usedNodeIds?: Set<string>;
   } = {},
 ): AtlasNode {
@@ -3441,6 +3506,7 @@ function createAiRequestNode(
     openClawSessionKey: options.openClawSessionKey,
     openClawLogPath: options.openClawLogPath,
     claudeLogPath: options.claudeLogPath,
+    claudeSessionId: options.claudeSessionId,
     position: options.position,
     children: [],
   };
@@ -3463,6 +3529,7 @@ function createAiResponseNode(
     openClawSessionKey?: string;
     openClawLogPath?: string;
     claudeLogPath?: string;
+    claudeSessionId?: string;
     usedNodeIds?: Set<string>;
   } = {},
 ): AtlasNode {
@@ -3501,6 +3568,7 @@ function createAiResponseNode(
     openClawSessionKey: options.openClawSessionKey,
     openClawLogPath: options.openClawLogPath,
     claudeLogPath: options.claudeLogPath,
+    claudeSessionId: options.claudeSessionId,
     position: options.position,
     children: [],
   };
@@ -3519,6 +3587,7 @@ function createAiErrorNode(
     openClawSessionKey?: string;
     openClawLogPath?: string;
     claudeLogPath?: string;
+    claudeSessionId?: string;
     usedNodeIds?: Set<string>;
   } = {},
 ): AtlasNode {
@@ -3565,6 +3634,7 @@ function createAiErrorNode(
     openClawSessionKey: options.openClawSessionKey,
     openClawLogPath: options.openClawLogPath,
     claudeLogPath: options.claudeLogPath,
+    claudeSessionId: options.claudeSessionId,
     position: options.position,
     children: [],
   };
@@ -3611,23 +3681,6 @@ function isBridgeConnectionFailureMessage(message: string) {
     normalized.includes("networkerror when attempting to fetch resource") ||
     normalized.includes("load failed") ||
     normalized.includes("network request failed")
-  );
-}
-
-function notifyAiContextTruncated(mode: AiExecutionMode, stats: AiContextStats) {
-  if (!stats.truncated || typeof window === "undefined" || typeof window.alert !== "function") return;
-  const details = [
-    stats.truncatedBodyCount ? `node bodies: ${stats.truncatedBodyCount}` : "",
-    stats.truncatedSummaryCount ? `summaries: ${stats.truncatedSummaryCount}` : "",
-    stats.omittedChildNodeCount ? `child nodes omitted: ${stats.omittedChildNodeCount}` : "",
-    stats.truncatedAttachmentCount ? `attachments: ${stats.truncatedAttachmentCount}` : "",
-  ].filter(Boolean);
-  window.alert(
-    [
-      `Mind Atlas cut some selected node context before sending this ${modeLabel(mode)} request.`,
-      details.length ? `Cut details: ${details.join(", ")}.` : "",
-      "Narrow the AI context scope or split large nodes if the missing detail matters.",
-    ].filter(Boolean).join("\n"),
   );
 }
 
@@ -4057,6 +4110,13 @@ function inferClaudeLogPathFromNodePath(path: AtlasNode[]) {
   return undefined;
 }
 
+function inferClaudeSessionIdFromNodePath(path: AtlasNode[]) {
+  for (const node of path.slice().reverse()) {
+    if (node.claudeSessionId) return node.claudeSessionId;
+  }
+  return undefined;
+}
+
 function getOpenClawSessionKeyForNewChild(path: AtlasNode[], aiDialogSettings?: AiDialogSettings) {
   if (aiDialogSettings?.openClawSettings.continueMode === "new") return undefined;
   return aiDialogSettings?.openClawSettings.resumeSessionKey || inferOpenClawSessionKeyFromNodePath(path) || undefined;
@@ -4104,6 +4164,7 @@ function sanitizeStoredClaudeSettings(settings: ClaudeSettings) {
     clientRunId: _clientRunId,
     requestNodeId: _requestNodeId,
     sourceNodeId: _sourceNodeId,
+    forkSession: _forkSession,
     ...rest
   } = settings;
   return normalizeClaudeSettings(rest);
@@ -4129,33 +4190,59 @@ function removeCodexRetryResultChildren(children: AtlasNode[]) {
   return children.filter((child) => !(child.provider === "codex" && child.aiRunId?.startsWith("codex-approval-")));
 }
 
-function buildCodexSettingsForRun(settings: CodexSettings, context: AiNodeContext) {
-  const workspaceFromContext = inferCodexWorkspaceFromContext(context);
-  const continueMode = settings.continueMode ?? "auto";
+// Session continuation is resolved by the context engine's state machine, not
+// by a user-facing selector. `settings.continueMode === "new"` survives only as
+// a stored per-branch override that forces a fresh session.
+function buildCodexSettingsForRun(settings: CodexSettings, sourcePath: AtlasNode[], session: AgentSessionResolution) {
   return normalizeCodexSettings({
     ...settings,
-    workspace: settings.workspace.trim() || workspaceFromContext,
-    continueMode,
-    resumeThreadId: continueMode === "auto" ? settings.resumeThreadId || inferCodexThreadIdFromContext(context) : "",
+    workspace: settings.workspace.trim() || inferWorkspaceFromPath(sourcePath),
+    continueMode: session.action === "continue" ? "auto" : "new",
+    resumeThreadId: session.action === "continue" ? session.resumeId ?? "" : "",
   });
 }
 
-function buildOpenClawSettingsForRun(settings: OpenClawSettings, context: AiNodeContext) {
-  const continueMode = settings.continueMode ?? "auto";
+function buildOpenClawSettingsForRun(settings: OpenClawSettings, session: AgentSessionResolution) {
   return normalizeOpenClawSettings({
     ...settings,
     workspace: "",
-    continueMode,
-    resumeSessionKey: continueMode === "auto" ? settings.resumeSessionKey || inferOpenClawSessionKeyFromContext(context) : "",
+    continueMode: session.action === "continue" ? "auto" : "new",
+    resumeSessionKey: session.action === "continue" ? session.resumeId ?? "" : "",
   });
 }
 
-function buildClaudeSettingsForRun(settings: ClaudeSettings, context: AiNodeContext) {
-  const workspaceFromContext = inferCodexWorkspaceFromContext(context);
+function buildClaudeSettingsForRun(settings: ClaudeSettings, sourcePath: AtlasNode[], session: AgentSessionResolution) {
   return normalizeClaudeSettings({
     ...settings,
-    workspace: settings.workspace.trim() || workspaceFromContext,
+    workspace: settings.workspace.trim() || inferWorkspaceFromPath(sourcePath),
+    continueMode: session.action === "new" ? "new" : "auto",
+    resumeSessionId: session.action === "new" ? "" : session.resumeId ?? "",
+    forkSession: session.action === "fork",
   });
+}
+
+function inferWorkspaceFromPath(path: AtlasNode[]) {
+  for (const node of path.slice().reverse()) {
+    const value = extractWorkspaceFromText([node.title, node.summary, node.body, ...node.tags].join("\n"));
+    if (value) return value;
+  }
+  return "";
+}
+
+function resolveAgentSessionForRun(
+  root: AtlasNode,
+  sourceNodeId: string,
+  mode: AiExecutionMode,
+  settings: AiDialogSettings,
+  forceNew: boolean,
+): AgentSessionResolution | undefined {
+  const agent: AgentKind | undefined = mode === "codex" || mode === "claude" || mode === "openclaw" ? mode : undefined;
+  if (!agent) return undefined;
+  const storedNewOverride =
+    (mode === "codex" && settings.codexSettings.continueMode === "new") ||
+    (mode === "openclaw" && settings.openClawSettings.continueMode === "new") ||
+    (mode === "claude" && settings.claudeSettings.continueMode === "new");
+  return resolveAgentSession(root, sourceNodeId, agent, { forceNew: forceNew || storedNewOverride });
 }
 
 function collectRecoverableCodexRequests(root: AtlasNode): CodexRunRecoveryRequest[] {
@@ -4215,32 +4302,6 @@ function inferCodexWorkspaceFromNodePath(path: AtlasNode[]) {
   for (const node of path.slice().reverse()) {
     const value = extractWorkspaceFromText([node.title, node.summary, node.body, ...node.tags].join("\n"));
     if (value) return value;
-  }
-  return "";
-}
-
-function inferCodexThreadIdFromContext(context: AiNodeContext) {
-  const nodes = [
-    context.selectedNode,
-    ...(context.selectedNodes ?? []),
-    ...context.path.slice().reverse(),
-    ...context.siblingNodes,
-  ];
-  for (const node of nodes) {
-    if (node.codexThreadId) return node.codexThreadId;
-  }
-  return "";
-}
-
-function inferOpenClawSessionKeyFromContext(context: AiNodeContext) {
-  const nodes = [
-    context.selectedNode,
-    ...(context.selectedNodes ?? []),
-    ...context.path.slice().reverse(),
-    ...context.siblingNodes,
-  ];
-  for (const node of nodes) {
-    if (node.openClawSessionKey) return node.openClawSessionKey;
   }
   return "";
 }
@@ -4310,6 +4371,7 @@ function normalizeOpenClawSettings(settings: Partial<OpenClawSettings>): OpenCla
 }
 
 function normalizeClaudeSettings(settings: Partial<ClaudeSettings>): ClaudeSettings {
+  const continueMode = settings.continueMode === "new" ? "new" : "auto";
   return {
     ...DEFAULT_CLAUDE_SETTINGS,
     ...settings,
@@ -4319,6 +4381,9 @@ function normalizeClaudeSettings(settings: Partial<ClaudeSettings>): ClaudeSetti
     permissionMode: normalizeClaudePermissionMode(settings.permissionMode),
     workspace: (settings.workspace ?? "").trim(),
     timeoutMs: clampInteger(settings.timeoutMs ?? DEFAULT_CLAUDE_SETTINGS.timeoutMs, 30_000, 120 * 60_000),
+    continueMode,
+    resumeSessionId: continueMode === "new" ? "" : (settings.resumeSessionId ?? "").trim(),
+    forkSession: settings.forkSession === true,
     clientRunId: (settings.clientRunId ?? "").trim(),
     requestNodeId: (settings.requestNodeId ?? "").trim(),
     sourceNodeId: (settings.sourceNodeId ?? "").trim(),
@@ -4374,19 +4439,6 @@ function normalizeCodexSandbox(value: CodexSettings["sandbox"] | undefined, full
   if (value === "read-only") return "read-only";
   if (value === "danger-full-access") return fullAccessApproved ? "danger-full-access" : "workspace-write";
   return "workspace-write";
-}
-
-function inferCodexWorkspaceFromContext(context: AiNodeContext) {
-  const nodes = [
-    context.selectedNode,
-    ...(context.selectedNodes ?? []),
-    ...context.path,
-  ];
-  for (const node of nodes) {
-    const value = extractWorkspaceFromText([node.title, node.summary, node.body, ...node.tags].join("\n"));
-    if (value) return value;
-  }
-  return "";
 }
 
 function extractWorkspaceFromText(text: string) {
@@ -4619,6 +4671,7 @@ function nodeToAiSnapshot(
     openClawSessionKey: node.openClawSessionKey,
     openClawLogPath: node.openClawLogPath,
     claudeLogPath: node.claudeLogPath,
+    claudeSessionId: node.claudeSessionId,
     attachments: node.attachments.map((attachment) => ({
       id: attachment.id,
       name: attachment.name,

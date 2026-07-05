@@ -6,13 +6,13 @@ import { runOpenClawPartnerTurn } from "../ai/openClawPartnerClient";
 import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceSession, type RealtimeSessionState } from "../ai/realtimeClient";
 import { runTextPartnerTurn } from "../ai/textPartnerClient";
 import { buildVoiceLogContext } from "../ai/voiceLogContext";
+import { CONTEXT_BUDGET_PRESETS, buildContextPlan } from "../context/contextEngine";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
 import { isHostedServiceMode } from "../hosted/serviceClient";
 import { buildAiNodeContextWithAttachments, findInheritedAiDialogSettings, findNode, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
 import { clearPersistedCommandDraft, loadPersistedUiState, persistUiStatePatch } from "../uiPersistence";
 import { ProviderUsagePanel } from "./ProviderUsagePanel";
 import type {
-  AiAttachmentMode,
   AiContextScope,
   AiExecutionMode,
   ChatOptionsResult,
@@ -20,7 +20,6 @@ import type {
   ChatServiceId,
   ClaudePermissionMode,
   ClaudeReasoningEffort,
-  CodexContinueMode,
   CodexOptionsResult,
   CodexReasoningEffort,
   CodexSandboxMode,
@@ -75,7 +74,6 @@ export function CommandDock() {
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const multiSelectedNodeIds = useAtlasStore((state) => state.multiSelectedNodeIds);
   const aiContextOptions = useAtlasStore((state) => state.aiContextOptions);
-  const setAiContextOptions = useAtlasStore((state) => state.setAiContextOptions);
   const chatSettings = useAtlasStore((state) => state.chatSettings);
   const setChatSettings = useAtlasStore((state) => state.setChatSettings);
   const codexSettings = useAtlasStore((state) => state.codexSettings);
@@ -97,19 +95,32 @@ export function CommandDock() {
   const runAiOnSelectedNode = useAtlasStore((state) => state.runAiOnSelectedNode);
   const addQuickChildFromInput = useAtlasStore((state) => state.addQuickChildFromInput);
   const setNodeStatus = useAtlasStore((state) => state.setNodeStatus);
+  const forceNewAgentSession = useAtlasStore((state) => state.forceNewAgentSession);
+  const requestNewAgentSession = useAtlasStore((state) => state.requestNewAgentSession);
   const selectedNode = findNode(atlasRoot, selectedNodeId);
   const effectiveAiContextOptions = PUBLIC_SERVICE_MODE
     ? { ...aiContextOptions, scope: "path-children" as AiContextScope }
     : aiContextOptions;
-  const scope = effectiveAiContextOptions.scope;
-  const editableContextControls = !PUBLIC_SERVICE_MODE && mode !== "note" && scope === "custom";
   const [codexOptions, setCodexOptions] = useState<CodexOptionsResult | null>(null);
   const [chatOptions, setChatOptions] = useState<ChatOptionsResult | null>(null);
   const [openClawOptions, setOpenClawOptions] = useState<OpenClawOptionsResult | null>(null);
+  const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
   const contextOptionsForRun = useMemo(
     () => normalizeAiContextOptions({ ...effectiveAiContextOptions, selectedNodeIds: multiSelectedNodeIds }),
     [effectiveAiContextOptions, multiSelectedNodeIds],
   );
+  // Auto context: what will actually be sent for the current node + mode.
+  // The user inspects it on demand instead of choosing a scope up front.
+  const contextPlan = useMemo(() => {
+    if (mode === "note") return null;
+    const budget =
+      mode === "codex" || mode === "claude" || mode === "openclaw"
+        ? CONTEXT_BUDGET_PRESETS.agent
+        : mode === "local" || (mode !== "openai" && chatSettings.service === "local")
+          ? CONTEXT_BUDGET_PRESETS.local
+          : CONTEXT_BUDGET_PRESETS.chat;
+    return buildContextPlan(atlasRoot, selectedNodeId, { ...budget, pinnedNodeIds: multiSelectedNodeIds });
+  }, [atlasRoot, selectedNodeId, multiSelectedNodeIds, mode, chatSettings.service]);
   const codexModelOptions = codexOptions?.models.length
     ? codexOptions.models
     : [
@@ -332,7 +343,7 @@ export function CommandDock() {
       return;
     }
     if (isChatCommandMode(mode)) {
-      void runTextPartnerTurn(trimmed, chatSettingsForCommandMode(chatSettings, mode), contextOptionsForRun);
+      void runTextPartnerTurn(trimmed, chatSettingsForCommandMode(chatSettings, mode));
       return;
     }
     if (mode === "openclaw" && selectedNodeId === atlasRoot.id) {
@@ -811,7 +822,9 @@ export function CommandDock() {
   const contextText =
     mode === "note"
       ? "Note mode / no API"
-      : `${scopeLabel(scope)} / ${selectedCount} selected / ${attachmentModeLabel(aiContextOptions.attachmentMode)}`;
+      : contextPlan
+        ? `Auto context ~${formatTokenEstimate(contextPlan.stats.estimatedTokens)} tokens / ${contextPlan.stats.conversationTurnCount} turns / ${selectedCount} selected`
+        : "Auto context";
   const codexWorkRootMissing = mode === "codex" && !codexSettings.workspace.trim();
   const statusText =
     codexWorkRootMissing
@@ -854,24 +867,16 @@ export function CommandDock() {
             <ModeButton mode="openclaw" activeMode={mode} onSelect={setMode} />
             <ModeButton mode="note" activeMode={mode} onSelect={setMode} />
           </div>
-          <select
-            className="scope-select"
-            value={scope}
-            onChange={(event) => setAiContextOptions({ scope: event.target.value as AiContextScope })}
-            onFocus={() => setCommandInputEditing(true)}
-            onBlur={() => setCommandInputEditing(false)}
-            disabled={mode === "note"}
-            aria-label="AI context scope"
-            title="AI context scope"
+          <button
+            type="button"
+            className="scope-select context-chip"
+            onClick={() => setContextPreviewOpen(true)}
+            disabled={mode === "note" || !contextPlan}
+            aria-label="Preview the auto-assembled AI context"
+            title={`${contextText}. Click to preview exactly what will be sent.`}
           >
-            <option value="path-children">Default</option>
-            <option value="minimal">Active</option>
-            <option value="focused">Focused</option>
-            <option value="subtree">Subtree</option>
-            <option value="neighborhood">Neighborhood</option>
-            <option value="selected">Selected</option>
-            <option value="custom">Custom</option>
-          </select>
+            {contextPlan ? `~${formatTokenEstimate(contextPlan.stats.estimatedTokens)} tok` : "ctx"}
+          </button>
         </>
       ) : null}
       <label className="command-field">
@@ -899,65 +904,33 @@ export function CommandDock() {
       <button className="send-button" type="submit" aria-label="Send instruction" disabled={!value.trim() || codexWorkRootMissing}>
         <SendHorizonal size={18} />
       </button>
-      {editableContextControls ? (
-        <div className="context-options-row" aria-label="AI context settings">
-          <ContextNumberControl
-            label="Parent"
-            value={aiContextOptions.ancestorDepth}
-            min={0}
-            max={12}
-            onChange={(ancestorDepth) => setAiContextOptions({ ancestorDepth })}
-            onFocus={() => setCommandInputEditing(true)}
-            onBlur={() => setCommandInputEditing(false)}
-          />
-          <ContextNumberControl
-            label="Child"
-            value={aiContextOptions.descendantDepth}
-            min={0}
-            max={6}
-            onChange={(descendantDepth) => setAiContextOptions({ descendantDepth })}
-            onFocus={() => setCommandInputEditing(true)}
-            onBlur={() => setCommandInputEditing(false)}
-          />
-          <ContextNumberControl
-            label="Degree"
-            value={aiContextOptions.lateralRadius}
-            min={0}
-            max={4}
-            onChange={(lateralRadius) => setAiContextOptions({ lateralRadius })}
-            onFocus={() => setCommandInputEditing(true)}
-            onBlur={() => setCommandInputEditing(false)}
-          />
-          <label className="context-option-field">
-            <span>Files</span>
-            <select
-              value={aiContextOptions.attachmentMode}
-              onFocus={() => setCommandInputEditing(true)}
-              onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setAiContextOptions({ attachmentMode: event.target.value as AiAttachmentMode })}
-            >
-              <option value="metadata">Meta</option>
-              <option value="content">Body</option>
-            </select>
-          </label>
-          <ContextNumberControl
-            label="Max file count"
-            value={aiContextOptions.maxAttachmentCount}
-            min={0}
-            max={20}
-            onChange={(maxAttachmentCount) => setAiContextOptions({ maxAttachmentCount })}
-            onFocus={() => setCommandInputEditing(true)}
-            onBlur={() => setCommandInputEditing(false)}
-          />
-          <ContextNumberControl
-            label="Max MB/file"
-            value={Math.round(aiContextOptions.maxAttachmentBytes / 1024 / 1024)}
-            min={1}
-            max={12}
-            onChange={(megabytes) => setAiContextOptions({ maxAttachmentBytes: megabytes * 1024 * 1024 })}
-            onFocus={() => setCommandInputEditing(true)}
-            onBlur={() => setCommandInputEditing(false)}
-          />
+      {contextPreviewOpen && contextPlan ? (
+        <div className="context-preview-overlay" onClick={() => setContextPreviewOpen(false)}>
+          <div className="context-preview-panel" role="dialog" aria-label="AI context preview" onClick={(event) => event.stopPropagation()}>
+            <div className="context-preview-header">
+              <strong>Auto context preview</strong>
+              <span>
+                {`~${contextPlan.stats.estimatedTokens.toLocaleString()} tokens / ${contextPlan.stats.includedNodeCount} nodes / ${contextPlan.stats.conversationTurnCount} conversation turns${contextPlan.stats.droppedTurnCount ? ` (${contextPlan.stats.droppedTurnCount} summarized)` : ""}${contextPlan.stats.truncated ? " / trimmed to budget" : ""}`}
+              </span>
+              <button type="button" className="icon-button ghost" onClick={() => setContextPreviewOpen(false)} aria-label="Close context preview">
+                ×
+              </button>
+            </div>
+            <div className="context-preview-body">
+              {contextPlan.conversation.length ? (
+                <>
+                  <h4>Conversation replay (this branch)</h4>
+                  {contextPlan.conversation.map((message, index) => (
+                    <pre key={index} className={`context-preview-turn is-${message.role}`}>
+                      {`${message.role === "user" ? "User" : "Assistant"}:\n${message.content}`}
+                    </pre>
+                  ))}
+                </>
+              ) : null}
+              <h4>Notebook context</h4>
+              <pre>{contextPlan.contextText}</pre>
+            </div>
+          </div>
         </div>
       ) : null}
       {mode === "chat" ? (
@@ -1112,19 +1085,12 @@ export function CommandDock() {
               placeholder="workspace: from selected node or bridge"
             />
           </label>
-          <label className="context-option-field">
-            <span>Thread</span>
-            <select
-              value={codexSettings.continueMode ?? "auto"}
-              onFocus={() => setCommandInputEditing(true)}
-              onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setCodexSettings({ continueMode: event.target.value as CodexContinueMode, resumeThreadId: "" })}
-              title="Auto resumes a Codex thread found on the active node path. New always starts a fresh Codex session."
-            >
-              <option value="auto">auto</option>
-              <option value="new">new</option>
-            </select>
-          </label>
+          <AgentSessionControl
+            forceNew={forceNewAgentSession}
+            onChange={requestNewAgentSession}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+          />
             </>
           ) : (
             <>
@@ -1190,6 +1156,12 @@ export function CommandDock() {
               placeholder="optional project path"
             />
           </label>
+          <AgentSessionControl
+            forceNew={forceNewAgentSession}
+            onChange={requestNewAgentSession}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+          />
           <ContextNumberControl
             className="claude-timeout-field"
             label="Timeout (min)"
@@ -1222,19 +1194,12 @@ export function CommandDock() {
               ))}
             </select>
           </label>
-          <label className="context-option-field">
-            <span>Session</span>
-            <select
-              value={openClawSettings.continueMode ?? "auto"}
-              onFocus={() => setCommandInputEditing(true)}
-              onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setOpenClawSettings({ continueMode: event.target.value as CodexContinueMode, resumeSessionKey: "" })}
-              title="Auto resumes an OpenClaw session key found on the active node path. New starts a fresh OpenClaw session."
-            >
-              <option value="auto">auto</option>
-              <option value="new">new</option>
-            </select>
-          </label>
+          <AgentSessionControl
+            forceNew={forceNewAgentSession}
+            onChange={requestNewAgentSession}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+          />
           <ContextNumberControl
             className="openclaw-timeout-field"
             label="Timeout (min)"
@@ -1289,6 +1254,39 @@ function ContextNumberControl({
       />
     </label>
   );
+}
+
+function AgentSessionControl({
+  forceNew,
+  onChange,
+  onFocus,
+  onBlur,
+}: {
+  forceNew: boolean;
+  onChange: (forceNew: boolean) => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
+}) {
+  return (
+    <label className="context-option-field">
+      <span>Session</span>
+      <select
+        value={forceNew ? "new" : "auto"}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        onChange={(event) => onChange(event.target.value === "new")}
+        title="Auto continues or forks the agent session recorded on this branch. New forces a fresh session for the next run only."
+      >
+        <option value="auto">auto</option>
+        <option value="new">new</option>
+      </select>
+    </label>
+  );
+}
+
+function formatTokenEstimate(tokens: number) {
+  if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}k`;
+  return String(tokens);
 }
 
 function openClawModelLabel(option: OpenClawOptionsResult["models"][number]) {
@@ -1570,27 +1568,4 @@ function getClaudePresetId(model: string, baseUrl: string) {
 
 function isCommandMode(value: unknown): value is CommandMode {
   return value === "chat" || value === "openai" || value === "local" || value === "codex" || value === "openclaw" || value === "claude" || value === "note";
-}
-
-function scopeLabel(scope: AiContextScope) {
-  switch (scope) {
-    case "path-children":
-      return "Default";
-    case "minimal":
-      return "Active";
-    case "focused":
-      return "Focused";
-    case "subtree":
-      return "Subtree";
-    case "neighborhood":
-      return "Neighborhood";
-    case "selected":
-      return "Selected";
-    case "custom":
-      return "Custom";
-  }
-}
-
-function attachmentModeLabel(mode: AiAttachmentMode) {
-  return mode === "content" ? "file bodies" : "file metadata";
 }

@@ -131,6 +131,44 @@ Mobile browsers usually require HTTPS before allowing microphone access from a L
 
 Install `.certs/mind-atlas-dev-ca.crt` as a trusted CA on mobile devices that need microphone access. If you only need desktop testing and want HTTP, set `MIND_ATLAS_DEV_HTTPS=false` before `npm run dev:all`.
 
+## Context Engine And Agent Sessions
+
+Node-anchored AI requests are assembled by one shared context engine
+(`src/context/contextEngine.ts`) instead of a user-selected scope:
+
+- The ancestor path of the active node is the branch's conversation. Prior
+  `human_prompt` / `ai_reply` nodes are replayed as real user/assistant
+  messages (`chatMessages` for Chat, a `# Conversation so far` section for
+  agent CLIs). Sibling branches stay out unless multi-selected (pinned).
+- Everything that is not conversation is rendered as compact markdown
+  (`contextText`): breadcrumb, ancestor document bodies, outline skeleton of
+  sibling titles, child summaries, pinned nodes, and attachment metadata.
+  Output is deterministic and timestamp-free so provider prompt caching works
+  across turns on the same branch.
+- A per-provider character budget degrades gracefully: oldest conversation
+  turns collapse to one-line summaries, deep bodies truncate first. The command
+  dock shows a token-estimate chip; clicking it previews exactly what will be
+  sent. There is no scope selector.
+- Agent CLI sessions are resolved automatically per run:
+  - Codex threads and OpenClaw session keys `continue` only when the branch tip
+    is being extended; a diverged or stale (7 days) session starts `new` with a
+    full context replay.
+  - Claude Code always resumes the nearest ancestor `claudeSessionId` with
+    `--resume <id> --fork-session`, so every stored session id remains an
+    immutable snapshot of its branch point and sibling branches can never
+    contaminate each other. The forked `session_id` is stored on the result
+    node.
+  - On `continue`/`fork`, only a small delta prompt (position + current node +
+    task) is sent because the CLI already holds the history. If the resume
+    fails (missing rollout / unknown session), the bridge automatically falls
+    back to a fresh session with the full context replay and reports
+    `sessionInfo.fellBack` in the response.
+  - The Session control in the dock is a one-shot override: `new` forces a
+    fresh session for the next run only.
+- Older payloads without `contextText` / `chatMessages` / `agentPrompt` still
+  work through the legacy context-JSON path.
+- Verify with `npm run verify:context-engine` (plus the standard checks).
+
 ## Current AI Surface
 
 - The command dock supports Chat, Code, OpenClaw, and Note modes.

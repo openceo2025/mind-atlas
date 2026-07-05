@@ -14,6 +14,7 @@ server-data/
 AGENTS.md
 CLAUDE.md
 .DS_Store
+.claude/
 .idea/
 .vscode/
 .env

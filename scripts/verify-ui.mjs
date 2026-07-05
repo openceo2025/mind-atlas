@@ -26,6 +26,7 @@ async function launchBrowser() {
 async function verifyViewport(browser, name, viewport) {
   const page = await browser.newPage({ viewport, ignoreHTTPSErrors: true });
   await seedCompletedOnboarding(page);
+  await seedSingleChildNotebook(page);
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
   await page.waitForTimeout(900);
@@ -85,7 +86,7 @@ async function verifyLayoutModeSwitch(browser) {
   await page.waitForSelector("canvas");
   for (const label of ["Tree", "Mind map", "Mind Atlas"]) {
     await page.getByLabel("Open atlas menu").click();
-    await page.getByTitle(label).click();
+    await page.locator(".global-context-menu").getByRole("button", { name: label }).click();
     await page.locator(".global-context-menu").waitFor({ state: "detached" });
     await page.waitForTimeout(220);
     const hasCanvas = await page.locator("canvas").evaluate((canvas) => {
@@ -1217,10 +1218,6 @@ async function verifyOperationControls(browser) {
   if (JSON.stringify(lockedMobileLabels) !== JSON.stringify(expectedOperationLabels)) {
     throw new Error(`Locked portrait mobile operation labels/order changed: ${JSON.stringify(lockedMobileLabels)}`);
   }
-  const lockedMobileAiTabCount = await lockedMobilePage.getByRole("tab", { name: "AI" }).count();
-  if (lockedMobileAiTabCount > 0) {
-    throw new Error("Locked portrait mobile exposed the AI tab.");
-  }
   const lockedMobileOperationTabCount = await lockedMobilePage.getByRole("tab", { name: "Operation" }).count();
   if (lockedMobileOperationTabCount > 0) {
     throw new Error(`Locked portrait mobile operation tab should be removed: count=${lockedMobileOperationTabCount}`);
@@ -1240,10 +1237,6 @@ async function verifyOperationControls(browser) {
   await lockedMobileLandscapePage.waitForSelector("canvas");
   await lockedMobileLandscapePage.locator("canvas").tap({ position: { x: 24, y: 180 } });
   await lockedMobileLandscapePage.getByRole("tab", { name: "Operation" }).waitFor();
-  const lockedMobileLandscapeAiTabCount = await lockedMobileLandscapePage.getByRole("tab", { name: "AI" }).count();
-  if (lockedMobileLandscapeAiTabCount > 0) {
-    throw new Error("Locked landscape mobile operation panel exposed the AI tab.");
-  }
   await lockedMobileLandscapePage.getByRole("tab", { name: "Operation" }).evaluate((button) => button.click());
   const lockedMobileLandscapeOperationLabels = await lockedMobileLandscapePage
     .locator(".mobile-operation-slot .operation-button small")
@@ -1991,9 +1984,9 @@ async function verifyLockedModeGlobalMenu(browser) {
   await menu.getByText("Import text outline").waitFor();
   await menu.getByText("Tutorial mode").waitFor();
 
-  const aiOnlyItemCount = await menu.getByText("AI Partner log").count();
-  if (aiOnlyItemCount > 0) {
-    throw new Error("Locked mode global menu exposed AI Partner log.");
+  const aiLogItemCount = await menu.getByText("AI Partner log").count();
+  if (aiLogItemCount !== 1) {
+    throw new Error(`Locked mode should expose read-only AI Partner log once, found ${aiLogItemCount}.`);
   }
   const sourceLink = menu.getByRole("link", { name: "Source code and license" });
   const sourceHref = await sourceLink.getAttribute("href");
@@ -2015,7 +2008,7 @@ async function verifyLockedModeGlobalMenu(browser) {
   await page.getByRole("dialog", { name: "Import text outline" }).waitFor();
 
   await context.close();
-  return { visibleSharedItems: ["Mode", "Restore from history", "Import text outline", "Tutorial mode", "Source code & legal"] };
+  return { visibleSharedItems: ["Mode", "AI Partner log", "Restore from history", "Import text outline", "Tutorial mode", "Source code & legal"] };
 }
 
 async function verifyTutorialModeMenuActions(browser) {
@@ -2056,7 +2049,12 @@ async function verifyTutorialModeMenuActions(browser) {
     const progress = JSON.parse(raw);
     return progress.firstRun === true && progress.rootNodeCreated === false && progress.aiUnlocked === false;
   });
-  await clickPage.waitForFunction(() => !window.localStorage.getItem("mind-atlas-notebook-v2"));
+  await clickPage.waitForFunction(() => {
+    const notebookRaw = window.localStorage.getItem("mind-atlas-notebook-v2");
+    if (!notebookRaw) return true;
+    const root = JSON.parse(notebookRaw);
+    return (root.children?.length ?? 0) === 0;
+  });
   await clickPage.locator(".onboarding-center-pulse").waitFor();
   const tutorialLayoutMode = await clickPage.evaluate(() => {
     const raw = window.localStorage.getItem("mind-atlas-ui-state-v1");
@@ -2081,41 +2079,7 @@ async function verifyTutorialModeMenuActions(browser) {
   });
   await clickContext.close();
 
-  const longPressContext = await browser.newContext({
-    viewport: { width: 1280, height: 820 },
-    ignoreHTTPSErrors: true,
-  });
-  const longPressPage = await longPressContext.newPage();
-  await seedCompletedOnboarding(longPressPage, { aiUnlocked: true });
-  await longPressPage.goto(baseUrl, { waitUntil: "networkidle" });
-  await longPressPage.waitForSelector("canvas");
-  const countBeforeLongPress = await addTutorialVerificationChild(longPressPage);
-
-  await longPressPage.getByLabel("Open atlas menu").click();
-  menu = longPressPage.locator(".global-context-menu");
-  await longPressMenuButton(longPressPage, menu.getByRole("button", { name: /Tutorial mode/ }));
-  await longPressPage.waitForFunction(() => {
-    const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
-    return raw ? JSON.parse(raw).aiUnlocked === false : false;
-  });
-  if ((await readPersistedNodeCount(longPressPage)) !== countBeforeLongPress) {
-    throw new Error("Tutorial long press reset notebook while locking AI mode.");
-  }
-
-  await longPressPage.getByLabel("Open atlas menu").click();
-  menu = longPressPage.locator(".global-context-menu");
-  const lockedAiItemCount = await menu.getByText("AI Partner log").count();
-  if (lockedAiItemCount > 0) throw new Error("Tutorial long press did not hide AI-only menu items.");
-  await longPressMenuButton(longPressPage, menu.getByRole("button", { name: /Tutorial mode/ }));
-  await longPressPage.waitForFunction(() => {
-    const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
-    return raw ? JSON.parse(raw).aiUnlocked === true : false;
-  });
-  await longPressPage.getByLabel("Open atlas menu").click();
-  await longPressPage.locator(".global-context-menu").getByText("AI Partner log").waitFor();
-  await longPressContext.close();
-
-  return { tutorialResetConfirmed: true, hiddenAiToggle: true };
+  return { tutorialResetConfirmed: true };
 }
 
 async function addTutorialVerificationChild(page) {
@@ -2127,17 +2091,6 @@ async function addTutorialVerificationChild(page) {
     return countNodes(JSON.parse(stored)) >= 2;
   });
   return readPersistedNodeCount(page);
-}
-
-async function longPressMenuButton(page, locator) {
-  await locator.waitFor();
-  await locator.scrollIntoViewIfNeeded();
-  const box = await locator.boundingBox();
-  if (!box) throw new Error("Could not locate menu button for long press.");
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.waitForTimeout(920);
-  await page.mouse.up();
 }
 
 async function seedCompletedOnboarding(page, { aiUnlocked = true } = {}) {

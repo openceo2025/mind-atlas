@@ -191,6 +191,9 @@ export interface ClaudeSettings {
   permissionMode: ClaudePermissionMode;
   workspace: string;
   timeoutMs: number;
+  continueMode?: CodexContinueMode;
+  resumeSessionId?: string;
+  forkSession?: boolean;
   clientRunId?: string;
   requestNodeId?: string;
   sourceNodeId?: string;
@@ -405,6 +408,8 @@ export interface AiRun {
   openClawSessionKey?: string;
   openClawLogPath?: string;
   claudeLogPath?: string;
+  claudeSessionId?: string;
+  sessionInfo?: AgentSessionInfo;
 }
 
 export interface AiNodeSnapshot {
@@ -424,6 +429,7 @@ export interface AiNodeSnapshot {
   openClawSessionKey?: string;
   openClawLogPath?: string;
   claudeLogPath?: string;
+  claudeSessionId?: string;
   attachments: AiAttachmentSnapshot[];
   children: AiNodeSnapshot[];
 }
@@ -480,8 +486,30 @@ export interface AiResponsePayload {
   codex?: Partial<CodexSettings>;
   openclaw?: Partial<OpenClawSettings>;
   claude?: Partial<ClaudeSettings>;
+  // Context-engine fields. When present the bridge prefers these over the
+  // legacy `context` JSON dump; `context` stays as a slim compatibility copy.
+  contextText?: string;
+  chatMessages?: ChatContextMessage[];
+  agentPrompt?: string;
+  agentDeltaPrompt?: string;
+  session?: AgentSessionInfo;
   // Node anchored AI runs must stay limited to the explicit node context.
   // Do not add AI Partner log, voice summary, or other global history here.
+}
+
+export interface ChatContextMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export type AgentSessionAction = "continue" | "fork" | "new";
+
+export interface AgentSessionInfo {
+  action: AgentSessionAction;
+  resumeId?: string;
+  resolvedId?: string;
+  fellBack?: boolean;
+  reason?: string;
 }
 
 export interface AiGeneratedOutput {
@@ -513,6 +541,8 @@ export interface AiResponseResult {
   openClawSessionKey?: string;
   openClawLogPath?: string;
   claudeLogPath?: string;
+  claudeSessionId?: string;
+  sessionInfo?: AgentSessionInfo;
   rawText: string;
   usage?: AiUsage;
 }
@@ -686,6 +716,9 @@ export interface TextPartnerToolCall {
 export interface TextPartnerTurnPayload {
   provider: ChatServiceId;
   context: AiNodeContext;
+  // Compact markdown notebook context from the context engine. Servers that
+  // understand it prefer it over the legacy `context` JSON dump.
+  contextText?: string;
   messages: TextPartnerMessage[];
   tools: RealtimeToolDefinition[];
   model?: string;
@@ -734,6 +767,7 @@ export interface AtlasNode {
   openClawSessionKey?: string;
   openClawLogPath?: string;
   claudeLogPath?: string;
+  claudeSessionId?: string;
   usage?: AiUsage;
   action?: AtlasNodeAction;
   aiDialogSettings?: AiDialogSettings;

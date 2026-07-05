@@ -1,15 +1,22 @@
 import { requestTextPartnerTurn } from "./bridgeClient";
 import { buildVoiceLogContext } from "./voiceLogContext";
-import { buildAiNodeContextWithAttachments, useAtlasStore } from "../store/atlasStore";
-import type { AiContextOptions, ChatSettings, TextPartnerMessage } from "../types";
+import { CONTEXT_BUDGET_PRESETS, buildContextPlan, buildSlimLegacyContext } from "../context/contextEngine";
+import { useAtlasStore } from "../store/atlasStore";
+import type { ChatSettings, TextPartnerMessage } from "../types";
 import { executeVoiceTool, getVoiceToolDefinitions } from "../voice/voiceTools";
 
 const MAX_TEXT_PARTNER_TOOL_TURNS = 6;
 
-export async function runTextPartnerTurn(prompt: string, settings: ChatSettings, options: AiContextOptions) {
+export async function runTextPartnerTurn(prompt: string, settings: ChatSettings) {
   const state = useAtlasStore.getState();
-  const context = await buildAiNodeContextWithAttachments(state.atlasRoot, state.selectedNodeId, options);
-  if (!context) return;
+  // The ancestor path of the active node IS this branch's chat history, so it
+  // is replayed as real user/assistant messages instead of a context JSON dump.
+  const plan = buildContextPlan(state.atlasRoot, state.selectedNodeId, {
+    pinnedNodeIds: state.multiSelectedNodeIds,
+    ...(settings.service === "local" ? CONTEXT_BUDGET_PRESETS.local : CONTEXT_BUDGET_PRESETS.chat),
+  });
+  const context = buildSlimLegacyContext(state.atlasRoot, state.selectedNodeId);
+  if (!plan || !context) return;
 
   const label = chatSettingsLabel(settings);
   const sessionId = `text-partner-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
@@ -21,11 +28,19 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings,
     sessionId,
     metadata: {
       activeNodeId: state.selectedNodeId,
-      contextStats: context.stats,
+      contextStats: {
+        ...context.stats,
+        estimatedInputTokens: plan.stats.estimatedTokens,
+        includedNodeCount: plan.stats.includedNodeCount,
+        truncated: plan.stats.truncated,
+      },
     },
   });
 
-  const messages: TextPartnerMessage[] = [{ role: "user", content: prompt }];
+  const messages: TextPartnerMessage[] = [
+    ...plan.conversation.map((turn) => ({ role: turn.role, content: turn.content }) satisfies TextPartnerMessage),
+    { role: "user", content: prompt },
+  ];
   const tools = getVoiceToolDefinitions();
 
   try {
@@ -34,6 +49,7 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings,
       const result = await requestTextPartnerTurn({
         provider: settings.service,
         context,
+        contextText: plan.contextText,
         messages,
         tools,
         model: settings.model,

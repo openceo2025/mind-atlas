@@ -87,6 +87,7 @@ export function sanitizeNotebookForExport(node: AtlasNode, options: NotebookExpo
   assignOptionalString(sanitized, "openClawSessionKey", source.openClawSessionKey);
   assignOptionalString(sanitized, "openClawLogPath", source.openClawLogPath);
   assignOptionalString(sanitized, "claudeLogPath", source.claudeLogPath);
+  assignOptionalString(sanitized, "claudeSessionId", source.claudeSessionId);
   assignOptionalString(sanitized, "reminderAt", source.reminderAt);
   assignOptionalString(sanitized, "reminderFiredAt", source.reminderFiredAt);
 
@@ -162,6 +163,7 @@ function assignOptionalString(
     | "propagatedErrorSourceId"
     | "aiRunId"
     | "modelId"
+    | "claudeSessionId"
     | "codexThreadId"
     | "codexLogPath"
     | "openClawSessionKey"
@@ -310,6 +312,8 @@ function sanitizeClaudeSettings(value: unknown): ClaudeSettings | undefined {
       : "default",
     workspace: safeString(value.workspace, ""),
     timeoutMs: safeInteger(value.timeoutMs, 60 * 60 * 1000),
+    continueMode: value.continueMode === "new" ? "new" : "auto",
+    resumeSessionId: safeString(value.resumeSessionId, ""),
   };
 }
 

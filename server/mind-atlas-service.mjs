@@ -784,6 +784,12 @@ async function callAnthropicToolTurn(provider, payload) {
 }
 
 function buildPartnerSystemPrompt(payload) {
+  // Prefer the client context engine's compact markdown context; fall back to
+  // the legacy JSON dump for older cached browser bundles.
+  const contextText = stringValue(payload.contextText).trim();
+  const contextBlock = contextText
+    ? `Current Mind Atlas notebook context:\n${contextText.slice(0, 48000)}`
+    : `Current Mind Atlas context:\n${JSON.stringify(payload.context ?? {}, null, 2).slice(0, 24000)}`;
   return [
     "You are Mind Atlas AI Partner.",
     "Mind Atlas is a local-first spatial tree notebook made of celestial nodes.",
@@ -791,7 +797,7 @@ function buildPartnerSystemPrompt(payload) {
     "Keep replies concise. After tool use, briefly say what changed.",
     payload.summary?.text ? `Previous session summary:\n${payload.summary.text}` : "",
     payload.voiceLogContext ? `Recent AI Partner log:\n${payload.voiceLogContext}` : "",
-    `Current Mind Atlas context:\n${JSON.stringify(payload.context ?? {}, null, 2).slice(0, 24000)}`,
+    contextBlock,
   ].filter(Boolean).join("\n\n");
 }
 
@@ -1441,6 +1447,7 @@ function maxOutputTokensForModel(providerId, model) {
 function estimateChatInputChars(payload) {
   return stringValue(payload?.messages ? JSON.stringify(payload.messages) : "").length
     + stringValue(payload?.context ? JSON.stringify(payload.context) : "").length
+    + stringValue(payload?.contextText).length
     + stringValue(payload?.tools ? JSON.stringify(payload.tools) : "").length
     + stringValue(payload?.summary ? JSON.stringify(payload.summary) : "").length
     + stringValue(payload?.voiceLogContext).length;

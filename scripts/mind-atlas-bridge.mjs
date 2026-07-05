@@ -444,6 +444,14 @@ async function createAiResponse(payload) {
   const provider = stringOr(payload?.provider, "openai");
   const prompt = stringOr(payload?.prompt, "");
   const context = payload?.context ?? {};
+  // Context-engine protocol: the client sends compact markdown context plus
+  // replayed branch conversation (chat) or pre-rendered agent prompts with a
+  // session plan (agent CLIs). The legacy `context` JSON stays as a slim
+  // compatibility copy for mock output and workspace inference.
+  const contextText = stringOr(payload?.contextText, "");
+  const chatMessages = normalizeChatContextMessages(payload?.chatMessages);
+  const agentPrompt = stringOr(payload?.agentPrompt, "");
+  const agentDeltaPrompt = stringOr(payload?.agentDeltaPrompt, "");
   // /api/ai/respond is for node anchored AI runs only. Keep it scoped to
   // prompt + explicit Mind Atlas node context; AI Partner log belongs to
   // /api/ai/text-partner-turn and Realtime endpoints.
@@ -456,6 +464,8 @@ async function createAiResponse(payload) {
     return await createChatAiResponse({
       prompt,
       context,
+      contextText,
+      chatMessages,
       settings: normalizeChatSettings(payload?.chat, provider, payload?.model),
       startedAt,
       requestId,
@@ -466,6 +476,8 @@ async function createAiResponse(payload) {
     return await createCodexResponse({
       prompt,
       context,
+      agentPrompt,
+      agentDeltaPrompt,
       model: stringOr(payload?.model, codexModel),
       codex: payload?.codex ?? {},
       startedAt,
@@ -476,6 +488,8 @@ async function createAiResponse(payload) {
     return await createOpenClawResponse({
       prompt,
       context,
+      agentPrompt,
+      agentDeltaPrompt,
       openclaw: payload?.openclaw ?? {},
       startedAt,
     });
@@ -485,6 +499,8 @@ async function createAiResponse(payload) {
     return await createClaudeCodeResponse({
       prompt,
       context,
+      agentPrompt,
+      agentDeltaPrompt,
       model: stringOr(payload?.model, claudeModel),
       claude: payload?.claude ?? {},
       startedAt,
@@ -536,7 +552,7 @@ async function createAiResponse(payload) {
   };
 }
 
-async function createChatAiResponse({ prompt, context, settings, startedAt, requestId }) {
+async function createChatAiResponse({ prompt, context, contextText = "", chatMessages = [], settings, startedAt, requestId }) {
   if (settings.service === "local") {
     const model = await resolveLoadedLocalModel();
     return await createOpenAiCompatibleResponse({
@@ -545,6 +561,8 @@ async function createChatAiResponse({ prompt, context, settings, startedAt, requ
       model,
       prompt,
       context,
+      contextText,
+      chatMessages,
       provider: "local",
       startedAt,
       reasoningEffort: "default",
@@ -555,6 +573,8 @@ async function createChatAiResponse({ prompt, context, settings, startedAt, requ
     return await createAnthropicCompatibleResponse({
       prompt,
       context,
+      contextText,
+      chatMessages,
       settings,
       startedAt,
       requestId,
@@ -584,8 +604,8 @@ async function createChatAiResponse({ prompt, context, settings, startedAt, requ
     });
   }
 
-  const system = buildSystemInstruction();
-  const user = buildUserInstruction(prompt, context);
+  const system = chatMessages.length ? buildNodeChatSystem(contextText) : buildSystemInstruction();
+  const user = chatMessages.length ? chatMessages : buildUserInstruction(prompt, context);
   const data = openAiMode === "chat-completions"
     ? await callChatCompletions(openAiBaseUrl, openAiApiKey, model, system, user, openAiMaxOutputTokens, settings.reasoningEffort)
     : await callResponses(openAiBaseUrl, openAiApiKey, model, system, user, openAiMaxOutputTokens, settings.reasoningEffort);
@@ -606,7 +626,7 @@ async function createChatAiResponse({ prompt, context, settings, startedAt, requ
   };
 }
 
-async function createAnthropicCompatibleResponse({ prompt, context, settings, startedAt, requestId }) {
+async function createAnthropicCompatibleResponse({ prompt, context, contextText = "", chatMessages = [], settings, startedAt, requestId }) {
   const providerConfig = anthropicProviderConfig(settings);
   const model = stringOr(settings.model, providerConfig.defaultModel);
   if (!providerConfig.apiKey && !providerConfig.authToken) {
@@ -617,8 +637,10 @@ async function createAnthropicCompatibleResponse({ prompt, context, settings, st
     apiKey: providerConfig.apiKey,
     authToken: providerConfig.authToken,
     model,
-    system: buildSystemInstruction(),
-    messages: [{ role: "user", content: buildUserInstruction(prompt, context) }],
+    system: chatMessages.length ? buildNodeChatSystem(contextText) : buildSystemInstruction(),
+    messages: chatMessages.length
+      ? chatMessages.map((message) => ({ role: message.role, content: message.content }))
+      : [{ role: "user", content: buildUserInstruction(prompt, context) }],
     tools: [],
     maxOutputTokens: providerConfig.maxOutputTokens,
     effort: settings.reasoningEffort,
@@ -639,9 +661,16 @@ async function createAnthropicCompatibleResponse({ prompt, context, settings, st
   };
 }
 
-async function createOpenAiCompatibleResponse({ baseUrl, apiKey, model, prompt, context, provider, startedAt, reasoningEffort = "default" }) {
-  const system = buildSystemInstruction();
-  const user = provider === "local" ? buildLocalUserInstruction(prompt, context) : buildUserInstruction(prompt, context);
+async function createOpenAiCompatibleResponse({ baseUrl, apiKey, model, prompt, context, contextText = "", chatMessages = [], provider, startedAt, reasoningEffort = "default" }) {
+  const local = provider === "local";
+  const system = chatMessages.length
+    ? buildNodeChatSystem(local ? truncateText(contextText, localPromptContextCharLimit) : contextText)
+    : buildSystemInstruction();
+  const user = chatMessages.length
+    ? chatMessages
+    : local
+      ? buildLocalUserInstruction(prompt, context)
+      : buildUserInstruction(prompt, context);
   const maxOutputTokens = provider === "local" ? localMaxOutputTokens : openAiMaxOutputTokens;
   const data = await callChatCompletions(baseUrl, apiKey, model, system, user, maxOutputTokens, reasoningEffort);
   const rawText = extractModelText(data);
@@ -701,6 +730,7 @@ async function createTextPartnerTurn(payload) {
   }
   const settings = normalizeChatSettings(payload, provider, payload?.model);
   const context = payload?.context ?? {};
+  const contextText = stringOr(payload?.contextText, "");
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
   if (!messages.length) throw new BridgeError(400, "messages are required");
   const tools = Array.isArray(payload?.tools) ? payload.tools : [];
@@ -709,7 +739,7 @@ async function createTextPartnerTurn(payload) {
 
   if (settings.service === "local") {
     const model = await resolveLoadedLocalModel();
-    const data = await callChatToolTurn(localBaseUrl, localApiKey, model, "local", context, messages, tools, summary, voiceLogContext);
+    const data = await callChatToolTurn(localBaseUrl, localApiKey, model, "local", context, messages, tools, summary, voiceLogContext, "default", contextText);
     return textPartnerResultWithoutRaw(data, "local", startedAt, localMaxOutputTokens);
   }
 
@@ -719,7 +749,7 @@ async function createTextPartnerTurn(payload) {
     if (!providerConfig.apiKey && !providerConfig.authToken) {
       throw new BridgeError(503, `${providerConfig.label} API key is not configured`);
     }
-    const data = await callAnthropicToolTurn(providerConfig, model, context, messages, tools, summary, voiceLogContext, settings.reasoningEffort);
+    const data = await callAnthropicToolTurn(providerConfig, model, context, messages, tools, summary, voiceLogContext, settings.reasoningEffort, contextText);
     return textPartnerResultWithoutRaw(data, settings.service, startedAt, providerConfig.maxOutputTokens);
   }
 
@@ -736,8 +766,8 @@ async function createTextPartnerTurn(payload) {
   }
 
   const data = openAiMode === "chat-completions"
-    ? await callChatToolTurn(openAiBaseUrl, openAiApiKey, model, "openai", context, messages, tools, summary, voiceLogContext, settings.reasoningEffort)
-    : await callResponsesToolTurn(openAiBaseUrl, openAiApiKey, model, context, messages, tools, summary, voiceLogContext, settings.reasoningEffort);
+    ? await callChatToolTurn(openAiBaseUrl, openAiApiKey, model, "openai", context, messages, tools, summary, voiceLogContext, settings.reasoningEffort, contextText)
+    : await callResponsesToolTurn(openAiBaseUrl, openAiApiKey, model, context, messages, tools, summary, voiceLogContext, settings.reasoningEffort, contextText);
   return textPartnerResultWithoutRaw(data, "openai", startedAt, openAiMaxOutputTokens);
 }
 
@@ -751,7 +781,7 @@ function textPartnerResultWithoutRaw(data, provider, startedAt, maxOutputTokens)
   };
 }
 
-async function callResponsesToolTurn(baseUrl, apiKey, model, context, messages, tools, summary, voiceLogContext, reasoningEffort = "default") {
+async function callResponsesToolTurn(baseUrl, apiKey, model, context, messages, tools, summary, voiceLogContext, reasoningEffort = "default", contextText = "") {
   const body = {
     model,
     instructions: buildMindAtlasPartnerInstructions({
@@ -759,6 +789,7 @@ async function callResponsesToolTurn(baseUrl, apiKey, model, context, messages, 
       summary,
       voiceLogContext,
       context,
+      contextText,
     }),
     input: buildTextPartnerInput(messages),
     tools: normalizeRealtimeTools(tools),
@@ -781,13 +812,14 @@ async function callResponsesToolTurn(baseUrl, apiKey, model, context, messages, 
   };
 }
 
-async function callChatToolTurn(baseUrl, apiKey, model, provider, context, messages, tools, summary, voiceLogContext, reasoningEffort = "default") {
+async function callChatToolTurn(baseUrl, apiKey, model, provider, context, messages, tools, summary, voiceLogContext, reasoningEffort = "default", contextText = "") {
   const local = provider === "local";
   const systemContent = buildMindAtlasPartnerInstructions({
     mode: "text",
     summary: local ? truncateText(summary, localPartnerSummaryCharLimit) : summary,
     voiceLogContext: local ? truncateFromStart(voiceLogContext, localPartnerLogCharLimit) : voiceLogContext,
     context: local ? compactAiContextForLocal(context) : context,
+    contextText,
     contextCharLimit: local ? localPromptContextCharLimit : 8000,
     compactedForLocal: local,
   });
@@ -820,7 +852,7 @@ async function callChatToolTurn(baseUrl, apiKey, model, provider, context, messa
   };
 }
 
-async function callAnthropicToolTurn(providerConfig, model, context, messages, tools, summary, voiceLogContext, effort) {
+async function callAnthropicToolTurn(providerConfig, model, context, messages, tools, summary, voiceLogContext, effort, contextText = "") {
   const raw = await callAnthropicMessages({
     baseUrl: providerConfig.baseUrl,
     apiKey: providerConfig.apiKey,
@@ -831,6 +863,7 @@ async function callAnthropicToolTurn(providerConfig, model, context, messages, t
       summary,
       voiceLogContext,
       context,
+      contextText,
     }),
     messages: buildAnthropicPartnerMessages(messages),
     tools: normalizeAnthropicTools(tools),
@@ -1446,20 +1479,56 @@ function normalizeCodexModelOption(model) {
   };
 }
 
-async function createCodexResponse({ prompt, context, model, codex, startedAt }) {
+async function createCodexResponse({ prompt, context, model, codex, startedAt, agentPrompt = "", agentDeltaPrompt = "" }) {
   if (codexDisabled) throw new BridgeError(503, "Codex CLI is disabled");
   const settings = normalizeCodexSettings(codex, model, context);
   settings.webSearch = true;
   settings.skipGitRepoCheck = await shouldSkipCodexGitRepoCheck(settings.workspace);
-  const codexPrompt = buildCodexPrompt(prompt, context, settings);
+  // Full prompt replays branch conversation + notebook context; the delta
+  // prompt carries only position + task because a resumed thread already holds
+  // the history on the Codex side. Resume failures fall back to a fresh thread
+  // with the full prompt so a lost rollout can never lose the request.
+  const fullPrompt = agentPrompt
+    ? `${buildCodexPromptHeader(settings)}\n\n${agentPrompt}`
+    : buildCodexPrompt(prompt, context, settings);
+  const deltaPrompt = agentDeltaPrompt ? `${buildCodexPromptHeader(settings)}\n\n${agentDeltaPrompt}` : "";
+  const resuming = Boolean(settings.resumeThreadId);
   const beforeGitStatus = await collectGitStatus(settings.workspace);
-  const result = await runCodex(codexPrompt, settings);
+  let activeSettings = settings;
+  let sessionInfo = resuming ? { action: "continue", resumeId: settings.resumeThreadId } : { action: "new" };
+  let result = null;
+  let resumeError = null;
+  try {
+    result = await runCodex(resuming && deltaPrompt ? deltaPrompt : fullPrompt, settings);
+  } catch (error) {
+    if (!resuming) throw error;
+    resumeError = error;
+  }
+  if (resuming && (!result || codexResumeLooksFailed(result))) {
+    // The referenced rollout may be missing (deleted, other machine). Retry on
+    // a fresh thread with the full context replay so the request still lands.
+    activeSettings = { ...settings, resumeThreadId: "" };
+    result = await runCodex(fullPrompt, activeSettings);
+    sessionInfo = {
+      action: "new",
+      resumeId: settings.resumeThreadId,
+      fellBack: true,
+      reason: resumeError instanceof Error ? `resume-failed: ${resumeError.message.slice(0, 200)}` : "resume-failed",
+    };
+  }
   const durationMs = Date.now() - startedAt;
   const afterGitStatus = await collectGitStatus(settings.workspace);
   const gitStatus = diffGitStatus(beforeGitStatus, afterGitStatus);
-  const response = buildCodexResponseFromRun({ prompt, context, settings, result, gitStatus, durationMs });
+  const response = buildCodexResponseFromRun({ prompt, context, settings: activeSettings, result, gitStatus, durationMs });
+  response.sessionInfo = { ...sessionInfo, resolvedId: response.codexThreadId || undefined };
   await saveCodexResponseLog(result.codexLogPath, response);
   return response;
+}
+
+function codexResumeLooksFailed(result) {
+  if (result.exitCode === 0) return false;
+  const events = Array.isArray(result.events) ? result.events : [];
+  return !events.some((event) => event?.type === "thread.started");
 }
 
 function buildCodexResponseFromRun({ prompt, context, settings, result, gitStatus = "", durationMs }) {
@@ -1506,10 +1575,18 @@ async function saveCodexResponseLog(logPath, response) {
   }
 }
 
-async function createOpenClawResponse({ prompt, context, openclaw, startedAt }) {
+async function createOpenClawResponse({ prompt, context, openclaw, startedAt, agentPrompt = "", agentDeltaPrompt = "" }) {
   if (openClawDisabled) throw new BridgeError(503, "OpenClaw CLI is disabled");
   const settings = normalizeOpenClawSettings(openclaw);
-  const openClawPrompt = buildOpenClawPrompt(prompt, context, settings);
+  const rootSurfaceRun = context?.selectedNode?.id === "atlas-root" && context?.scope === "minimal";
+  const resuming = Boolean(settings.resumeSessionKey);
+  const fullPrompt = agentPrompt
+    ? `${buildOpenClawPromptHeader(settings, rootSurfaceRun)}\n\n${agentPrompt}`
+    : buildOpenClawPrompt(prompt, context, settings);
+  const deltaPrompt = agentDeltaPrompt ? `${buildOpenClawPromptHeader(settings, rootSurfaceRun)}\n\n${agentDeltaPrompt}` : "";
+  // OpenClaw session keys are Mind Atlas generated. An unknown key simply
+  // starts a fresh session under that key, so no resume fallback is needed.
+  const openClawPrompt = resuming && deltaPrompt ? deltaPrompt : fullPrompt;
   const result = await runOpenClaw(openClawPrompt, settings);
   const durationMs = Date.now() - startedAt;
   const parsed = parseOpenClawJson(result.stdout);
@@ -1530,6 +1607,11 @@ async function createOpenClawResponse({ prompt, context, openclaw, startedAt }) 
     provider: "openclaw",
     model: stringOr(parsed?.model, stringOr(parsed?.meta?.agentMeta?.model, settings.model || "openclaw-cli")),
     output,
+    sessionInfo: {
+      action: resuming ? "continue" : "new",
+      resumeId: settings.resumeSessionKey || undefined,
+      resolvedId: result.openClawSessionKey || undefined,
+    },
     openClawSessionKey: result.openClawSessionKey,
     openClawLogPath: result.openClawLogPath,
     rawText: result.stdout,
@@ -1592,16 +1674,7 @@ function buildOpenClawCommand(args) {
   return { command: openClawBin, args };
 }
 
-function buildOpenClawPrompt(prompt, context, settings) {
-  const rootSurfaceRun = context?.selectedNode?.id === "atlas-root" && context?.scope === "minimal";
-  const contextSummary = JSON.stringify({
-    selectedNode: context?.selectedNode,
-    selectedNodes: context?.selectedNodes,
-    path: context?.path,
-    siblingNodes: context?.siblingNodes,
-    scope: context?.scope,
-    stats: context?.stats,
-  }, null, 2);
+function buildOpenClawPromptHeader(settings, rootSurfaceRun) {
   return [
     "You are OpenClaw CLI invoked from Mind Atlas.",
     rootSurfaceRun
@@ -1619,6 +1692,20 @@ function buildOpenClawPrompt(prompt, context, settings) {
       : rootSurfaceRun
         ? "Starting a new OpenClaw session key for this AI Partner turn."
         : "Starting a new OpenClaw session key for this branch.",
+  ].join("\n");
+}
+
+function buildOpenClawPrompt(prompt, context, settings) {
+  const rootSurfaceRun = context?.selectedNode?.id === "atlas-root" && context?.scope === "minimal";
+  const contextSummary = JSON.stringify({
+    selectedNode: context?.selectedNode,
+    selectedNodes: context?.selectedNodes,
+    path: context?.path,
+    siblingNodes: context?.siblingNodes,
+    scope: context?.scope,
+  }, null, 2);
+  return [
+    buildOpenClawPromptHeader(settings, rootSurfaceRun),
     "",
     "# User request",
     prompt,
@@ -1771,13 +1858,42 @@ async function saveOpenClawResponseLog(logPath, response) {
   }
 }
 
-async function createClaudeCodeResponse({ prompt, context, model, claude, startedAt }) {
+async function createClaudeCodeResponse({ prompt, context, model, claude, startedAt, agentPrompt = "", agentDeltaPrompt = "" }) {
   if (claudeDisabled) throw new BridgeError(503, "Claude Code CLI is disabled");
   const settings = normalizeClaudeSettings(claude, model, context);
-  const claudePrompt = buildClaudePrompt(prompt, context, settings);
-  const result = await runClaudeCode(claudePrompt, settings);
+  const fullPrompt = agentPrompt
+    ? `${buildClaudePromptHeader(settings)}\n\n${agentPrompt}`
+    : buildClaudePrompt(prompt, context, settings);
+  const deltaPrompt = agentDeltaPrompt ? `${buildClaudePromptHeader(settings)}\n\n${agentDeltaPrompt}` : "";
+  const resuming = Boolean(settings.resumeSessionId);
+  let activeSettings = settings;
+  let sessionInfo = resuming
+    ? { action: settings.forkSession ? "fork" : "continue", resumeId: settings.resumeSessionId }
+    : { action: "new" };
+  let result = null;
+  let resumeError = null;
+  try {
+    result = await runClaudeCode(resuming && deltaPrompt ? deltaPrompt : fullPrompt, activeSettings);
+  } catch (error) {
+    if (!resuming) throw error;
+    resumeError = error;
+  }
+  let parsed = result ? parseClaudeJson(result.stdout) : null;
+  if (resuming && (!result || claudeResumeLooksFailed(result, parsed))) {
+    // The referenced session may have been garbage collected or created on
+    // another machine. Fall back to a fresh session with the full context
+    // replay so the request itself never fails because of a lost session.
+    activeSettings = { ...settings, resumeSessionId: "", forkSession: false };
+    result = await runClaudeCode(fullPrompt, activeSettings);
+    parsed = parseClaudeJson(result.stdout);
+    sessionInfo = {
+      action: "new",
+      resumeId: settings.resumeSessionId,
+      fellBack: true,
+      reason: resumeError instanceof Error ? `resume-failed: ${resumeError.message.slice(0, 200)}` : "resume-failed",
+    };
+  }
   const durationMs = Date.now() - startedAt;
-  const parsed = parseClaudeJson(result.stdout);
   const finalText = extractClaudeText(parsed) || result.stdout.trim();
   const body = [
     finalText || "Claude Code did not produce a final message.",
@@ -1790,11 +1906,15 @@ async function createClaudeCodeResponse({ prompt, context, model, claude, starte
     suggestedStatus: "needs_review",
     tags: ["claude", "code"],
   }, prompt);
+  const claudeSessionId = stringOr(parsed?.session_id, stringOr(parsed?.sessionId, ""))
+    || (sessionInfo.action === "continue" ? settings.resumeSessionId : "");
   const response = {
     id: randomUUID(),
     provider: "claude",
     model: stringOr(parsed?.model, settings.model || "claude-code"),
     output,
+    claudeSessionId: claudeSessionId || undefined,
+    sessionInfo: { ...sessionInfo, resolvedId: claudeSessionId || undefined },
     claudeLogPath: result.claudeLogPath,
     rawText: result.stdout,
     usage: {
@@ -1804,6 +1924,11 @@ async function createClaudeCodeResponse({ prompt, context, model, claude, starte
   };
   await saveClaudeResponseLog(result.claudeLogPath, response);
   return response;
+}
+
+function claudeResumeLooksFailed(result, parsed) {
+  if (result.exitCode === 0) return false;
+  return !extractClaudeText(parsed).trim();
 }
 
 async function runClaudeCode(prompt, settings) {
@@ -1820,6 +1945,13 @@ async function runClaudeCode(prompt, settings) {
   }
   if (settings.permissionMode && settings.permissionMode !== "default") {
     args.push("--permission-mode", settings.permissionMode);
+  }
+  if (settings.resumeSessionId) {
+    args.push("--resume", settings.resumeSessionId);
+    // Forking on resume keeps every stored session id an immutable snapshot of
+    // its branch point, so any node can branch from it later without picking up
+    // turns from sibling branches.
+    if (settings.forkSession) args.push("--fork-session");
   }
   const commandSpec = buildClaudeCommand(args);
   const result = await runProcess(commandSpec.command, commandSpec.args, boundedPrompt, settings.timeoutMs, settings.workspace, buildClaudeEnv(settings));
@@ -1906,6 +2038,17 @@ function applyDeepSeekClaudeDefaults(env, baseUrl, model) {
   env.CLAUDE_CODE_EFFORT_LEVEL ||= "max";
 }
 
+function buildClaudePromptHeader(settings) {
+  return [
+    "You are Claude Code invoked from Mind Atlas.",
+    "Mind Atlas is a spatial tree notebook. This is a node-anchored run: use the explicit node context below, plus the files and tools available in the configured work root.",
+    "Return a concise final answer suitable for saving as a child Mind Atlas node.",
+    "Do not change Claude Code configuration unless the user explicitly asks for that in this prompt.",
+    settings.workspace ? `User-selected work root: ${settings.workspace}` : "No Mind Atlas work root was provided; use the bridge default workspace.",
+    `Claude permission mode: ${settings.permissionMode || "default"} (not equivalent to Codex OS sandbox).`,
+  ].join("\n");
+}
+
 function buildClaudePrompt(prompt, context, settings) {
   const contextSummary = JSON.stringify({
     selectedNode: context?.selectedNode,
@@ -1913,18 +2056,9 @@ function buildClaudePrompt(prompt, context, settings) {
     path: context?.path,
     siblingNodes: context?.siblingNodes,
     scope: context?.scope,
-    stats: context?.stats,
   }, null, 2);
   return [
-    "You are Claude Code invoked from Mind Atlas.",
-    "Mind Atlas is a spatial tree notebook. This is a node-anchored run: use the explicit node context below, plus the files and tools available in the configured work root.",
-    "Return a concise final answer suitable for saving as a child Mind Atlas node.",
-    "Do not change Claude Code configuration unless the user explicitly asks for that in this prompt.",
-    settings.workspace ? `User-selected work root: ${settings.workspace}` : "No Mind Atlas work root was provided; use the bridge default workspace.",
-    settings.baseUrl ? `Claude API base URL override: ${settings.baseUrl}` : "Claude API base URL: bridge environment default.",
-    settings.model ? `Claude model: ${settings.model}` : "Claude model: bridge environment default.",
-    `Claude effort: ${settings.reasoningEffort || "default"}.`,
-    `Claude permission mode: ${settings.permissionMode || "default"} (not equivalent to Codex OS sandbox).`,
+    buildClaudePromptHeader(settings),
     "",
     "# User request",
     prompt,
@@ -1936,6 +2070,7 @@ function buildClaudePrompt(prompt, context, settings) {
 
 function normalizeClaudeSettings(input, model, context) {
   const workspace = stringOr(input?.workspace, stringOr(extractWorkspaceFromContext(context), claudeWorkspace));
+  const continueMode = input?.continueMode === "new" ? "new" : "auto";
   return {
     model: stringOr(input?.model, model || claudeModel),
     baseUrl: stringOr(input?.baseUrl, claudeBaseUrl).replace(/\/+$/, ""),
@@ -1943,6 +2078,9 @@ function normalizeClaudeSettings(input, model, context) {
     permissionMode: normalizeClaudePermissionMode(input?.permissionMode),
     workspace,
     timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input.timeoutMs) : claudeTimeoutMs,
+    continueMode,
+    resumeSessionId: continueMode === "new" ? "" : stringOr(input?.resumeSessionId, ""),
+    forkSession: input?.forkSession === true,
     clientRunId: stringOr(input?.clientRunId, ""),
     requestNodeId: stringOr(input?.requestNodeId, ""),
     sourceNodeId: stringOr(input?.sourceNodeId, ""),
@@ -2030,6 +2168,8 @@ async function saveClaudeRunLog({ settings, prompt, result, command, args, start
       apiKeyConfigured: Boolean(claudeApiKey),
       authTokenConfigured: Boolean(claudeAuthToken),
       deepSeekAuthTokenConfigured: Boolean(claudeDeepSeekAuthToken),
+      resumeSessionId: settings.resumeSessionId,
+      forkSession: settings.forkSession,
       clientRunId: settings.clientRunId,
       requestNodeId: settings.requestNodeId,
       sourceNodeId: settings.sourceNodeId,
@@ -3110,7 +3250,7 @@ async function callResponses(baseUrl, apiKey, model, system, user, maxOutputToke
   const body = {
     model,
     instructions: system,
-    input: user,
+    input: Array.isArray(user) ? user.map((message) => ({ role: message.role, content: message.content })) : user,
     max_output_tokens: maxOutputTokens,
   };
   applyOpenAiReasoning(body, reasoningEffort);
@@ -3164,10 +3304,13 @@ async function callImageGenerations(baseUrl, apiKey, model, prompt) {
 }
 
 async function callChatCompletions(baseUrl, apiKey, model, system, user, maxOutputTokens = openAiMaxOutputTokens, reasoningEffort = "default") {
+  const userMessages = Array.isArray(user)
+    ? user.map((message) => ({ role: message.role, content: message.content }))
+    : [{ role: "user", content: user }];
   const body = {
     messages: [
       { role: "system", content: system },
-      { role: "user", content: user },
+      ...userMessages,
     ],
     max_tokens: maxOutputTokens,
   };
@@ -3204,6 +3347,34 @@ function buildUserInstruction(prompt, context) {
   ].join("\n");
 }
 
+// Context-engine chat protocol: replayed branch conversation arrives as
+// user/assistant messages, and the compact markdown context is appended to the
+// system instruction so the stable prefix stays cache-friendly.
+function normalizeChatContextMessages(value) {
+  if (!Array.isArray(value)) return [];
+  const merged = [];
+  for (const entry of value) {
+    const role = entry?.role === "assistant" ? "assistant" : "user";
+    const content = stringOr(entry?.content, "");
+    if (!content.trim()) continue;
+    const previous = merged[merged.length - 1];
+    if (previous && previous.role === role) {
+      previous.content = `${previous.content}\n\n${content}`;
+    } else {
+      merged.push({ role, content });
+    }
+  }
+  // Anthropic requires the first message to be a user turn.
+  while (merged.length && merged[0].role !== "user") merged.shift();
+  return merged;
+}
+
+function buildNodeChatSystem(contextText) {
+  const base = buildSystemInstruction();
+  if (!stringOr(contextText, "").trim()) return base;
+  return [base, "", "# Notebook context", truncateText(contextText, 120_000)].join("\n");
+}
+
 function buildLocalUserInstruction(prompt, context) {
   return [
     "User prompt:",
@@ -3215,7 +3386,7 @@ function buildLocalUserInstruction(prompt, context) {
   ].join("\n");
 }
 
-function buildCodexPrompt(prompt, context, settings) {
+function buildCodexPromptHeader(settings) {
   return [
     "You are Codex CLI being invoked from Mind Atlas.",
     "Use the provided Mind Atlas context as project orientation, then work in the configured workspace.",
@@ -3225,16 +3396,13 @@ function buildCodexPrompt(prompt, context, settings) {
       ? "Mind Atlas Web search is enabled. Use web-search capability only if this Codex CLI environment exposes it; otherwise continue without failing and mention any need for current external verification."
       : "Mind Atlas Web search is disabled. Do not browse the web unless the user explicitly asks and the environment permits it.",
     "Return a concise final answer that can be stored as a Mind Atlas child node.",
-    "",
-    "Codex run settings:",
-    JSON.stringify({
-      model: settings.model,
-      reasoningEffort: settings.reasoningEffort,
-      sandbox: settings.sandbox,
-      workspace: settings.workspace,
-      webSearch: settings.webSearch,
-      skipGitRepoCheck: settings.skipGitRepoCheck,
-    }, null, 2),
+    `Sandbox: ${settings.sandbox}. Workspace: ${settings.workspace || "(bridge default)"}.`,
+  ].join("\n");
+}
+
+function buildCodexPrompt(prompt, context, settings) {
+  return [
+    buildCodexPromptHeader(settings),
     "",
     "User task:",
     prompt,
@@ -3244,8 +3412,14 @@ function buildCodexPrompt(prompt, context, settings) {
   ].join("\n");
 }
 
-function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summary = "", voiceLogContext = "", notificationSummary = "", context = null, contextCharLimit = 8000, compactedForLocal = false }) {
-  const contextText = context ? JSON.stringify(context, null, 2).slice(0, contextCharLimit) : "";
+function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summary = "", voiceLogContext = "", notificationSummary = "", context = null, contextText = "", contextCharLimit = 8000, compactedForLocal = false }) {
+  // Prefer the context engine's compact markdown; markdown carries roughly the
+  // same information in far fewer tokens than the legacy pretty-printed JSON,
+  // so it gets a proportionally larger cap.
+  const providedContextText = stringOr(contextText, "").trim();
+  const renderedContextText = providedContextText
+    ? providedContextText.slice(0, Math.max(contextCharLimit * 3, 24_000))
+    : context ? JSON.stringify(context, null, 2).slice(0, contextCharLimit) : "";
   const voiceMode = mode === "voice";
   return [
     "You are operating inside Mind Atlas, a spatial tree notebook made of celestial nodes.",
@@ -3263,15 +3437,18 @@ function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summa
     summary ? `Previous session summary:\n${summary}` : "",
     notificationSummary ? `Current notification summary:\n${notificationSummary}` : "",
     voiceLogContext ? `Persistent AI/Partner log context:\n${voiceLogContext}` : "",
-    contextText ? `Selected context JSON:\n${contextText}` : "",
+    renderedContextText
+      ? `${providedContextText ? "Selected notebook context:" : "Selected context JSON:"}\n${renderedContextText}`
+      : "",
   ].filter(Boolean).join("\n\n");
 }
 
 function fitLocalPartnerSystemPrompt(value) {
   if (value.length <= localPartnerSystemCharLimit) return value;
-  const marker = "Selected context JSON:\n";
+  const markers = ["Selected notebook context:\n", "Selected context JSON:\n"];
+  const marker = markers.find((candidate) => value.indexOf(candidate) >= 0);
+  if (!marker) return truncateText(value, localPartnerSystemCharLimit);
   const markerIndex = value.indexOf(marker);
-  if (markerIndex < 0) return truncateText(value, localPartnerSystemCharLimit);
   const prefix = value.slice(0, markerIndex + marker.length);
   const remaining = Math.max(400, localPartnerSystemCharLimit - prefix.length - 38);
   return `${prefix}[Context truncated for local model]\n${value.slice(value.length - remaining)}`;
