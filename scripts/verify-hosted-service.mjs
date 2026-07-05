@@ -34,6 +34,8 @@ for (const filePath of [
   "deploy/conoha/env.service.example",
   "docs/vps-service.md",
   "docs/staging-service.md",
+  "scripts/build-hosted-public.mjs",
+  "scripts/verify-hosted-dist.mjs",
   "scripts/verify-google-staging-ready.mjs",
   "scripts/verify-stripe-staging-ready.mjs",
   "scripts/verify-openai-staging-ready.mjs",
@@ -54,6 +56,8 @@ for (const filePath of [
   "scripts/verify-core-provider-staging-ready.mjs",
   "scripts/verify-live-staging-ui.mjs",
   "scripts/verify-live-staging-e2e.mjs",
+  "scripts/build-hosted-public.mjs",
+  "scripts/verify-hosted-dist.mjs",
 ]) {
   execFileSync(process.execPath, ["--check", filePath], { cwd: rootDir, stdio: "pipe" });
 }
@@ -71,7 +75,9 @@ for (const scriptName of [
   "staging:ui:doctor",
   "staging:e2e:doctor",
   "staging:verify",
+  "build:hosted",
   "verify:hosted-public-ui",
+  "verify:hosted-dist",
 ]) {
   assert.ok(packageJson.scripts?.[scriptName], `package.json should define ${scriptName}`);
 }
@@ -164,6 +170,8 @@ for (const adminCommand of ["doctor", "usage", "grant-credit", "grant-admin", "s
 }
 
 assert.ok(docs.includes("VITE_MIND_ATLAS_PUBLIC_SERVICE=true"), "docs should include public build command");
+assert.ok(docs.includes("npm run build:hosted"), "docs should use hosted public build script");
+assert.ok(docs.includes("npm run verify:hosted-dist"), "docs should verify hosted dist before deployment");
 assert.ok(docs.includes("mind-atlas.org/api/billing/stripe/webhook"), "docs should include Stripe webhook URL");
 assert.ok(server.includes("reserveUsageCredit"), "hosted service should reserve credit before upstream calls");
 assert.ok(server.includes("meterReservedUsage"), "hosted service should settle reserved credit after usage");

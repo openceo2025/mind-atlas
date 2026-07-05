@@ -296,13 +296,14 @@ reservation.
 
 ## Build For Public Service
 
-Build with hosted-service mode enabled:
+Build with hosted-service mode enabled. Do not deploy a plain `npm run build`
+output to ConoHa; that build is for local developer mode and can expose local
+AI surfaces in the browser.
 
 ```bash
 cd /opt/mind-atlas
-VITE_MIND_ATLAS_PUBLIC_SERVICE=true \
-VITE_MIND_ATLAS_SERVICE_URL=https://mind-atlas.org \
-npm run build
+npm run build:hosted
+npm run verify:hosted-dist
 ```
 
 Run migrations:
@@ -414,26 +415,27 @@ Before public promotion:
 5. `npm run staging:verify`
 6. `docker compose -f docker-compose.staging.yml exec app node server/admin.mjs set-credit staging-user@example.test 0`
 7. Confirm an AI request returns HTTP 402, then restore with `set-credit ... 100`.
-8. `VITE_MIND_ATLAS_PUBLIC_SERVICE=true VITE_MIND_ATLAS_SERVICE_URL=https://mind-atlas.org npm run build`
-9. `npm run service:migrate`
-10. `npm run service:admin -- doctor`
-11. `npm run service:start`
-12. `curl http://127.0.0.1:8788/health`
-13. `curl https://mind-atlas.org/health`
-14. Open `https://mind-atlas.org/`.
-15. Confirm the top-right AI feature button appears.
-16. Confirm unauthenticated users can edit the notebook but cannot open Chat.
-17. Complete Google login.
-18. Complete Stripe checkout in test mode first.
-19. Confirm `/api/service/session` returns `entitlement.aiEnabled=true`.
-20. Confirm Chat works with a configured provider.
-21. Confirm token percent decreases after a metered Chat response.
-22. Confirm `npm run service:admin -- usage user@example.com` shows the Chat
+8. `npm run build:hosted`
+9. `npm run verify:hosted-dist`
+10. `npm run service:migrate`
+11. `npm run service:admin -- doctor`
+12. `npm run service:start`
+13. `curl http://127.0.0.1:8788/health`
+14. `curl https://mind-atlas.org/health`
+15. Open `https://mind-atlas.org/`.
+16. Confirm the top-right AI feature button appears.
+17. Confirm unauthenticated users can edit the notebook but cannot open Chat.
+18. Complete Google login.
+19. Complete Stripe checkout in test mode first.
+20. Confirm `/api/service/session` returns `entitlement.aiEnabled=true`.
+21. Confirm Chat works with a configured provider.
+22. Confirm token percent decreases after a metered Chat response.
+23. Confirm `npm run service:admin -- usage user@example.com` shows the Chat
     request.
-23. Confirm token percent decreases after web search and Dictation.
-24. Confirm Realtime Talk connects only after entitlement is active and records
+24. Confirm token percent decreases after web search and Dictation.
+25. Confirm Realtime Talk connects only after entitlement is active and records
     a `realtime_session_reservation` usage event.
-25. Confirm Code/Codex, Claude Code, OpenClaw, and Local controls are hidden in
+26. Confirm Code/Codex, Claude Code, OpenClaw, and Local controls are hidden in
     public service mode.
 
 ## Rollback
