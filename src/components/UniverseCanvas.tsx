@@ -30,9 +30,9 @@ import {
   useAtlasStore,
 } from "../store/atlasStore";
 import { deriveAtlasLayout, deriveAtlasLayoutFrame, type AtlasLayoutFrame, type AtlasLayoutMode, type AtlasLayoutViewport, type Vec3 } from "../layout/atlasLayout";
-import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
+import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_BIRTH_UNAVAILABLE_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { buildContextCopy, CONTEXT_COPY_PRESETS, copyContextMarkdown, type ContextCopyPreset } from "../context/contextCopy";
-import { createNodeClipboardText, nodeTreeHasAttachments, parseNodeClipboardText } from "../nodeClipboard";
+import { nodeTreeHasAttachments, readNodeClipboard, writeNodeClipboard } from "../nodeClipboard";
 import { emitOnboardingEvent, getOnboardingCurrentSpaceStep } from "../onboarding/useOnboarding";
 import type { AtlasTheme } from "../theme";
 import { NODE_TITLE_PLACEHOLDER } from "../titleMaintenance";
@@ -59,6 +59,15 @@ const GENERATED_LAYOUT_MAX_CAMERA_DISTANCE = 1800;
 const GENERATED_LAYOUT_MOBILE_MAX_CAMERA_DISTANCE = 6400;
 const GENERATED_LAYOUT_MOBILE_FIT_PADDING = 1.55;
 const GENERATED_LAYOUT_MOBILE_LANDSCAPE_FIT_PADDING = 1.38;
+const GENERATED_LAYOUT_DESKTOP_PANEL_RESERVED_RIGHT_PX = 370;
+const GENERATED_LAYOUT_MOBILE_PORTRAIT_PANEL_MAX_HEIGHT_PX = 336;
+const GENERATED_LAYOUT_MOBILE_PORTRAIT_PANEL_HEIGHT_RATIO = 0.42;
+const GENERATED_LAYOUT_MOBILE_LANDSCAPE_PANEL_MAX_WIDTH_PX = 292;
+const GENERATED_LAYOUT_MOBILE_LANDSCAPE_PANEL_WIDTH_RATIO = 0.33;
+const GENERATED_LAYOUT_MOBILE_EDGE_GAP_PX = 24;
+const GENERATED_LAYOUT_TREE_DESKTOP_CHILD_BIAS_RATIO = 0.18;
+const GENERATED_LAYOUT_TREE_MOBILE_LANDSCAPE_CHILD_BIAS_RATIO = 0.2;
+const GENERATED_LAYOUT_TREE_MAX_CHILD_BIAS_PX = 170;
 const MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER = 3;
 const VISIBLE_DESCENDANT_DEPTH = 5;
 const GENERATED_LAYOUT_VISIBLE_DESCENDANT_DEPTH = VISIBLE_DESCENDANT_DEPTH;
@@ -100,6 +109,7 @@ const MOBILE_CANVAS_DPR: [number, number] = [1, 1.15];
 const LOW_QUALITY_CANVAS_DPR: [number, number] = [0.75, 1];
 const MOBILE_LANDSCAPE_FOCUS_DISTANCE_MULTIPLIER = 0.29;
 const UNIVERSE_PAN_DELTA_EVENT = "mindatlas:universe-pan-delta";
+const DOM_TOUCH_SPACE_POINTER_ID = -90001;
 type RenderQuality = "high" | "low";
 const NOTIFICATION_SNOOZE_OPTIONS = [
   { label: "2時間後", delayMs: 2 * 60 * 60 * 1000 },
@@ -320,6 +330,7 @@ export function UniverseCanvas({
   pageActive,
   initialCameraPose,
   shareTargetRef,
+  tutorialRootBirthUnlocked,
 }: {
   theme: AtlasTheme;
   vrPanEnabled: boolean;
@@ -328,6 +339,7 @@ export function UniverseCanvas({
   pageActive: boolean;
   initialCameraPose: PersistedCameraPose | null;
   shareTargetRef?: RefObject<HTMLElement | null>;
+  tutorialRootBirthUnlocked?: boolean;
 }) {
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeContextMenuState | null>(null);
   const mobilePerformanceMode = useMobilePerformanceMode();
@@ -376,7 +388,9 @@ export function UniverseCanvas({
         if (event.key === "Enter") {
           store.addSiblingNode(shortcutOriginNodeId);
         } else {
-          store.addChildNode(shortcutOriginNodeId);
+          const parentPath = findNodePath(store.atlasRoot, shortcutOriginNodeId);
+          const childId = store.addChildNode(shortcutOriginNodeId);
+          if (childId) emitOnboardingEvent("child-node-created", { childDepth: parentPath?.length ?? 1 });
         }
         setNodeContextMenu(null);
         return;
@@ -453,7 +467,15 @@ export function UniverseCanvas({
             <BackgroundStarLayer theme={theme} />
           </>
         ) : null}
-        <NavigationController theme={theme} vrPanEnabled={vrPanEnabled} renderQuality={renderQuality} layoutMode={layoutMode} pageActive={pageActive} initialCameraPose={initialCameraPose} />
+        <NavigationController
+          theme={theme}
+          vrPanEnabled={vrPanEnabled}
+          renderQuality={renderQuality}
+          layoutMode={layoutMode}
+          pageActive={pageActive}
+          initialCameraPose={initialCameraPose}
+          tutorialRootBirthUnlocked={Boolean(tutorialRootBirthUnlocked)}
+        />
         <NotebookNodes theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} pageActive={pageActive} onOpenNodeContextMenu={setNodeContextMenu} />
         <NotificationPulseLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} pageActive={pageActive} />
       </Canvas>
@@ -488,11 +510,15 @@ function isSpaceEditorShortcutTarget(target: EventTarget | null) {
 }
 
 function getNodeKeyboardShortcutOriginId(target: EventTarget | null, spaceEditorNodeId: string | null) {
-  const selectedNodeId = useAtlasStore.getState().selectedNodeId;
+  const store = useAtlasStore.getState();
+  const selectedNodeId = store.selectedNodeId;
   if (spaceEditorNodeId) {
     return spaceEditorNodeId === selectedNodeId ? spaceEditorNodeId : selectedNodeId;
   }
   if (isInteractiveShortcutTarget(target)) return null;
+  if (selectedNodeId === store.atlasRoot.id && getOnboardingCurrentSpaceStep() === "childNodeCreated") {
+    return store.atlasRoot.children[0]?.id ?? selectedNodeId;
+  }
   return selectedNodeId;
 }
 
@@ -595,15 +621,22 @@ function NotificationPulseLayer({
   const tickNotificationPulses = useAtlasStore((state) => state.tickNotificationPulses);
   const lastPruneRef = useRef(0);
   const { size } = useThree();
-  const layoutViewport = getGeneratedLayoutViewport(layoutMode, size.width, size.height);
+  const stableLayoutMetrics = getStableLayoutMetrics(size.width, size.height);
+  const layoutViewport = getGeneratedLayoutViewport(layoutMode, stableLayoutMetrics.width, stableLayoutMetrics.height, stableLayoutMetrics.keyboardPortraitLock);
   const renderablePulses = useMemo(
     () => pulses.filter((pulse) => pulse.nodeId !== atlasRoot.id && Boolean(findNode(atlasRoot, pulse.nodeId))),
     [atlasRoot, pulses],
   );
   const animatedPulses = useMemo(() => selectAnimatedNotificationPulses(renderablePulses, renderQuality), [renderablePulses, renderQuality]);
   const layoutFrame = useMemo(
-    () => deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport: layoutViewport, viewportWidth: size.width, viewportHeight: size.height }),
-    [atlasRoot, layoutMode, layoutViewport, selectedNodeId, size.height, size.width],
+    () =>
+      deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, {
+        focusNodeId: selectedNodeId,
+        viewport: layoutViewport,
+        viewportWidth: stableLayoutMetrics.width,
+        viewportHeight: stableLayoutMetrics.height,
+      }),
+    [atlasRoot, layoutMode, layoutViewport, selectedNodeId, stableLayoutMetrics.height, stableLayoutMetrics.width],
   );
 
   useFrame(() => {
@@ -774,6 +807,21 @@ function isAutoFocusSuppressed() {
   return state.commandInputEditing || state.multiSelectedNodeIds.length > 0;
 }
 
+type CameraPoseState = {
+  yaw: number;
+  pitch: number;
+  offset: number;
+  panX: number;
+  panY: number;
+  panZ: number;
+};
+
+type StableLayoutMetrics = {
+  width: number;
+  height: number;
+  keyboardPortraitLock: boolean;
+};
+
 function NavigationController({
   theme,
   vrPanEnabled,
@@ -781,6 +829,7 @@ function NavigationController({
   layoutMode,
   pageActive,
   initialCameraPose,
+  tutorialRootBirthUnlocked,
 }: {
   theme: AtlasTheme;
   vrPanEnabled: boolean;
@@ -788,20 +837,21 @@ function NavigationController({
   layoutMode: AtlasLayoutMode;
   pageActive: boolean;
   initialCameraPose: PersistedCameraPose | null;
+  tutorialRootBirthUnlocked: boolean;
 }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const focusRequest = useAtlasStore((state) => state.focusRequest);
   const setViewport = useAtlasStore((state) => state.setViewport);
   const addRootNodeAt = useAtlasStore((state) => state.addRootNodeAt);
-  const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
   const { camera, gl, size } = useThree();
   const perspective = camera as PerspectiveCamera;
-  const keyboardPortraitLock = commandInputEditing && isKeyboardOverlayPortraitActive();
-  const mobilePortraitCamera = isMobilePortraitCamera(size.width, size.height, keyboardPortraitLock);
-  const mobileCamera = isMobileCamera(size.width, size.height);
-  const mobileLandscapeCamera = isMobileLandscapeCamera(size.width, size.height, keyboardPortraitLock);
+  const stableLayoutMetrics = getStableLayoutMetrics(size.width, size.height);
+  const { keyboardPortraitLock } = stableLayoutMetrics;
+  const mobilePortraitCamera = isMobilePortraitCamera(stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
+  const mobileCamera = isMobileCamera(stableLayoutMetrics.width, stableLayoutMetrics.height);
+  const mobileLandscapeCamera = isMobileLandscapeCamera(stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
   const initialCenteredRef = useRef(false);
-  const yawPitchRef = useRef({ yaw: 0, pitch: 0, offset: INITIAL_CAMERA_OFFSET, panX: 0, panY: 0 });
+  const yawPitchRef = useRef<CameraPoseState>({ yaw: 0, pitch: 0, offset: INITIAL_CAMERA_OFFSET, panX: 0, panY: 0, panZ: 0 });
   const dragRef = useRef<SpaceDragState | null>(null);
   const wheelZoomOutRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelZoomInRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
@@ -824,11 +874,13 @@ function NavigationController({
     startOffset: number;
     startPanX: number;
     startPanY: number;
+    startPanZ: number;
     targetYaw: number;
     targetPitch: number;
     targetOffset: number;
     targetPanX: number;
     targetPanY: number;
+    targetPanZ: number;
     elapsed: number;
     duration: number;
     nonce: number;
@@ -837,7 +889,7 @@ function NavigationController({
   const [birthEffect, setBirthEffect] = useState<BirthEffect | null>(null);
   const inputSphereSegments: [number, number] = renderQuality === "low" ? [32, 16] : [64, 32];
 
-  const setViewportFromCameraState = (state: { yaw: number; pitch: number; offset: number; panX?: number; panY?: number }, forcePersist = false) => {
+  const setViewportFromCameraState = (state: CameraPoseState, forcePersist = false) => {
     const viewport = { x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) };
     setViewport(viewport);
     const now = performance.now();
@@ -896,6 +948,22 @@ function NavigationController({
       if (event.touches.length < 2) {
         multiTouchRef.current = false;
         pinchGestureRef.current = null;
+        if (tutorialRootBirthUnlocked && layoutMode === "phyllotaxis" && !dragRef.current && event.touches.length === 1) {
+          const touch = event.touches[0];
+          const started = beginSpaceDrag({
+            pointerId: DOM_TOUCH_SPACE_POINTER_ID,
+            clientX: touch.clientX,
+            clientY: touch.clientY,
+            direction: directionFromClientPoint(touch.clientX, touch.clientY),
+            button: 0,
+            pointerType: "touch",
+          });
+          if (started && event.cancelable) event.preventDefault();
+        }
+        return;
+      }
+      if (tutorialRootBirthUnlocked && dragRef.current?.mode === "hold" && !dragRef.current.created) {
+        if (event.cancelable) event.preventDefault();
         return;
       }
       event.preventDefault();
@@ -906,6 +974,17 @@ function NavigationController({
       pinchGestureRef.current = { lastDistance: getTouchDistance(event.touches) };
     };
     const handleTouchMove = (event: TouchEvent) => {
+      const drag = dragRef.current;
+      if (drag?.pointerId === DOM_TOUCH_SPACE_POINTER_ID && event.touches.length === 1) {
+        if (event.cancelable) event.preventDefault();
+        const touch = event.touches[0];
+        updateSpaceDrag(touch.clientX, touch.clientY, DOM_TOUCH_SPACE_POINTER_ID);
+        return;
+      }
+      if (tutorialRootBirthUnlocked && drag?.mode === "hold" && !drag.created) {
+        if (event.cancelable) event.preventDefault();
+        return;
+      }
       if (event.touches.length < 2 || !multiTouchRef.current) return;
       event.preventDefault();
       const distance = getTouchDistance(event.touches);
@@ -920,6 +999,17 @@ function NavigationController({
       handleWheelDelta(-distanceDelta * PINCH_ZOOM_WHEEL_SCALE, { allowLayerNavigation: false });
     };
     const handleTouchEnd = (event: TouchEvent) => {
+      const drag = dragRef.current;
+      if (drag?.pointerId === DOM_TOUCH_SPACE_POINTER_ID) {
+        const touch = event.changedTouches[0];
+        endSpaceDrag(touch?.clientX ?? drag.lastScreen.x, touch?.clientY ?? drag.lastScreen.y, DOM_TOUCH_SPACE_POINTER_ID);
+        return;
+      }
+      if (tutorialRootBirthUnlocked && drag && event.touches.length === 0) {
+        const touch = event.changedTouches[0];
+        endSpaceDrag(touch?.clientX ?? drag.lastScreen.x, touch?.clientY ?? drag.lastScreen.y, drag.pointerId);
+        return;
+      }
       if (event.touches.length >= 2) {
         pinchGestureRef.current = { lastDistance: getTouchDistance(event.touches) };
         return;
@@ -944,14 +1034,13 @@ function NavigationController({
 
   useEffect(() => {
     if (!focusRequest) return;
-    const layoutViewport = getGeneratedLayoutViewport(layoutMode, size.width, size.height, keyboardPortraitLock);
+    const layoutViewport = getGeneratedLayoutViewport(layoutMode, stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
     const generatedLayoutActive = layoutMode !== "phyllotaxis";
     const mobileGeneratedLayout = generatedLayoutActive && layoutViewport !== "desktop";
     const generatedLayoutFocus = generatedLayoutActive
       ? getGeneratedLayoutFocusView(atlasRoot, layoutMode, focusRequest.nodeId ?? atlasRoot.id, layoutViewport, {
-          centerBounds: mobileGeneratedLayout,
-          viewportWidth: size.width,
-          viewportHeight: size.height,
+          viewportWidth: stableLayoutMetrics.width,
+          viewportHeight: stableLayoutMetrics.height,
         })
       : null;
     const targetVector = generatedLayoutFocus?.target ?? getFocusTargetVector(atlasRoot, layoutMode, focusRequest, layoutViewport);
@@ -965,10 +1054,10 @@ function NavigationController({
     const targetDiameter = Math.max(focusRequest.diameter, generatedFocusDiameter);
     const targetDistance =
       mobileGeneratedLayout
-        ? getGeneratedLayoutMobileCameraDistance(targetDiameter, size.height, perspective.fov, layoutViewport)
+        ? getGeneratedLayoutMobileCameraDistance(targetDiameter, stableLayoutMetrics.height, perspective.fov, layoutViewport)
         : getCameraDistanceForDiameter(
             targetDiameter,
-            size.height,
+            stableLayoutMetrics.height,
             perspective.fov,
             generatedLayoutActive ? GENERATED_LAYOUT_MAX_CAMERA_DISTANCE : 620,
           );
@@ -986,10 +1075,20 @@ function NavigationController({
             focusDistance,
             false,
           );
-    const generatedMobilePanYOffset = mobileGeneratedLayout
-      ? getGeneratedLayoutMobilePanYOffset(focusDistance, size.height, perspective.fov, layoutViewport)
-      : 0;
+    const focusScreenOffset = getGeneratedLayoutFocusScreenOffset(layoutMode, layoutViewport, stableLayoutMetrics.width, stableLayoutMetrics.height);
+    const focusWorldPerPixel = getWorldUnitsPerPixel(focusDistance, stableLayoutMetrics.height, perspective.fov);
     const current = yawPitchRef.current;
+    const targetYaw = closestAngle(current.yaw, targetAngles.yaw);
+    const targetPitch = clamp(targetAngles.pitch, -FOCUS_PITCH_LIMIT, FOCUS_PITCH_LIMIT);
+    const phyllotaxisFocusPan = generatedLayoutActive
+      ? new Vector3(0, 0, 0)
+      : getPhyllotaxisFocusPanVector(
+          targetVector,
+          directionFromYawPitch(targetYaw, targetPitch),
+          targetRadius,
+          focusScreenOffset,
+          focusWorldPerPixel,
+        );
 
     transitionRef.current = {
       startYaw: current.yaw,
@@ -997,17 +1096,30 @@ function NavigationController({
       startOffset: current.offset,
       startPanX: current.panX,
       startPanY: current.panY,
-      targetYaw: closestAngle(current.yaw, targetAngles.yaw),
-      targetPitch: clamp(targetAngles.pitch, -FOCUS_PITCH_LIMIT, FOCUS_PITCH_LIMIT),
+      startPanZ: current.panZ,
+      targetYaw,
+      targetPitch,
       targetOffset,
-      targetPanX: generatedLayoutActive ? targetVector.x : 0,
-      targetPanY: generatedLayoutActive ? targetVector.y + generatedMobilePanYOffset : 0,
+      targetPanX: generatedLayoutActive ? targetVector.x - focusScreenOffset.x * focusWorldPerPixel : phyllotaxisFocusPan.x,
+      targetPanY: generatedLayoutActive ? targetVector.y + focusScreenOffset.y * focusWorldPerPixel : phyllotaxisFocusPan.y,
+      targetPanZ: generatedLayoutActive ? 0 : phyllotaxisFocusPan.z,
       elapsed: 0,
       duration: renderQuality === "low" ? LOW_QUALITY_MOTION_DURATION_SECONDS : LAYOUT_MOTION_DURATION_SECONDS,
       nonce: focusRequest.nonce,
       nodeId: focusRequest.nodeId ?? "",
     };
-  }, [atlasRoot, focusRequest, keyboardPortraitLock, layoutMode, mobileCamera, mobileLandscapeCamera, perspective.fov, renderQuality, size.height, size.width]);
+  }, [
+    atlasRoot,
+    focusRequest,
+    keyboardPortraitLock,
+    layoutMode,
+    mobileCamera,
+    mobileLandscapeCamera,
+    perspective.fov,
+    renderQuality,
+    stableLayoutMetrics.height,
+    stableLayoutMetrics.width,
+  ]);
 
   useEffect(() => {
     if (initialCenteredRef.current) return;
@@ -1023,8 +1135,9 @@ function NavigationController({
             offset: clamp(restoredPose.offset, getMinCameraOffset(mobilePortraitCamera), MAX_CAMERA_OFFSET),
             panX: 0,
             panY: 0,
+            panZ: 0,
           }
-        : { yaw: 0, pitch: 0, offset: initialOffset, panX: 0, panY: 0 };
+        : { yaw: 0, pitch: 0, offset: initialOffset, panX: 0, panY: 0, panZ: 0 };
       applyCameraPose(perspective, yawPitchRef.current);
       setViewportFromCameraState(yawPitchRef.current, true);
     });
@@ -1069,7 +1182,7 @@ function NavigationController({
       setBirthEffect(null);
     }
 
-    const visibilityViewport = getGeneratedLayoutViewport(layoutMode, size.width, size.height, keyboardPortraitLock);
+    const visibilityViewport = getGeneratedLayoutViewport(layoutMode, stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
     reportNodeVisibility(atlasRoot, perspective, nodeVisibilityRef.current, visibilityViewport);
 
     const drag = dragRef.current;
@@ -1094,6 +1207,13 @@ function NavigationController({
         emitOnboardingEvent("root-birth-blocked-zoom");
       }
     }
+    if (layoutMode !== "phyllotaxis" && drag?.mode === "hold" && !drag.created && !drag.blockedBirthHintEmitted) {
+      const heldFor = performance.now() - drag.startedAt;
+      if (heldFor >= HOLD_TO_BIRTH_MS) {
+        drag.blockedBirthHintEmitted = true;
+        window.dispatchEvent(new CustomEvent(UNIVERSE_BACKGROUND_BIRTH_UNAVAILABLE_EVENT, { detail: { layoutMode } }));
+      }
+    }
 
     if (vrPanEnabled && !transitionRef.current && !dragRef.current && !multiTouchRef.current) {
       applyVrTiltPan(delta);
@@ -1111,6 +1231,7 @@ function NavigationController({
     state.offset = lerp(transition.startOffset, transition.targetOffset, eased);
     state.panX = lerp(transition.startPanX, transition.targetPanX, eased);
     state.panY = lerp(transition.startPanY, transition.targetPanY, eased);
+    state.panZ = lerp(transition.startPanZ, transition.targetPanZ, eased);
     applyCameraPose(perspective, state);
     setViewportFromCameraState(state);
 
@@ -1124,20 +1245,35 @@ function NavigationController({
     }
   });
 
-  const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
-    if (event.button !== 0 && event.button !== 2) return;
-    event.stopPropagation();
+  const beginSpaceDrag = ({
+    pointerId,
+    clientX,
+    clientY,
+    direction,
+    button,
+    pointerType,
+  }: {
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    direction: Vec3Tuple;
+    button: number;
+    pointerType: string;
+  }) => {
+    if (pointerType === "mouse" && button !== 0 && button !== 2) return false;
+    const activeDrag = dragRef.current;
+    if (activeDrag && activeDrag.pointerId !== pointerId) return false;
     window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_INTERACTION_EVENT));
-    (event.target as Element | null)?.setPointerCapture?.(event.pointerId);
-    backgroundClickRef.current = event.button === 0 ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY } : null;
-    const canBirth = layoutMode === "phyllotaxis" && canStartRootBirth(yawPitchRef.current.offset, size.height, perspective.fov);
-    const direction = directionFromRay(event.ray, NOTEBOOK_FIRST_SHELL_RADIUS);
+    backgroundClickRef.current = pointerType !== "mouse" || button === 0 ? { pointerId, x: clientX, y: clientY } : null;
+    const canBirth =
+      layoutMode === "phyllotaxis" &&
+      (tutorialRootBirthUnlocked || canStartRootBirth(yawPitchRef.current.offset, size.height, perspective.fov));
     setMobileRaycastMode({ kind: "space-drag" });
 
     dragRef.current = {
-      pointerId: event.pointerId,
-      startScreen: { x: event.clientX, y: event.clientY },
-      lastScreen: { x: event.clientX, y: event.clientY },
+      pointerId,
+      startScreen: { x: clientX, y: clientY },
+      lastScreen: { x: clientX, y: clientY },
       startedAt: performance.now(),
       direction,
       mode: "hold",
@@ -1158,18 +1294,23 @@ function NavigationController({
     } else {
       setBirthEffect(null);
     }
+    return true;
   };
 
-  const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
+  const updateSpaceDrag = (clientX: number, clientY: number, pointerId: number) => {
     const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    event.stopPropagation();
-    const dx = event.clientX - drag.startScreen.x;
-    const dy = event.clientY - drag.startScreen.y;
+    if (!drag || drag.pointerId !== pointerId) return false;
+    const dx = clientX - drag.startScreen.x;
+    const dy = clientY - drag.startScreen.y;
     const moved = Math.hypot(dx, dy);
     const backgroundClick = backgroundClickRef.current;
-    if (backgroundClick?.pointerId === event.pointerId && Math.hypot(event.clientX - backgroundClick.x, event.clientY - backgroundClick.y) > 6) {
+    if (backgroundClick?.pointerId === pointerId && Math.hypot(clientX - backgroundClick.x, clientY - backgroundClick.y) > 6) {
       backgroundClickRef.current = null;
+    }
+
+    if (tutorialRootBirthUnlocked && drag.mode === "hold" && !drag.created) {
+      drag.lastScreen = { x: clientX, y: clientY };
+      return true;
     }
 
     if (drag.mode === "hold" && moved > WHITE_HOLE_CANCEL_PX && !drag.created) {
@@ -1178,13 +1319,74 @@ function NavigationController({
     }
 
     if (drag.mode === "rotate") {
-      const deltaX = event.clientX - drag.lastScreen.x;
-      const deltaY = event.clientY - drag.lastScreen.y;
+      const deltaX = clientX - drag.lastScreen.x;
+      const deltaY = clientY - drag.lastScreen.y;
       applyPanDelta(deltaX, deltaY);
       markVrManualPan(deltaX, deltaY);
     }
 
-    drag.lastScreen = { x: event.clientX, y: event.clientY };
+    drag.lastScreen = { x: clientX, y: clientY };
+    return true;
+  };
+
+  const endSpaceDrag = (clientX: number, clientY: number, pointerId: number) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== pointerId) return false;
+    const backgroundClick = backgroundClickRef.current;
+    if (
+      backgroundClick?.pointerId === pointerId &&
+      Math.hypot(clientX - backgroundClick.x, clientY - backgroundClick.y) <= 6
+    ) {
+      const store = useAtlasStore.getState();
+      store.clearMultiSelection();
+      store.selectNodeInPlace(store.atlasRoot.id);
+      window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_CLICK_EVENT));
+    }
+    backgroundClickRef.current = null;
+    if (vrManualPanPendingRef.current) recenterVrBaseline();
+    dragRef.current = null;
+    setMobileRaycastMode({ kind: "idle" });
+    if (!drag.created && drag.mode === "hold" && drag.canBirth) {
+      setBirthEffect(null);
+    }
+    return true;
+  };
+
+  const directionFromClientPoint = (clientX: number, clientY: number): Vec3Tuple => {
+    const rect = gl.domElement.getBoundingClientRect();
+    const width = rect.width || size.width || 1;
+    const height = rect.height || size.height || 1;
+    const x = ((clientX - rect.left) / width) * 2 - 1;
+    const y = -((clientY - rect.top) / height) * 2 + 1;
+    perspective.updateMatrixWorld();
+    const origin = new Vector3().setFromMatrixPosition(perspective.matrixWorld);
+    const direction = new Vector3(x, y, 0.5).unproject(perspective).sub(origin).normalize();
+    return directionFromRay(new Ray(origin, direction), NOTEBOOK_FIRST_SHELL_RADIUS);
+  };
+
+  const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
+    const pointerType = event.pointerType || "mouse";
+    if (pointerType === "mouse" && event.button !== 0 && event.button !== 2) return;
+    event.stopPropagation();
+    try {
+      (event.target as Element | null)?.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Mobile browsers can cancel or retarget touch pointers during gesture negotiation.
+    }
+    beginSpaceDrag({
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      direction: directionFromRay(event.ray, NOTEBOOK_FIRST_SHELL_RADIUS),
+      button: event.button,
+      pointerType,
+    });
+  };
+
+  const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
+    if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+    updateSpaceDrag(event.clientX, event.clientY, event.pointerId);
   };
 
   const applyPanDelta = (
@@ -1199,6 +1401,7 @@ function NavigationController({
       const worldPerPixel = getWorldUnitsPerPixel(Math.abs(state.offset), size.height, perspective.fov);
       state.panX -= deltaX * worldPerPixel;
       state.panY += deltaY * worldPerPixel;
+      state.panZ = 0;
       state.yaw = 0;
       state.pitch = 0;
       transitionRef.current = null;
@@ -1270,32 +1473,37 @@ function NavigationController({
   };
 
   const handlePointerUp = (event: ThreeEvent<PointerEvent>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) return;
     event.stopPropagation();
-    const backgroundClick = backgroundClickRef.current;
+    endSpaceDrag(event.clientX, event.clientY, event.pointerId);
+  };
+
+  const handlePointerCancel = (event: ThreeEvent<PointerEvent>) => {
+    const drag = dragRef.current;
     if (
-      backgroundClick?.pointerId === event.pointerId &&
-      Math.hypot(event.clientX - backgroundClick.x, event.clientY - backgroundClick.y) <= 6
+      tutorialRootBirthUnlocked &&
+      drag?.pointerId === event.pointerId &&
+      drag.mode === "hold" &&
+      !drag.created &&
+      isMobilePointerEvent(event)
     ) {
-      const store = useAtlasStore.getState();
-      store.clearMultiSelection();
-      store.selectNodeInPlace(store.atlasRoot.id);
-      window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_CLICK_EVENT));
+      event.stopPropagation();
+      return;
     }
-    backgroundClickRef.current = null;
-    if (vrManualPanPendingRef.current) recenterVrBaseline();
-    dragRef.current = null;
-    setMobileRaycastMode({ kind: "idle" });
-    if (!drag.created && drag.mode === "hold" && drag.canBirth) {
-      setBirthEffect(null);
-    }
+    handlePointerUp(event);
   };
 
   const handleWheelDelta = (deltaY: number, options: { allowLayerNavigation?: boolean } = {}) => {
     const allowLayerNavigation = options.allowLayerNavigation ?? true;
     const now = performance.now();
     if (now < wheelSuppressUntilRef.current) return;
+    if (tutorialRootBirthUnlocked) {
+      wheelZoomOutRef.current.amount = 0;
+      wheelZoomOutRef.current.startedAt = 0;
+      wheelZoomInRef.current.amount = 0;
+      wheelZoomInRef.current.startedAt = 0;
+      return;
+    }
     const onboardingSpaceStep = getOnboardingCurrentSpaceStep();
     const suppressOnboardingFastFocus = onboardingSpaceStep !== null || now < onboardingFastFocusSuppressUntilRef.current;
     if (onboardingSpaceStep === "zoom") {
@@ -1427,7 +1635,7 @@ function NavigationController({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
       >
         <sphereGeometry args={[INPUT_EVENT_SPHERE_RADIUS, inputSphereSegments[0], inputSphereSegments[1]]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} side={BackSide} />
@@ -1482,7 +1690,7 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
       };
     }
 
-    if (typeof navigator === "undefined" || !navigator.clipboard?.readText) {
+    if (typeof navigator === "undefined" || (!navigator.clipboard?.read && !navigator.clipboard?.readText)) {
       setClipboardState("unavailable");
       return () => {
         cancelled = true;
@@ -1490,11 +1698,9 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
     }
 
     setClipboardState("checking");
-    navigator.clipboard
-      .readText()
-      .then((text) => {
+    readNodeClipboard()
+      .then((parsedNode) => {
         if (cancelled) return;
-        const parsedNode = parseNodeClipboardText(text);
         setClipboardNode(parsedNode);
         setClipboardState(parsedNode ? "available" : "unavailable");
       })
@@ -1538,7 +1744,7 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
   const handleCopyObject = async () => {
     try {
       const hasAttachments = nodeTreeHasAttachments(node);
-      await writeClipboardText(createNodeClipboardText(node));
+      await writeNodeClipboard(node, serializeNodeTreeForLlm(node));
       if (hasAttachments) {
         window.alert("画像・動画などの添付ファイルが含まれています。クリップボードにはファイル本体ではなくメタデータのみコピーされます。");
       }
@@ -1551,7 +1757,7 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
   const handleCutObject = async () => {
     try {
       const hasAttachments = nodeTreeHasAttachments(node);
-      await writeClipboardText(createNodeClipboardText(node));
+      await writeNodeClipboard(node, serializeNodeTreeForLlm(node));
       if (hasAttachments) {
         window.alert("画像・動画などの添付ファイルが含まれています。クリップボードにはファイル本体ではなくメタデータのみコピーされます。");
       }
@@ -1565,8 +1771,7 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
   const handlePasteObject = async () => {
     let copiedNode = clipboardNode;
     try {
-      const clipboardText = await navigator.clipboard.readText();
-      const latestNode = parseNodeClipboardText(clipboardText);
+      const latestNode = await readNodeClipboard();
       if (!latestNode) {
         setClipboardNode(null);
         setClipboardState("unavailable");
@@ -1907,10 +2112,17 @@ function NotebookNodes({
       selectedNodeId,
     ],
   );
-  const layoutViewport = getGeneratedLayoutViewport(layoutMode, size.width, size.height);
+  const stableLayoutMetrics = getStableLayoutMetrics(size.width, size.height);
+  const layoutViewport = getGeneratedLayoutViewport(layoutMode, stableLayoutMetrics.width, stableLayoutMetrics.height, stableLayoutMetrics.keyboardPortraitLock);
   const layoutFrame = useMemo(
-    () => deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport: layoutViewport, viewportWidth: size.width, viewportHeight: size.height }),
-    [atlasRoot, layoutMode, layoutViewport, selectedNodeId, size.height, size.width],
+    () =>
+      deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, {
+        focusNodeId: selectedNodeId,
+        viewport: layoutViewport,
+        viewportWidth: stableLayoutMetrics.width,
+        viewportHeight: stableLayoutMetrics.height,
+      }),
+    [atlasRoot, layoutMode, layoutViewport, selectedNodeId, stableLayoutMetrics.height, stableLayoutMetrics.width],
   );
   const currentLayoutPositions = layoutFrame.positions;
   const currentVisibleNodeIds = layoutFrame.visibleIds;
@@ -2089,7 +2301,7 @@ function NotebookNodes({
   }, [dismissNotificationSnoozePrompt, notificationSnoozePrompt, pageActive]);
 
   if (!atlasRoot.children.length) {
-    return <EmptyAtlasPulse theme={theme} />;
+    return null;
   }
 
   if (renderQuality === "low") {
@@ -2502,6 +2714,8 @@ function HierarchyNode({
     typeof activePathIndex === "number" ? selectedPathLength - 1 - activePathIndex : null;
   const isDirectChildOfSelected = parentId === selectedNodeId;
   const isRootDirectChild = depth === 1 && parentId === path[0]?.id;
+  const rootActiveDirectChild = selectedNodeId === path[0]?.id && isRootDirectChild;
+  const rootOverviewDirectChild = rootOverviewActive && isRootDirectChild;
   const rootDirectTitleVisible = isRootDirectChild && Boolean(node.title.trim());
   const isDirectParentOfSelected = activeAncestorDistance === 1;
   const isActiveAncestor = activeAncestorDistance !== null && activeAncestorDistance > 0;
@@ -2521,7 +2735,15 @@ function HierarchyNode({
         : isActiveSibling
           ? 1
           : visibleDepthIndex;
-  const depthFade = getLayoutAwareDepthFade(layoutMode, renderQuality, currentVisibleNodeIds.has(node.id), perspective, worldPosition, visualDepthIndex);
+  const depthFade = getLayoutAwareDepthFade(
+    layoutMode,
+    renderQuality,
+    currentVisibleNodeIds.has(node.id) || visibleNodeIds.has(node.id),
+    perspective,
+    worldPosition,
+    rootActiveDirectChild ? 0 : visualDepthIndex,
+    rootActiveDirectChild,
+  );
   const childrenVisible =
     visibleDepthRemaining > 0 &&
     node.children.length > 0 &&
@@ -2530,9 +2752,10 @@ function HierarchyNode({
       (activeDescendantDistance !== null && activeDescendantDistance < VISIBLE_DESCENDANT_DEPTH) ||
       node.children.some((child) => hasAiContextPreviewNode(child, aiContextPreviewNodeIds)) ||
       layoutMode !== "phyllotaxis");
-  const isLocalContextNode = isSelected || isMultiSelected || aiContextPreviewNodeIds.has(node.id) || isActiveAncestor || isActiveSibling || isDirectChildOfSelected;
-  const mobileLabelVisible = isSelected || isDirectChildOfSelected || rootDirectTitleVisible;
-  const lowQualityLabelVisible = isSelected || isDirectChildOfSelected || rootDirectTitleVisible;
+  const isLocalContextNode =
+    isSelected || isMultiSelected || aiContextPreviewNodeIds.has(node.id) || isActiveAncestor || isActiveSibling || isDirectChildOfSelected || rootOverviewDirectChild;
+  const mobileLabelVisible = isSelected || isDirectChildOfSelected || rootDirectTitleVisible || rootOverviewDirectChild;
+  const lowQualityLabelVisible = isSelected || isDirectChildOfSelected || rootDirectTitleVisible || rootOverviewDirectChild;
   const labelVisible = renderQuality === "low"
     ? lowQualityLabelVisible
     : mobileLabelScope
@@ -2542,7 +2765,6 @@ function HierarchyNode({
   const [layoutEdgeHidden, setLayoutEdgeHidden] = useState(false);
   const parentEdgeVisible = !suppressParentEdge && path.length > 2 && hiddenDragEdgeNodeId !== node.id && !layoutEdgeHidden;
   const lowQuality = renderQuality === "low";
-  const rootActiveDirectChild = selectedNodeId === path[0]?.id && depth === 1;
   const hitSphereSegments: [number, number] = lowQuality ? [10, 6] : [20, 12];
   const planetSphereSegments: [number, number] = lowQuality
     ? depth <= 1
@@ -2600,7 +2822,7 @@ function HierarchyNode({
   } | null>(null);
   const groupRef = useRef<Group>(null);
   const parentWorldRef = useRef<Vec3Tuple>(subtractPosition(worldPosition, localPosition));
-  const isNodeLayoutVisible = layoutMode === "phyllotaxis" || currentVisibleNodeIds.has(node.id);
+  const isNodeLayoutVisible = layoutMode === "phyllotaxis" || currentVisibleNodeIds.has(node.id) || visibleNodeIds.has(node.id);
   const isEnteringLayout = layoutMode !== "phyllotaxis" && renderQuality !== "low" && enteringNodeIds.has(node.id);
   const initialVisualWorld = isEnteringLayout ? getBackstagePosition(worldPosition) : worldPosition;
   const visualWorldRef = useRef<Vec3Tuple>(initialVisualWorld);
@@ -4312,30 +4534,6 @@ function BirthRing({ startedAt, radius, color }: { startedAt: number; radius: nu
   );
 }
 
-function EmptyAtlasPulse({ theme }: { theme: AtlasTheme }) {
-  const meshRef = useRef<Mesh>(null);
-  const themeColors = getUniverseThemeColors(theme);
-  useFrame(({ clock }) => {
-    if (!meshRef.current) return;
-    meshRef.current.scale.setScalar(1 + Math.sin(clock.elapsedTime * 1.7) * 0.04);
-  });
-
-  return (
-    <group position={[0, 0, -NOTEBOOK_FIRST_SHELL_RADIUS]}>
-      <CameraFacingGroup>
-        <mesh ref={meshRef}>
-          <torusGeometry args={[42, 0.7, 16, 120]} />
-          <meshBasicMaterial color={themeColors.ringHighlight} transparent opacity={theme === "light" ? 0.34 : 0.18} />
-        </mesh>
-        <mesh>
-          <sphereGeometry args={[3.4, 18, 10]} />
-          <meshBasicMaterial color={themeColors.birthCore} transparent opacity={0.42} blending={AdditiveBlending} />
-        </mesh>
-      </CameraFacingGroup>
-    </group>
-  );
-}
-
 function BackgroundStarLayer({ theme }: { theme: AtlasTheme }) {
   const backgroundScene = useMemo(() => new Scene(), []);
   const backgroundCamera = useMemo(() => new OrthographicCamera(), []);
@@ -4617,9 +4815,9 @@ function directionToYawPitch(direction: Vector3) {
   };
 }
 
-function applyCameraPose(camera: PerspectiveCamera, state: { yaw: number; pitch: number; offset: number; panX?: number; panY?: number }) {
+function applyCameraPose(camera: PerspectiveCamera, state: { yaw: number; pitch: number; offset: number; panX?: number; panY?: number; panZ?: number }) {
   const direction = directionFromYawPitch(state.yaw, state.pitch);
-  camera.position.copy(direction.clone().multiplyScalar(state.offset).add(new Vector3(state.panX ?? 0, state.panY ?? 0, 0)));
+  camera.position.copy(direction.clone().multiplyScalar(state.offset).add(new Vector3(state.panX ?? 0, state.panY ?? 0, state.panZ ?? 0)));
   camera.lookAt(camera.position.clone().add(direction));
   camera.updateProjectionMatrix();
 }
@@ -4666,6 +4864,31 @@ function directionFromYawPitch(yaw: number, pitch: number) {
   return new Vector3(Math.sin(yaw) * cosPitch, Math.sin(pitch), -Math.cos(yaw) * cosPitch).normalize();
 }
 
+function getPhyllotaxisFocusPanVector(
+  targetVector: Vector3,
+  cameraDirection: Vector3,
+  targetRadius: number,
+  screenOffset: { x: number; y: number },
+  worldPerPixel: number,
+) {
+  const normalizedDirection = cameraDirection.clone().normalize();
+  const basePan = targetVector.clone().sub(normalizedDirection.clone().multiplyScalar(targetRadius));
+  const screenPan = getCameraScreenPanVector(normalizedDirection, screenOffset, worldPerPixel);
+  return basePan.add(screenPan);
+}
+
+function getCameraScreenPanVector(cameraDirection: Vector3, screenOffset: { x: number; y: number }, worldPerPixel: number) {
+  const worldUp = new Vector3(0, 1, 0);
+  const right = cameraDirection.clone().cross(worldUp);
+  if (right.lengthSq() < 0.0001) {
+    right.set(1, 0, 0);
+  } else {
+    right.normalize();
+  }
+  const up = right.clone().cross(cameraDirection).normalize();
+  return right.multiplyScalar(-screenOffset.x * worldPerPixel).add(up.multiplyScalar(screenOffset.y * worldPerPixel));
+}
+
 function closestAngle(from: number, to: number) {
   const delta = ((((to - from) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
   return from + delta;
@@ -4692,11 +4915,9 @@ function getGeneratedLayoutFocusView(
   focusNodeId: string,
   viewport: AtlasLayoutViewport,
   {
-    centerBounds,
     viewportWidth,
     viewportHeight,
   }: {
-    centerBounds: boolean;
     viewportWidth: number;
     viewportHeight: number;
   },
@@ -4709,7 +4930,7 @@ function getGeneratedLayoutFocusView(
     (frame.bounds.minY + frame.bounds.maxY) / 2,
     fallbackZ,
   );
-  const target = centerBounds ? boundsCenter : focusPosition ? new Vector3(...focusPosition) : boundsCenter;
+  const target = focusPosition ? new Vector3(...focusPosition) : boundsCenter;
   const width = frame.bounds.maxX - frame.bounds.minX + NOTEBOOK_NODE_RADIUS * 7;
   const height = frame.bounds.maxY - frame.bounds.minY + NOTEBOOK_NODE_RADIUS * 8;
   const aspect = Math.max(0.1, viewportWidth / Math.max(1, viewportHeight));
@@ -4734,14 +4955,66 @@ function getGeneratedLayoutMobileCameraDistance(diameter: number, viewportHeight
   return clamp(distance, 180, GENERATED_LAYOUT_MOBILE_MAX_CAMERA_DISTANCE);
 }
 
-function getGeneratedLayoutMobilePanYOffset(distance: number, viewportHeight: number, fov: number, viewport: AtlasLayoutViewport) {
-  if (viewport === "desktop") return 0;
-  const worldPerPixel = getWorldUnitsPerPixel(distance, viewportHeight, fov);
-  const upwardShiftPx =
-    viewport === "mobile-portrait"
-      ? viewportHeight * 0.23 + 28
-      : Math.max(18, viewportHeight * 0.06);
-  return -upwardShiftPx * worldPerPixel;
+function getGeneratedLayoutFocusScreenOffset(
+  layoutMode: AtlasLayoutMode,
+  viewport: AtlasLayoutViewport,
+  viewportWidth: number,
+  viewportHeight: number,
+) {
+  const reserved = getGeneratedLayoutReservedScreenArea(viewport, viewportWidth, viewportHeight);
+  const usableWidth = Math.max(1, viewportWidth - reserved.left - reserved.right);
+  const usableHeight = Math.max(1, viewportHeight - reserved.top - reserved.bottom);
+  const dialogOffset = {
+    x: (reserved.left - reserved.right) / 2,
+    y: (reserved.top - reserved.bottom) / 2,
+  };
+  const treeBias = layoutMode === "tree" ? getGeneratedLayoutTreeScreenBias(viewport, usableWidth, usableHeight) : { x: 0, y: 0 };
+  return {
+    x: dialogOffset.x + treeBias.x,
+    y: dialogOffset.y + treeBias.y,
+  };
+}
+
+function getGeneratedLayoutReservedScreenArea(viewport: AtlasLayoutViewport, viewportWidth: number, viewportHeight: number) {
+  if (viewport === "mobile-portrait") {
+    return {
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: Math.min(
+        GENERATED_LAYOUT_MOBILE_PORTRAIT_PANEL_MAX_HEIGHT_PX,
+        Math.max(0, viewportHeight * GENERATED_LAYOUT_MOBILE_PORTRAIT_PANEL_HEIGHT_RATIO),
+      ) + GENERATED_LAYOUT_MOBILE_EDGE_GAP_PX,
+    };
+  }
+  if (viewport === "mobile-landscape") {
+    return {
+      left: 0,
+      right: Math.min(
+        GENERATED_LAYOUT_MOBILE_LANDSCAPE_PANEL_MAX_WIDTH_PX,
+        Math.max(0, viewportWidth * GENERATED_LAYOUT_MOBILE_LANDSCAPE_PANEL_WIDTH_RATIO),
+      ) + GENERATED_LAYOUT_MOBILE_EDGE_GAP_PX,
+      top: 0,
+      bottom: 0,
+    };
+  }
+  return {
+    left: 0,
+    right: Math.min(GENERATED_LAYOUT_DESKTOP_PANEL_RESERVED_RIGHT_PX, Math.max(0, viewportWidth - 96)),
+    top: 0,
+    bottom: 0,
+  };
+}
+
+function getGeneratedLayoutTreeScreenBias(viewport: AtlasLayoutViewport, usableWidth: number, usableHeight: number) {
+  if (viewport === "mobile-portrait") {
+    return { x: 0, y: 0 };
+  }
+  const ratio = viewport === "mobile-landscape" ? GENERATED_LAYOUT_TREE_MOBILE_LANDSCAPE_CHILD_BIAS_RATIO : GENERATED_LAYOUT_TREE_DESKTOP_CHILD_BIAS_RATIO;
+  return {
+    x: 0,
+    y: -Math.min(GENERATED_LAYOUT_TREE_MAX_CHILD_BIAS_PX, usableHeight * ratio),
+  };
 }
 
 function getWorldUnitsPerPixel(distance: number, viewportHeight: number, fov: number) {
@@ -4770,6 +5043,32 @@ function getMinCameraOffset(mobilePortraitCamera: boolean) {
   if (!mobilePortraitCamera) return MIN_CAMERA_OFFSET;
   const firstLayerZoomOutDistance = NOTEBOOK_FIRST_SHELL_RADIUS - MIN_CAMERA_OFFSET;
   return NOTEBOOK_FIRST_SHELL_RADIUS - firstLayerZoomOutDistance * MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER;
+}
+
+function getStableLayoutMetrics(width: number, height: number): StableLayoutMetrics {
+  const fallbackWidth = Math.max(1, Math.round(width));
+  const fallbackHeight = Math.max(1, Math.round(height));
+  if (!isKeyboardOverlayPortraitActive()) {
+    return { width: fallbackWidth, height: fallbackHeight, keyboardPortraitLock: false };
+  }
+
+  const stableWidth =
+    typeof window === "undefined"
+      ? fallbackWidth
+      : Math.max(1, Math.round(window.innerWidth || document.documentElement.clientWidth || fallbackWidth));
+  const stableAppHeight = readRootPixelValue("--app-height") ?? fallbackHeight;
+  return {
+    width: stableWidth,
+    height: Math.max(fallbackHeight, stableAppHeight, stableWidth + 1),
+    keyboardPortraitLock: true,
+  };
+}
+
+function readRootPixelValue(name: string) {
+  if (typeof document === "undefined") return null;
+  const rawValue = document.documentElement.style.getPropertyValue(name);
+  const value = Number.parseFloat(rawValue);
+  return Number.isFinite(value) ? Math.max(1, Math.round(value)) : null;
 }
 
 function isMobilePortraitCamera(width: number, height: number, keyboardPortraitLock = false) {
@@ -4897,7 +5196,16 @@ function getLayoutAwareDepthFade(
   camera: PerspectiveCamera,
   worldPosition: Vec3Tuple,
   fallbackIndex: number,
+  preserveBrightness = false,
 ) {
+  if (preserveBrightness) {
+    return {
+      index: 0,
+      opacity: 1,
+      brightness: 1,
+      backgroundBlend: 0,
+    };
+  }
   if ((layoutMode === "tree" || layoutMode === "mind-map") && renderQuality === "high" && layoutVisible) {
     return {
       index: 0,

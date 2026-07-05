@@ -2,6 +2,15 @@
 
 Mind Atlas keeps provider API keys out of the browser. The React app talks to a small local bridge, and the bridge talks to OpenAI or OpenAI-compatible providers.
 
+For public paid hosting, do not expose the local bridge directly. Build with
+`VITE_MIND_ATLAS_PUBLIC_SERVICE=true` and run
+`server/mind-atlas-service.mjs` instead. The hosted service adds Google OAuth,
+Stripe Billing, PostgreSQL user/session/subscription/credit storage, and
+server-side Chat/Realtime proxying. See [vps-service.md](vps-service.md).
+Run `npm run verify:hosted-service` before deploying to check the hosted
+routes, provider catalog, deployment templates, and required environment
+entries without using real provider keys.
+
 ## Start
 
 Start the app and bridge together:
@@ -59,6 +68,17 @@ overriding variables already set by the shell.
 - `MIND_ATLAS_DEEPSEEK_MAX_OUTPUT_TOKENS`: DeepSeek Chat output cap. Defaults to `MIND_ATLAS_OPENAI_MAX_OUTPUT_TOKENS`.
 - `MIND_ATLAS_DEEPSEEK_BALANCE_BASE_URL`: DeepSeek native balance API base URL. Defaults to `https://api.deepseek.com`.
 - `MIND_ATLAS_WEB_SEARCH_MAX_OUTPUT_TOKENS`: web-search response cap. Defaults to `2048`.
+- Hosted service only:
+  - `MIND_ATLAS_SERVICE_JSON_MAX_BYTES`: maximum JSON request body. Defaults to `2097152`.
+  - `MIND_ATLAS_SERVICE_FORM_MAX_BYTES`: maximum multipart request body, mainly for Dictation audio. Defaults to `29360128`.
+  - `MIND_ATLAS_SERVICE_CHAT_INPUT_MAX_CHARS`: maximum serialized Chat input/context/tool size. Defaults to `300000`.
+  - `MIND_ATLAS_SERVICE_CHAT_RESERVE_CHARS_PER_TOKEN`: conservative character-to-token ratio for hosted Chat credit reservations. Defaults to `2`.
+  - `MIND_ATLAS_SERVICE_MAX_REQUEST_ESTIMATE_MICRO_USD`: per-request operator safety ceiling for estimated Chat cost. Defaults to `2000000`; set `0` to disable.
+  - Hosted AI calls reserve credit before upstream execution and settle to actual recorded usage after success. Upstream failures refund the reservation.
+  - `MIND_ATLAS_REALTIME_MODELS`: comma-separated Realtime model allowlist for the hosted service. Defaults to the configured `MIND_ATLAS_REALTIME_MODEL`.
+  - `MIND_ATLAS_WEB_SEARCH_MAX_QUERY_CHARS`: maximum web-search query length. Defaults to `1000`.
+  - `MIND_ATLAS_STRIPE_WEBHOOK_MAX_BYTES`: maximum Stripe webhook body. Defaults to `1048576`.
+  - `MIND_ATLAS_STRIPE_WEBHOOK_TOLERANCE_SECONDS`: allowed Stripe webhook signature timestamp age. Defaults to `300`.
 - Local mode inspects `${MIND_ATLAS_LOCAL_BASE_URL}/models` and uses the first model currently loaded by LM Studio. `MIND_ATLAS_LOCAL_MODEL` is intentionally ignored to avoid auto-loading a model.
 - `MIND_ATLAS_CODEX_BIN`: Codex executable name. Defaults to `codex`.
 - `MIND_ATLAS_CODEX_USE_WSL`: set `true` to run `wsl codex ...`.

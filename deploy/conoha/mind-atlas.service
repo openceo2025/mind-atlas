@@ -1,0 +1,18 @@
+[Unit]
+Description=Mind Atlas hosted service
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mind-atlas
+EnvironmentFile=/opt/mind-atlas/.env.service
+ExecStart=/usr/bin/npm run service:start
+Restart=always
+RestartSec=5
+User=www-data
+Group=www-data
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

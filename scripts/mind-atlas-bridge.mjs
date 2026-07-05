@@ -15,6 +15,7 @@ const host = process.env.MIND_ATLAS_BRIDGE_HOST ?? "127.0.0.1";
 const bridgeProtocol = process.env.MIND_ATLAS_BRIDGE_PROTOCOL ?? "http";
 const httpsKeyPath = process.env.MIND_ATLAS_HTTPS_KEY ?? "";
 const httpsCertPath = process.env.MIND_ATLAS_HTTPS_CERT ?? "";
+const defaultAllowedOrigins = "http://127.0.0.1:5173,http://localhost:5173";
 
 const openAiApiKey = process.env.MIND_ATLAS_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY ?? "";
 const openAiBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_OPENAI_BASE_URL ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1");
@@ -195,6 +196,10 @@ const server = createBridgeServer(async (request, response) => {
       sendJson(response, 200, {
         ok: true,
         bridge: "mind-atlas-bridge",
+        processId: process.pid,
+        uptimeSeconds: Math.round(process.uptime()),
+        allowedOrigin: process.env.MIND_ATLAS_ALLOWED_ORIGIN || defaultAllowedOrigins,
+        requestOrigin: stringOr(request.headers.origin, ""),
         openaiConfigured: Boolean(openAiApiKey),
         openAiBaseUrl,
         openAiMode,
@@ -3248,7 +3253,7 @@ function buildMindAtlasPartnerInstructions({ mode, extraInstructions = "", summa
     "Codex work roots are inherited from parent nodes. Multiple Codex work roots and runs may coexist in one universe.",
     "You may operate Mind Atlas broadly through tools: search, focus, select, add, update, run AI, inspect notifications, and search the web.",
     "Do not use run_ai_from_active_node to answer the current global conversation, inspect existing nodes, pick up tasks, summarize state, or check notifications. That tool starts a separate node-anchored AI run and creates notebook nodes. Use it only when the user explicitly asks for a persistent node-based AI result or delegation to a specific node context.",
-    "Destructive operations require approval. If a tool reports approval is required, do not claim the operation was executed.",
+    "Notebook edit tools execute directly when available. If a tool reports that an operation is not executable through this API, say so plainly and suggest the relevant UI action.",
     "After tool use, briefly say what changed.",
     voiceMode ? "Keep responses concise enough for voice." : "This is a text conversation. Be concise, but include enough detail to be useful in the AI/Partner log.",
     "Do not create a celestial response node unless a tool explicitly creates or edits nodes.",
@@ -3460,7 +3465,9 @@ function normalizeAnthropicTools(tools, options = {}) {
 }
 
 function buildAnthropicPartnerMessages(messages) {
-  return messages.map((message) => {
+  const output = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
     if (message?.role === "assistant") {
       const content = [];
       const text = stringOr(message.content, "");
@@ -3477,28 +3484,32 @@ function buildAnthropicPartnerMessages(messages) {
           });
         }
       }
-      return {
+      output.push({
         role: "assistant",
         content: content.length ? content : [{ type: "text", text: "" }],
-      };
+      });
+      continue;
     }
     if (message?.role === "tool") {
-      return {
-        role: "user",
-        content: [
-          {
+      const content = [];
+      for (; index < messages.length && messages[index]?.role === "tool"; index += 1) {
+        const toolMessage = messages[index];
+        content.push({
             type: "tool_result",
-            tool_use_id: stringOr(message.toolCallId, ""),
-            content: textPartnerMessageContent(message),
-          },
-        ],
-      };
+          tool_use_id: stringOr(toolMessage.toolCallId, ""),
+          content: textPartnerMessageContent(toolMessage),
+        });
+      }
+      index -= 1;
+      output.push({ role: "user", content });
+      continue;
     }
-    return {
+    output.push({
       role: "user",
       content: textPartnerMessageContent(message),
-    };
-  });
+    });
+  }
+  return output;
 }
 
 function applyOpenAiReasoning(body, effort) {
@@ -3954,9 +3965,8 @@ function sendJson(response, status, payload) {
 }
 
 function setCors(request, response) {
-  const defaultOrigins = "http://127.0.0.1:5173,http://localhost:5173";
   const configuredOrigins = process.env.MIND_ATLAS_ALLOWED_ORIGIN;
-  const allowedOrigins = (configuredOrigins ?? defaultOrigins)
+  const allowedOrigins = (configuredOrigins ?? defaultAllowedOrigins)
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);

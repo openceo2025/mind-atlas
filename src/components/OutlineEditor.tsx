@@ -48,6 +48,7 @@ export function OutlineEditor({ root, selectedNodeId, onClose, onFocusNode, onAp
   const [copyStatus, setCopyStatus] = useState("");
   const liveEditHistoryNodeIdsRef = useRef<Set<string>>(new Set());
   const draftRoot = useMemo(() => applyCollapsedState(createOutlineDraftFromAtlas(root), collapsedNodeIds), [collapsedNodeIds, root]);
+  const collapseRootOnCollapseAll = root.kind !== "root";
   const activePath = useMemo(() => findOutlineNodePath(draftRoot, activeKey), [activeKey, draftRoot]);
   const activeDepth = activePath?.length ?? 0;
 
@@ -136,7 +137,7 @@ export function OutlineEditor({ root, selectedNodeId, onClose, onFocusNode, onAp
       <header className="outline-editor-header">
         <div>
           <span className="outline-editor-kicker">
-            <ListTree size={16} /> Outline Editor
+            <ListTree size={16} /> Text Editor
           </span>
           <h2>{root.title || OUTLINE_UNTITLED_TITLE}</h2>
           {copyStatus ? <p>{copyStatus}</p> : null}
@@ -148,7 +149,7 @@ export function OutlineEditor({ root, selectedNodeId, onClose, onFocusNode, onAp
           <button type="button" onClick={() => setCollapsedNodeIds(new Set())}>
             <ChevronsDown size={17} /> Expand all
           </button>
-          <button type="button" onClick={() => setCollapsedNodeIds(new Set(collectCollapsibleOutlineIds(draftRoot, false)))}>
+          <button type="button" onClick={() => setCollapsedNodeIds(new Set(collectCollapsibleOutlineIds(draftRoot, collapseRootOnCollapseAll)))}>
             <ChevronsUp size={17} /> Collapse all
           </button>
         </div>
@@ -234,6 +235,7 @@ function OutlineNodeEditor({
 }) {
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
   const isActive = activeKey === node.key;
+  const hasChildren = node.children.length > 0;
   const hiddenCount = node.collapsed ? countDraftDescendants(node) : 0;
   const subtreeHidden = node.collapsed;
 
@@ -244,8 +246,12 @@ function OutlineNodeEditor({
         <button
           className="outline-fold-button"
           type="button"
-          onClick={() => onToggleCollapsed(node.key)}
+          onClick={() => {
+            if (hasChildren) onToggleCollapsed(node.key);
+          }}
+          disabled={!hasChildren}
           aria-label={node.collapsed ? "Expand node" : "Collapse node"}
+          aria-expanded={hasChildren ? !node.collapsed : undefined}
         >
           {node.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
         </button>

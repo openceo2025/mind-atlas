@@ -83,7 +83,7 @@ async function verifyLayoutModeSwitch(browser) {
   await seedCompletedOnboarding(page);
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
-  for (const label of ["Tree", "Mind map", "Phyllotaxis"]) {
+  for (const label of ["Tree", "Mind map", "Mind Atlas"]) {
     await page.getByLabel("Open atlas menu").click();
     await page.getByTitle(label).click();
     await page.locator(".global-context-menu").waitFor({ state: "detached" });
@@ -95,9 +95,60 @@ async function verifyLayoutModeSwitch(browser) {
     if (!hasCanvas) throw new Error(`Mode ${label} lost WebGL canvas`);
   }
   await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("Outline").click();
+  await page.locator(".global-context-menu").getByTitle("TextEditor").click();
   await page.waitForSelector(".outline-editor-shell");
   await page.close();
+}
+
+async function verifyLocalDeveloperModeSurface(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  await seedSingleChildNotebook(page);
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  await page.locator(".mode-switch").waitFor();
+
+  const hostedButtonCount = await page.getByRole("button", { name: /AI\u6a5f\u80fd/ }).count();
+  if (hostedButtonCount !== 0) {
+    throw new Error(`Local developer mode exposed the hosted AI feature button: ${hostedButtonCount}`);
+  }
+
+  const modeLabels = await page.locator(".mode-switch button").evaluateAll((buttons) =>
+    buttons.map((button) => button.getAttribute("aria-label") || button.textContent?.trim() || ""),
+  );
+  for (const expected of ["Chat", "Code", "OpenClaw", "Note"]) {
+    if (!modeLabels.includes(expected)) {
+      throw new Error(`Local developer mode is missing ${expected} mode: ${JSON.stringify(modeLabels)}`);
+    }
+  }
+
+  await page.getByRole("button", { name: "Code" }).click();
+  await page.locator(".code-options-row").waitFor();
+  const codeBackends = await page.locator('.code-options-row select[title="Choose the code backend for this node-anchored run."] option')
+    .evaluateAll((options) => options.map((option) => option.textContent?.trim()));
+  for (const expected of ["Codex", "Claude Code"]) {
+    if (!codeBackends.includes(expected)) {
+      throw new Error(`Local developer mode is missing ${expected} backend: ${JSON.stringify(codeBackends)}`);
+    }
+  }
+
+  await page.getByRole("button", { name: "OpenClaw" }).click();
+  await page.locator(".openclaw-options-row").waitFor();
+
+  await page.getByRole("button", { name: "Chat" }).click();
+  await page.locator(".chat-options-row").waitFor();
+  const chatServices = await page.locator(".chat-options-row select").first().locator("option")
+    .evaluateAll((options) => options.map((option) => option.textContent?.trim()));
+  if (!chatServices.some((service) => service?.startsWith("Local"))) {
+    throw new Error(`Local developer mode is missing the Local chat service: ${JSON.stringify(chatServices)}`);
+  }
+
+  await context.close();
+  return { modeLabels, codeBackends, chatServices };
 }
 
 async function verifyGeneratedLayoutBlocksBackgroundBirth(browser) {
@@ -124,8 +175,13 @@ async function verifyGeneratedLayoutBlocksBackgroundBirth(browser) {
     const beforeCount = await readPersistedNodeCount(page);
     await page.mouse.move(backgroundPoint.x, backgroundPoint.y);
     await page.mouse.down();
-    await page.waitForTimeout(1720);
+    await page.locator(".layout-birth-unavailable-toast").waitFor({ timeout: 2800 });
+    const message = await page.locator(".layout-birth-unavailable-toast").innerText();
+    if (!message.includes(label) || !message.includes("Mind Atlas")) {
+      throw new Error(`${label} unavailable birth message was wrong: ${message}`);
+    }
     await page.mouse.up();
+    await page.locator(".layout-birth-unavailable-toast").waitFor({ state: "detached", timeout: 5200 });
     await page.waitForTimeout(180);
     const afterCount = await readPersistedNodeCount(page);
     if (afterCount !== beforeCount) {
@@ -136,7 +192,7 @@ async function verifyGeneratedLayoutBlocksBackgroundBirth(browser) {
   await context.close();
 }
 
-async function verifyKonamiUnlockSequence(browser) {
+async function verifyKonamiDoesNotUnlock(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 820 },
     ignoreHTTPSErrors: true,
@@ -146,25 +202,20 @@ async function verifyKonamiUnlockSequence(browser) {
   await page.waitForSelector("canvas");
 
   await enterKonamiSequence(page);
-  await page.waitForFunction(() => {
+  await page.waitForTimeout(350);
+  const progress = await page.evaluate(() => {
     const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
-    if (!raw) return false;
-    const progress = JSON.parse(raw);
-    return progress.basicCompleted === true && progress.aiUnlocked === false;
+    return raw ? JSON.parse(raw) : null;
   });
-
-  page.once("dialog", (dialog) => dialog.accept());
-  await enterKonamiSequence(page);
-  await page.waitForFunction(() => {
-    const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
-    if (!raw) return false;
-    return JSON.parse(raw).aiUnlocked === true;
-  });
-  await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByText("AI Partner log").waitFor();
+  if (progress?.aiUnlocked === true) {
+    throw new Error("Konami sequence unlocked AI features.");
+  }
+  if (progress?.basicCompleted === true) {
+    throw new Error("Konami sequence completed tutorial onboarding.");
+  }
 
   await context.close();
-  return { tutorialSkipped: true, aiUnlocked: true };
+  return { aiUnlocked: false };
 }
 
 async function verifyTutorialSkipButton(browser) {
@@ -389,7 +440,7 @@ async function verifyOutlineAndContextCopy(browser) {
   await page.waitForSelector("canvas");
 
   await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("Outline").click();
+  await page.locator(".global-context-menu").getByTitle("TextEditor").click();
   await page.waitForSelector(".outline-editor-shell");
 
   const titleInputs = page.getByLabel("Node title");
@@ -431,7 +482,7 @@ async function verifyOutlineAndContextCopy(browser) {
   await page.getByRole("button", { name: /Close/i }).click();
   await page.keyboard.press("Control+Z");
   await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("Outline").click();
+  await page.locator(".global-context-menu").getByTitle("TextEditor").click();
   await page.waitForSelector(".outline-editor-shell");
   const revertedTitleCount = await page.locator('input[aria-label="Node title"]').evaluateAll(
     (inputs, expectedTitle) => inputs.filter((input) => input.value === expectedTitle).length,
@@ -465,7 +516,7 @@ async function verifyOutlineCollapseAndDeletionSafety(browser) {
   }
 
   await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("Outline").click();
+  await page.locator(".global-context-menu").getByTitle("TextEditor").click();
   await page.waitForSelector(".outline-editor-shell");
   const initialOutlineValues = await readOutlineTitleValues(page);
   if (!initialOutlineValues.includes("Nested Parent") || !initialOutlineValues.includes("Nested Child")) {
@@ -543,6 +594,87 @@ async function verifyOutlineCollapseAndDeletionSafety(browser) {
   };
 }
 
+async function verifyOutlineThemeAndSubtreeCollapse(browser) {
+  const darkContext = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const darkPage = await darkContext.newPage();
+  await seedCompletedOnboarding(darkPage);
+  await seedNestedNotebook(darkPage, { selectedNodeId: "nested-parent" });
+  await darkPage.addInitScript(() => {
+    window.localStorage.setItem("mind-atlas-theme", "dark");
+  });
+  await darkPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await darkPage.waitForSelector("canvas");
+  await darkPage.getByLabel("Open atlas menu").click();
+  await darkPage.locator(".global-context-menu").getByTitle("TextEditor").click();
+  await darkPage.waitForSelector(".outline-editor-shell");
+
+  const darkThemeStats = await readOutlineThemeStats(darkPage);
+  if (darkThemeStats.backgroundBrightness > 160) {
+    throw new Error(`Dark outline theme rendered too bright: ${JSON.stringify(darkThemeStats)}`);
+  }
+
+  await darkPage.locator('input[aria-label="Node title"]').nth(1).click();
+  await darkPage.getByRole("button", { name: /Close/i }).click();
+  await darkPage.locator(".outline-editor-shell").waitFor({ state: "detached" });
+  await darkPage.getByLabel("Open atlas menu").click();
+  await darkPage.locator(".global-context-menu").getByTitle("TextEditor").click();
+  await darkPage.waitForSelector(".outline-editor-shell");
+  const subtreeInitialValues = await readOutlineTitleValues(darkPage);
+  if (JSON.stringify(subtreeInitialValues) !== JSON.stringify(["Nested Parent", "Nested Child"])) {
+    throw new Error(`Subtree outline should open from the active parent node: ${JSON.stringify(subtreeInitialValues)}`);
+  }
+
+  await darkPage.getByRole("button", { name: /Collapse all/i }).click();
+  await darkPage.waitForFunction(
+    () => ![...document.querySelectorAll('input[aria-label="Node title"]')].some((input) => input.value === "Nested Child"),
+  );
+  const subtreeCollapsedValues = await readOutlineTitleValues(darkPage);
+  if (JSON.stringify(subtreeCollapsedValues) !== JSON.stringify(["Nested Parent"])) {
+    throw new Error(`Subtree Collapse all should hide the subtree root children: ${JSON.stringify(subtreeCollapsedValues)}`);
+  }
+
+  await darkPage.getByRole("button", { name: /Expand all/i }).click();
+  await darkPage.waitForFunction(
+    () => [...document.querySelectorAll('input[aria-label="Node title"]')].some((input) => input.value === "Nested Child"),
+  );
+  await darkPage.locator(".outline-editor-body > .outline-node-row > .outline-title-row .outline-fold-button").click();
+  await darkPage.waitForFunction(
+    () => ![...document.querySelectorAll('input[aria-label="Node title"]')].some((input) => input.value === "Nested Child"),
+  );
+  await darkContext.close();
+
+  const lightContext = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const lightPage = await lightContext.newPage();
+  await seedCompletedOnboarding(lightPage);
+  await seedNestedNotebook(lightPage, { selectedNodeId: "nested-parent" });
+  await lightPage.addInitScript(() => {
+    window.localStorage.setItem("mind-atlas-theme", "light");
+  });
+  await lightPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await lightPage.waitForSelector("canvas");
+  await lightPage.getByLabel("Open atlas menu").click();
+  await lightPage.locator(".global-context-menu").getByTitle("TextEditor").click();
+  await lightPage.waitForSelector(".outline-editor-shell");
+
+  const lightThemeStats = await readOutlineThemeStats(lightPage);
+  if (lightThemeStats.backgroundBrightness < 600) {
+    throw new Error(`Light outline theme rendered too dark: ${JSON.stringify(lightThemeStats)}`);
+  }
+  await lightContext.close();
+
+  return {
+    darkBackground: darkThemeStats.backgroundColor,
+    lightBackground: lightThemeStats.backgroundColor,
+    subtreeCollapse: true,
+  };
+}
+
 async function verifyMobileOutlinePanel(browser) {
   const results = {};
   for (const viewportCase of [
@@ -561,7 +693,7 @@ async function verifyMobileOutlinePanel(browser) {
     await page.waitForSelector("canvas");
 
     await page.getByLabel("Open atlas menu").click();
-    await page.locator(".global-context-menu").getByTitle("Outline").click();
+    await page.locator(".global-context-menu").getByTitle("TextEditor").click();
     const outlinePanel = page.locator(".outline-editor-shell");
     await outlinePanel.waitFor();
     const panelStats = await outlinePanel.evaluate((shell) => {
@@ -727,17 +859,75 @@ async function verifyMobileCanvasPinchZoom(browser) {
   return pinchState;
 }
 
+async function verifyMobileTutorialRootBirth(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    ignoreHTTPSErrors: true,
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  await page.locator(".onboarding-center-pulse").waitFor();
+  await page.waitForTimeout(420);
+
+  const beforeCount = await readPersistedNodeCount(page);
+  if (beforeCount > 1) {
+    throw new Error(`Fresh mobile tutorial should not start with user nodes: count=${beforeCount}`);
+  }
+
+  const box = await page.locator("canvas").boundingBox();
+  if (!box) throw new Error("Could not locate mobile tutorial canvas.");
+  const x = Math.round(box.x + box.width / 2);
+  const y = Math.round(box.y + box.height / 2);
+  const client = await context.newCDPSession(page);
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x, y, id: 1, radiusX: 3, radiusY: 3, force: 1 }],
+  });
+  await page.waitForTimeout(1850);
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+
+  await page.waitForFunction(
+    () => {
+      const progressRaw = window.localStorage.getItem("mind-atlas-onboarding-v1");
+      const notebookRaw = window.localStorage.getItem("mind-atlas-notebook-v2");
+      if (!progressRaw || !notebookRaw) return false;
+      const progress = JSON.parse(progressRaw);
+      const root = JSON.parse(notebookRaw);
+      return progress.rootNodeCreated === true && (root.children?.length ?? 0) >= 1;
+    },
+    undefined,
+    { timeout: 6000 },
+  );
+  const afterCount = await readPersistedNodeCount(page);
+  if (afterCount <= beforeCount) {
+    throw new Error(`Mobile tutorial touch long press did not create the first node: before=${beforeCount}, after=${afterCount}`);
+  }
+  const pulseCount = await page.locator(".onboarding-center-pulse").count();
+  if (pulseCount > 0) {
+    throw new Error("Mobile tutorial root pulse remained after first-node creation.");
+  }
+
+  await context.close();
+  return { beforeCount, afterCount };
+}
+
 async function verifyMobileGeneratedLayoutVisibility(browser) {
   const results = {};
   for (const viewportCase of [
+    { name: "desktop", viewport: { width: 1440, height: 920 }, isMobile: false },
     { name: "portrait", viewport: { width: 390, height: 844 } },
     { name: "landscape", viewport: { width: 844, height: 390 } },
   ]) {
     const context = await browser.newContext({
       viewport: viewportCase.viewport,
       ignoreHTTPSErrors: true,
-      isMobile: true,
-      hasTouch: true,
+      ...(viewportCase.isMobile === false ? {} : { isMobile: true, hasTouch: true }),
     });
     for (const layoutMode of ["tree", "mind-map"]) {
       const page = await context.newPage();
@@ -745,17 +935,50 @@ async function verifyMobileGeneratedLayoutVisibility(browser) {
       await seedGeneratedLayoutNotebook(page, layoutMode);
       await page.goto(baseUrl, { waitUntil: "networkidle" });
       await page.waitForSelector("canvas");
+      await page.keyboard.press("ArrowDown");
       await page.waitForTimeout(1800);
-      const coverage = await readGeneratedLayoutCoverage(page);
-      if (coverage.insideCount < coverage.total) {
-        throw new Error(`Mobile ${viewportCase.name} ${layoutMode} layout did not keep visible nodes in view: ${JSON.stringify(coverage)}`);
+      const coverage = await readGeneratedLayoutCoverage(page, viewportCase.name, layoutMode);
+      if (!coverage.activeInside || coverage.insideCount < Math.max(1, coverage.total - 1)) {
+        throw new Error(`${viewportCase.name} ${layoutMode} layout did not keep visible nodes in view: ${JSON.stringify(coverage)}`);
       }
-      if (!coverage.centered) {
-        throw new Error(`Mobile ${viewportCase.name} ${layoutMode} layout was not centered in the usable viewport: ${JSON.stringify(coverage)}`);
+      if (!coverage.focusAligned) {
+        throw new Error(`${viewportCase.name} ${layoutMode} layout focus was not aligned to the reserved viewport center: ${JSON.stringify(coverage)}`);
       }
       results[`${viewportCase.name}-${layoutMode}`] = coverage;
       await page.close();
     }
+    await context.close();
+  }
+  return results;
+}
+
+async function verifyPhyllotaxisFocusOffset(browser) {
+  const results = {};
+  for (const viewportCase of [
+    { name: "desktop", viewport: { width: 1440, height: 920 }, isMobile: false },
+    { name: "portrait", viewport: { width: 390, height: 844 } },
+    { name: "landscape", viewport: { width: 844, height: 390 } },
+  ]) {
+    const context = await browser.newContext({
+      viewport: viewportCase.viewport,
+      ignoreHTTPSErrors: true,
+      ...(viewportCase.isMobile === false ? {} : { isMobile: true, hasTouch: true }),
+    });
+    const page = await context.newPage();
+    await seedCompletedOnboarding(page);
+    await seedGeneratedLayoutNotebook(page, "phyllotaxis");
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.waitForSelector("canvas");
+    await page.keyboard.press("ArrowUp");
+    await page.waitForTimeout(1800);
+    const coverage = await readGeneratedLayoutCoverage(page, viewportCase.name, "phyllotaxis");
+    if (!coverage.activeInside) {
+      throw new Error(`${viewportCase.name} phyllotaxis focus node was outside the usable viewport: ${JSON.stringify(coverage)}`);
+    }
+    if (!coverage.focusAligned) {
+      throw new Error(`${viewportCase.name} phyllotaxis focus was not aligned to the reserved viewport center: ${JSON.stringify(coverage)}`);
+    }
+    results[viewportCase.name] = coverage;
     await context.close();
   }
   return results;
@@ -797,6 +1020,7 @@ async function verifyTreeWheelZoomDoesNotAutoFocus(browser) {
 }
 
 async function verifyOperationControls(browser) {
+  const expectedOperationLabels = ["Tab", "Enter", "up", "down", "left", "right"];
   const mobileContext = await browser.newContext({
     viewport: { width: 390, height: 844 },
     ignoreHTTPSErrors: true,
@@ -809,16 +1033,64 @@ async function verifyOperationControls(browser) {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
   await page.getByRole("tab", { name: "AI" }).waitFor();
-  await page.getByRole("tab", { name: "Operation" }).click();
-  const operationSlot = page.locator(".mobile-operation-slot");
-  const mobileOperationLabels = await operationSlot.locator(".operation-button small").evaluateAll((items) => items.map((item) => item.textContent?.trim()));
-  const expectedOperationLabels = ["Tab", "Enter", "up", "down", "left", "right"];
-  if (JSON.stringify(mobileOperationLabels) !== JSON.stringify(expectedOperationLabels)) {
-    throw new Error(`Mobile operation labels/order changed: ${JSON.stringify(mobileOperationLabels)}`);
+  const portraitOperationTabCount = await page.getByRole("tab", { name: "Operation" }).count();
+  if (portraitOperationTabCount > 0) {
+    throw new Error(`Portrait mobile operation tab should be removed: count=${portraitOperationTabCount}`);
   }
-  const mobileDesktopToolbarCount = await page.locator(".operation-panel-desktop").count();
+  const portraitMobileSlotCount = await page.locator(".mobile-operation-slot").count();
+  if (portraitMobileSlotCount > 0) {
+    throw new Error(`Portrait mobile operation slot should be removed: count=${portraitMobileSlotCount}`);
+  }
+  const portraitToolbar = page.locator(".operation-panel-desktop");
+  await portraitToolbar.waitFor();
+  const portraitOperationLabels = await portraitToolbar.locator(".operation-button small").evaluateAll((items) => items.map((item) => item.textContent?.trim()));
+  if (JSON.stringify(portraitOperationLabels) !== JSON.stringify(expectedOperationLabels)) {
+    throw new Error(`Portrait mobile operation labels/order changed: ${JSON.stringify(portraitOperationLabels)}`);
+  }
+  const portraitToolbarBox = await portraitToolbar.boundingBox();
+  const portraitToolbarCenterY = portraitToolbarBox ? portraitToolbarBox.y + portraitToolbarBox.height / 2 : Number.NaN;
+  const portraitExpectedCenterY = (844 - Math.min(844 * 0.3, 236)) / 2;
+  if (!portraitToolbarBox || portraitToolbarBox.x > 40 || portraitToolbarBox.height < 250 || Math.abs(portraitToolbarCenterY - portraitExpectedCenterY) > 18) {
+    throw new Error(`Portrait mobile operation toolbar was not centered in the free workspace area: ${JSON.stringify({ box: portraitToolbarBox, portraitExpectedCenterY })}`);
+  }
+  await portraitToolbar.getByRole("button", { name: "Go to child layer" }).click();
+  await page.waitForFunction(
+    () => document.querySelector('textarea.space-title-editor[data-node-id="verify-child"]')?.getAttribute("data-selected") === "true",
+  );
+  await portraitToolbar.getByRole("button", { name: "Go to parent layer" }).click();
+  await page.waitForFunction(
+    () => document.querySelector('textarea.space-title-editor[data-node-id="verify-child"]')?.getAttribute("data-selected") !== "true",
+  );
+  await portraitToolbar.getByRole("button", { name: "Add child" }).click();
+  await page.waitForFunction(
+    () => {
+      const selected = document.querySelector('textarea.space-title-editor[data-selected="true"]');
+      return selected && selected.getAttribute("data-node-id") !== "verify-child";
+    },
+  );
+  await mobileContext.close();
+
+  const mobileLandscapeContext = await browser.newContext({
+    viewport: { width: 844, height: 390 },
+    ignoreHTTPSErrors: true,
+    isMobile: true,
+    hasTouch: true,
+  });
+  const mobileLandscapePage = await mobileLandscapeContext.newPage();
+  await seedCompletedOnboarding(mobileLandscapePage);
+  await seedSingleChildNotebook(mobileLandscapePage);
+  await mobileLandscapePage.goto(baseUrl, { waitUntil: "networkidle" });
+  await mobileLandscapePage.waitForSelector("canvas");
+  await mobileLandscapePage.getByRole("tab", { name: "AI" }).waitFor();
+  await mobileLandscapePage.getByRole("tab", { name: "Operation" }).evaluate((button) => button.click());
+  const operationSlot = mobileLandscapePage.locator(".mobile-operation-slot");
+  const mobileOperationLabels = await operationSlot.locator(".operation-button small").evaluateAll((items) => items.map((item) => item.textContent?.trim()));
+  if (JSON.stringify(mobileOperationLabels) !== JSON.stringify(expectedOperationLabels)) {
+    throw new Error(`Landscape mobile operation labels/order changed: ${JSON.stringify(mobileOperationLabels)}`);
+  }
+  const mobileDesktopToolbarCount = await mobileLandscapePage.locator(".operation-panel-desktop").count();
   if (mobileDesktopToolbarCount > 0) {
-    throw new Error(`Desktop operation toolbar was rendered on mobile: count=${mobileDesktopToolbarCount}`);
+    throw new Error(`Desktop operation toolbar was rendered on landscape mobile: count=${mobileDesktopToolbarCount}`);
   }
   const mobileOperationLayout = await operationSlot.locator(".operation-panel-mobile").evaluate((panel) => {
     const panelRect = panel.getBoundingClientRect();
@@ -855,24 +1127,24 @@ async function verifyOperationControls(browser) {
     mobileOperationLayout.maxButtonWidth > 64 ||
     mobileOperationLayout.overflow
   ) {
-    throw new Error(`Mobile operation buttons did not fit in one compact row: ${JSON.stringify(mobileOperationLayout)}`);
+    throw new Error(`Landscape mobile operation buttons did not fit in one compact row: ${JSON.stringify(mobileOperationLayout)}`);
   }
   await operationSlot.getByRole("button", { name: "Go to child layer" }).click();
-  await page.waitForFunction(
+  await mobileLandscapePage.waitForFunction(
     () => document.querySelector('textarea.space-title-editor[data-node-id="verify-child"]')?.getAttribute("data-selected") === "true",
   );
   await operationSlot.getByRole("button", { name: "Go to parent layer" }).click();
-  await page.waitForFunction(
+  await mobileLandscapePage.waitForFunction(
     () => document.querySelector('textarea.space-title-editor[data-node-id="verify-child"]')?.getAttribute("data-selected") !== "true",
   );
   await operationSlot.getByRole("button", { name: "Add child" }).click();
-  await page.waitForFunction(
+  await mobileLandscapePage.waitForFunction(
     () => {
       const selected = document.querySelector('textarea.space-title-editor[data-selected="true"]');
       return selected && selected.getAttribute("data-node-id") !== "verify-child";
     },
   );
-  await mobileContext.close();
+  await mobileLandscapeContext.close();
 
   const desktopContext = await browser.newContext({
     viewport: { width: 1280, height: 820 },
@@ -939,20 +1211,56 @@ async function verifyOperationControls(browser) {
   await seedSingleChildNotebook(lockedMobilePage);
   await lockedMobilePage.goto(baseUrl, { waitUntil: "networkidle" });
   await lockedMobilePage.waitForSelector("canvas");
-  await lockedMobilePage.locator("canvas").tap({ position: { x: 24, y: 180 } });
-  await lockedMobilePage.getByRole("tab", { name: "Operation" }).waitFor();
+  const lockedMobileToolbar = lockedMobilePage.locator(".operation-panel-desktop");
+  await lockedMobileToolbar.waitFor();
+  const lockedMobileLabels = await lockedMobileToolbar.locator(".operation-button small").evaluateAll((items) => items.map((item) => item.textContent?.trim()));
+  if (JSON.stringify(lockedMobileLabels) !== JSON.stringify(expectedOperationLabels)) {
+    throw new Error(`Locked portrait mobile operation labels/order changed: ${JSON.stringify(lockedMobileLabels)}`);
+  }
   const lockedMobileAiTabCount = await lockedMobilePage.getByRole("tab", { name: "AI" }).count();
   if (lockedMobileAiTabCount > 0) {
-    throw new Error("Locked mobile operation panel exposed the AI tab.");
+    throw new Error("Locked portrait mobile exposed the AI tab.");
   }
-  await lockedMobilePage.getByRole("tab", { name: "Operation" }).click();
-  const lockedMobileOperationLabels = await lockedMobilePage.locator(".mobile-operation-slot .operation-button small").evaluateAll((items) => items.map((item) => item.textContent?.trim()));
-  if (JSON.stringify(lockedMobileOperationLabels) !== JSON.stringify(expectedOperationLabels)) {
-    throw new Error(`Locked mobile operation labels/order changed: ${JSON.stringify(lockedMobileOperationLabels)}`);
+  const lockedMobileOperationTabCount = await lockedMobilePage.getByRole("tab", { name: "Operation" }).count();
+  if (lockedMobileOperationTabCount > 0) {
+    throw new Error(`Locked portrait mobile operation tab should be removed: count=${lockedMobileOperationTabCount}`);
   }
   await lockedMobileContext.close();
 
-  return { mobileTabs: ["AI", "Editor", "Operation"], desktopLeftToolbar: true, lockedDesktopLeftToolbar: true, lockedMobileOperationTab: true };
+  const lockedMobileLandscapeContext = await browser.newContext({
+    viewport: { width: 844, height: 390 },
+    ignoreHTTPSErrors: true,
+    isMobile: true,
+    hasTouch: true,
+  });
+  const lockedMobileLandscapePage = await lockedMobileLandscapeContext.newPage();
+  await seedCompletedOnboarding(lockedMobileLandscapePage, { aiUnlocked: false });
+  await seedSingleChildNotebook(lockedMobileLandscapePage);
+  await lockedMobileLandscapePage.goto(baseUrl, { waitUntil: "networkidle" });
+  await lockedMobileLandscapePage.waitForSelector("canvas");
+  await lockedMobileLandscapePage.locator("canvas").tap({ position: { x: 24, y: 180 } });
+  await lockedMobileLandscapePage.getByRole("tab", { name: "Operation" }).waitFor();
+  const lockedMobileLandscapeAiTabCount = await lockedMobileLandscapePage.getByRole("tab", { name: "AI" }).count();
+  if (lockedMobileLandscapeAiTabCount > 0) {
+    throw new Error("Locked landscape mobile operation panel exposed the AI tab.");
+  }
+  await lockedMobileLandscapePage.getByRole("tab", { name: "Operation" }).evaluate((button) => button.click());
+  const lockedMobileLandscapeOperationLabels = await lockedMobileLandscapePage
+    .locator(".mobile-operation-slot .operation-button small")
+    .evaluateAll((items) => items.map((item) => item.textContent?.trim()));
+  if (JSON.stringify(lockedMobileLandscapeOperationLabels) !== JSON.stringify(expectedOperationLabels)) {
+    throw new Error(`Locked landscape mobile operation labels/order changed: ${JSON.stringify(lockedMobileLandscapeOperationLabels)}`);
+  }
+  await lockedMobileLandscapeContext.close();
+
+  return {
+    portraitMobileLeftToolbar: true,
+    landscapeMobileOperationTab: true,
+    desktopLeftToolbar: true,
+    lockedDesktopLeftToolbar: true,
+    lockedPortraitMobileLeftToolbar: true,
+    lockedLandscapeMobileOperationTab: true,
+  };
 }
 
 async function verifyCommandDockAndMobileTextTap(browser) {
@@ -1003,7 +1311,7 @@ async function verifyCommandDockAndMobileTextTap(browser) {
 
   await page.locator('textarea.space-title-editor[data-node-id="verify-child"]').blur();
   await page.waitForTimeout(1000);
-  await page.locator("canvas").tap({ position: { x: 24, y: 180 } });
+  await page.locator("canvas").tap({ position: { x: 340, y: 220 } });
   await page.waitForFunction(() => !document.querySelector(".command-dock"));
   const afterBackgroundTap = await readCommandDockProbe(page);
   if (afterBackgroundTap.commandDockExists) {
@@ -1190,6 +1498,9 @@ async function verifyMobileEditorKeyboardOverlay(browser) {
     const panel = document.querySelector(".mobile-workspace-panel");
     const panelRect = panel?.getBoundingClientRect();
     const minimap = document.querySelector(".minimap");
+    const shell = document.querySelector(".universe-shell");
+    const shellRect = shell?.getBoundingClientRect();
+    const mobileTabs = [...document.querySelectorAll(".mobile-workspace-tabs button")].map((button) => button.textContent?.trim());
     return {
       keyboardOverlay: document.documentElement.getAttribute("data-keyboard-overlay-input"),
       keyboardPortrait: document.documentElement.getAttribute("data-keyboard-overlay-portrait"),
@@ -1207,6 +1518,10 @@ async function verifyMobileEditorKeyboardOverlay(browser) {
         : null,
       activeClassName: document.activeElement instanceof HTMLElement ? document.activeElement.className : null,
       minimapDisplay: minimap ? window.getComputedStyle(minimap).display : null,
+      shellBecameLandscape: shellRect ? shellRect.width > shellRect.height : false,
+      mobileTabs,
+      operationTabCount: mobileTabs.filter((label) => label === "Operation").length,
+      operationSlotCount: document.querySelectorAll(".mobile-operation-slot").length,
     };
     })),
     shellRectBeforeKeyboard,
@@ -1225,6 +1540,9 @@ async function verifyMobileEditorKeyboardOverlay(browser) {
   }
   if (overlayState.minimapDisplay !== "none") {
     throw new Error(`Minimap should stay hidden while editor keyboard overlay is active: ${JSON.stringify(overlayState)}`);
+  }
+  if (overlayState.shellBecameLandscape && (overlayState.operationTabCount > 0 || overlayState.operationSlotCount > 0)) {
+    throw new Error(`Keyboard overlay should keep the mobile portrait operation surface even when the shell becomes landscape: ${JSON.stringify(overlayState)}`);
   }
   if (overlayState.titleCenterDuringKeyboard >= overlayState.titleCenterBeforeKeyboard - 36) {
     throw new Error(`Universe target did not move upward for mobile keyboard overlay: ${JSON.stringify(overlayState)}`);
@@ -1375,7 +1693,7 @@ async function verifyExternalImports(browser) {
     );
     await page.getByRole("button", { name: "MindAtlas" }).click();
     await page.getByLabel("Open atlas menu").click();
-    await page.locator(".global-context-menu").getByTitle("Outline").click();
+    await page.locator(".global-context-menu").getByTitle("TextEditor").click();
     await page.waitForSelector(".outline-editor-shell");
     const outlineTitles = await page.locator('input[aria-label="Node title"]').evaluateAll((inputs) =>
       inputs.map((input) => input.value),
@@ -1394,7 +1712,7 @@ async function verifyExternalImports(browser) {
   await page.getByLabel("Markdown outline text").fill("# Pasted Outline\n\n## Act One\n\n- Beat One");
   await page.getByRole("button", { name: "Append as children" }).click();
   await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("Outline").click();
+  await page.locator(".global-context-menu").getByTitle("TextEditor").click();
   await page.waitForSelector(".outline-editor-shell");
   const appendedTitles = await page.locator('input[aria-label="Node title"]').evaluateAll((inputs) =>
     inputs.map((input) => input.value),
@@ -1413,7 +1731,7 @@ async function verifyExternalImports(browser) {
   await page.getByRole("dialog", { name: "Preview merge" }).waitFor();
   await page.getByRole("button", { name: "Apply merge" }).click();
   await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("Outline").click();
+  await page.locator(".global-context-menu").getByTitle("TextEditor").click();
   await page.waitForSelector(".outline-editor-shell");
   const previewTitles = await page.locator('input[aria-label="Node title"]').evaluateAll((inputs) =>
     inputs.map((input) => input.value),
@@ -1710,9 +2028,16 @@ async function verifyTutorialModeMenuActions(browser) {
   await clickPage.goto(baseUrl, { waitUntil: "networkidle" });
   await clickPage.waitForSelector("canvas");
   const originalCount = await addTutorialVerificationChild(clickPage);
+  let menu;
 
   await clickPage.getByLabel("Open atlas menu").click();
-  let menu = clickPage.locator(".global-context-menu");
+  menu = clickPage.locator(".global-context-menu");
+  await menu.getByTitle("Tree").click();
+  await menu.waitFor({ state: "detached" });
+  await clickPage.waitForTimeout(240);
+
+  await clickPage.getByLabel("Open atlas menu").click();
+  menu = clickPage.locator(".global-context-menu");
   const tutorialButton = menu.getByRole("button", { name: /Tutorial mode/ });
   await tutorialButton.waitFor();
   clickPage.once("dialog", (dialog) => dialog.dismiss());
@@ -1733,6 +2058,27 @@ async function verifyTutorialModeMenuActions(browser) {
   });
   await clickPage.waitForFunction(() => !window.localStorage.getItem("mind-atlas-notebook-v2"));
   await clickPage.locator(".onboarding-center-pulse").waitFor();
+  const tutorialLayoutMode = await clickPage.evaluate(() => {
+    const raw = window.localStorage.getItem("mind-atlas-ui-state-v1");
+    return raw ? JSON.parse(raw).layoutMode : null;
+  });
+  if (tutorialLayoutMode !== "phyllotaxis") {
+    throw new Error(`Tutorial mode should reset tree layout to phyllotaxis, got ${tutorialLayoutMode}`);
+  }
+  const canvasBox = await clickPage.locator("canvas").boundingBox();
+  if (!canvasBox) throw new Error("Could not locate tutorial canvas after tree reset.");
+  await clickPage.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2);
+  await clickPage.mouse.down();
+  await clickPage.waitForTimeout(1720);
+  await clickPage.mouse.up();
+  await clickPage.waitForFunction(() => {
+    const progressRaw = window.localStorage.getItem("mind-atlas-onboarding-v1");
+    const notebookRaw = window.localStorage.getItem("mind-atlas-notebook-v2");
+    if (!progressRaw || !notebookRaw) return false;
+    const progress = JSON.parse(progressRaw);
+    const root = JSON.parse(notebookRaw);
+    return progress.rootNodeCreated === true && (root.children?.length ?? 0) >= 1;
+  });
   await clickContext.close();
 
   const longPressContext = await browser.newContext({
@@ -2121,13 +2467,18 @@ function readBulkLabelCounts(page) {
   }));
 }
 
-function readGeneratedLayoutCoverage(page) {
-  return page.evaluate(() => {
-    const panel = document.querySelector(".mobile-workspace-panel")?.getBoundingClientRect();
-    const sidePanel = panel && panel.height > window.innerHeight * 0.72 && panel.left > window.innerWidth * 0.45;
-    const bottomPanel = panel && !sidePanel && panel.top > window.innerHeight * 0.35;
-    const usableRight = sidePanel ? panel.left : window.innerWidth;
-    const usableBottom = bottomPanel ? panel.top : window.innerHeight;
+function readGeneratedLayoutCoverage(page, viewportName, layoutMode) {
+  return page.evaluate(({ viewportName, layoutMode }) => {
+    const reserved = getReservedArea(viewportName, window.innerWidth, window.innerHeight);
+    const usableLeft = reserved.left;
+    const usableTop = reserved.top;
+    const usableRight = window.innerWidth - reserved.right;
+    const usableBottom = window.innerHeight - reserved.bottom;
+    const usableWidth = Math.max(1, usableRight - usableLeft);
+    const usableHeight = Math.max(1, usableBottom - usableTop);
+    const treeBias = layoutMode === "tree" ? getTreeBias(viewportName, usableWidth, usableHeight) : { x: 0, y: 0 };
+    const expectedFocusX = window.innerWidth / 2 + (reserved.left - reserved.right) / 2 + treeBias.x;
+    const expectedFocusY = window.innerHeight / 2 + (reserved.top - reserved.bottom) / 2 + treeBias.y;
     const labels = [...document.querySelectorAll('[data-node-id^="layout-"]')].map((element) => {
       const rect = element.getBoundingClientRect();
       return {
@@ -2136,7 +2487,9 @@ function readGeneratedLayoutCoverage(page) {
         y: Math.round(rect.y),
         width: Math.round(rect.width),
         height: Math.round(rect.height),
-        inside: rect.right >= 0 && rect.left <= usableRight && rect.bottom >= 0 && rect.top <= usableBottom,
+        centerX: Math.round(rect.left + rect.width / 2),
+        centerY: Math.round(rect.top + rect.height / 2),
+        inside: rect.right >= usableLeft && rect.left <= usableRight && rect.bottom >= usableTop && rect.top <= usableBottom,
       };
     });
     const visibleLabels = labels.filter((label) => label.width > 0 && label.height > 0);
@@ -2148,17 +2501,45 @@ function readGeneratedLayoutCoverage(page) {
     const centerY = visibleLabels.length ? (minY + maxY) / 2 : usableBottom / 2;
     const centerDeltaX = Math.abs(centerX - usableRight / 2);
     const centerDeltaY = Math.abs(centerY - usableBottom / 2);
+    const activeLabel = labels.find((label) => label.id === "layout-alpha");
+    // Phyllotaxis labels are anchored below the planet, so infer the planet center from the label box.
+    const activeLabelCenterOffsetY = layoutMode === "phyllotaxis" && activeLabel ? activeLabel.height * 8 : 0;
+    const focusDeltaX = activeLabel ? activeLabel.centerX - expectedFocusX : Number.POSITIVE_INFINITY;
+    const focusDeltaY = activeLabel ? activeLabel.centerY - (expectedFocusY + activeLabelCenterOffsetY) : Number.POSITIVE_INFINITY;
+    const focusToleranceX = Math.max(72, usableWidth * 0.14);
+    const focusToleranceY = Math.max(72, usableHeight * 0.14);
     return {
       total: labels.length,
       insideCount: labels.filter((label) => label.inside).length,
-      centered: centerDeltaX <= usableRight * 0.24 && centerDeltaY <= usableBottom * 0.26,
+      activeInside: Boolean(activeLabel?.inside),
+      focusAligned: Math.abs(focusDeltaX) <= focusToleranceX && Math.abs(focusDeltaY) <= focusToleranceY,
       centerDeltaX: Math.round(centerDeltaX),
       centerDeltaY: Math.round(centerDeltaY),
+      focusDeltaX: Number.isFinite(focusDeltaX) ? Math.round(focusDeltaX) : null,
+      focusDeltaY: Number.isFinite(focusDeltaY) ? Math.round(focusDeltaY) : null,
+      expectedFocusX: Math.round(expectedFocusX),
+      expectedFocusY: Math.round(expectedFocusY),
+      expectedLabelCenterY: Math.round(expectedFocusY + activeLabelCenterOffsetY),
+      usableLeft: Math.round(usableLeft),
+      usableTop: Math.round(usableTop),
       usableRight: Math.round(usableRight),
       usableBottom: Math.round(usableBottom),
       labels,
     };
-  });
+    function getReservedArea(viewportName, width, height) {
+      if (viewportName === "portrait") {
+        return { left: 0, right: 0, top: 0, bottom: Math.min(336, height * 0.42) + 24 };
+      }
+      if (viewportName === "landscape") {
+        return { left: 0, right: Math.min(292, width * 0.33) + 24, top: 0, bottom: 0 };
+      }
+      return { left: 0, right: Math.min(370, Math.max(0, width - 96)), top: 0, bottom: 0 };
+    }
+    function getTreeBias(viewportName, usableWidth, usableHeight) {
+      if (viewportName === "portrait") return { x: 0, y: 0 };
+      return { x: 0, y: -Math.min(170, usableHeight * (viewportName === "landscape" ? 0.2 : 0.18)) };
+    }
+  }, { viewportName, layoutMode });
 }
 
 function readCommandDockProbe(page) {
@@ -2186,6 +2567,17 @@ function readOutlineTitleValues(page) {
   return page.locator('input[aria-label="Node title"]').evaluateAll((inputs) => inputs.map((input) => input.value));
 }
 
+function readOutlineThemeStats(page) {
+  return page.locator(".outline-editor-shell").evaluate((shell) => {
+    const backgroundColor = getComputedStyle(shell).backgroundColor;
+    const channels = (backgroundColor.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number);
+    return {
+      backgroundColor,
+      backgroundBrightness: channels.reduce((sum, channel) => sum + channel, 0),
+    };
+  });
+}
+
 function readPersistedNodeCount(page) {
   return page.evaluate(() => {
     const stored = window.localStorage.getItem("mind-atlas-notebook-v2");
@@ -2199,41 +2591,51 @@ function readPersistedNodeCount(page) {
 await mkdir(outputDir, { recursive: true });
 
 const browser = await launchBrowser();
+async function runStep(name, fn) {
+  console.log(`verify:${name}:start`);
+  const result = await fn();
+  console.log(`verify:${name}:done`);
+  return result;
+}
 try {
   if (process.argv[2] === "share") {
-    const shareFlows = await verifyShareFlows(browser);
+    const shareFlows = await runStep("shareFlows", () => verifyShareFlows(browser));
     console.log("Share UI verification passed");
     console.log({ shareFlows });
     process.exitCode = 0;
   } else {
-    const desktop = await verifyViewport(browser, "desktop", { width: 1440, height: 920 });
-    await verifyLayoutModeSwitch(browser);
-    await verifyGeneratedLayoutBlocksBackgroundBirth(browser);
-    const konamiUnlock = await verifyKonamiUnlockSequence(browser);
-    const tutorialSkip = await verifyTutorialSkipButton(browser);
-    await verifyStartupMissingTitleMaintenance(browser);
-    await verifyIndexedDbCurrentBeatsStaleLegacyCache(browser);
-    const lockedMenu = await verifyLockedModeGlobalMenu(browser);
-    const tutorialMode = await verifyTutorialModeMenuActions(browser);
-    const voiceLog = await verifyVoiceLogDialog(browser);
-    const shareFlows = await verifyShareFlows(browser);
-    const outline = await verifyOutlineAndContextCopy(browser);
-    const outlineSafety = await verifyOutlineCollapseAndDeletionSafety(browser);
-    const imports = await verifyExternalImports(browser);
-    const mobileOutline = await verifyMobileOutlinePanel(browser);
-    const mobileGlobalMenuScroll = await verifyMobileGlobalMenuScroll(browser);
-    const mobileCanvasPinchZoom = await verifyMobileCanvasPinchZoom(browser);
-    const mobileGeneratedLayout = await verifyMobileGeneratedLayoutVisibility(browser);
-    const treeWheelZoom = await verifyTreeWheelZoomDoesNotAutoFocus(browser);
-    const operationControls = await verifyOperationControls(browser);
-    const commandDock = await verifyCommandDockAndMobileTextTap(browser);
-    const providerUsage = await verifyProviderUsagePanel(browser);
-    const mobileEditorKeyboard = await verifyMobileEditorKeyboardOverlay(browser);
-    const cameraScopedRendering = await verifyCameraScopedRendering(browser);
-    const mobile = await verifyViewport(browser, "mobile", { width: 390, height: 844 });
-    const mobileLandscape = await verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 });
+    const desktop = await runStep("desktopViewport", () => verifyViewport(browser, "desktop", { width: 1440, height: 920 }));
+    await runStep("layoutModeSwitch", () => verifyLayoutModeSwitch(browser));
+    const localDeveloperMode = await runStep("localDeveloperMode", () => verifyLocalDeveloperModeSurface(browser));
+    await runStep("generatedLayoutBlocksBackgroundBirth", () => verifyGeneratedLayoutBlocksBackgroundBirth(browser));
+    const konamiBlocked = await runStep("konamiBlocked", () => verifyKonamiDoesNotUnlock(browser));
+    const tutorialSkip = await runStep("tutorialSkip", () => verifyTutorialSkipButton(browser));
+    await runStep("startupTitleMaintenance", () => verifyStartupMissingTitleMaintenance(browser));
+    await runStep("indexedDbBeatsLegacy", () => verifyIndexedDbCurrentBeatsStaleLegacyCache(browser));
+    const lockedMenu = await runStep("lockedMenu", () => verifyLockedModeGlobalMenu(browser));
+    const tutorialMode = await runStep("tutorialMode", () => verifyTutorialModeMenuActions(browser));
+    const voiceLog = await runStep("voiceLog", () => verifyVoiceLogDialog(browser));
+    const shareFlows = await runStep("shareFlows", () => verifyShareFlows(browser));
+    const outline = await runStep("outline", () => verifyOutlineAndContextCopy(browser));
+    const outlineSafety = await runStep("outlineSafety", () => verifyOutlineCollapseAndDeletionSafety(browser));
+    const outlineTheme = await runStep("outlineTheme", () => verifyOutlineThemeAndSubtreeCollapse(browser));
+    const imports = await runStep("imports", () => verifyExternalImports(browser));
+    const mobileOutline = await runStep("mobileOutline", () => verifyMobileOutlinePanel(browser));
+    const mobileGlobalMenuScroll = await runStep("mobileGlobalMenuScroll", () => verifyMobileGlobalMenuScroll(browser));
+    const mobileCanvasPinchZoom = await runStep("mobileCanvasPinchZoom", () => verifyMobileCanvasPinchZoom(browser));
+    const mobileTutorialRootBirth = await runStep("mobileTutorialRootBirth", () => verifyMobileTutorialRootBirth(browser));
+    const mobileGeneratedLayout = await runStep("mobileGeneratedLayout", () => verifyMobileGeneratedLayoutVisibility(browser));
+    const phyllotaxisFocusOffset = await runStep("phyllotaxisFocusOffset", () => verifyPhyllotaxisFocusOffset(browser));
+    const treeWheelZoom = await runStep("treeWheelZoom", () => verifyTreeWheelZoomDoesNotAutoFocus(browser));
+    const operationControls = await runStep("operationControls", () => verifyOperationControls(browser));
+    const commandDock = await runStep("commandDock", () => verifyCommandDockAndMobileTextTap(browser));
+    const providerUsage = await runStep("providerUsage", () => verifyProviderUsagePanel(browser));
+    const mobileEditorKeyboard = await runStep("mobileEditorKeyboard", () => verifyMobileEditorKeyboardOverlay(browser));
+    const cameraScopedRendering = await runStep("cameraScopedRendering", () => verifyCameraScopedRendering(browser));
+    const mobile = await runStep("mobileViewport", () => verifyViewport(browser, "mobile", { width: 390, height: 844 }));
+    const mobileLandscape = await runStep("mobileLandscapeViewport", () => verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 }));
     console.log("UI verification passed");
-    console.log({ desktop, konamiUnlock, tutorialSkip, lockedMenu, tutorialMode, voiceLog, shareFlows, outline, outlineSafety, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileGeneratedLayout, treeWheelZoom, operationControls, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+    console.log({ desktop, localDeveloperMode, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
   }
 } finally {
   await browser.close();

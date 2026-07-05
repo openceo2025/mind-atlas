@@ -84,9 +84,9 @@ const NOTIFICATION_PULSE_DURATION_MS = 8200;
 const NOTIFICATION_REPEAT_INTERVAL_MS = 3600;
 const HISTORY_LIMIT = 50;
 const DEFAULT_AI_CONTEXT_OPTIONS: AiContextOptions = {
-  scope: "focused",
+  scope: "path-children",
   ancestorDepth: 2,
-  descendantDepth: 2,
+  descendantDepth: 1,
   lateralRadius: 1,
   attachmentMode: "metadata",
   maxAttachmentCount: 10,
@@ -271,6 +271,7 @@ interface AtlasStore {
   setNodeReminders: (updates: NodeReminderUpdate[]) => NodeReminderUpdateResult;
   clearNodeReminder: (id: string) => void;
   showNotificationSnoozePrompt: (id: string) => void;
+  acknowledgeNodeNotification: (id: string) => void;
   dismissNotificationSnoozePrompt: (id?: string) => void;
   snoozeNodeNotification: (id: string, delayMs: number) => void;
   setNodeStatus: (id: string, status: WorkStatus, nextDecision?: string) => void;
@@ -361,13 +362,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!located) return;
     const { node, path, position } = located;
     const visualRadius = getNodeVisualRadius(node, path.length - 1);
-    set((state) => {
-      const unreadNotifications = markNodeNotificationsRead(state.atlasRoot, state.unreadNotifications, id);
+    set(() => {
       return {
         selected: selectionFromNode(node),
         selectedNodeId: id,
         cameraFocusNodeId: null,
-        unreadNotifications,
         focusRequest: {
           x: position[0],
           y: position[1],
@@ -383,13 +382,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   selectNodeInPlace: (id) => {
     const node = findNode(get().atlasRoot, id);
     if (!node) return;
-    set((state) => {
-      const unreadNotifications = markNodeNotificationsRead(state.atlasRoot, state.unreadNotifications, id);
+    set(() => {
       return {
         selected: selectionFromNode(node),
         selectedNodeId: id,
         cameraFocusNodeId: null,
-        unreadNotifications,
       };
     });
   },
@@ -401,12 +398,10 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const { node, path, position } = located;
     const visualRadius = getNodeVisualRadius(node, path.length - 1);
     set((state) => {
-      const unreadNotifications = markNodeNotificationsRead(state.atlasRoot, state.unreadNotifications, id);
       return {
         selected: selectionFromNode(node),
         selectedNodeId: id,
         cameraFocusNodeId: null,
-        unreadNotifications,
         focusRequest: {
           x: position[0],
           y: position[1],
@@ -793,6 +788,14 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         expiresAt: now + 60_000,
         nonce: (state.notificationSnoozePrompt?.nonce ?? 0) + 1,
       },
+    }));
+  },
+
+  acknowledgeNodeNotification: (id) => {
+    set((state) => ({
+      unreadNotifications: markNodeNotificationsRead(state.atlasRoot, state.unreadNotifications, id),
+      notificationPulses: state.notificationPulses.filter((pulse) => pulse.nodeId !== id),
+      notificationSnoozePrompt: state.notificationSnoozePrompt?.nodeId === id ? null : state.notificationSnoozePrompt,
     }));
   },
 
@@ -2496,6 +2499,7 @@ export function buildAiNodeContext(root: AtlasNode, selectedNodeId: string, opti
   const selectedNode = path[path.length - 1];
   const parent = path.length > 1 ? path[path.length - 2] : null;
   const selectedDepth = getSelectedSnapshotDepth(options);
+  const pathSnapshotDepth = options.scope === "path-children" ? 1 : 0;
   const selectedSnapshotOptions = {
     ...(options.scope === "subtree" ? { childLimit: Number.MAX_SAFE_INTEGER } : {}),
     truncationStats,
@@ -2503,7 +2507,7 @@ export function buildAiNodeContext(root: AtlasNode, selectedNodeId: string, opti
   const siblingDepth = options.scope === "neighborhood" ? 1 : 0;
   const includeSiblings = options.scope === "neighborhood";
   const selectedSnapshot = nodeToAiSnapshot(selectedNode, selectedDepth, selectedSnapshotOptions);
-  const pathSnapshots = getContextPathNodes(path, options).map((node) => nodeToAiSnapshot(node, 0, { truncationStats }));
+  const pathSnapshots = getContextPathNodes(path, options).map((node) => nodeToAiSnapshot(node, pathSnapshotDepth, { truncationStats }));
   const siblingSnapshots =
     options.scope === "custom"
       ? getLateralContextNodes(root, selectedNodeId, options).map((node) => nodeToAiSnapshot(node, 0, { truncationStats }))
@@ -4341,7 +4345,19 @@ function normalizeChatSettings(settings: Partial<ChatSettings>): ChatSettings {
 }
 
 function normalizeChatService(value: ChatSettings["service"] | undefined): ChatSettings["service"] {
-  if (value === "anthropic" || value === "deepseek" || value === "local") return value;
+  if (
+    value === "anthropic" ||
+    value === "glm" ||
+    value === "deepseek" ||
+    value === "gemini" ||
+    value === "qwen" ||
+    value === "composer" ||
+    value === "kimi" ||
+    value === "mimo" ||
+    value === "minimax" ||
+    value === "grok" ||
+    value === "local"
+  ) return value;
   return "openai";
 }
 
@@ -4638,6 +4654,8 @@ function getSelectedSnapshotDepth(options: AiContextOptions) {
   switch (options.scope) {
     case "minimal":
       return 0;
+    case "path-children":
+      return 1;
     case "focused":
       return 1;
     case "subtree":
@@ -4654,6 +4672,7 @@ function getSelectedSnapshotDepth(options: AiContextOptions) {
 function getContextPathNodes(path: AtlasNode[], options: AiContextOptions) {
   if (options.scope === "selected") return [];
   if (options.scope === "minimal") return path.slice(-1);
+  if (options.scope === "path-children") return path.slice(0, -1);
   if (options.scope === "custom") {
     return path.slice(Math.max(0, path.length - options.ancestorDepth - 1));
   }

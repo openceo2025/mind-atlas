@@ -25,6 +25,16 @@ type VoiceToolSpec = RealtimeToolDefinition & {
   handler: VoiceToolHandler;
 };
 
+type BulkNodeUpdate = {
+  nodeId: string;
+  title: string | undefined;
+  body: string | undefined;
+  summary: string | undefined;
+  nextDecision: string | undefined;
+  tags: string[] | undefined;
+  status: WorkStatus | undefined;
+};
+
 const scopeValues: AiContextScope[] = ["minimal", "focused", "subtree", "neighborhood", "selected", "custom"];
 const toolCapableAiModes: AiExecutionMode[] = ["chat", "openai", "local"];
 const statuses: WorkStatus[] = ["running", "needs_review", "waiting", "blocked", "error", "done"];
@@ -414,40 +424,66 @@ const toolSpecs: VoiceToolSpec[] = [
   {
     type: "function",
     name: "delete_node",
-    description: "Request deletion of a node. This is dangerous and requires human approval.",
-    parameters: objectSchema({ nodeId: { type: "string" }, reason: { type: "string" } }, ["nodeId"]),
-    handler: (args) => approvalRequired("delete_node", args),
+    description: "Delete a notebook node. If nodeId is omitted, the active node is deleted. Root notebook deletion is not allowed.",
+    parameters: objectSchema({ nodeId: { type: "string" }, reason: { type: "string" } }),
+    handler: (args) => {
+      const state = useAtlasStore.getState();
+      const nodeId = stringArg(args, "nodeId", state.selectedNodeId);
+      if (!nodeId || nodeId === state.atlasRoot.id) return fail("The root notebook node cannot be deleted.");
+      const node = findNode(state.atlasRoot, nodeId);
+      if (!node) return fail(`Node not found: ${nodeId}`);
+      state.deleteNode(nodeId);
+      return ok(`Deleted ${node.title}. Use undo if this was not intended.`, { nodeId, title: node.title, undoAvailable: true });
+    },
   },
   {
     type: "function",
     name: "import_notebook",
-    description: "Request notebook import or replacement. This is dangerous and requires human approval; browser and OS file pickers must be opened by the user.",
+    description: "Explain that notebook import or replacement requires the user to operate the browser file picker manually.",
     parameters: objectSchema({
       reason: { type: "string" },
       sourceDescription: { type: "string", description: "Describe the user-provided source. Do not attempt to open a file picker." },
     }),
-    handler: (args) => approvalRequired("import_notebook", args),
+    handler: () => fail("Notebook import is not executable through AI tools because the browser file picker must be operated by the user."),
   },
   {
     type: "function",
     name: "bulk_update_nodes",
-    description: "Request bulk notebook edits. This is dangerous and requires human approval.",
+    description: "Apply simple text/status updates to multiple existing notebook nodes.",
     parameters: objectSchema({
       reason: { type: "string" },
-      updates: { type: "array", items: { type: "object" } },
-    }, ["reason"]),
-    handler: (args) => approvalRequired("bulk_update_nodes", args),
+      updates: {
+        type: "array",
+        minItems: 1,
+        maxItems: 50,
+        items: {
+          type: "object",
+          properties: {
+            nodeId: { type: "string" },
+            title: { type: "string" },
+            body: { type: "string" },
+            summary: { type: "string" },
+            nextDecision: { type: "string" },
+            tags: { type: "array", items: { type: "string" } },
+            status: { type: "string", enum: statuses },
+          },
+          required: ["nodeId"],
+          additionalProperties: false,
+        },
+      },
+    }, ["updates"]),
+    handler: handleBulkUpdateNodes,
   },
   {
     type: "function",
     name: "run_codex_full_access",
-    description: "Request a Codex retry with full filesystem access. This is dangerous and requires human approval.",
+    description: "Explain that Codex full-access retries cannot be started from hosted AI tools.",
     parameters: objectSchema({
       reason: { type: "string" },
       workspace: { type: "string" },
       requestNodeId: { type: "string" },
     }, ["reason"]),
-    handler: (args) => approvalRequired("run_codex_full_access", args),
+    handler: () => fail("Codex full-access retries are not executable through hosted AI tools."),
   },
   {
     type: "function",
@@ -457,14 +493,17 @@ const toolSpecs: VoiceToolSpec[] = [
       action: { type: "string" },
       reason: { type: "string" },
     }, ["action"]),
-    handler: (args) => approvalRequired("request_file_picker_action", args),
+    handler: () => fail("Browser or OS file picker actions must be performed by the user and cannot be executed through AI tools."),
   },
   {
     type: "function",
     name: "reset_notebook",
-    description: "Request notebook reset. This is dangerous and requires human approval.",
+    description: "Reset the notebook to the initial state. Undo can restore the previous notebook during the current session.",
     parameters: objectSchema({ reason: { type: "string" } }),
-    handler: (args) => approvalRequired("reset_notebook", args),
+    handler: () => {
+      useAtlasStore.getState().resetNotebook();
+      return ok("Notebook reset. Use undo if this was not intended.", { undoAvailable: true });
+    },
   },
 ];
 
@@ -552,24 +591,6 @@ function fail(text: string): VoiceToolExecutionResult {
   return { ok: false, text };
 }
 
-function approvalRequired(toolName: string, args: Record<string, unknown>): VoiceToolExecutionResult {
-  const approvalId = `voice-approval-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
-  const text = `${toolName} requires human approval and was not executed. The request was recorded in the AI Partner log with approval id ${approvalId}.`;
-  return {
-    ok: false,
-    text,
-    approvalRequired: true,
-    data: {
-      approvalId,
-      toolName,
-      args,
-      status: "pending_user_approval",
-      executed: false,
-      instructions: "Review the request in the AI Partner log. Execute the corresponding UI action manually only if it is safe.",
-    },
-  };
-}
-
 function handleAddChildNodes(args: Record<string, unknown>) {
   const state = useAtlasStore.getState();
   const parentId = stringArg(args, "parentId", state.selectedNodeId);
@@ -580,6 +601,38 @@ function handleAddChildNodes(args: Record<string, unknown>) {
   const ids = state.addChildNodes(parentId, drafts, { focus: true });
   if (!ids.length) return fail("Could not create child nodes.");
   return ok(`Created ${ids.length} child node(s).`, { nodeIds: ids });
+}
+
+function handleBulkUpdateNodes(args: Record<string, unknown>) {
+  const updates = bulkUpdateArrayArg(args, "updates");
+  if (!updates.length) return fail("No valid node updates were provided.");
+
+  const state = useAtlasStore.getState();
+  const updated: Array<{ nodeId: string; title: string }> = [];
+  const failed: Array<{ nodeId: string; reason: string }> = [];
+
+  for (const update of updates) {
+    const node = findNode(useAtlasStore.getState().atlasRoot, update.nodeId);
+    if (!node) {
+      failed.push({ nodeId: update.nodeId, reason: "not_found" });
+      continue;
+    }
+    if (update.title !== undefined || update.body !== undefined || update.summary !== undefined || update.nextDecision !== undefined || update.tags !== undefined) {
+      useAtlasStore.getState().updateNode(update.nodeId, {
+        title: update.title,
+        body: update.body,
+        summary: update.summary,
+        nextDecision: update.nextDecision,
+        tags: update.tags,
+      });
+    }
+    if (update.status) {
+      useAtlasStore.getState().setNodeStatus(update.nodeId, update.status);
+    }
+    updated.push({ nodeId: update.nodeId, title: node.title });
+  }
+
+  return ok(`Updated ${updated.length} node(s).${failed.length ? ` ${failed.length} failed.` : ""}`, { updated, failed, activeNodeId: state.selectedNodeId });
 }
 
 function formatWebSearchToolText(result: WebSearchResult) {
@@ -658,6 +711,28 @@ function reminderUpdateArrayArg(args: Record<string, unknown>, key: string) {
       return { nodeId, reminderAt };
     })
     .filter((item): item is { nodeId: string; reminderAt: string } => item !== null);
+}
+
+function bulkUpdateArrayArg(args: Record<string, unknown>, key: string) {
+  const value = args[key];
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const record = item as Record<string, unknown>;
+      const nodeId = typeof record.nodeId === "string" ? record.nodeId.trim() : "";
+      if (!nodeId) return null;
+      return {
+        nodeId,
+        title: typeof record.title === "string" ? record.title : undefined,
+        body: typeof record.body === "string" ? record.body : undefined,
+        summary: typeof record.summary === "string" ? record.summary : undefined,
+        nextDecision: typeof record.nextDecision === "string" ? record.nextDecision : undefined,
+        tags: Array.isArray(record.tags) ? record.tags.map((tag) => String(tag).trim()).filter(Boolean) : undefined,
+        status: typeof record.status === "string" && statuses.includes(record.status as WorkStatus) ? record.status as WorkStatus : undefined,
+      };
+    })
+    .filter((item): item is BulkNodeUpdate => item !== null);
 }
 
 function numberArg(args: Record<string, unknown>, key: string, fallback: number) {

@@ -44,9 +44,9 @@ interface ContextNode {
 }
 
 const DEFAULT_CONTEXT_OPTIONS: Required<Pick<ContextAssemblyOptions, "scope" | "ancestorDepth" | "descendantDepth" | "lateralRadius" | "attachmentMode" | "maxAttachmentCount" | "maxAttachmentBytes" | "selectedNodeIds" | "maxCharacters" | "includeMetadata">> = {
-  scope: "focused",
+  scope: "path-children",
   ancestorDepth: 2,
-  descendantDepth: 2,
+  descendantDepth: 1,
   lateralRadius: 1,
   attachmentMode: "metadata",
   maxAttachmentCount: 20,
@@ -241,6 +241,7 @@ function findDeepestRemovableBlockIndex(blocks: ContextBlock[]) {
 function selectAncestorChain(path: AtlasNode[], options: Required<ContextAssemblyOptions>) {
   if (options.scope === "selected") return [];
   if (options.scope === "minimal") return path.slice(-1);
+  if (options.scope === "path-children") return path.slice(0, -1);
   if (options.scope === "custom") return path.slice(Math.max(0, path.length - options.ancestorDepth - 1));
   return path;
 }
@@ -270,6 +271,7 @@ function selectedDepth(options: Required<ContextAssemblyOptions>) {
     case "minimal":
     case "selected":
       return 0;
+    case "path-children":
     case "focused":
       return 1;
     case "neighborhood":

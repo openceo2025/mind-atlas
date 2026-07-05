@@ -69,6 +69,10 @@ export function persistUiStatePatch(patch: Omit<Partial<PersistedUiState>, "vers
   }
 }
 
+export function clearPersistedCommandDraft() {
+  persistUiStatePatch({ commandDraft: undefined });
+}
+
 export function isPersistedCameraPose(value: unknown): value is PersistedCameraPose {
   const pose = value as Partial<PersistedCameraPose>;
   return Number.isFinite(pose?.yaw) && Number.isFinite(pose?.pitch) && Number.isFinite(pose?.offset);

@@ -1,6 +1,6 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CloudDownload, CloudUpload, Download, FileText, GitBranch, Github, GraduationCap, History, ListTree, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Share2, Smartphone, Sun, Trash2, Undo2, Upload, Volume2, X } from "lucide-react";
-import { ChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CloudDownload, CloudUpload, CreditCard, Download, FileText, GitBranch, Github, GraduationCap, History, Info, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
+import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
 import { CommandDock } from "./components/CommandDock";
@@ -8,7 +8,7 @@ import { copyContextMarkdown, formatContextCopyStats } from "./context/contextCo
 import { Minimap } from "./components/Minimap";
 import { OutlineEditor } from "./components/OutlineEditor";
 import { UniverseCanvas } from "./components/UniverseCanvas";
-import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
+import { HOSTED_SERVICE_SESSION_REFRESH_EVENT, REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_BIRTH_UNAVAILABLE_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
 import { detectImportFormat, importExternalNotebookFile, importMarkdownText } from "./notebookImport";
 import { createAtlasImageShareData, createAtlasShareImage } from "./notebookImageShare";
 import { createNotebookJsonPackage, createNotebookPackage, importNotebookPackage, type NotebookPackageResult } from "./notebookPackage";
@@ -16,18 +16,20 @@ import { createSharedNotebookLink, readSharedNotebookFromUrl, removeSharedNotebo
 import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
 import type { OutlineNodeInput } from "./outline/atlasOutline";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
-import { getAtlasLayoutModeLabel, type AtlasLayoutMode } from "./layout/atlasLayout";
+import { getAtlasLayoutModeLabel, isAtlasLayoutMode, type AtlasLayoutMode } from "./layout/atlasLayout";
+import { fetchHostedServiceSession, isHostedServiceMode, logoutHostedService, openHostedBillingPortal, startHostedBillingCheckout, startHostedGoogleLogin } from "./hosted/serviceClient";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
-import type { AtlasNode, CloudNotebookEntry, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
+import type { AtlasNode, CloudNotebookEntry, HostedServiceSession, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
 import type { NotebookPersistenceStatus, NotebookSnapshot } from "./notebookPersistence";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const WORKSPACE_PANEL_EXIT_MS = 960;
+const LAYOUT_BIRTH_UNAVAILABLE_NOTICE_MS = 3600;
 const RENDER_QUALITY_STORAGE_KEY = "mind-atlas-render-quality";
 const ROOT_COMMAND_MAX_ZOOM = 1.08;
-const TUTORIAL_SECRET_LONG_PRESS_MS = 780;
 const DEFAULT_DATASET_TITLE = "Mind Atlas";
+const MIND_ATLAS_ABOUT_URL = "/about.html";
 const MIND_ATLAS_SOURCE_URL = "https://github.com/openceo2025/mind-atlas";
 const IMPORT_ACCEPT_TYPES = ".mindatlas,.mindatlaspkg,.md,.markdown,.opml,.mm,application/mindatlas+json,application/x-mindatlas-package,text/markdown,text/plain,text/xml,application/xml";
 const MODE_OPTIONS: Array<{ mode: AtlasLayoutMode; icon: "orbit" | "tree" | "mind" }> = [
@@ -47,6 +49,7 @@ const MOBILE_KEYBOARD_OPEN_THRESHOLD_PX = 150;
 const MOBILE_KEYBOARD_PREPARE_MS = 1200;
 const MOBILE_KEYBOARD_CLOSING_MS = 320;
 const MOBILE_KEYBOARD_SETTLE_DELAYS_MS = [80, 180, 360, 700, 1100, 1500] as const;
+const MOBILE_KEYBOARD_PROFILE_EVENT = "mind-atlas-mobile-keyboard-profile";
 type MobilePanelTab = "command" | "editor" | "operation" | "outline";
 type MergeChoice = "current" | "incoming";
 
@@ -107,8 +110,10 @@ export default function App() {
   const restoreNotebookFromSnapshot = useAtlasStore((state) => state.restoreNotebookFromSnapshot);
   const clearVoiceLog = useAtlasStore((state) => state.clearVoiceLog);
   const markVoiceLogSeen = useAtlasStore((state) => state.markVoiceLogSeen);
+  const appendVoiceLogEntry = useAtlasStore((state) => state.appendVoiceLogEntry);
   const notificationPulses = useAtlasStore((state) => state.notificationPulses);
   const unreadNotifications = useAtlasStore((state) => state.unreadNotifications);
+  const acknowledgeNodeNotification = useAtlasStore((state) => state.acknowledgeNodeNotification);
   const restoreAttachmentPreviews = useAtlasStore((state) => state.restoreAttachmentPreviews);
   const recoverCompletedCodexRuns = useAtlasStore((state) => state.recoverCompletedCodexRuns);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
@@ -125,6 +130,11 @@ export default function App() {
   const [outlineEditorOpen, setOutlineEditorOpen] = useState(false);
   const [outlineEditorRootId, setOutlineEditorRootId] = useState<string | null>(null);
   const [cloudLoadOpen, setCloudLoadOpen] = useState(false);
+  const publicServiceMode = isHostedServiceMode();
+  const [aiFeatureDialogOpen, setAiFeatureDialogOpen] = useState(false);
+  const [hostedSession, setHostedSession] = useState<HostedServiceSession | null>(null);
+  const [hostedSessionLoading, setHostedSessionLoading] = useState(false);
+  const [hostedSessionError, setHostedSessionError] = useState("");
   const [mobileNotificationsEnabled, setMobileNotificationsEnabled] = useState(() => loadMobileNotificationPreference());
   const [mobileNotificationPermission, setMobileNotificationPermission] = useState<MobileNotificationPermission>(() => getMobileNotificationPermission());
   const [mobileNotificationMessage, setMobileNotificationMessage] = useState("");
@@ -141,6 +151,7 @@ export default function App() {
   const [mobileWorkspacePanelRevealed, setMobileWorkspacePanelRevealed] = useState(false);
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const [contextCopyStatus, setContextCopyStatus] = useState("");
+  const [layoutBirthUnavailableMessage, setLayoutBirthUnavailableMessage] = useState("");
   const [textImportOpen, setTextImportOpen] = useState(false);
   const [textImportValue, setTextImportValue] = useState("");
   const [mergePreview, setMergePreview] = useState<MergePreviewState | null>(null);
@@ -150,18 +161,33 @@ export default function App() {
   const [dragImportActive, setDragImportActive] = useState(false);
   const mobilePortraitBreadcrumb = useMobilePortraitBreadcrumbLayout();
   const mobileOperationSurface = useMobileOperationSurface();
-  const tutorialLongPressTimerRef = useRef<number | null>(null);
-  const tutorialLongPressTriggeredRef = useRef(false);
+  const mobilePortraitOperationSurface = useMobilePortraitOperationSurface();
   const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
   const selectedPath = findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
   const selectedNode = selectedPath[selectedPath.length - 1] ?? atlasRoot;
   const outlineEditorRoot = outlineEditorRootId ? findNode(atlasRoot, outlineEditorRootId) ?? selectedNode : selectedNode;
   const onboarding = useOnboarding();
-  const showCommandDock = onboarding.showAiFeatures && shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport);
-  const effectiveMobilePanelTab: MobilePanelTab = getEffectiveMobilePanelTab(mobilePanelTab, showCommandDock, outlineEditorOpen);
-  const showWorkspacePanel = !outlineEditorOpen && (showCommandDock || selectedNodeId !== atlasRoot.id || (onboarding.showMainChrome && mobileWorkspacePanelRevealed));
+  const aiFeaturesUnlocked = publicServiceMode ? Boolean(hostedSession?.entitlement.aiEnabled) : onboarding.showMainChrome;
+  const voiceLogReadable = publicServiceMode ? onboarding.showMainChrome : aiFeaturesUnlocked;
+  const showCommandDock = aiFeaturesUnlocked && (publicServiceMode || shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport));
+  const showTutorialOperationFallback = onboarding.showChildCreationFallback;
+  const mobileOperationPanelTabAvailable = !mobilePortraitOperationSurface;
+  const operationPanelInWorkspace = mobileOperationSurface && mobileOperationPanelTabAvailable;
+  const effectiveMobilePanelTab: MobilePanelTab = getEffectiveMobilePanelTab(mobilePanelTab, showCommandDock, outlineEditorOpen, mobileOperationPanelTabAvailable);
+  const showWorkspacePanel =
+    !outlineEditorOpen &&
+    (showCommandDock ||
+      selectedNodeId !== atlasRoot.id ||
+      (showTutorialOperationFallback && operationPanelInWorkspace) ||
+      (onboarding.showMainChrome && mobileWorkspacePanelRevealed && mobileOperationPanelTabAvailable));
   const focusPanelOpen = outlineEditorOpen || selectedNodeId !== atlasRoot.id;
   const operationTargets = useMemo(() => getOperationTargets(selectedPath), [selectedPath]);
+  const tutorialFallbackChildParentId =
+    showTutorialOperationFallback && selectedNodeId === atlasRoot.id ? atlasRoot.children[0]?.id ?? selectedNodeId : selectedNodeId;
+  const tutorialFallbackChildParentPath = useMemo(
+    () => findNodePath(atlasRoot, tutorialFallbackChildParentId) ?? selectedPath,
+    [atlasRoot, selectedPath, tutorialFallbackChildParentId],
+  );
   const operationActions = useMemo<OperationAction[]>(
     () => [
       {
@@ -169,7 +195,10 @@ export default function App() {
         label: "Add child",
         shortcut: "Tab",
         icon: <GitBranch size={18} />,
-        onClick: () => addChildNode(selectedNodeId),
+        onClick: () => {
+          const childId = addChildNode(tutorialFallbackChildParentId);
+          if (childId) emitOnboardingEvent("child-node-created", { childDepth: tutorialFallbackChildParentPath.length });
+        },
       },
       {
         id: "add-sibling",
@@ -229,6 +258,8 @@ export default function App() {
       operationTargets.nextSiblingId,
       operationTargets.parentId,
       operationTargets.previousSiblingId,
+      tutorialFallbackChildParentId,
+      tutorialFallbackChildParentPath.length,
       selectedNodeId,
     ],
   );
@@ -237,7 +268,9 @@ export default function App() {
     "app-shell",
     onboarding.showLogoOnly ? "is-onboarding-logo-only" : "",
     !onboarding.showMainChrome ? "is-onboarding-main-hidden" : "",
-    onboarding.showAiFeatures ? "is-ai-unlocked" : "is-ai-locked",
+    showTutorialOperationFallback ? "is-onboarding-child-fallback" : "",
+    aiFeaturesUnlocked ? "is-ai-unlocked" : "is-ai-locked",
+    publicServiceMode ? "is-public-service" : "",
   ].filter(Boolean).join(" ");
   const unreadNotificationLinks = useMemo(
     () =>
@@ -250,6 +283,33 @@ export default function App() {
         .slice(0, 8),
     [atlasRoot, unreadNotifications],
   );
+  useEffect(() => {
+    const loggedSignatures = new Set(
+      voiceLogEntries
+        .map((entry) => entry.metadata?.notificationSignature)
+        .filter((value): value is string => typeof value === "string" && value.length > 0),
+    );
+    for (const { notification, node } of unreadNotificationLinks) {
+      const signature = notification.signature ?? `${notification.nodeId}:${notification.kind}:${notification.title}`;
+      if (loggedSignatures.has(signature)) continue;
+      loggedSignatures.add(signature);
+      appendVoiceLogEntry({
+        role: "system",
+        title: `Notification: ${notification.title}`,
+        text: [
+          `${notification.kind} notification for ${node.title || "Untitled node"}.`,
+          `Node: ${node.title || "Untitled node"} (${notification.nodeId})`,
+          node.summary ? `Summary: ${node.summary}` : "",
+        ].filter(Boolean).join("\n"),
+        metadata: {
+          nodeId: notification.nodeId,
+          notificationKind: notification.kind,
+          notificationTitle: notification.title,
+          notificationSignature: signature,
+        },
+      });
+    }
+  }, [appendVoiceLogEntry, unreadNotificationLinks, voiceLogEntries]);
   const unreadPartnerEntries = useMemo(
     () => voiceLogEntries.filter((entry) => isUnreadPartnerEntry(entry, voiceLogLastSeenAt)),
     [voiceLogEntries, voiceLogLastSeenAt],
@@ -258,12 +318,6 @@ export default function App() {
   const uiPersistenceReadyRef = useRef(false);
   const uiRestoreAppliedRef = useRef(false);
   const latestUiStateRef = useRef<Omit<Partial<PersistedUiState>, "version" | "savedAt">>({});
-
-  const clearTutorialLongPressTimer = useCallback(() => {
-    if (tutorialLongPressTimerRef.current === null) return;
-    window.clearTimeout(tutorialLongPressTimerRef.current);
-    tutorialLongPressTimerRef.current = null;
-  }, []);
 
   const closeMobileBackOverlays = useCallback(() => {
     setMenuOpen(false);
@@ -280,8 +334,43 @@ export default function App() {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   }, []);
 
+  const refreshHostedSession = useCallback(async () => {
+    if (!publicServiceMode) return;
+    try {
+      setHostedSessionLoading(true);
+      setHostedSessionError("");
+      setHostedSession(await fetchHostedServiceSession());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Mind Atlas service session could not be loaded.";
+      setHostedSessionError(message);
+    } finally {
+      setHostedSessionLoading(false);
+    }
+  }, [publicServiceMode]);
+
   useVisualViewportHeight(commandInputEditing);
   useMobileBackButtonGuard({ closeOverlays: closeMobileBackOverlays });
+
+  useEffect(() => {
+    void refreshHostedSession();
+  }, [refreshHostedSession]);
+
+  useEffect(() => {
+    if (!publicServiceMode) return;
+    let refreshTimer: number | null = null;
+    const handleRefreshRequest = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void refreshHostedSession();
+      }, 180);
+    };
+    window.addEventListener(HOSTED_SERVICE_SESSION_REFRESH_EVENT, handleRefreshRequest);
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      window.removeEventListener(HOSTED_SERVICE_SESSION_REFRESH_EVENT, handleRefreshRequest);
+    };
+  }, [publicServiceMode, refreshHostedSession]);
 
   useEffect(() => {
     try {
@@ -324,6 +413,33 @@ export default function App() {
     if (!persistedUiState?.layoutMode) return;
     setLayoutMode(persistedUiState.layoutMode);
   }, [persistedUiState, setLayoutMode]);
+
+  useEffect(() => {
+    if (!onboarding.showRootPulse || layoutMode === "phyllotaxis") return;
+    const nextUiState = { ...latestUiStateRef.current, layoutMode: "phyllotaxis" as const };
+    latestUiStateRef.current = nextUiState;
+    setLayoutMode("phyllotaxis");
+    persistUiStatePatch(nextUiState);
+  }, [layoutMode, onboarding.showRootPulse, setLayoutMode]);
+
+  useEffect(() => {
+    let timeout: number | null = null;
+    const handleBirthUnavailable = (event: Event) => {
+      const mode = (event as CustomEvent<{ layoutMode?: unknown }>).detail?.layoutMode;
+      const label = isAtlasLayoutMode(mode) ? getAtlasLayoutModeLabel(mode) : "This layout";
+      setLayoutBirthUnavailableMessage(`${label}では長押しでノードを作成できません。Mind Atlasモードで作成できます。`);
+      if (timeout !== null) window.clearTimeout(timeout);
+      timeout = window.setTimeout(() => {
+        timeout = null;
+        setLayoutBirthUnavailableMessage("");
+      }, LAYOUT_BIRTH_UNAVAILABLE_NOTICE_MS);
+    };
+    window.addEventListener(UNIVERSE_BACKGROUND_BIRTH_UNAVAILABLE_EVENT, handleBirthUnavailable);
+    return () => {
+      if (timeout !== null) window.clearTimeout(timeout);
+      window.removeEventListener(UNIVERSE_BACKGROUND_BIRTH_UNAVAILABLE_EVENT, handleBirthUnavailable);
+    };
+  }, []);
 
   useEffect(() => {
     const saveUiState = () => persistUiStatePatch(latestUiStateRef.current);
@@ -382,24 +498,22 @@ export default function App() {
     };
   }, [menuOpen]);
 
-  useEffect(() => clearTutorialLongPressTimer, [clearTutorialLongPressTimer]);
-
   useEffect(() => {
     const revealMobileWorkspacePanel = () => {
       if (!isMobileWorkspacePanelRevealTarget()) return;
       if (!onboarding.showMainChrome) return;
       const state = useAtlasStore.getState();
-      if (onboarding.showAiFeatures && !shouldShowCommandDock(state.atlasRoot.id, state.selectedNodeId, state.viewport)) {
+      if (!publicServiceMode && aiFeaturesUnlocked && !shouldShowCommandDock(state.atlasRoot.id, state.selectedNodeId, state.viewport)) {
         setMobileWorkspacePanelRevealed(false);
         return;
       }
       setMobileWorkspacePanelRevealed(true);
-      setMobilePanelTab(onboarding.showAiFeatures ? "command" : "operation");
+      setMobilePanelTab(aiFeaturesUnlocked ? "command" : "operation");
       setRenderWorkspacePanel(true);
     };
     window.addEventListener(UNIVERSE_BACKGROUND_CLICK_EVENT, revealMobileWorkspacePanel);
     return () => window.removeEventListener(UNIVERSE_BACKGROUND_CLICK_EVENT, revealMobileWorkspacePanel);
-  }, [onboarding.showAiFeatures, onboarding.showMainChrome]);
+  }, [aiFeaturesUnlocked, onboarding.showMainChrome, publicServiceMode]);
 
   useEffect(() => {
     if (selectedNodeId !== atlasRoot.id) {
@@ -408,8 +522,8 @@ export default function App() {
   }, [atlasRoot.id, selectedNodeId]);
 
   useEffect(() => {
-    if (onboarding.showAiFeatures && !showCommandDock) setMobileWorkspacePanelRevealed(false);
-  }, [onboarding.showAiFeatures, showCommandDock]);
+    if (!publicServiceMode && aiFeaturesUnlocked && !showCommandDock) setMobileWorkspacePanelRevealed(false);
+  }, [aiFeaturesUnlocked, publicServiceMode, showCommandDock]);
 
   useEffect(() => {
     persistTheme(theme);
@@ -437,9 +551,14 @@ export default function App() {
   }, [voiceLogOpen, voiceLogEntries.length, markVoiceLogSeen]);
 
   useEffect(() => {
-    if (onboarding.showAiFeatures || mobilePanelTab !== "command") return;
+    if (aiFeaturesUnlocked || mobilePanelTab !== "command") return;
     setMobilePanelTab("operation");
-  }, [mobilePanelTab, onboarding.showAiFeatures]);
+  }, [aiFeaturesUnlocked, mobilePanelTab]);
+
+  useEffect(() => {
+    if (!showTutorialOperationFallback) return;
+    setMobilePanelTab("operation");
+  }, [showTutorialOperationFallback]);
 
   useEffect(() => {
     if (showWorkspacePanel) {
@@ -457,11 +576,11 @@ export default function App() {
   }, [onboarding.showMainChrome]);
 
   useEffect(() => {
-    if (onboarding.showAiFeatures) return;
-    setVoiceLogOpen(false);
+    if (!voiceLogReadable) setVoiceLogOpen(false);
+    if (aiFeaturesUnlocked) return;
     setVoiceSettingsOpen(false);
     setCloudLoadOpen(false);
-  }, [onboarding.showAiFeatures]);
+  }, [aiFeaturesUnlocked, voiceLogReadable]);
 
   useEffect(() => {
     if (!onboarding.shouldApplyUniverseTitlePrompt) return;
@@ -607,6 +726,9 @@ export default function App() {
         try {
           await navigator.share(shareData);
           setContextCopyStatus("Share sheet opened.");
+          window.setTimeout(() => {
+            setContextCopyStatus((current) => (current === "Share sheet opened." ? "" : current));
+          }, 5000);
           return;
         } catch (error) {
           if (error instanceof DOMException && error.name === "AbortError") {
@@ -841,20 +963,14 @@ export default function App() {
     setMenuOpen(false);
   };
 
-  const showTutorialSecretStatus = (message: string) => {
-    setContextCopyStatus(message);
-    window.setTimeout(() => setContextCopyStatus(""), 2400);
-  };
-
   const handleTutorialModeClick = () => {
-    clearTutorialLongPressTimer();
-    if (tutorialLongPressTriggeredRef.current) {
-      tutorialLongPressTriggeredRef.current = false;
-      return;
-    }
     const confirmed = window.confirm("Tutorial mode will erase the current local atlas and restart the guided first-run flow. Continue?");
     if (!confirmed) return;
     resetNotebook();
+    const nextUiState = { ...latestUiStateRef.current, layoutMode: "phyllotaxis" as const };
+    latestUiStateRef.current = nextUiState;
+    setLayoutMode("phyllotaxis");
+    persistUiStatePatch(nextUiState);
     onboarding.startTutorialMode();
     setOutlineEditorOpen(false);
     setOutlineEditorRootId(null);
@@ -864,29 +980,6 @@ export default function App() {
 
   const handleSkipTutorial = () => {
     onboarding.completeTutorial();
-  };
-
-  const startTutorialLongPress = () => {
-    tutorialLongPressTriggeredRef.current = false;
-    clearTutorialLongPressTimer();
-    tutorialLongPressTimerRef.current = window.setTimeout(() => {
-      tutorialLongPressTimerRef.current = null;
-      tutorialLongPressTriggeredRef.current = true;
-      const nextAiUnlocked = !onboarding.showAiFeatures;
-      onboarding.setAiFeaturesUnlocked(nextAiUnlocked);
-      setMenuOpen(false);
-      showTutorialSecretStatus(nextAiUnlocked ? "AI mode unlocked." : "Normal mode enabled.");
-    }, TUTORIAL_SECRET_LONG_PRESS_MS);
-  };
-
-  const handleTutorialModePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.pointerType === "mouse" && event.button !== 0) return;
-    startTutorialLongPress();
-  };
-
-  const handleTutorialModeMouseDown = (event: ReactMouseEvent<HTMLButtonElement>) => {
-    if (event.button !== 0) return;
-    startTutorialLongPress();
   };
 
   const handleUndo = () => {
@@ -953,6 +1046,7 @@ export default function App() {
 
   const handleFocusNotification = (id: string) => {
     focusNode(id);
+    acknowledgeNodeNotification(id);
     showNotificationSnoozePrompt(id);
   };
 
@@ -1041,7 +1135,7 @@ export default function App() {
   const handleCloseOutlineEditor = () => {
     setOutlineEditorOpen(false);
     setOutlineEditorRootId(null);
-    setMobilePanelTab(onboarding.showAiFeatures ? "command" : "editor");
+    setMobilePanelTab(aiFeaturesUnlocked ? "command" : "editor");
   };
 
   return (
@@ -1062,6 +1156,7 @@ export default function App() {
         pageActive={pageActive}
         initialCameraPose={persistedUiState?.cameraPose ?? null}
         shareTargetRef={universeShareTargetRef}
+        tutorialRootBirthUnlocked={onboarding.showRootPulse}
       />
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
       {onboarding.message ? (
@@ -1072,6 +1167,11 @@ export default function App() {
       {contextCopyStatus ? (
         <div className="onboarding-message context-copy-toast" role="status" aria-live="polite">
           {contextCopyStatus}
+        </div>
+      ) : null}
+      {layoutBirthUnavailableMessage ? (
+        <div className="onboarding-message layout-birth-unavailable-toast" role="status" aria-live="polite">
+          {layoutBirthUnavailableMessage}
         </div>
       ) : null}
       {dragImportActive ? (
@@ -1111,6 +1211,19 @@ export default function App() {
 
       {onboarding.showMainChrome ? (
       <div ref={globalMenuRef} className="global-menu" aria-label="Atlas actions">
+        {publicServiceMode ? (
+          <button
+            className={`ai-feature-button ${aiFeaturesUnlocked ? "is-active" : ""}`}
+            type="button"
+            onClick={() => setAiFeatureDialogOpen(true)}
+            aria-label="AI機能"
+            title="AI機能"
+          >
+            <Sparkles size={16} />
+            <span>AI機能</span>
+            <small>{aiFeatureButtonBadge(hostedSession, hostedSessionLoading, hostedSessionError)}</small>
+          </button>
+        ) : null}
         <button
           className="icon-button"
           type="button"
@@ -1168,10 +1281,10 @@ export default function App() {
                   type="button"
                   onClick={handleOpenOutlineEditor}
                   aria-pressed={outlineEditorOpen}
-                  title="Outline"
+                  title="TextEditor"
                 >
                   <PenLine size={15} />
-                  Outline
+                  TextEditor
                 </button>
               </div>
             </div>
@@ -1183,15 +1296,17 @@ export default function App() {
                 <Redo2 size={15} /> Redo
               </button>
             </div>
-            {onboarding.showAiFeatures ? (
+            {voiceLogReadable ? (
+              <button type="button" onClick={handleOpenVoiceLog}>
+                <MessageSquareText size={15} />
+                <span>
+                  AI Partner log
+                  <small>{voiceLogUnreadLabel(unreadPartnerEntries.length, voiceLogEntries.length)}</small>
+                </span>
+              </button>
+            ) : null}
+            {aiFeaturesUnlocked ? (
               <>
-                <button type="button" onClick={handleOpenVoiceLog}>
-                  <MessageSquareText size={15} />
-                  <span>
-                    AI Partner log
-                    <small>{voiceLogUnreadLabel(unreadPartnerEntries.length, voiceLogEntries.length)}</small>
-                  </span>
-                </button>
                 <button type="button" onClick={handleRestartRealtime}>
                   <Radio size={15} />
                   <span>
@@ -1259,8 +1374,8 @@ export default function App() {
             <button type="button" onClick={handleExportLight}>
               <Download size={15} />
               <span>
-                Export light
-                <small>.mindatlas / metadata only</small>
+                Export text only
+                <small>.mindatlas / text and metadata</small>
               </span>
             </button>
             <button type="button" onClick={handleExportPackage}>
@@ -1270,13 +1385,15 @@ export default function App() {
                 <small>.mindatlaspkg / includes images and video</small>
               </span>
             </button>
-            <button type="button" onClick={handleCreateSharedNotebookLink} disabled={shareBusy}>
-              <Share2 size={15} />
-              <span>
-                Create embedded-data URL
-                <small>copy atlas data inside a link</small>
-              </span>
-            </button>
+            {!publicServiceMode ? (
+              <button type="button" onClick={handleCreateSharedNotebookLink} disabled={shareBusy}>
+                <Share2 size={15} />
+                <span>
+                  Create embedded-data URL
+                  <small>copy atlas data inside a link</small>
+                </span>
+              </button>
+            ) : null}
             <button type="button" onClick={handleOpenRestoreHistory}>
               <History size={15} />
               <span>
@@ -1284,7 +1401,7 @@ export default function App() {
                 <small>{notebookHistoryStatusLabel(notebookPersistenceStatus, notebookSnapshots.length, durableNotebookStorage, notebookPersistenceError)}</small>
               </span>
             </button>
-            {onboarding.showAiFeatures ? (
+            {aiFeaturesUnlocked && !publicServiceMode ? (
               <>
                 <button type="button" onClick={handleSaveToCloud}>
                   <CloudUpload size={15} />
@@ -1317,15 +1434,6 @@ export default function App() {
               className="tutorial-mode-button"
               type="button"
               onClick={handleTutorialModeClick}
-              onPointerDown={handleTutorialModePointerDown}
-              onPointerUp={clearTutorialLongPressTimer}
-              onPointerCancel={clearTutorialLongPressTimer}
-              onPointerLeave={clearTutorialLongPressTimer}
-              onMouseDown={handleTutorialModeMouseDown}
-              onMouseUp={clearTutorialLongPressTimer}
-              onMouseLeave={clearTutorialLongPressTimer}
-              onBlur={clearTutorialLongPressTimer}
-              onContextMenu={(event) => event.preventDefault()}
             >
               <GraduationCap size={15} />
               <span>
@@ -1336,6 +1444,13 @@ export default function App() {
             <button type="button" onClick={handleInitialize}>
               <RotateCcw size={15} /> Initialize
             </button>
+            <a className="context-menu-link" href={MIND_ATLAS_ABOUT_URL} aria-label="Mind Atlas overview and AI plan">
+              <Info size={15} />
+              <span>
+                About Mind Atlas
+                <small>philosophy, features, and AI plan</small>
+              </span>
+            </a>
             <a
               className="context-menu-link legal-notice-link"
               href={MIND_ATLAS_SOURCE_URL}
@@ -1355,7 +1470,7 @@ export default function App() {
       ) : null}
 
       {onboarding.showMainChrome ? <Minimap /> : null}
-      {onboarding.showMainChrome && !mobileOperationSurface ? <OperationPanel actions={operationActions} variant="desktop" /> : null}
+      {(onboarding.showMainChrome || showTutorialOperationFallback) && !operationPanelInWorkspace ? <OperationPanel actions={operationActions} variant="desktop" /> : null}
       {renderWorkspacePanel ? (
         <section
           className={`mobile-workspace-panel ${showWorkspacePanel ? "is-open" : "is-closing"}`}
@@ -1385,16 +1500,18 @@ export default function App() {
               <PenLine size={15} />
               <span>Editor</span>
             </button>
-            <button
-              className={effectiveMobilePanelTab === "operation" ? "is-active" : ""}
-              type="button"
-              role="tab"
-              aria-selected={effectiveMobilePanelTab === "operation"}
-              onClick={() => setMobilePanelTab("operation")}
-            >
-              <Settings2 size={15} />
-              <span>Operation</span>
-            </button>
+            {mobileOperationPanelTabAvailable ? (
+              <button
+                className={effectiveMobilePanelTab === "operation" ? "is-active" : ""}
+                type="button"
+                role="tab"
+                aria-selected={effectiveMobilePanelTab === "operation"}
+                onClick={() => setMobilePanelTab("operation")}
+              >
+                <Settings2 size={15} />
+                <span>Operation</span>
+              </button>
+            ) : null}
             {outlineEditorOpen ? (
               <button
                 className={effectiveMobilePanelTab === "outline" ? "is-active" : ""}
@@ -1404,7 +1521,7 @@ export default function App() {
                 onClick={() => setMobilePanelTab("outline")}
               >
                 <ListTree size={15} />
-                <span>Outline</span>
+                <span>TextEditor</span>
               </button>
             ) : null}
           </div>
@@ -1416,9 +1533,11 @@ export default function App() {
           <div className="mobile-panel-slot mobile-editor-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "editor"}>
             <FocusPanel theme={theme} />
           </div>
-          <div className="mobile-panel-slot mobile-operation-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "operation"}>
-            <OperationPanel actions={operationActions} variant="mobile" />
-          </div>
+          {mobileOperationPanelTabAvailable ? (
+            <div className="mobile-panel-slot mobile-operation-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "operation"}>
+              <OperationPanel actions={operationActions} variant="mobile" />
+            </div>
+          ) : null}
         </section>
       ) : null}
       {outlineEditorOpen ? (
@@ -1450,15 +1569,16 @@ export default function App() {
           onClose={() => setMergePreview(null)}
         />
       ) : null}
-      {onboarding.showAiFeatures && voiceLogOpen ? (
+      {voiceLogReadable && voiceLogOpen ? (
         <VoiceLogDialog
           entries={voiceLogEntries}
           summary={voiceSessionSummary}
           onClose={() => setVoiceLogOpen(false)}
           onClear={clearVoiceLog}
+          readOnly={!aiFeaturesUnlocked}
         />
       ) : null}
-      {onboarding.showAiFeatures && voiceSettingsOpen ? (
+      {aiFeaturesUnlocked && voiceSettingsOpen ? (
         <VoiceSettingsDialog
           settings={voicePartnerSettings}
           onClose={() => setVoiceSettingsOpen(false)}
@@ -1476,7 +1596,7 @@ export default function App() {
           onRestore={restoreNotebookFromSnapshot}
         />
       ) : null}
-      {onboarding.showAiFeatures && cloudLoadOpen ? (
+      {aiFeaturesUnlocked && cloudLoadOpen ? (
         <CloudLoadDialog
           notebooks={cloudNotebooks}
           directory={cloudDirectory}
@@ -1485,6 +1605,15 @@ export default function App() {
           onClose={() => setCloudLoadOpen(false)}
           onRefresh={refreshCloudNotebooks}
           onLoad={handleLoadCloudNotebook}
+        />
+      ) : null}
+      {publicServiceMode && aiFeatureDialogOpen ? (
+        <AiFeatureDialog
+          session={hostedSession}
+          loading={hostedSessionLoading}
+          error={hostedSessionError}
+          onClose={() => setAiFeatureDialogOpen(false)}
+          onRefresh={refreshHostedSession}
         />
       ) : null}
       {sharedNotebookRoot ? (
@@ -1496,6 +1625,187 @@ export default function App() {
       ) : null}
     </main>
   );
+}
+
+function AiFeatureDialog({
+  session,
+  loading,
+  error,
+  onClose,
+  onRefresh,
+}: {
+  session: HostedServiceSession | null;
+  loading: boolean;
+  error: string;
+  onClose: () => void;
+  onRefresh: () => Promise<void>;
+}) {
+  const [actionBusy, setActionBusy] = useState<"login" | "checkout" | "portal" | "logout" | "refresh" | null>(null);
+  const creditPercent = session?.credit ? Math.max(0, Math.min(100, session.credit.remainingPercent)) : 0;
+  const roundedCreditPercent = Math.round(creditPercent);
+  const authenticated = Boolean(session?.authenticated && session.user);
+  const aiEnabled = Boolean(session?.entitlement.aiEnabled);
+  const reason = session?.entitlement.reason;
+  const checkoutAvailable = authenticated
+    && reason === "subscription_required"
+    && (!session?.subscription || session.subscription.status === "canceled" || session.subscription.status === "incomplete");
+  const portalAvailable = authenticated && Boolean(session?.subscription) && session?.subscription?.status !== "canceled";
+  const showCredit = authenticated && Boolean(session?.credit && session.subscription && session.subscription.status !== "canceled");
+  const creditCardClass = [
+    "ai-credit-card",
+    aiEnabled ? "is-active" : "",
+    session?.credit && creditPercent > 0 && creditPercent <= 20 ? "is-warning" : "",
+    reason === "credit_exhausted" ? "is-exhausted" : "",
+  ].filter(Boolean).join(" ");
+
+  const runAction = async (action: NonNullable<typeof actionBusy>, run: () => Promise<void> | void) => {
+    if (actionBusy) return;
+    try {
+      setActionBusy(action);
+      await run();
+    } finally {
+      if (action !== "login" && action !== "checkout" && action !== "portal") setActionBusy(null);
+    }
+  };
+
+  const handleLogout = () => runAction("logout", async () => {
+    await logoutHostedService();
+    await onRefresh();
+  });
+
+  const handleRefresh = () => runAction("refresh", onRefresh);
+
+  return (
+    <section className="ai-feature-dialog" role="dialog" aria-modal="true" aria-label="AI機能" onMouseDown={(event) => event.stopPropagation()}>
+      <header className="voice-log-header">
+        <div>
+          <h2>AI機能</h2>
+          <p>{aiFeatureStatusLabel(session, loading, error)}</p>
+        </div>
+        <button className="icon-button" type="button" onClick={onClose} aria-label="Close AI settings">
+          <X size={16} />
+        </button>
+      </header>
+      <div className="ai-feature-body">
+        {error ? <p className="ai-feature-error">{error}</p> : null}
+        {!authenticated ? (
+          <p className="ai-feature-copy">Notebookはログインなしで使えます。AI機能はGoogleログインと月額登録で利用できます。</p>
+        ) : null}
+        {aiEnabled ? (
+          <div className="ai-plan-card ai-usage-guide-card">
+            <div className="ai-plan-card-header">
+              <span>AIリクエスト</span>
+              <strong>利用ガイド</strong>
+            </div>
+            <p>
+              右矢印のSENDボタンは、入力内容を選択中のAIへ送ります。AI利用トークンを消費します。
+              任意のノードを選択して送ると、そのノードの情報もAIに渡され、返答は子ノードとして追加されます。
+              何も選ばずに送ると、返答はAI Partner logへ戻ります。
+            </p>
+            <p>
+              マイクを一度押して止めると、音声認識でテキストを書き起こします。消費は小さめです。
+              マイクを長押しするとリアルタイムAI会話モードになり、赤くなります。話す間は押し続け、AIの返答は音声で返ります。
+              リアルタイム会話は消費が大きめです。音声はサブメニューのVoice settingsから変更できます。
+            </p>
+          </div>
+        ) : (
+          <div className="ai-plan-card">
+            <div className="ai-plan-card-header">
+              <span>Mind Atlas Pro</span>
+              <strong>US$10 / month</strong>
+            </div>
+            <p>ChatGPTやClaude等のAIに質問や編集指示ができます。Mind Atlasを見ながらリアルタイムでAIと会話することもできます。</p>
+            <dl>
+              <div>
+                <dt>AI利用トークン</dt>
+                <dd>毎月100%付与</dd>
+              </div>
+              <div>
+                <dt>更新</dt>
+                <dd>毎月自動更新</dd>
+              </div>
+            </dl>
+          </div>
+        )}
+        {authenticated ? (
+          <div className="ai-feature-user">
+            {session?.user?.pictureUrl ? <img src={session.user.pictureUrl} alt="" /> : <UserCircle size={34} />}
+            <span>
+              <strong>{session?.user?.name || session?.user?.email}</strong>
+              <small>{session?.user?.email}</small>
+            </span>
+          </div>
+        ) : null}
+        {showCredit ? (
+          <div className={creditCardClass}>
+            <div>
+              <span>AI利用トークン</span>
+              <strong>{roundedCreditPercent}%</strong>
+            </div>
+            <div className="ai-credit-track" aria-hidden="true">
+              <span style={{ width: `${creditPercent}%` }} />
+            </div>
+          </div>
+        ) : null}
+        <div className="ai-feature-actions">
+          {!authenticated ? (
+            <button className="secondary-button" type="button" onClick={() => void runAction("login", startHostedGoogleLogin)} disabled={loading || Boolean(actionBusy)}>
+              <LogIn size={15} />
+              Googleでログイン
+            </button>
+          ) : null}
+          {checkoutAvailable ? (
+            <button className="secondary-button is-wide" type="button" onClick={() => void runAction("checkout", startHostedBillingCheckout)} disabled={loading || Boolean(actionBusy)}>
+              <CreditCard size={15} />
+              月額US$10で登録
+            </button>
+          ) : null}
+          {portalAvailable ? (
+            <button className="secondary-button" type="button" onClick={() => void runAction("portal", openHostedBillingPortal)} disabled={loading || Boolean(actionBusy)}>
+              <CreditCard size={15} />
+              {session?.subscription?.status === "past_due" ? "支払いを確認" : "支払いを管理"}
+            </button>
+          ) : null}
+          <button className="secondary-button" type="button" onClick={() => void handleRefresh()} disabled={loading || Boolean(actionBusy)}>
+            <RefreshCw size={15} />
+            更新
+          </button>
+          {authenticated ? (
+            <button className="secondary-button" type="button" onClick={() => void handleLogout()} disabled={loading || Boolean(actionBusy)}>
+              <LogOut size={15} />
+              ログアウト
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function aiFeatureButtonBadge(session: HostedServiceSession | null, loading: boolean, error: string) {
+  if (loading) return "確認中";
+  if (error) return "要確認";
+  if (!session?.authenticated) return "未ログイン";
+  if (session.credit) return `${Math.round(Math.max(0, Math.min(100, session.credit.remainingPercent)))}%`;
+  return "未登録";
+}
+
+function aiFeatureStatusLabel(session: HostedServiceSession | null, loading: boolean, error: string) {
+  if (loading) return "AI利用状況を確認しています";
+  if (error) return "サービス状況を確認できません";
+  if (!session?.authenticated) return "Notebookは無料で使えます。AIはログイン後に登録できます。";
+  if (session.entitlement.aiEnabled) return "AI機能を利用できます";
+  if (session.entitlement.reason === "credit_exhausted") return "今月のAI利用トークンは0%です";
+  if (session.subscription?.status === "past_due") return "支払い確認が必要です";
+  if (session.subscription?.status === "canceled") return "サブスクリプションは停止しています";
+  return "AI機能は未登録です";
+}
+
+function formatHostedDate(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return date.toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
 }
 
 function TextImportModal({
@@ -1721,7 +2031,10 @@ function VoiceSettingsDialog({
   const [draft, setDraft] = useState(settings);
 
   useEffect(() => {
-    setDraft(settings);
+    setDraft({
+      ...settings,
+      realtimeVoice: VOICE_OPTION_IDS.includes(settings.realtimeVoice) ? settings.realtimeVoice : VOICE_OPTION_IDS[0],
+    });
   }, [settings]);
 
   const handleSave = () => {
@@ -1761,28 +2074,15 @@ function VoiceSettingsDialog({
           <label className="voice-settings-field">
             <span>Voice</span>
             <select
-              value={VOICE_OPTION_IDS.includes(draft.realtimeVoice) ? draft.realtimeVoice : "custom"}
-              onChange={(event) => {
-                if (event.target.value !== "custom") {
-                  setDraft((current) => ({ ...current, realtimeVoice: event.target.value }));
-                }
-              }}
+              value={VOICE_OPTION_IDS.includes(draft.realtimeVoice) ? draft.realtimeVoice : VOICE_OPTION_IDS[0]}
+              onChange={(event) => setDraft((current) => ({ ...current, realtimeVoice: event.target.value }))}
             >
               {VOICE_OPTION_IDS.map((voice) => (
                 <option key={voice} value={voice}>
                   {voice}
                 </option>
               ))}
-              <option value="custom">custom</option>
             </select>
-          </label>
-          <label className="voice-settings-field">
-            <span>Custom voice</span>
-            <input
-              value={draft.realtimeVoice}
-              onChange={(event) => setDraft((current) => ({ ...current, realtimeVoice: event.target.value }))}
-              placeholder="marin"
-            />
           </label>
         </div>
         <footer className="voice-settings-actions">
@@ -1830,9 +2130,11 @@ function OperationPanel({ actions, variant }: { actions: OperationAction[]; vari
   );
 }
 
-function getEffectiveMobilePanelTab(tab: MobilePanelTab, showCommandDock: boolean, outlineEditorOpen: boolean): MobilePanelTab {
-  if (tab === "outline") return outlineEditorOpen ? "outline" : showCommandDock ? "command" : "operation";
-  if (tab === "command") return showCommandDock ? "command" : "operation";
+function getEffectiveMobilePanelTab(tab: MobilePanelTab, showCommandDock: boolean, outlineEditorOpen: boolean, operationTabAvailable: boolean): MobilePanelTab {
+  const fallbackTab: MobilePanelTab = showCommandDock ? "command" : operationTabAvailable ? "operation" : "editor";
+  if (tab === "outline") return outlineEditorOpen ? "outline" : fallbackTab;
+  if (tab === "command") return showCommandDock ? "command" : operationTabAvailable ? "operation" : "editor";
+  if (tab === "operation") return operationTabAvailable ? "operation" : fallbackTab;
   return tab;
 }
 
@@ -1854,11 +2156,13 @@ function VoiceLogDialog({
   summary,
   onClose,
   onClear,
+  readOnly = false,
 }: {
   entries: ReturnType<typeof useAtlasStore.getState>["voiceLogEntries"];
   summary: ReturnType<typeof useAtlasStore.getState>["voiceSessionSummary"];
   onClose: () => void;
   onClear: () => void;
+  readOnly?: boolean;
 }) {
   const displayedEntries = [...entries].reverse();
   const approvalCount = entries.filter((entry) => entry.status === "approval_required").length;
@@ -1873,12 +2177,16 @@ function VoiceLogDialog({
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="voice-log-dialog" role="dialog" aria-modal="true" aria-label="AI Partner log" onMouseDown={(event) => event.stopPropagation()}>
         <header className="voice-log-header voice-log-header-with-clear">
-          <button className="icon-button" type="button" onClick={handleClear} aria-label="Clear AI Partner log" disabled={entries.length === 0}>
-            <Trash2 size={16} />
-          </button>
+          {readOnly ? (
+            <span className="voice-log-header-spacer" aria-hidden="true" />
+          ) : (
+            <button className="icon-button" type="button" onClick={handleClear} aria-label="Clear AI Partner log" disabled={entries.length === 0}>
+              <Trash2 size={16} />
+            </button>
+          )}
           <div>
             <h2>AI Partner log</h2>
-            <p>{entries.length} entries{approvalCount ? ` / ${approvalCount} approval pending` : ""}</p>
+            <p>{entries.length} entries{approvalCount ? ` / ${approvalCount} approval pending` : ""}{readOnly ? " / read-only" : ""}</p>
           </div>
           <div className="voice-log-actions">
             <button className="icon-button" type="button" onClick={onClose} aria-label="Close AI Partner log">
@@ -2430,6 +2738,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
       document.documentElement.style.setProperty("--app-height", `${appHeight}px`);
       document.documentElement.style.setProperty("--keyboard-top", `${appHeight}px`);
       document.documentElement.style.setProperty("--keyboard-bottom-offset", "0px");
+      window.dispatchEvent(new Event(MOBILE_KEYBOARD_PROFILE_EVENT));
     };
 
     const applyKeyboardViewportState = (phase: MobileKeyboardPhase, stableHeight: number, keyboardBottomOffset: number) => {
@@ -2451,6 +2760,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
       document.documentElement.style.setProperty("--keyboard-top", `${keyboardTop}px`);
       document.documentElement.style.setProperty("--keyboard-bottom-offset", `${boundedKeyboardBottomOffset}px`);
       if (!hasKeyboardPanelSizeLock()) lockKeyboardPanelSizeForKeyboardOverlay();
+      window.dispatchEvent(new Event(MOBILE_KEYBOARD_PROFILE_EVENT));
     };
 
     const scheduleViewportUpdate = (delay = 0) => {
@@ -2705,10 +3015,12 @@ function useMobilePortraitBreadcrumbLayout() {
     query?.addEventListener?.("change", update);
     window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
+    window.addEventListener(MOBILE_KEYBOARD_PROFILE_EVENT, update);
     return () => {
       query?.removeEventListener?.("change", update);
       window.removeEventListener("resize", update);
       window.removeEventListener("orientationchange", update);
+      window.removeEventListener(MOBILE_KEYBOARD_PROFILE_EVENT, update);
     };
   }, []);
 
@@ -2731,10 +3043,39 @@ function useMobileOperationSurface() {
     queries.forEach((query) => query.addEventListener?.("change", update));
     window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
+    window.addEventListener(MOBILE_KEYBOARD_PROFILE_EVENT, update);
     return () => {
       queries.forEach((query) => query.removeEventListener?.("change", update));
       window.removeEventListener("resize", update);
       window.removeEventListener("orientationchange", update);
+      window.removeEventListener(MOBILE_KEYBOARD_PROFILE_EVENT, update);
+    };
+  }, []);
+
+  return matches;
+}
+
+function useMobilePortraitOperationSurface() {
+  const [matches, setMatches] = useState(() => isMobilePortraitOperationSurfaceTarget());
+
+  useEffect(() => {
+    const update = () => setMatches(isMobilePortraitOperationSurfaceTarget());
+    const queries = [
+      window.matchMedia?.("(pointer: coarse)"),
+      window.matchMedia?.("(hover: none)"),
+      window.matchMedia?.("(max-width: 980px)"),
+      window.matchMedia?.("(orientation: portrait)"),
+    ].filter((query): query is MediaQueryList => Boolean(query));
+    update();
+    queries.forEach((query) => query.addEventListener?.("change", update));
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    window.addEventListener(MOBILE_KEYBOARD_PROFILE_EVENT, update);
+    return () => {
+      queries.forEach((query) => query.removeEventListener?.("change", update));
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+      window.removeEventListener(MOBILE_KEYBOARD_PROFILE_EVENT, update);
     };
   }, []);
 
@@ -2751,6 +3092,7 @@ function isMobilePortraitBreadcrumbTarget() {
 
 function isMobileOperationSurfaceTarget() {
   if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  if (document.documentElement.getAttribute("data-keyboard-overlay-portrait") === "true") return true;
   const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
   const hoverNone = window.matchMedia?.("(hover: none)").matches ?? false;
   const narrowViewport = window.matchMedia?.("(max-width: 980px)").matches ?? false;
@@ -2765,8 +3107,20 @@ function isMobileOperationSurfaceTarget() {
   return hoverNone && (touchDevice || compactViewport) && phoneOrSmallTabletViewport;
 }
 
+function isMobilePortraitOperationSurfaceTarget() {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  if (document.documentElement.getAttribute("data-keyboard-overlay-portrait") === "true") return true;
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const hoverNone = window.matchMedia?.("(hover: none)").matches ?? false;
+  const narrowPortrait = window.matchMedia?.("(max-width: 980px) and (orientation: portrait)").matches ?? false;
+  const mobileUa = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+  const touchDevice = navigator.maxTouchPoints > 0;
+  return narrowPortrait && (coarsePointer || mobileUa || (hoverNone && touchDevice));
+}
+
 function isMobileWorkspacePanelRevealTarget() {
   if (typeof window === "undefined") return false;
+  if (document.documentElement.getAttribute("data-keyboard-overlay-portrait") === "true") return true;
   const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
   const mobileViewport = window.matchMedia?.("(max-width: 980px)").matches ?? false;
   return coarsePointer && mobileViewport;
@@ -2902,6 +3256,7 @@ function UnreadNotificationLinks({
       nodeId: string;
       kind: NotificationPulse["kind"];
       title: string;
+      signature?: string;
     };
     node: AtlasNode;
   }>;

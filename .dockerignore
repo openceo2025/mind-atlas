@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.certs
+artifacts
+server-data
+.env
+.env.local
+.env.service
+npm-debug.log

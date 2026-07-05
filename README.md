@@ -8,12 +8,23 @@ Instead of treating prompts, artifacts, and project states as a flat list of cha
 
 Public site: https://mind-atlas.org
 
+Production hosting currently runs on a ConoHa VPS. GitHub is the public source
+repository and collaboration record, not the production database, secret store,
+or customer-data archive.
+
 Current version: `0.1.1`
 
 Mind Atlas is open source under `AGPL-3.0-only`. The project accepts
 community contributions under the [Contributor License Agreement](CLA.md).
 The Mind Atlas name and official branding are governed separately by the
 [trademark policy](TRADEMARKS.md).
+
+Commercial use of the community source is allowed only under the obligations
+of the GNU AGPL and the trademark policy. Organizations that need proprietary
+embedding, closed-source hosted modifications, OEM/white-label use, license
+compatibility exceptions, or contractual support need separate written
+commercial terms. See [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md) and
+[docs/licensing-and-commercial-boundary.md](docs/licensing-and-commercial-boundary.md).
 
 ## What This Prototype Does
 
@@ -175,12 +186,64 @@ Preview the production build:
 npm run preview
 ```
 
+## Hosted VPS Service
+
+Mind Atlas can also be built as a small paid hosted service for
+`mind-atlas.org`. In hosted mode, the public UI keeps the notebook available
+without login, shows a top-right `AI機能` button, and unlocks only Chat and
+Realtime Talk after Google login plus Stripe subscription. Code/Codex, Claude
+Code, OpenClaw, and Local controls remain available in local developer mode but
+are hidden from the public service UI.
+
+Build hosted mode with:
+
+```powershell
+$env:VITE_MIND_ATLAS_PUBLIC_SERVICE="true"
+$env:VITE_MIND_ATLAS_SERVICE_URL="https://mind-atlas.org"
+npm run build
+```
+
+Run the VPS service with:
+
+```powershell
+npm run service:migrate
+npm run service:start
+```
+
+See [docs/vps-service.md](docs/vps-service.md) for ConoHa VPS, PostgreSQL,
+Google OAuth, Stripe, provider API key, systemd, nginx, and admin CUI setup.
+Use [docs/staging-service.md](docs/staging-service.md) first to run a local
+VPS-like Docker Compose environment with PostgreSQL, the hosted service, nginx,
+and explicit mock Google/Stripe/provider flows. Before testing real Google
+OAuth locally, fill `deploy/staging/env.service.local` and run
+`npm run staging:google:doctor`.
+
+Only templates and source code belong in GitHub. Do not commit `.env.service`,
+real OAuth/Stripe/provider keys, VPS private keys, PostgreSQL dumps, customer
+records, access logs, AI request logs, local notebooks, or files from
+`server-data/`. See
+[docs/repository-publication-safety.md](docs/repository-publication-safety.md).
+
 ## Verification
 
 Type check:
 
 ```powershell
 npm run typecheck
+```
+
+Hosted service static checks:
+
+```powershell
+npm run verify:hosted-service
+npm run verify:hosted-public-ui
+npm run staging:verify
+npm run staging:google:doctor
+npm run staging:stripe:doctor
+npm run staging:openai:doctor
+npm run staging:providers:doctor
+npm run staging:ui:doctor
+npm run staging:e2e:doctor
 ```
 
 UI smoke test:
@@ -192,36 +255,17 @@ npm run verify:ui
 
 The UI smoke test checks desktop, mobile portrait, and mobile landscape rendering. Generated screenshots are local artifacts and are not part of the public repository.
 
-## GitHub Pages Deployment
+## GitHub and Static Preview
 
-This repository includes `.github/workflows/deploy-pages.yml`.
+The official production service for `mind-atlas.org` is the ConoHa VPS
+deployment described above. Do not point `mind-atlas.org` DNS at GitHub Pages
+while the VPS service is the production environment.
 
-To publish with GitHub Pages:
-
-1. Create the GitHub repository and push the source files.
-2. In the repository settings, open `Settings > Pages`.
-3. Set `Build and deployment` to `GitHub Actions`.
-4. Push to the `main` branch, or run the workflow manually.
-5. Configure DNS for `mind-atlas.org` at your domain provider.
-6. In GitHub Pages custom domain settings, use:
-
-```text
-mind-atlas.org
-```
-
-The file `public/CNAME` is included so the built site keeps the custom domain when deployed.
-
-Recommended DNS:
-
-```text
-A     @     185.199.108.153
-A     @     185.199.109.153
-A     @     185.199.110.153
-A     @     185.199.111.153
-CNAME www   <your-github-username>.github.io
-```
-
-Replace `<your-github-username>` with the GitHub account or organization that owns the repository.
+The repository still contains `.github/workflows/deploy-pages.yml` as a manual
+static preview workflow. It is intentionally `workflow_dispatch` only, so
+pushing source code to `main` does not replace or redeploy the production VPS
+service. A static preview build does not include Google OAuth, Stripe webhook
+handling, PostgreSQL, hosted credit accounting, or server-side provider keys.
 
 ## Data Notes
 
@@ -239,7 +283,11 @@ See [docs/ai-bridge.md](docs/ai-bridge.md) for AI bridge setup and Realtime note
 
 ## Repository Contents
 
-The public repository should include source, configuration, documentation, and the GitHub Pages workflow. It should not include dependency folders, generated builds, logs, or verification screenshots.
+The public repository should include source, configuration templates,
+documentation, tests, deployment templates, and manual preview workflows. It
+should not include dependency folders, generated builds, logs, verification
+screenshots, real environment files, API keys, private keys, database dumps,
+customer records, server access logs, AI request logs, or local notebook data.
 
 ## Contributing
 
@@ -252,6 +300,9 @@ project the rights needed to distribute the open-source edition, offer
 commercial licenses, and transfer the project as part of a future business or
 asset transaction. Project decision-making and succession are described in
 [GOVERNANCE.md](GOVERNANCE.md).
+
+Security reports and reports containing credentials or personal data should not
+be filed as public issues. See [SECURITY.md](SECURITY.md).
 
 ## License
 

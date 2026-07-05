@@ -32,6 +32,29 @@ without an explicit licensing decision. It should live in a separately
 licensed repository, package, service, or clearly isolated directory with its
 own license notice.
 
+## Current hosted service code
+
+The current ConoHa/VPS hosted-service implementation in this repository is
+part of the AGPL community source unless a file says otherwise. That includes
+the Node service entry point, database migration code, provider proxy logic,
+credit ledger implementation, staging Docker files, and deployment templates.
+
+Publishing that source does not publish or license the official production
+operation itself. The following must remain outside the public repository:
+
+- `.env.service`, `.env.local`, and all real environment files;
+- Google OAuth client secrets, Stripe secret keys, webhook secrets, provider
+  API keys, VPS SSH keys, and database passwords;
+- PostgreSQL data, backups, dumps, and migration snapshots containing live
+  customer data;
+- server access logs, AI request logs, billing records, support records,
+  analytics exports, and incident notes containing personal data;
+- official domain, account, billing, and infrastructure credentials.
+
+Forks may run the AGPL service code under the GNU AGPL, but they do not receive
+rights to use the Mind Atlas marks as an official service, and modified hosted
+versions must comply with AGPL network-source obligations.
+
 Likely proprietary areas include:
 
 - official encrypted Sync infrastructure and managed backup services;

@@ -2,7 +2,6 @@ import {
   Bot,
   CalendarClock,
   CornerDownLeft,
-  Copy,
   FileArchive,
   FileCode,
   FileJson,
@@ -12,21 +11,19 @@ import {
   Image as ImageIcon,
   Mic,
   Paintbrush,
-  Plus,
+  Paperclip,
   Presentation,
   X,
 } from "lucide-react";
 import { ChangeEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { saveStoredAttachmentBlob } from "../attachmentStorage";
-import { buildContextCopy, CONTEXT_COPY_PRESETS, copyContextMarkdown, formatContextCopyStats, type ContextCopyPreset } from "../context/contextCopy";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { findNode, useAtlasStore } from "../store/atlasStore";
 import type { AtlasTheme } from "../theme";
-import type { AtlasNode, AttachmentKind, NodeAttachment, WorkStatus } from "../types";
+import type { AtlasNode, AttachmentKind, NodeAttachment } from "../types";
 
 let sessionReminderDraftAt = addDays(new Date(), 1).toISOString();
-const STATUS_OPTIONS: WorkStatus[] = ["running", "needs_review", "waiting", "blocked", "error", "done"];
 
 export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -37,28 +34,20 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
   const updateNodeAppearance = useAtlasStore((state) => state.updateNodeAppearance);
   const setNodeReminder = useAtlasStore((state) => state.setNodeReminder);
   const clearNodeReminder = useAtlasStore((state) => state.clearNodeReminder);
-  const setNodeStatus = useAtlasStore((state) => state.setNodeStatus);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
-  const aiRuns = useAtlasStore((state) => state.aiRuns);
   const selectedNode = findNode(atlasRoot, selectedNodeId) ?? atlasRoot;
   const isRoot = selectedNode.id === atlasRoot.id;
   const [surfaceMenuOpen, setSurfaceMenuOpen] = useState(false);
-  const [copyMenuOpen, setCopyMenuOpen] = useState(false);
-  const [copyStatus, setCopyStatus] = useState("");
   const [reminderMenuOpen, setReminderMenuOpen] = useState(false);
-  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [reminderDraftAt, setReminderDraftAt] = useState(sessionReminderDraftAt);
   const [reminderCalendarMonth, setReminderCalendarMonth] = useState(() => startOfMonth(dateFromInput(sessionReminderDraftAt) ?? addDays(new Date(), 1)));
-  const aiRun = selectedNode.aiRunId ? aiRuns[selectedNode.aiRunId] : undefined;
   const reminderDraft = dateFromInput(reminderDraftAt) ?? addDays(new Date(), 1);
   const reminderMobileLayout = useReminderMobileLayout();
 
   useEffect(() => {
     const closeMenus = () => {
       setSurfaceMenuOpen(false);
-      setCopyMenuOpen(false);
       setReminderMenuOpen(false);
-      setStatusMenuOpen(false);
     };
     window.addEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenus);
     return () => window.removeEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenus);
@@ -201,105 +190,30 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
     event.target.value = "";
   };
 
-  const handleCopyContext = (preset: ContextCopyPreset) => {
-    void copyContextMarkdown(atlasRoot, selectedNode.id, preset)
-      .then((result) => {
-        setCopyStatus(`Copied ${formatContextCopyStats(result)}`);
-        setCopyMenuOpen(false);
-      })
-      .catch((error) => setCopyStatus(error instanceof Error ? error.message : "Copy failed."));
-  };
-
   return (
     <>
       <aside className={`focus-panel ${isRoot ? "is-hidden" : "is-active"}`} aria-label="Focused context" aria-hidden={isRoot}>
         <div className="panel-toolbar">
-        <label className="icon-button file-button panel-tool-button" aria-label="Attach file">
-          <Plus size={18} />
-          <input type="file" multiple onChange={handleAttachmentChange} />
-        </label>
-        <div className="panel-menu-anchor">
-          <button
-            className="icon-button panel-tool-button"
-            type="button"
-            onClick={() => {
-              setCopyMenuOpen((open) => !open);
-              setSurfaceMenuOpen(false);
-              setReminderMenuOpen(false);
-              setStatusMenuOpen(false);
-            }}
-            aria-label="Copy with context"
-          >
-            <Copy size={17} />
-          </button>
-          {copyMenuOpen ? (
-            <div className="context-menu surface-context-menu">
-              {CONTEXT_COPY_PRESETS.map((preset) => {
-                const preview = buildContextCopy(atlasRoot, selectedNode.id, preset.id);
-                return (
-                  <button key={preset.id} type="button" onClick={() => handleCopyContext(preset.id)} title={formatContextCopyStats(preview)}>
-                    <span>{preset.label}</span>
-                    <small>{formatContextCopyStats(preview)}</small>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
-        <div className="panel-menu-anchor">
-          <button
-            className="ai-node-status"
-            type="button"
-            title={aiRun?.error ?? selectedNode.nextDecision}
-            aria-label="Change node status"
-            aria-haspopup="menu"
-            aria-expanded={statusMenuOpen}
-            onClick={() => {
-              setStatusMenuOpen((open) => !open);
-              setReminderMenuOpen(false);
-              setSurfaceMenuOpen(false);
-            }}
-          >
-            <Bot size={14} />
-            <span>{formatStatusLabel(selectedNode.status)}</span>
-            {selectedNode.modelId ? <b>{selectedNode.modelId}</b> : null}
-          </button>
-          {statusMenuOpen ? (
-            <div className="context-menu status-context-menu" role="menu" aria-label="Node status">
-              {STATUS_OPTIONS.map((status) => (
-                <button
-                  key={status}
-                  className={selectedNode.status === status ? "is-active" : ""}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={selectedNode.status === status}
-                  onClick={() => {
-                    setNodeStatus(selectedNode.id, status, `Status changed to ${formatStatusLabel(status)} by human.`);
-                    setStatusMenuOpen(false);
-                  }}
-                >
-                  <span>{formatStatusLabel(status)}</span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-        <div className="panel-menu-anchor">
-          <button
-            className={`icon-button panel-tool-button ${selectedNode.reminderAt && !selectedNode.reminderFiredAt ? "is-live" : ""}`}
-            type="button"
-            onClick={() => {
-              setReminderMenuOpen((open) => !open);
-              setSurfaceMenuOpen(false);
-              setStatusMenuOpen(false);
-            }}
-            aria-label="Open reminder menu"
-            title={selectedNode.reminderAt ? `Reminder: ${formatReminderDate(selectedNode.reminderAt)}` : "Set reminder"}
-          >
-            <CalendarClock size={17} />
-          </button>
-          {reminderMobileLayout ? null : reminderMenu}
-        </div>
+          <div className="panel-role-label editor-panel-role" aria-hidden="true">
+            <FileText size={14} />
+            <span>Editor</span>
+          </div>
+          <div className="panel-menu-anchor">
+            <button
+              className={`icon-button panel-tool-button reminder-tool-button ${selectedNode.reminderAt && !selectedNode.reminderFiredAt ? "is-live" : ""}`}
+              type="button"
+              onClick={() => {
+                setReminderMenuOpen((open) => !open);
+                setSurfaceMenuOpen(false);
+              }}
+              aria-label="Open reminder menu"
+              title={selectedNode.reminderAt ? `Reminder: ${formatReminderDate(selectedNode.reminderAt)}` : "Set reminder"}
+            >
+              <CalendarClock size={17} />
+              <span>リマインダー</span>
+            </button>
+            {reminderMobileLayout ? null : reminderMenu}
+          </div>
         <div className="panel-menu-anchor">
           <button
             className="icon-button panel-tool-button"
@@ -307,7 +221,6 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
             onClick={() => {
               setSurfaceMenuOpen((open) => !open);
               setReminderMenuOpen(false);
-              setStatusMenuOpen(false);
             }}
             aria-label="Open surface menu"
           >
@@ -345,7 +258,6 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
           ) : null}
         </div>
       </div>
-      {copyStatus ? <div className="panel-copy-status" role="status">{copyStatus}</div> : null}
 
       <div className="panel-text-section">
         <textarea
@@ -374,6 +286,10 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
 
       <section className="panel-preview-area" aria-label="Attachment preview">
         <div className="panel-preview-frame">
+          <label className="icon-button file-button panel-attach-preview-button" aria-label="Attach file">
+            <Paperclip size={17} />
+            <input type="file" multiple onChange={handleAttachmentChange} />
+          </label>
           {selectedNode.attachments.length ? (
             <div className="attachment-list panel-preview-list">
               {selectedNode.attachments.map((attachment) => (
@@ -418,10 +334,6 @@ function useReminderMobileLayout() {
   }, []);
 
   return isMobile;
-}
-
-function formatStatusLabel(status: WorkStatus) {
-  return status.replace(/_/g, " ");
 }
 
 function TimeStepper({

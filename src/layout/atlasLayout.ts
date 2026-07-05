@@ -244,7 +244,7 @@ export function getStoredPositionForWorldDirection(
 export function getAtlasLayoutModeLabel(mode: AtlasLayoutMode) {
   switch (mode) {
     case "phyllotaxis":
-      return "Phyllotaxis";
+      return "Mind Atlas";
     case "tree":
       return "Tree";
     case "mind-map":

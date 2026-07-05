@@ -40,11 +40,11 @@ export type OnboardingState = {
   showLogoOnly: boolean;
   showMainChrome: boolean;
   showRootPulse: boolean;
+  showChildCreationFallback: boolean;
   showAiFeatures: boolean;
   shouldApplyUniverseTitlePrompt: boolean;
   startTutorialMode: () => void;
   completeTutorial: () => void;
-  setAiFeaturesUnlocked: (unlocked: boolean) => void;
   markUniverseTitlePromptApplied: () => void;
 };
 
@@ -53,6 +53,7 @@ const NOTEBOOK_STORAGE_KEY = "mind-atlas-notebook-v2";
 const ROOT_DISCOVERY_WAIT_MS = 5000;
 const ROOT_WHITE_HOLE_WAIT_MS = 2000;
 const SPACE_STEP_GRACE_MS = 5000;
+const CHILD_CREATION_FALLBACK_MS = 5000;
 const CAMERA_RESET_HINT_DELAY_MS = 3000;
 const NOTICE_MS = 5000;
 
@@ -68,8 +69,6 @@ const SPACE_STEPS: Array<{ id: SpaceStepId; event: OnboardingEventType; messageI
   { id: "childNodeCreated", event: "child-node-created", messageId: "space.childNode" },
 ];
 
-const KONAMI_SEQUENCE = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
-
 export function useOnboarding(): OnboardingState {
   const locale = useMemo(() => detectOnboardingLocale(), []);
   const text = ONBOARDING_TEXT[locale];
@@ -79,6 +78,7 @@ export function useOnboarding(): OnboardingState {
   const [spacePromptDeadline, setSpacePromptDeadline] = useState<SpacePromptDeadline | null>(null);
   const [spacePromptStep, setSpacePromptStep] = useState<SpaceStepId | null>(null);
   const [noticeMessageId, setNoticeMessageId] = useState<OnboardingMessageId | null>(null);
+  const [childCreationFallbackVisible, setChildCreationFallbackVisible] = useState(false);
   const [allNodesOffscreen, setAllNodesOffscreen] = useState(false);
   const [cameraResetHintVisible, setCameraResetHintVisible] = useState(false);
 
@@ -103,6 +103,7 @@ export function useOnboarding(): OnboardingState {
     setSpacePromptStep(null);
     setSpacePromptDeadline(null);
     setNoticeMessageId(null);
+    setChildCreationFallbackVisible(false);
     setAllNodesOffscreen(false);
     setCameraResetHintVisible(false);
   }, []);
@@ -123,17 +124,11 @@ export function useOnboarding(): OnboardingState {
     setRootHelpLevel(0);
     setSpacePromptStep(null);
     setSpacePromptDeadline(null);
+    setChildCreationFallbackVisible(false);
     setAllNodesOffscreen(false);
     setCameraResetHintVisible(false);
     setNoticeMessageId("basic.complete");
   }, [persistProgress]);
-
-  const setAiFeaturesUnlocked = useCallback(
-    (unlocked: boolean) => {
-      persistProgress((current) => (current.aiUnlocked === unlocked ? current : { ...current, aiUnlocked: unlocked }));
-    },
-    [persistProgress],
-  );
 
   const markSpaceStep = useCallback(
     (stepId: SpaceStepId) => {
@@ -179,6 +174,7 @@ export function useOnboarding(): OnboardingState {
       if (type === "child-node-created") {
         if (typeof detail.childDepth !== "number" || detail.childDepth < 2) return;
         persistProgress((current) => (current.childNodeCreated ? current : { ...current, childNodeCreated: true }));
+        setChildCreationFallbackVisible(false);
         return;
       }
 
@@ -227,6 +223,7 @@ export function useOnboarding(): OnboardingState {
       stepId: firstMissingSpaceStep.id,
       deadlineAt: Date.now() + SPACE_STEP_GRACE_MS,
     });
+    setChildCreationFallbackVisible(false);
   }, [firstMissingSpaceStep, persistProgress, progress.firstRun, progress.rootNodeCreated, progress.spaceBasicsCompleted]);
 
   useEffect(() => {
@@ -239,32 +236,15 @@ export function useOnboarding(): OnboardingState {
   }, [firstMissingSpaceStep, progress.spaceBasicsCompleted, spacePromptDeadline]);
 
   useEffect(() => {
-    let matched = 0;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.key === "Process" || event.keyCode === 229) return;
-      const expected = KONAMI_SEQUENCE[matched];
-      const actual = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-      if (actual === expected) {
-        matched += 1;
-        if (matched === KONAMI_SEQUENCE.length) {
-          matched = 0;
-          if (progress.firstRun && !progress.basicCompleted) {
-            completeTutorial();
-            return;
-          }
-          if (progress.aiUnlocked) return;
-          const confirmed = window.confirm(text["ai.unlockConfirm"]);
-          if (!confirmed) return;
-          persistProgress((current) => ({ ...current, aiUnlocked: true }));
-          setNoticeMessageId("ai.unlocked");
-        }
-        return;
-      }
-      matched = actual === KONAMI_SEQUENCE[0] ? 1 : 0;
-    };
-    window.addEventListener("keydown", handleKeyDown, { capture: true });
-    return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
-  }, [completeTutorial, persistProgress, progress.aiUnlocked, progress.basicCompleted, progress.firstRun, text]);
+    if (progress.childNodeCreated || progress.spaceBasicsCompleted || spacePromptStep !== "childNodeCreated") {
+      setChildCreationFallbackVisible(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setChildCreationFallbackVisible(true);
+    }, CHILD_CREATION_FALLBACK_MS);
+    return () => window.clearTimeout(timeout);
+  }, [progress.childNodeCreated, progress.spaceBasicsCompleted, spacePromptStep]);
 
   useEffect(() => {
     if (!noticeMessageId) return;
@@ -284,7 +264,8 @@ export function useOnboarding(): OnboardingState {
   const activeMessageId =
     noticeMessageId ??
     rootMessageId(progress, rootHelpLevel) ??
-    (cameraResetHintVisible ? "space.cameraReset" : null) ??
+    (cameraResetHintVisible ? cameraResetMessageId() : null) ??
+    (childCreationFallbackVisible ? "space.childNodeFallback" : null) ??
     spaceMessageId(firstMissingSpaceStep, spacePromptStep);
   const showMainChrome = !progress.firstRun || progress.spaceBasicsCompleted;
 
@@ -296,11 +277,11 @@ export function useOnboarding(): OnboardingState {
     showLogoOnly: progress.firstRun && !progress.spaceBasicsCompleted,
     showMainChrome,
     showRootPulse: progress.firstRun && !progress.rootNodeCreated,
+    showChildCreationFallback: childCreationFallbackVisible,
     showAiFeatures: progress.aiUnlocked,
     shouldApplyUniverseTitlePrompt: progress.firstRun && progress.spaceBasicsCompleted && !progress.titlePromptApplied,
     startTutorialMode,
     completeTutorial,
-    setAiFeaturesUnlocked,
     markUniverseTitlePromptApplied,
   };
 }
@@ -410,6 +391,14 @@ function rootMessageId(progress: OnboardingProgress, helpLevel: 0 | 1 | 2): Onbo
   if (helpLevel === 1) return "root.hint";
   if (helpLevel === 2) return "root.answer";
   return null;
+}
+
+function cameraResetMessageId(): OnboardingMessageId {
+  if (typeof window === "undefined" || typeof document === "undefined") return "space.cameraReset";
+  if (document.documentElement.getAttribute("data-keyboard-overlay-portrait") === "true") return "space.cameraResetMobile";
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const narrowPortrait = window.matchMedia?.("(max-width: 980px) and (orientation: portrait)").matches ?? false;
+  return coarsePointer && narrowPortrait ? "space.cameraResetMobile" : "space.cameraReset";
 }
 
 function spaceMessageId(

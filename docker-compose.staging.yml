@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mindatlas
+      POSTGRES_PASSWORD: mindatlas-staging
+      POSTGRES_DB: mindatlas
+    volumes:
+      - mind_atlas_staging_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mindatlas -d mindatlas"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.staging
+      args:
+        VITE_MIND_ATLAS_PUBLIC_SERVICE: "true"
+        VITE_MIND_ATLAS_SERVICE_URL: "http://127.0.0.1:8088"
+    env_file:
+      - deploy/staging/env.service.docker.example
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8788"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8788/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "8088:80"
+    volumes:
+      - ./deploy/staging/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mind_atlas_staging_pg:

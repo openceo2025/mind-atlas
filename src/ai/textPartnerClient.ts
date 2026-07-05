@@ -47,15 +47,27 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings,
       }
 
       if (!result.toolCalls.length) {
+        const responseText = result.text.trim() || "(No text response.)";
+        const archived = useAtlasStore.getState().archivePartnerTurn({
+          parentNodeId: state.selectedNodeId,
+          prompt,
+          response: responseText,
+          mode: partnerArchiveMode(settings.service),
+          provider: result.provider,
+          model: result.model,
+          usage: result.usage,
+          status: "done",
+        });
         useAtlasStore.getState().appendVoiceLogEntry({
           role: "assistant",
           title: `AI Partner (${label})`,
-          text: result.text.trim() || "(No text response.)",
+          text: archived ? "Response archived as notebook nodes." : responseText,
           sessionId,
           metadata: {
             provider: result.provider,
             model: result.model,
             usage: result.usage,
+            archived,
           },
         });
         return;
@@ -99,6 +111,20 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings,
 function chatSettingsLabel(settings: ChatSettings) {
   if (settings.service === "anthropic") return settings.model || "Opus";
   if (settings.service === "deepseek") return settings.model || "DeepSeek";
+  if (settings.service === "glm") return settings.model || "GLM";
+  if (settings.service === "gemini") return settings.model || "Gemini";
+  if (settings.service === "qwen") return settings.model || "Qwen";
+  if (settings.service === "composer") return settings.model || "Composer";
+  if (settings.service === "kimi") return settings.model || "Kimi";
+  if (settings.service === "mimo") return settings.model || "Mimo";
+  if (settings.service === "minimax") return settings.model || "MiniMax";
+  if (settings.service === "grok") return settings.model || "Grok";
   if (settings.service === "local") return "Local";
   return settings.model || "OpenAI";
+}
+
+function partnerArchiveMode(service: ChatSettings["service"]) {
+  if (service === "openai") return "openai";
+  if (service === "local") return "local";
+  return "chat";
 }

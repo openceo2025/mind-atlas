@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Mind Atlas privacy policy for Google sign-in, hosted AI features, billing, and local-first notebook data."
+    />
+    <meta name="theme-color" content="#061014" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Privacy Policy | Mind Atlas</title>
+    <style>
+      :root {
+        --bg: #f6f2e5;
+        --ink: #102018;
+        --muted: #52645a;
+        --panel: #ffffff;
+        --line: rgba(16, 32, 24, 0.14);
+        --green: #0b6f4b;
+        --gold: #9a7412;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        line-height: 1.72;
+      }
+
+      a {
+        color: var(--green);
+        font-weight: 800;
+      }
+
+      .page {
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 28px 20px 56px;
+      }
+
+      header,
+      section {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.76);
+        box-shadow: 0 16px 48px rgba(28, 38, 32, 0.08);
+      }
+
+      header {
+        padding: 28px;
+      }
+
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+
+      nav a {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 11px;
+        background: #fff;
+        color: var(--ink);
+        text-decoration: none;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: clamp(30px, 6vw, 48px);
+        line-height: 1.08;
+      }
+
+      h2 {
+        margin: 0 0 12px;
+        font-size: 22px;
+        line-height: 1.25;
+      }
+
+      p {
+        margin: 0 0 14px;
+      }
+
+      .lead {
+        color: var(--muted);
+        font-size: 16px;
+      }
+
+      .meta {
+        color: var(--gold);
+        font-size: 13px;
+        font-weight: 900;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      section {
+        margin-top: 16px;
+        padding: 24px 28px;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 1.2em;
+      }
+
+      li + li {
+        margin-top: 8px;
+      }
+
+      footer {
+        margin-top: 24px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 640px) {
+        .page {
+          padding: 14px 12px 40px;
+        }
+
+        header,
+        section {
+          padding: 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <nav aria-label="Legal navigation">
+          <a href="/">Mind Atlasへ戻る</a>
+          <a href="/about.html">Mind Atlasについて</a>
+          <a href="/terms.html">利用規約</a>
+        </nav>
+        <p class="meta">Last updated: 2026-07-01</p>
+        <h1>Privacy Policy</h1>
+        <p class="lead">
+          このプライバシーポリシーは、Mind Atlas のWebサービス、Googleログイン、課金、AI機能、および関連するサーバー処理に適用されます。
+        </p>
+      </header>
+
+      <section>
+        <h2>1. 運営者と連絡先</h2>
+        <p>
+          Mind Atlas は、Mind Atlas operator により運営されています。プライバシーに関する問い合わせ、アカウント削除、データ削除の依頼は、以下に連絡してください。
+        </p>
+        <p><a href="mailto:support@mind-atlas.org">support@mind-atlas.org</a></p>
+      </section>
+
+      <section>
+        <h2>2. 取得する情報</h2>
+        <p>Mind Atlas は、提供する機能に応じて以下の情報を取得または処理します。</p>
+        <ul>
+          <li>Googleログインで提供される基本プロフィール情報: GoogleアカウントのID、メールアドレス、表示名、プロフィール画像。</li>
+          <li>アカウントとセッション情報: ユーザーID、ログイン状態、セッションCookie、サブスクリプション状態。</li>
+          <li>課金情報: Stripeが発行する顧客ID、サブスクリプションID、支払い状態。クレジットカード番号そのものはMind Atlasのサーバーには保存されません。</li>
+          <li>AI機能の利用情報: 選択したプロバイダー、モデル、概算利用量、トークン残量、処理時刻、エラー情報。</li>
+          <li>AIに送信する内容: ユーザーがChat、Web search、Dictation、Realtime Talk等で送信したテキスト、音声、検索クエリ、対象ノードの文脈。</li>
+          <li>技術情報: IPアドレス、ブラウザ情報、アクセス時刻、セキュリティおよび障害調査に必要なログ。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>3. ローカルファーストのノートデータ</h2>
+        <p>
+          Mind Atlas の通常ノートブックは、基本的にユーザーのブラウザ内ストレージに保存されます。ログインしていない状態で作成したノート内容は、AI機能、インポート、共有、クラウド保存などの明示的な操作をしない限り、Mind Atlasのサーバーへ送信されません。
+        </p>
+      </section>
+
+      <section>
+        <h2>4. 情報の利用目的</h2>
+        <ul>
+          <li>Googleログインによるユーザー認証とアカウント管理。</li>
+          <li>Stripeによるサブスクリプション管理、課金状態の確認、AI機能の利用資格判定。</li>
+          <li>Chat、Web search、Dictation、Realtime TalkなどのAI機能の提供。</li>
+          <li>月次のAI利用トークン残量、利用量、エラー、管理者向け利用履歴の記録。</li>
+          <li>不正利用、セキュリティ事故、障害、サポート対応への対処。</li>
+          <li>サービスの品質改善。ただし、個人を特定する形での広告販売には利用しません。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>5. Googleユーザーデータの扱い</h2>
+        <p>
+          Mind Atlas は、Googleログインのために必要な最小限のGoogleユーザーデータのみを利用します。現在の用途は、ユーザー認証、メールアドレスによるアカウント識別、ログイン状態の管理です。
+        </p>
+        <p>
+          Googleユーザーデータを販売したり、広告目的で第三者へ提供したりしません。Googleユーザーデータの利用は、このポリシーで明示した目的に限定します。
+        </p>
+      </section>
+
+      <section>
+        <h2>6. 第三者サービスへの提供</h2>
+        <p>Mind Atlas は、サービス提供のために以下の外部サービスを利用します。</p>
+        <ul>
+          <li>Google: ログイン認証。</li>
+          <li>Stripe: サブスクリプション、決済、請求管理。</li>
+          <li>OpenAI、Anthropic、DeepSeek等のAIプロバイダー: ユーザーがAI機能を実行したときの推論、音声認識、Realtime Talk、Web search等。</li>
+          <li>VPS、DNS、監視、メール等のインフラ提供者: サービス運用に必要な範囲。</li>
+        </ul>
+        <p>
+          AI機能を利用すると、入力内容、選択ノードの文脈、音声データ、検索クエリ等が、選択されたAIプロバイダーへ送信される場合があります。
+        </p>
+      </section>
+
+      <section>
+        <h2>7. Cookie</h2>
+        <p>
+          Mind Atlas はログインセッションを維持するためにCookieを使用します。公開サービスでは、セッションCookieは認証、セキュリティ、課金状態の確認のために利用されます。
+        </p>
+      </section>
+
+      <section>
+        <h2>8. 保存期間と削除</h2>
+        <p>
+          アカウント情報、課金状態、利用履歴は、サービス提供、会計、セキュリティ、紛争対応に必要な期間保存されます。アカウント削除または個人データ削除を希望する場合は、連絡先メールアドレスへ依頼してください。法令、決済、セキュリティ上必要な情報は、一定期間保持される場合があります。
+        </p>
+      </section>
+
+      <section>
+        <h2>9. セキュリティ</h2>
+        <p>
+          Mind Atlas は、APIキーをブラウザに公開せず、サーバー側で管理します。また、通信の暗号化、アクセス制限、ログ管理など、合理的な安全管理措置を講じます。ただし、インターネット上のサービスに絶対的な安全性は保証できません。
+        </p>
+      </section>
+
+      <section>
+        <h2>10. 変更</h2>
+        <p>
+          このポリシーは、サービス内容、法令、外部サービスの要件に応じて変更されることがあります。重要な変更がある場合は、サービス上または適切な方法で通知します。
+        </p>
+      </section>
+
+      <footer>
+        <p>Mind Atlas / Privacy Policy</p>
+      </footer>
+    </main>
+  </body>
+</html>

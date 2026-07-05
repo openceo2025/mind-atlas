@@ -1,5 +1,5 @@
 import { AudioLines, Bot, Code2, Mic, PenLine, SendHorizonal, Square, Terminal } from "lucide-react";
-import { FormEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { transcribeAudio } from "../ai/audioTranscriptionClient";
 import { getChatOptions, getCodexOptions, getOpenClawOptions } from "../ai/bridgeClient";
 import { runOpenClawPartnerTurn } from "../ai/openClawPartnerClient";
@@ -7,8 +7,9 @@ import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceS
 import { runTextPartnerTurn } from "../ai/textPartnerClient";
 import { buildVoiceLogContext } from "../ai/voiceLogContext";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
+import { isHostedServiceMode } from "../hosted/serviceClient";
 import { buildAiNodeContextWithAttachments, findInheritedAiDialogSettings, findNode, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
-import { loadPersistedUiState, persistUiStatePatch } from "../uiPersistence";
+import { clearPersistedCommandDraft, loadPersistedUiState, persistUiStatePatch } from "../uiPersistence";
 import { ProviderUsagePanel } from "./ProviderUsagePanel";
 import type {
   AiAttachmentMode,
@@ -33,6 +34,7 @@ type VoiceButtonState = "idle" | "dictation_recording" | "dictation_transcribing
 const VOICE_LONG_PRESS_MS = 460;
 const DEFAULT_VOICE_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 const VOICE_IDLE_TIMEOUT_MS = readVoiceIdleTimeoutMs();
+const CHAT_OPTIONS_REFRESH_MS = 5 * 60 * 1000;
 const CLAUDE_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 const CLAUDE_DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic";
 const CLAUDE_MODEL_PRESETS = [
@@ -43,6 +45,7 @@ const CLAUDE_MODEL_PRESETS = [
 ] as const;
 const CLAUDE_REASONING_EFFORTS: ClaudeReasoningEffort[] = ["default", "low", "medium", "high", "xhigh", "max"];
 const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
+const PUBLIC_SERVICE_MODE = isHostedServiceMode();
 
 export function CommandDock() {
   const [persistedCommandDraft] = useState(() => loadPersistedUiState()?.commandDraft ?? null);
@@ -95,14 +98,17 @@ export function CommandDock() {
   const addQuickChildFromInput = useAtlasStore((state) => state.addQuickChildFromInput);
   const setNodeStatus = useAtlasStore((state) => state.setNodeStatus);
   const selectedNode = findNode(atlasRoot, selectedNodeId);
-  const scope = aiContextOptions.scope;
-  const editableContextControls = mode !== "note" && scope === "custom";
+  const effectiveAiContextOptions = PUBLIC_SERVICE_MODE
+    ? { ...aiContextOptions, scope: "path-children" as AiContextScope }
+    : aiContextOptions;
+  const scope = effectiveAiContextOptions.scope;
+  const editableContextControls = !PUBLIC_SERVICE_MODE && mode !== "note" && scope === "custom";
   const [codexOptions, setCodexOptions] = useState<CodexOptionsResult | null>(null);
   const [chatOptions, setChatOptions] = useState<ChatOptionsResult | null>(null);
   const [openClawOptions, setOpenClawOptions] = useState<OpenClawOptionsResult | null>(null);
   const contextOptionsForRun = useMemo(
-    () => normalizeAiContextOptions({ ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds }),
-    [aiContextOptions, multiSelectedNodeIds],
+    () => normalizeAiContextOptions({ ...effectiveAiContextOptions, selectedNodeIds: multiSelectedNodeIds }),
+    [effectiveAiContextOptions, multiSelectedNodeIds],
   );
   const codexModelOptions = codexOptions?.models.length
     ? codexOptions.models
@@ -119,8 +125,9 @@ export function CommandDock() {
     ? selectedCodexModel.supportedReasoningEfforts
     : (["low", "medium", "high", "xhigh"] as CodexReasoningEffort[]);
   const fallbackServices = fallbackChatServices();
-  const chatServiceOptions = chatOptions?.services.length ? chatOptions.services : fallbackServices;
-  const selectedChatService = chatServiceOptions.find((service) => service.id === chatSettings.service) ?? fallbackServices[0];
+  const rawChatServiceOptions = chatOptions?.services.length ? chatOptions.services : fallbackServices;
+  const chatServiceOptions = visibleChatServices(rawChatServiceOptions);
+  const selectedChatService = chatServiceOptions.find((service) => service.id === chatSettings.service) ?? chatServiceOptions[0] ?? fallbackServices[0];
   const chatModelOptions = selectedChatService?.models.length
     ? selectedChatService.models
     : fallbackChatModelOptions(selectedChatService?.defaultModel ?? chatSettings.model);
@@ -168,6 +175,10 @@ export function CommandDock() {
   useEffect(() => {
     setActiveCommandMode(mode);
   }, [mode, setActiveCommandMode]);
+
+  useEffect(() => {
+    if (PUBLIC_SERVICE_MODE && mode !== "chat") setMode("chat");
+  }, [mode]);
 
   useEffect(() => {
     latestCommandDraftRef.current = { value, mode };
@@ -228,57 +239,74 @@ export function CommandDock() {
     };
   }, []);
 
+  const refreshChatOptions = useCallback(async (shouldApply: () => boolean = () => true) => {
+    const options = await getChatOptions();
+    if (!shouldApply()) return;
+    setChatOptions(options);
+    const current = useAtlasStore.getState();
+    if (findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId)?.chatSettings) return;
+    const services = visibleChatServices(options.services);
+    const service = services.find((item) => item.id === current.chatSettings.service) ?? services.find((item) => item.id === options.defaultService) ?? services[0];
+    if (!service) return;
+    const currentModelStillAvailable = service.models.some((item) => item.model === current.chatSettings.model);
+    const model = currentModelStillAvailable ? current.chatSettings.model : service.defaultModel || service.models[0]?.model || "";
+    const effort = service.models.find((item) => item.model === model)?.defaultReasoningEffort ?? service.defaultReasoningEffort;
+    setChatSettings({
+      service: service.id,
+      model,
+      reasoningEffort: effort,
+    });
+  }, [setChatSettings]);
+
   useEffect(() => {
     let alive = true;
-    void getChatOptions()
-      .then((options) => {
-        if (!alive) return;
-        setChatOptions(options);
-        const current = useAtlasStore.getState();
-        if (findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId)?.chatSettings) return;
-        const service = options.services.find((item) => item.id === current.chatSettings.service) ?? options.services.find((item) => item.id === options.defaultService) ?? options.services[0];
-        if (!service) return;
-        const model = current.chatSettings.model || service.defaultModel || service.models[0]?.model || "";
-        const effort = service.models.find((item) => item.model === model)?.defaultReasoningEffort ?? service.defaultReasoningEffort;
-        setChatSettings({
-          service: service.id,
-          model,
-          reasoningEffort: effort,
-        });
-      })
-      .catch(() => {
+    const refreshIfAlive = () => {
+      void refreshChatOptions(() => alive).catch(() => {
         if (alive) setChatOptions(null);
       });
-    void getCodexOptions()
-      .then((options) => {
-        if (!alive) return;
-        setCodexOptions(options);
-        const current = useAtlasStore.getState();
-        if (findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId)?.codexSettings) return;
-        setCodexSettings({
-          model: options.defaultModel,
-          reasoningEffort: options.defaultReasoningEffort,
-          sandbox: options.defaultSandbox,
-          fullAccessApproved: options.defaultSandbox === "danger-full-access",
-          workspace: options.defaultWorkspace,
-          timeoutMs: options.defaultTimeoutMs,
+    };
+    refreshIfAlive();
+    const refreshOnVisible = () => {
+      if (document.visibilityState === "visible") refreshIfAlive();
+    };
+    document.addEventListener("visibilitychange", refreshOnVisible);
+    window.addEventListener("pageshow", refreshIfAlive);
+    const chatOptionsTimer = PUBLIC_SERVICE_MODE ? window.setInterval(refreshIfAlive, CHAT_OPTIONS_REFRESH_MS) : null;
+    if (!PUBLIC_SERVICE_MODE) {
+      void getCodexOptions()
+        .then((options) => {
+          if (!alive) return;
+          setCodexOptions(options);
+          const current = useAtlasStore.getState();
+          if (findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId)?.codexSettings) return;
+          setCodexSettings({
+            model: options.defaultModel,
+            reasoningEffort: options.defaultReasoningEffort,
+            sandbox: options.defaultSandbox,
+            fullAccessApproved: options.defaultSandbox === "danger-full-access",
+            workspace: options.defaultWorkspace,
+            timeoutMs: options.defaultTimeoutMs,
+          });
+        })
+        .catch(() => {
+          if (alive) setCodexOptions(null);
         });
-      })
-      .catch(() => {
-        if (alive) setCodexOptions(null);
-      });
-    void getOpenClawOptions()
-      .then((options) => {
-        if (!alive) return;
-        setOpenClawOptions(options);
-      })
-      .catch(() => {
-        if (alive) setOpenClawOptions(null);
-      });
+      void getOpenClawOptions()
+        .then((options) => {
+          if (!alive) return;
+          setOpenClawOptions(options);
+        })
+        .catch(() => {
+          if (alive) setOpenClawOptions(null);
+        });
+    }
     return () => {
       alive = false;
+      document.removeEventListener("visibilitychange", refreshOnVisible);
+      window.removeEventListener("pageshow", refreshIfAlive);
+      if (chatOptionsTimer !== null) window.clearInterval(chatOptionsTimer);
     };
-  }, [setChatSettings, setCodexSettings]);
+  }, [refreshChatOptions, setCodexSettings]);
 
   useEffect(() => {
     if (!openClawOptions?.models.length) return;
@@ -295,7 +323,10 @@ export function CommandDock() {
       return;
     }
     setVoiceError("");
+    clearCommandDraftPersistTimer();
+    latestCommandDraftRef.current = { value: "", mode };
     setValue("");
+    clearPersistedCommandDraft();
     if (mode === "note") {
       addQuickChildFromInput(trimmed);
       return;
@@ -785,10 +816,16 @@ export function CommandDock() {
   const statusText =
     codexWorkRootMissing
       ? "Codex Work root required"
-      : voiceError || (voiceButtonState !== "idle" ? voiceStatusLabel(voiceButtonState) : micLive ? `Voice Partner ${voiceState}` : `${modeLabel(mode)} / ${selectedNode?.status ?? "waiting"}`);
+      : voiceError || (voiceButtonState !== "idle" ? voiceStatusLabel(voiceButtonState) : micLive ? `Voice Partner ${voiceState}` : PUBLIC_SERVICE_MODE ? `AI / ${selectedNode?.status ?? "waiting"}` : `${modeLabel(mode)} / ${selectedNode?.status ?? "waiting"}`);
 
   return (
-    <form className="command-dock" onSubmit={handleSubmit} aria-label="Re-instruction input">
+    <form className={`command-dock ${PUBLIC_SERVICE_MODE ? "is-public-service" : ""}`} onSubmit={handleSubmit} aria-label="Re-instruction input">
+      {PUBLIC_SERVICE_MODE ? (
+        <div className="panel-role-label ai-panel-role" aria-hidden="true">
+          <Bot size={14} />
+          <span>AI</span>
+        </div>
+      ) : null}
       <button
         className={`icon-button ghost ${micLive || voiceButtonState !== "idle" ? "is-live" : ""}`}
         type="button"
@@ -809,29 +846,34 @@ export function CommandDock() {
           <Mic size={18} />
         )}
       </button>
-      <div className="mode-switch" aria-label="AI execution mode">
-        <ModeButton mode="chat" activeMode={mode} onSelect={setMode} />
-        <CodeModeButton activeMode={mode} onSelect={setMode} />
-        <ModeButton mode="openclaw" activeMode={mode} onSelect={setMode} />
-        <ModeButton mode="note" activeMode={mode} onSelect={setMode} />
-      </div>
-      <select
-        className="scope-select"
-        value={scope}
-        onChange={(event) => setAiContextOptions({ scope: event.target.value as AiContextScope })}
-        onFocus={() => setCommandInputEditing(true)}
-        onBlur={() => setCommandInputEditing(false)}
-        disabled={mode === "note"}
-        aria-label="AI context scope"
-        title="AI context scope"
-      >
-        <option value="minimal">Active</option>
-        <option value="focused">Focused</option>
-        <option value="subtree">Subtree</option>
-        <option value="neighborhood">Neighborhood</option>
-        <option value="selected">Selected</option>
-        <option value="custom">Custom</option>
-      </select>
+      {!PUBLIC_SERVICE_MODE ? (
+        <>
+          <div className="mode-switch" aria-label="AI execution mode">
+            <ModeButton mode="chat" activeMode={mode} onSelect={setMode} />
+            <CodeModeButton activeMode={mode} onSelect={setMode} />
+            <ModeButton mode="openclaw" activeMode={mode} onSelect={setMode} />
+            <ModeButton mode="note" activeMode={mode} onSelect={setMode} />
+          </div>
+          <select
+            className="scope-select"
+            value={scope}
+            onChange={(event) => setAiContextOptions({ scope: event.target.value as AiContextScope })}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+            disabled={mode === "note"}
+            aria-label="AI context scope"
+            title="AI context scope"
+          >
+            <option value="path-children">Default</option>
+            <option value="minimal">Active</option>
+            <option value="focused">Focused</option>
+            <option value="subtree">Subtree</option>
+            <option value="neighborhood">Neighborhood</option>
+            <option value="selected">Selected</option>
+            <option value="custom">Custom</option>
+          </select>
+        </>
+      ) : null}
       <label className="command-field">
         <span title={`${selectedNodeTitle} / ${contextText}`}>{statusText}</span>
         <input
@@ -1148,6 +1190,16 @@ export function CommandDock() {
               placeholder="optional project path"
             />
           </label>
+          <ContextNumberControl
+            className="claude-timeout-field"
+            label="Timeout (min)"
+            value={Math.round(claudeSettings.timeoutMs / 60000)}
+            min={1}
+            max={120}
+            onChange={(minutes) => setClaudeSettings({ timeoutMs: minutes * 60000 })}
+            onFocus={() => setCommandInputEditing(true)}
+            onBlur={() => setCommandInputEditing(false)}
+          />
             </>
           )}
         </div>
@@ -1195,7 +1247,7 @@ export function CommandDock() {
           />
         </div>
       ) : null}
-      {mode !== "note" ? <ProviderUsagePanel /> : null}
+      {mode !== "note" && !PUBLIC_SERVICE_MODE ? <ProviderUsagePanel /> : null}
     </form>
   );
 }
@@ -1463,6 +1515,12 @@ function fallbackChatServices(): ChatOptionsResult["services"] {
   ];
 }
 
+function visibleChatServices(services: ChatOptionsResult["services"]) {
+  if (!PUBLIC_SERVICE_MODE) return services;
+  const configured = services.filter((service) => service.configured);
+  return configured.length ? configured : services;
+}
+
 function fallbackChatModelOptions(model: string): ChatOptionsResult["services"][number]["models"] {
   return [
     {
@@ -1516,6 +1574,8 @@ function isCommandMode(value: unknown): value is CommandMode {
 
 function scopeLabel(scope: AiContextScope) {
   switch (scope) {
+    case "path-children":
+      return "Default";
     case "minimal":
       return "Active";
     case "focused":

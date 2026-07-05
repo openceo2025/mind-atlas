@@ -90,7 +90,7 @@ export type PlanetTexture = "speckled" | "bands" | "freckles" | "craters" | "mis
 
 export type AiExecutionMode = "chat" | "openai" | "local" | "codex" | "openclaw" | "claude";
 
-export type AiContextScope = "minimal" | "focused" | "subtree" | "neighborhood" | "selected" | "custom";
+export type AiContextScope = "minimal" | "path-children" | "focused" | "subtree" | "neighborhood" | "selected" | "custom";
 
 export type AiAttachmentMode = "metadata" | "content";
 
@@ -105,9 +105,39 @@ export interface AiContextOptions {
   selectedNodeIds: string[];
 }
 
-export type AiProvider = "openai" | "openai-compatible" | "anthropic" | "deepseek" | "local" | "codex" | "openclaw" | "claude" | "mock";
+export type AiProvider =
+  | "openai"
+  | "openai-compatible"
+  | "anthropic"
+  | "glm"
+  | "deepseek"
+  | "gemini"
+  | "qwen"
+  | "composer"
+  | "kimi"
+  | "mimo"
+  | "minimax"
+  | "grok"
+  | "local"
+  | "codex"
+  | "openclaw"
+  | "claude"
+  | "mock";
 
-export type ChatServiceId = "openai" | "anthropic" | "deepseek" | "local";
+export type HostedChatServiceId =
+  | "openai"
+  | "anthropic"
+  | "glm"
+  | "deepseek"
+  | "gemini"
+  | "qwen"
+  | "composer"
+  | "kimi"
+  | "mimo"
+  | "minimax"
+  | "grok";
+
+export type ChatServiceId = HostedChatServiceId | "local";
 
 export type ChatReasoningEffort = "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -176,6 +206,10 @@ export interface ChatModelOption {
   model: string;
   displayName: string;
   description?: string;
+  pricing?: {
+    inputUsdPer1M: number;
+    outputUsdPer1M: number;
+  };
   defaultReasoningEffort: ChatReasoningEffort;
   supportedReasoningEfforts: ChatReasoningEffort[];
 }
@@ -195,6 +229,43 @@ export interface ChatServiceOption {
 export interface ChatOptionsResult {
   services: ChatServiceOption[];
   defaultService: ChatServiceId;
+}
+
+export interface HostedServiceUser {
+  id: string;
+  email: string;
+  name: string;
+  pictureUrl?: string;
+  role: "user" | "admin";
+}
+
+export interface HostedServiceSubscription {
+  status: string;
+  currentPeriodEnd?: string;
+  cancelAtPeriodEnd?: boolean;
+}
+
+export interface HostedServiceCredit {
+  periodKey: string;
+  remainingPercent: number;
+  limitPercent: number;
+  exhausted: boolean;
+  updatedAt?: string;
+}
+
+export interface HostedServiceEntitlement {
+  aiEnabled: boolean;
+  reason?: "anonymous" | "subscription_required" | "credit_exhausted" | "active";
+}
+
+export interface HostedServiceSession {
+  publicService: true;
+  authenticated: boolean;
+  user: HostedServiceUser | null;
+  subscription: HostedServiceSubscription | null;
+  credit: HostedServiceCredit | null;
+  entitlement: HostedServiceEntitlement;
+  chatOptions: ChatOptionsResult;
 }
 
 export interface CodexModelOption {
@@ -482,6 +553,10 @@ export interface AiBridgeHealth {
   transcriptionModel?: string;
   realtimeTranscriptionModel?: string;
   mockFallback: boolean;
+  processId?: number;
+  uptimeSeconds?: number;
+  allowedOrigin?: string;
+  requestOrigin?: string;
   providers: AiBridgeProvider[];
 }
 

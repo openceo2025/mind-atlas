@@ -3,6 +3,7 @@ import type { AtlasNode, NodeAttachment } from "./types";
 
 export const MIND_ATLAS_NODE_CLIPBOARD_FORMAT = "mind-atlas-node-subtree";
 export const MIND_ATLAS_NODE_CLIPBOARD_VERSION = 1;
+export const MIND_ATLAS_NODE_CLIPBOARD_MIME = "web text/mind-atlas-node-subtree";
 
 export type MindAtlasNodeClipboardPayload = {
   format: typeof MIND_ATLAS_NODE_CLIPBOARD_FORMAT;
@@ -30,6 +31,44 @@ export function createNodeClipboardText(root: AtlasNode) {
   };
 
   return JSON.stringify(payload, null, 2);
+}
+
+export async function writeNodeClipboard(root: AtlasNode, plainText: string) {
+  const objectText = createNodeClipboardText(root);
+  if (typeof navigator !== "undefined" && navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([plainText], { type: "text/plain" }),
+          [MIND_ATLAS_NODE_CLIPBOARD_MIME]: new Blob([objectText], { type: "text/plain" }),
+        }),
+      ]);
+      return;
+    } catch (error) {
+      console.warn("Structured Mind Atlas clipboard write failed; falling back to JSON text.", error);
+    }
+  }
+  await writeFallbackClipboardText(objectText);
+}
+
+export async function readNodeClipboard() {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        if (!item.types.includes(MIND_ATLAS_NODE_CLIPBOARD_MIME)) continue;
+        const blob = await item.getType(MIND_ATLAS_NODE_CLIPBOARD_MIME);
+        const parsedNode = parseNodeClipboardText(await blob.text());
+        if (parsedNode) return parsedNode;
+      }
+    } catch {
+      // Fall back to text/plain below. Some browsers require extra permission for read().
+    }
+  }
+  if (typeof navigator !== "undefined" && navigator.clipboard?.readText) {
+    return parseNodeClipboardText(await navigator.clipboard.readText());
+  }
+  return null;
 }
 
 export function parseNodeClipboardText(text: string) {
@@ -110,4 +149,24 @@ function isVec3(value: unknown): value is [number, number, number] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function writeFallbackClipboardText(text: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  if (!copied) {
+    throw new Error("Clipboard write is not available.");
+  }
 }

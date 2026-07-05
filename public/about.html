@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Mind Atlas is a spatial notebook and AI mission-control workspace for thinking, sharing, and supervising parallel AI work."
+    />
+    <meta name="theme-color" content="#061014" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Mind Atlas | 思考宇宙とAIミッションコントロール</title>
+    <style>
+      :root {
+        --ink: #06100c;
+        --ink-2: #10251e;
+        --paper: #f6f2e5;
+        --paper-2: #e7f0e9;
+        --text: #f8fff7;
+        --muted: rgba(248, 255, 247, 0.74);
+        --line: rgba(248, 255, 247, 0.18);
+        --mint: #79e0b4;
+        --gold: #f3cf58;
+        --coral: #ff7a68;
+        --sky: #78bdf4;
+        --violet: #a99cf4;
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: #102018;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        letter-spacing: 0;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .page {
+        min-height: 100vh;
+        overflow: hidden;
+      }
+
+      .hero {
+        position: relative;
+        min-height: 84vh;
+        display: grid;
+        align-items: center;
+        padding: 28px min(6vw, 76px) 64px;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 72% 24%, rgba(121, 224, 180, 0.18), transparent 34%),
+          radial-gradient(circle at 22% 74%, rgba(255, 122, 104, 0.16), transparent 30%),
+          linear-gradient(145deg, #06100c 0%, #153226 48%, #091813 100%);
+      }
+
+      .hero::after {
+        content: "";
+        position: absolute;
+        inset: auto 0 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(246, 242, 229, 0.36), transparent);
+      }
+
+      .hero-nav {
+        position: absolute;
+        inset: 22px min(6vw, 76px) auto;
+        z-index: 3;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .brand-mark {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 900;
+      }
+
+      .brand-mark img {
+        width: 34px;
+        height: 34px;
+        border-radius: 8px;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .nav-links a,
+      .button-link {
+        min-height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(248, 255, 247, 0.2);
+        border-radius: 8px;
+        padding: 9px 13px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .nav-links a:hover,
+      .button-link:hover {
+        border-color: rgba(121, 224, 180, 0.6);
+        background: rgba(121, 224, 180, 0.14);
+      }
+
+      .hero-copy {
+        position: relative;
+        z-index: 2;
+        width: min(760px, 100%);
+        padding-top: 84px;
+      }
+
+      .eyebrow {
+        margin: 0 0 18px;
+        color: var(--gold);
+        font-size: 13px;
+        font-weight: 900;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        margin-bottom: 22px;
+        font-size: 64px;
+        line-height: 1.02;
+        letter-spacing: 0;
+      }
+
+      .lead {
+        width: min(620px, 100%);
+        color: var(--muted);
+        font-size: 19px;
+        line-height: 1.8;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 30px;
+      }
+
+      .button-link.primary {
+        border-color: rgba(243, 207, 88, 0.68);
+        background: #f3cf58;
+        color: #102018;
+      }
+
+      .button-link.primary:hover {
+        border-color: #ffe18c;
+        background: #ffe18c;
+      }
+
+      .atlas-scene {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        pointer-events: none;
+        opacity: 0.92;
+      }
+
+      .atlas-plane {
+        position: absolute;
+        right: min(5vw, 70px);
+        bottom: 22px;
+        width: min(720px, 66vw);
+        height: min(560px, 62vh);
+        transform: perspective(980px) rotateX(58deg) rotateZ(-12deg);
+        transform-origin: 55% 55%;
+      }
+
+      .orbit-ring,
+      .orbit-line {
+        position: absolute;
+        border: 1px solid rgba(248, 255, 247, 0.2);
+        border-radius: 50%;
+      }
+
+      .orbit-ring.one {
+        inset: 12% 10%;
+      }
+
+      .orbit-ring.two {
+        inset: 24% 24%;
+        border-color: rgba(243, 207, 88, 0.28);
+      }
+
+      .orbit-ring.three {
+        inset: 36% 35%;
+        border-color: rgba(120, 189, 244, 0.24);
+      }
+
+      .orbit-line {
+        left: 8%;
+        right: 7%;
+        top: 50%;
+        height: 1px;
+        transform: rotate(22deg);
+        border-width: 1px 0 0;
+        border-radius: 0;
+      }
+
+      .atlas-node {
+        position: absolute;
+        width: 120px;
+        min-height: 58px;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(248, 255, 247, 0.28);
+        border-radius: 8px;
+        padding: 9px;
+        background: rgba(6, 16, 12, 0.72);
+        box-shadow: var(--shadow);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 900;
+        text-align: center;
+        transform: rotateZ(12deg) rotateX(-58deg);
+      }
+
+      .atlas-node::before {
+        content: "";
+        width: 18px;
+        height: 18px;
+        margin-bottom: 5px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 24px currentColor;
+      }
+
+      .atlas-node.root {
+        left: 43%;
+        top: 42%;
+        width: 142px;
+        color: var(--gold);
+      }
+
+      .atlas-node.thinking {
+        left: 22%;
+        top: 24%;
+        color: var(--mint);
+      }
+
+      .atlas-node.agent {
+        left: 61%;
+        top: 25%;
+        color: var(--sky);
+      }
+
+      .atlas-node.voice {
+        left: 64%;
+        top: 62%;
+        color: var(--coral);
+      }
+
+      .atlas-node.share {
+        left: 18%;
+        top: 62%;
+        color: var(--violet);
+      }
+
+      .section {
+        padding: 86px min(6vw, 76px);
+      }
+
+      .section.dark {
+        background: var(--ink);
+        color: var(--text);
+      }
+
+      .section.muted {
+        background: var(--paper-2);
+      }
+
+      .section-header {
+        width: min(780px, 100%);
+        margin-bottom: 34px;
+      }
+
+      .section-header h2 {
+        margin-bottom: 14px;
+        font-size: 34px;
+        line-height: 1.18;
+        letter-spacing: 0;
+      }
+
+      .section-header p {
+        color: rgba(16, 32, 24, 0.72);
+        font-size: 16px;
+        line-height: 1.8;
+      }
+
+      .dark .section-header p {
+        color: var(--muted);
+      }
+
+      .feature-grid,
+      .plan-grid,
+      .roadmap-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .feature,
+      .plan,
+      .roadmap-item {
+        min-width: 0;
+        border: 1px solid rgba(16, 32, 24, 0.14);
+        border-radius: 8px;
+        padding: 20px;
+        background: rgba(255, 255, 255, 0.66);
+      }
+
+      .dark .feature,
+      .dark .plan,
+      .dark .roadmap-item {
+        border-color: var(--line);
+        background: rgba(255, 255, 255, 0.055);
+      }
+
+      .feature h3,
+      .plan h3,
+      .roadmap-item h3 {
+        margin-bottom: 10px;
+        font-size: 18px;
+        line-height: 1.35;
+        letter-spacing: 0;
+      }
+
+      .feature p,
+      .plan p,
+      .roadmap-item p,
+      .plan li {
+        color: rgba(16, 32, 24, 0.72);
+        font-size: 14px;
+        line-height: 1.72;
+      }
+
+      .dark .feature p,
+      .dark .plan p,
+      .dark .roadmap-item p,
+      .dark .plan li {
+        color: var(--muted);
+      }
+
+      .feature strong,
+      .plan strong,
+      .roadmap-item strong {
+        color: #102018;
+      }
+
+      .dark .feature strong,
+      .dark .plan strong,
+      .dark .roadmap-item strong {
+        color: var(--gold);
+      }
+
+      .plan ul {
+        display: grid;
+        gap: 8px;
+        margin: 16px 0 0;
+        padding-left: 20px;
+      }
+
+      .tag {
+        display: inline-block;
+        margin-bottom: 12px;
+        border-radius: 8px;
+        padding: 5px 8px;
+        background: rgba(121, 224, 180, 0.16);
+        color: #0b5c43;
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .dark .tag {
+        color: var(--mint);
+      }
+
+      .philosophy {
+        display: grid;
+        grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+        gap: 34px;
+        align-items: start;
+      }
+
+      .quote {
+        border-left: 4px solid var(--coral);
+        padding-left: 22px;
+        font-size: 28px;
+        line-height: 1.55;
+        font-weight: 900;
+      }
+
+      .copy-stack {
+        display: grid;
+        gap: 18px;
+      }
+
+      .copy-stack p {
+        color: rgba(16, 32, 24, 0.76);
+        line-height: 1.86;
+      }
+
+      .closing {
+        display: grid;
+        gap: 18px;
+        justify-items: start;
+        background: linear-gradient(135deg, var(--ink-2), #2f1f19);
+        color: var(--text);
+      }
+
+      .closing p {
+        width: min(680px, 100%);
+        color: var(--muted);
+        line-height: 1.8;
+      }
+
+      footer {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+        padding: 28px min(6vw, 76px);
+        background: #040806;
+        color: rgba(248, 255, 247, 0.66);
+        font-size: 13px;
+      }
+
+      footer a {
+        color: var(--mint);
+        text-decoration: none;
+        font-weight: 800;
+      }
+
+      @media (max-width: 920px) {
+        .hero {
+          min-height: 82vh;
+          padding-bottom: 46px;
+        }
+
+        .hero-nav {
+          align-items: flex-start;
+        }
+
+        .nav-links a:not(.home-link) {
+          display: none;
+        }
+
+        h1 {
+          font-size: 48px;
+        }
+
+        .lead {
+          font-size: 17px;
+        }
+
+        .atlas-plane {
+          right: -18vw;
+          width: 820px;
+          opacity: 0.44;
+        }
+
+        .feature-grid,
+        .plan-grid,
+        .roadmap-grid,
+        .philosophy {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .hero {
+          min-height: 78vh;
+          padding: 22px 18px 42px;
+        }
+
+        .hero-nav {
+          inset: 16px 18px auto;
+        }
+
+        .brand-mark span {
+          display: none;
+        }
+
+        .hero-copy {
+          padding-top: 70px;
+        }
+
+        h1 {
+          font-size: 34px;
+          line-height: 1.08;
+        }
+
+        .lead {
+          font-size: 15px;
+        }
+
+        .button-link {
+          width: 100%;
+        }
+
+        .atlas-plane {
+          right: -380px;
+          width: 760px;
+          height: 520px;
+        }
+
+        .section {
+          padding: 58px 18px;
+        }
+
+        .section-header h2 {
+          font-size: 27px;
+        }
+
+        .quote {
+          font-size: 23px;
+        }
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .atlas-plane {
+          animation: drift 12s ease-in-out infinite alternate;
+        }
+
+        .atlas-node {
+          animation: pulse 4.6s ease-in-out infinite;
+        }
+
+        .atlas-node.agent,
+        .atlas-node.share {
+          animation-delay: 0.9s;
+        }
+
+        .atlas-node.voice {
+          animation-delay: 1.6s;
+        }
+      }
+
+      @keyframes drift {
+        from {
+          transform: perspective(980px) rotateX(58deg) rotateZ(-14deg) translate3d(0, 0, 0);
+        }
+
+        to {
+          transform: perspective(980px) rotateX(58deg) rotateZ(-10deg) translate3d(-14px, 18px, 0);
+        }
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          filter: brightness(1);
+        }
+
+        50% {
+          filter: brightness(1.16);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero" aria-labelledby="hero-title">
+        <nav class="hero-nav" aria-label="Mind Atlas overview navigation">
+          <a class="brand-mark" href="./" aria-label="Mind Atlas本編へ">
+            <img src="/favicon.svg" alt="" />
+            <span>Mind Atlas</span>
+          </a>
+          <div class="nav-links">
+            <a href="#philosophy">思想</a>
+            <a href="#features">機能</a>
+            <a href="#ai-plan">AI機能プラン</a>
+            <a class="home-link" href="./">本編へ</a>
+          </div>
+        </nav>
+
+        <div class="atlas-scene" aria-hidden="true">
+          <div class="atlas-plane">
+            <div class="orbit-ring one"></div>
+            <div class="orbit-ring two"></div>
+            <div class="orbit-ring three"></div>
+            <div class="orbit-line"></div>
+            <div class="atlas-node root">Mind Atlas</div>
+            <div class="atlas-node thinking">Thinking universe</div>
+            <div class="atlas-node agent">AI mission control</div>
+            <div class="atlas-node voice">Voice partner</div>
+            <div class="atlas-node share">Shareable worlds</div>
+          </div>
+        </div>
+
+        <div class="hero-copy">
+          <p class="eyebrow">2.5D spatial notebook / AI mission control</p>
+          <h1 id="hero-title">思考が宇宙になり、AI作業が見える。</h1>
+          <p class="lead">
+            Mind Atlasは、ノート、構想、AIとの作業ログを空間上のノードとして扱うワークスペースです。
+            ひとりで考えるための「思考宇宙」と、複数のAI作業を監督する「ミッションコントロール」を同じ土台でつなぎます。
+          </p>
+          <div class="hero-actions">
+            <a class="button-link primary" href="./">Mind Atlas本編を開く</a>
+            <a class="button-link" href="#ai-plan">AI機能プランを見る</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="philosophy" class="section philosophy">
+        <div>
+          <p class="eyebrow">Product thesis</p>
+          <h2>マインドマップではなく、思考の地形を育てる。</h2>
+        </div>
+        <div class="copy-stack">
+          <p class="quote">Mind Atlasの中心は、派手な3D表現ではなく「自分の考えがどこにあり、何が動いているか」を見失わないことです。</p>
+          <p>
+            ノードは単なる付箋ではなく、文脈、親子関係、状態、通知、AI実行結果を持つ作業単位です。
+            3D空間は入口であり、日常作業ではアウトライン編集や通知、ログ、検索と組み合わせて使えるようにします。
+          </p>
+          <p>
+            ローカルファーストを基本にしつつ、公開サービスではAI機能、共有、将来の同期やバックアップを重ねられる設計を目指しています。
+          </p>
+        </div>
+      </section>
+
+      <section id="features" class="section muted">
+        <div class="section-header">
+          <p class="eyebrow">Core features</p>
+          <h2>AIなしでも使える、視覚的なノート基盤。</h2>
+          <p>
+            Mind Atlasの無料側の価値は、思考を空間・アウトライン・インポート/エクスポートで扱えることです。
+            AIはこの基盤を強化しますが、ノートそのものをAI専用にはしません。
+          </p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature">
+            <span class="tag">Spatial notebook</span>
+            <h3>2.5Dの宇宙ノード</h3>
+            <p>ノードを宇宙のような空間に配置し、フォーカス、選択、通知、状態を視覚的に追えます。</p>
+          </article>
+          <article class="feature">
+            <span class="tag">Outline editor</span>
+            <h3>日常編集はアウトラインで</h3>
+            <p>3Dが疲れる場面でも、全体構造をアウトラインとして直接編集できます。</p>
+          </article>
+          <article class="feature">
+            <span class="tag">Import / export</span>
+            <h3>MarkdownやOPMLから移行</h3>
+            <p>Markdown、OPML、FreeMind形式の取り込み、画像付きパッケージ、軽量JSONの保存に対応します。</p>
+          </article>
+          <article class="feature">
+            <span class="tag">Durability</span>
+            <h3>IndexedDBと履歴復元</h3>
+            <p>ブラウザ内にノートを保存し、スナップショットから復元できるようにしています。</p>
+          </article>
+          <article class="feature">
+            <span class="tag">Sharing</span>
+            <h3>見せたくなる共有</h3>
+            <p>宇宙ビューをブランド付きPNGとして共有し、必要ならデータ埋め込みURLも作れます。</p>
+          </article>
+          <article class="feature">
+            <span class="tag">Mobile PWA</span>
+            <h3>スマホでも操作できる</h3>
+            <p>縦画面、キーボード表示、低描画品質など、古い端末でも使える方向で調整しています。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="ai-plan" class="section dark">
+        <div class="section-header">
+          <p class="eyebrow">AI plan</p>
+          <h2>AI機能は「作業を任せる」より先に「作業を監督する」ためにある。</h2>
+          <p>
+            Mind AtlasのAI機能は、チャット、音声、検索、エージェント実行をノード文脈に接続し、
+            複数のAI作業の結果、エラー、承認待ちを見える状態にすることを重視します。
+          </p>
+        </div>
+        <div class="plan-grid">
+          <article class="plan">
+            <span class="tag">Free Notebook</span>
+            <h3>無料の思考宇宙</h3>
+            <p>ノート、アウトライン、インポート/エクスポート、画像共有を中心に使えます。</p>
+            <ul>
+              <li>AI機能を使わなくてもノートとして成立</li>
+              <li>公開ページや共有から作成体験へつなげる</li>
+              <li>将来の同期や履歴強化の土台</li>
+            </ul>
+          </article>
+          <article class="plan">
+            <span class="tag">AI Pro</span>
+            <h3>公開サービス向けAI機能</h3>
+            <p>Chat、Realtime Talk、Dictation、web searchをサーバー側APIキーで提供する有料プラン方針です。</p>
+            <ul>
+              <li>月額USD 10のProプランを基準に設計</li>
+              <li>OpenAI、Anthropic、DeepSeekのモデル選択</li>
+              <li>月次トークン枠と使用量表示</li>
+            </ul>
+          </article>
+          <article class="plan">
+            <span class="tag">Local Power</span>
+            <h3>ローカル上級者向けAI司令室</h3>
+            <p>ローカルブリッジ経由で、AIチャットと開発者向けエージェントCLIを空間上の作業ログに接続します。</p>
+            <ul>
+              <li>Codex、OpenClaw、Claude Code系の実行を可視化</li>
+              <li>承認待ち、失敗、完了結果を通知で追跡</li>
+              <li>BYOKやローカルモデルの余地を残す</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <p class="eyebrow">What AI does inside the atlas</p>
+          <h2>AIがノード文脈を読み、必要な変更だけを返す。</h2>
+          <p>
+            AIは会話の相手であると同時に、現在のノード、選択範囲、通知、実行ログを読んで作業するパートナーです。
+            危険な操作やファイル選択のような操作は、人間の承認を前提にします。
+          </p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature">
+            <span class="tag">Context-aware chat</span>
+            <h3>ノード文脈つきチャット</h3>
+            <p>親子関係、兄弟ノード、選択範囲、本文を構造化してAIに渡します。</p>
+          </article>
+          <article class="feature">
+            <span class="tag">Voice partner</span>
+            <h3>音声で状態を聞く</h3>
+            <p>DictationとRealtime Voice Partnerで、話しながらノートやAI作業を操作する方向を育てています。</p>
+          </article>
+          <article class="feature">
+            <span class="tag">Agent visibility</span>
+            <h3>並列AI作業の見える化</h3>
+            <p>複数のAI実行、承認待ち、エラー、結果をノード分岐やログとして追えるようにします。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section muted">
+        <div class="section-header">
+          <p class="eyebrow">Roadmap direction</p>
+          <h2>これから強くする領域。</h2>
+        </div>
+        <div class="roadmap-grid">
+          <article class="roadmap-item">
+            <h3>公開・共有</h3>
+            <p>読み取り専用の宇宙ページ、自己完結HTML、テンプレート宇宙で「作ったものを見せる」導線を強めます。</p>
+          </article>
+          <article class="roadmap-item">
+            <h3>耐久性と同期</h3>
+            <p>スナップショット、復元、バックアップ、将来のE2E同期で、長く使えるノートにします。</p>
+          </article>
+          <article class="roadmap-item">
+            <h3>チーム/セルフホスト</h3>
+            <p>実行ログ、承認フロー、監査、コスト配賦を備えたAIミッションコントロールへ拡張します。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section closing">
+        <p class="eyebrow">Open the workspace</p>
+        <h2>本編で、あなたの宇宙を開く。</h2>
+        <p>
+          このページは紹介用です。実際のノート作成、共有、AI操作はMind Atlas本編から始められます。
+        </p>
+        <a class="button-link primary" href="./">Mind Atlas本編へ</a>
+      </section>
+    </main>
+    <footer>
+      <span>Mind Atlas / 2.5D spatial notebook and AI mission control</span>
+      <a href="./">本編へ戻る</a>
+    </footer>
+  </body>
+</html>

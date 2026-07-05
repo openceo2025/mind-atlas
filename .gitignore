@@ -19,6 +19,8 @@ CLAUDE.md
 .env
 .env.*
 !.env.example
+docker-compose*.local.yml
+deploy/staging/env.service.local
 *.local
 *.log
 *.tsbuildinfo

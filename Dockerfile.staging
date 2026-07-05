@@ -1,0 +1,26 @@
+FROM node:22-bookworm-slim AS build
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+ARG VITE_MIND_ATLAS_PUBLIC_SERVICE=true
+ARG VITE_MIND_ATLAS_SERVICE_URL=http://127.0.0.1:8088
+ENV VITE_MIND_ATLAS_PUBLIC_SERVICE=$VITE_MIND_ATLAS_PUBLIC_SERVICE
+ENV VITE_MIND_ATLAS_SERVICE_URL=$VITE_MIND_ATLAS_SERVICE_URL
+RUN npm run build
+
+FROM node:22-bookworm-slim AS runtime
+
+ENV NODE_ENV=production
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY --from=build /app/dist ./dist
+COPY server ./server
+COPY deploy ./deploy
+
+EXPOSE 8788
+CMD ["node", "server/mind-atlas-service.mjs"]

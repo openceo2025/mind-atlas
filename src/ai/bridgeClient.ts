@@ -17,6 +17,7 @@ import type {
   TextPartnerTurnResult,
   WebSearchResult,
 } from "../types";
+import { formatHostedServiceError, getHostedServiceUrl, isHostedServiceMode, notifyHostedServiceSessionChanged } from "../hosted/serviceClient";
 
 const FALLBACK_BRIDGE_URL = "http://127.0.0.1:8787";
 let preferredBridgeUrl: string | null = null;
@@ -27,6 +28,7 @@ export function getBridgeUrl() {
 }
 
 export function getBridgeUrlCandidates() {
+  if (isHostedServiceMode()) return [getHostedServiceUrl()];
   const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
   const configuredUrl = env?.VITE_MIND_ATLAS_BRIDGE_URL ?? FALLBACK_BRIDGE_URL;
   const primary = trimTrailingSlash(resolveBridgeUrl(configuredUrl));
@@ -95,7 +97,9 @@ export async function requestTextPartnerTurn(payload: TextPartnerTurnPayload): P
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  return await readJsonResponse<TextPartnerTurnResult>(response);
+  const result = await readJsonResponse<TextPartnerTurnResult>(response);
+  notifyHostedServiceSessionChanged();
+  return result;
 }
 
 export async function getChatOptions(): Promise<ChatOptionsResult> {
@@ -153,9 +157,12 @@ export async function createRealtimeCall(payload: RealtimeSessionConfig & { sdp:
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `Realtime call failed with ${response.status}`);
+    if (response.status === 402) notifyHostedServiceSessionChanged();
+    throw new Error(readBridgeErrorText(response.status, text, `Realtime call failed with ${response.status}`));
   }
-  return await response.text();
+  const sdp = await response.text();
+  notifyHostedServiceSessionChanged();
+  return sdp;
 }
 
 export async function transcribeAudio(blob: Blob, fileName = "dictation.webm"): Promise<AudioTranscriptionResult> {
@@ -165,7 +172,9 @@ export async function transcribeAudio(blob: Blob, fileName = "dictation.webm"): 
     method: "POST",
     body: formData,
   });
-  return await readJsonResponse<AudioTranscriptionResult>(response);
+  const result = await readJsonResponse<AudioTranscriptionResult>(response);
+  notifyHostedServiceSessionChanged();
+  return result;
 }
 
 export async function webSearch(query: string): Promise<WebSearchResult> {
@@ -174,7 +183,9 @@ export async function webSearch(query: string): Promise<WebSearchResult> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query }),
   });
-  return await readJsonResponse<WebSearchResult>(response);
+  const result = await readJsonResponse<WebSearchResult>(response);
+  notifyHostedServiceSessionChanged();
+  return result;
 }
 
 export async function saveCloudNotebookPackage(blob: Blob, fileName: string): Promise<CloudNotebookSaveResult> {
@@ -213,7 +224,11 @@ async function fetchBridgeGet(path: string, init: RequestInit = {}) {
   let lastError: unknown = null;
   for (const baseUrl of preferredBridgeUrl ? [preferredBridgeUrl, ...candidates.filter((candidate) => candidate !== preferredBridgeUrl)] : candidates) {
     try {
-      const response = await fetch(`${baseUrl}${path}`, { ...init, method: init.method ?? "GET" });
+      const response = await fetch(`${baseUrl}${path}`, {
+        ...init,
+        method: init.method ?? "GET",
+        credentials: isHostedServiceMode() ? "include" : init.credentials,
+      });
       preferredBridgeUrl = baseUrl;
       return response;
     } catch (error) {
@@ -221,13 +236,17 @@ async function fetchBridgeGet(path: string, init: RequestInit = {}) {
       if (preferredBridgeUrl === baseUrl) preferredBridgeUrl = null;
     }
   }
-  throw createBridgeFetchError(path, lastError, candidates);
+  const diagnostics = await probeBridgeHealthForDiagnostics(candidates);
+  throw createBridgeFetchError(path, lastError, candidates, diagnostics);
 }
 
 async function fetchBridge(path: string, init: RequestInit) {
   const baseUrl = await getReachableBridgeUrl();
   try {
-    return await fetch(`${baseUrl}${path}`, init);
+    return await fetch(`${baseUrl}${path}`, {
+      ...init,
+      credentials: isHostedServiceMode() ? "include" : init.credentials,
+    });
   } catch (error) {
     if (preferredBridgeUrl === baseUrl) preferredBridgeUrl = null;
     const candidates = getBridgeUrlCandidates();
@@ -251,7 +270,7 @@ async function probeBridgeHealth() {
   let lastError: unknown = null;
   for (const baseUrl of candidates) {
     try {
-      const response = await fetch(`${baseUrl}/health`);
+      const response = await fetch(`${baseUrl}/health`, { credentials: isHostedServiceMode() ? "include" : "same-origin" });
       if (response.ok) {
         preferredBridgeUrl = baseUrl;
         return baseUrl;
@@ -266,6 +285,17 @@ async function probeBridgeHealth() {
 
 function createBridgeFetchError(path: string, error: unknown, candidates: string[], diagnostics = "") {
   const reason = error instanceof Error ? error.message : String(error ?? "Unknown network error");
+  if (isHostedServiceMode()) {
+    return new Error(
+      [
+        "Mind Atlasのホストサービスに接続できませんでした。",
+        `Path: ${path}`,
+        diagnostics ? `Health: ${diagnostics}` : "",
+        `Reason: ${reason}`,
+        "ページを再読み込みしても直らない場合は、サーバーまたはネットワーク設定を確認してください。",
+      ].filter(Boolean).join("\n"),
+    );
+  }
   return new Error(
     [
       "Failed to fetch Mind Atlas bridge.",
@@ -273,6 +303,7 @@ function createBridgeFetchError(path: string, error: unknown, candidates: string
       `Tried: ${candidates.join(", ")}`,
       ...(diagnostics ? [`Health after failure: ${diagnostics}`] : []),
       `Reason: ${reason}`,
+      "Check that the bridge process is running, the page and bridge protocols both use HTTPS for LAN/mobile testing, the dev certificate is trusted, the firewall allows port 8787, and MIND_ATLAS_ALLOWED_ORIGIN includes this page origin.",
     ].join("\n"),
   );
 }
@@ -281,7 +312,7 @@ async function probeBridgeHealthForDiagnostics(candidates: string[]) {
   const results: string[] = [];
   for (const baseUrl of candidates) {
     try {
-      const response = await fetch(`${baseUrl}/health`);
+      const response = await fetch(`${baseUrl}/health`, { credentials: isHostedServiceMode() ? "include" : "same-origin" });
       results.push(`${baseUrl}/health -> ${response.status}`);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error ?? "failed");
@@ -308,8 +339,21 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
     );
   }
   if (!response.ok) {
-    const message = typeof data.error === "string" ? data.error : `Bridge request failed with ${response.status}`;
+    if (isHostedServiceMode() && response.status === 402) notifyHostedServiceSessionChanged();
+    const message = isHostedServiceMode()
+      ? formatHostedServiceError(response.status, data, `Bridge request failed with ${response.status}`)
+      : typeof data.error === "string" ? data.error : `Bridge request failed with ${response.status}`;
     throw new Error(message);
   }
   return data as T;
+}
+
+function readBridgeErrorText(status: number, text: string, fallbackMessage: string) {
+  if (!isHostedServiceMode()) return text || fallbackMessage;
+  try {
+    const data = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    return formatHostedServiceError(status, data, fallbackMessage);
+  } catch {
+    return formatHostedServiceError(status, { error: text }, fallbackMessage);
+  }
 }
