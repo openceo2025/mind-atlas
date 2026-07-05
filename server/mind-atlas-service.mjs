@@ -1755,7 +1755,7 @@ async function serveStatic(response, method, pathname) {
   response.writeHead(200, {
     "Content-Type": contentType(filePath),
     "Content-Length": stat.size,
-    "Cache-Control": filePath.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
+    "Cache-Control": filePath.endsWith(".html") ? "no-cache" : "public, max-age=31536000, immutable",
   });
   if (method === "HEAD") {
     response.end();
