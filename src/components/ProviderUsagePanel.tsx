@@ -1,18 +1,28 @@
 import { Gauge, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { getProviderUsage } from "../ai/bridgeClient";
+import { getAboutDemoProviderUsage, readAboutDemoConfig } from "../aboutDemo";
 import type { ProviderUsageMetric, ProviderUsageResult } from "../types";
 
 const PROVIDER_USAGE_SELECTION_KEY = "mind-atlas-provider-usage-selection-v1";
 
 export function ProviderUsagePanel() {
-  const [result, setResult] = useState<ProviderUsageResult | null>(null);
-  const [selectedIds, setSelectedIds] = useState<string[] | null>(() => loadProviderUsageSelection());
+  const aboutDemoConfig = useMemo(() => readAboutDemoConfig(), []);
+  const aboutDemoUsage = useMemo(() => (aboutDemoConfig?.kind === "app" ? getAboutDemoProviderUsage() : null), [aboutDemoConfig]);
+  const [result, setResult] = useState<ProviderUsageResult | null>(aboutDemoUsage);
+  const [selectedIds, setSelectedIds] = useState<string[] | null>(() => aboutDemoUsage?.metrics.map((metric) => metric.id) ?? loadProviderUsageSelection());
   const [configuring, setConfiguring] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!aboutDemoUsage);
   const [error, setError] = useState("");
 
   const refresh = async (forceRefresh = false) => {
+    if (aboutDemoUsage) {
+      setResult(aboutDemoUsage);
+      setSelectedIds(aboutDemoUsage.metrics.map((metric) => metric.id));
+      setLoading(false);
+      setError("");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -31,8 +41,8 @@ export function ProviderUsagePanel() {
   }, []);
 
   useEffect(() => {
-    if (selectedIds) persistProviderUsageSelection(selectedIds);
-  }, [selectedIds]);
+    if (!aboutDemoUsage && selectedIds) persistProviderUsageSelection(selectedIds);
+  }, [aboutDemoUsage, selectedIds]);
 
   const selectedMetrics = useMemo(() => {
     if (!result || !selectedIds) return [];
@@ -57,26 +67,30 @@ export function ProviderUsagePanel() {
           USAGE
         </span>
         <span className="provider-usage-updated">{loading ? "SYNC" : formatUpdatedAt(result?.fetchedAt)}</span>
-        <button
-          className="provider-usage-icon-button"
-          type="button"
-          onClick={() => void refresh(true)}
-          aria-label="Refresh provider usage"
-          title="Refresh provider usage"
-          disabled={loading}
-        >
-          <RefreshCw size={13} className={loading ? "is-spinning" : ""} />
-        </button>
-        <button
-          className={`provider-usage-icon-button ${configuring ? "is-active" : ""}`}
-          type="button"
-          onClick={() => setConfiguring((current) => !current)}
-          aria-label="Select provider usage metrics"
-          aria-expanded={configuring}
-          title="Select provider usage metrics"
-        >
-          <SlidersHorizontal size={13} />
-        </button>
+        {!aboutDemoUsage ? (
+          <>
+            <button
+              className="provider-usage-icon-button"
+              type="button"
+              onClick={() => void refresh(true)}
+              aria-label="Refresh provider usage"
+              title="Refresh provider usage"
+              disabled={loading}
+            >
+              <RefreshCw size={13} className={loading ? "is-spinning" : ""} />
+            </button>
+            <button
+              className={`provider-usage-icon-button ${configuring ? "is-active" : ""}`}
+              type="button"
+              onClick={() => setConfiguring((current) => !current)}
+              aria-label="Select provider usage metrics"
+              aria-expanded={configuring}
+              title="Select provider usage metrics"
+            >
+              <SlidersHorizontal size={13} />
+            </button>
+          </>
+        ) : null}
       </header>
 
       {configuring && result ? (

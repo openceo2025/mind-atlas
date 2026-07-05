@@ -109,17 +109,17 @@ try {
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).waitFor();
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).click();
     await page.waitForURL(/\/about\.html$/);
-    await page.getByRole("heading", { name: /考えを、動かせる宇宙にする/ }).waitFor();
+    await page.getByRole("heading", { name: "Mind Atlas", exact: true }).waitFor();
     if ((await page.locator(".demo-window iframe").count()) !== 3) throw new Error("About page should expose three embedded Mind Atlas examples.");
     if ((await page.locator(".view-controls button").count()) !== 4) throw new Error("About page should expose four novel view buttons.");
     await page.frameLocator("#novel-frame").locator("canvas").waitFor();
-    await page.getByRole("button", { name: /Mind map/ }).click();
+    await page.getByRole("button", { name: /MindMap/ }).click();
     await page.frameLocator("#novel-frame").locator(".app-shell.is-about-demo-view-mind-map").waitFor();
     await page.getByRole("button", { name: /Tree/ }).click();
     await page.frameLocator("#novel-frame").locator(".app-shell.is-about-demo-view-tree").waitFor();
     await page.getByRole("button", { name: /Editor/ }).click();
     await page.frameLocator("#novel-frame").locator(".outline-editor-shell").waitFor();
-    await page.getByRole("heading", { name: /旅行の予定と通知/ }).scrollIntoViewIfNeeded();
+    await page.getByRole("heading", { name: /旅行計画を忘れない/ }).scrollIntoViewIfNeeded();
     const travelFrame = page.frameLocator('iframe[title="Mind Atlas travel planning example"]');
     await travelFrame.locator("canvas").waitFor();
     await travelFrame.locator(".unread-notification-link").first().waitFor();
@@ -127,10 +127,19 @@ try {
     const appFrame = page.frameLocator('iframe[title="Mind Atlas app development AI example"]');
     await appFrame.locator(".command-dock").waitFor();
     const appDemoCommandPointerEvents = await appFrame.locator(".command-dock").evaluate((element) => getComputedStyle(element).pointerEvents);
-    if (appDemoCommandPointerEvents !== "none") throw new Error(`About AI demo command dock should be non-interactive: ${appDemoCommandPointerEvents}`);
+    if (appDemoCommandPointerEvents !== "auto") throw new Error(`About AI demo command dock should allow demo selectors: ${appDemoCommandPointerEvents}`);
+    const appDemoSendPointerEvents = await appFrame.locator(".send-button").evaluate((element) => getComputedStyle(element).pointerEvents);
+    if (appDemoSendPointerEvents !== "none") throw new Error(`About AI demo send button should be inert: ${appDemoSendPointerEvents}`);
+    await appFrame.locator(".provider-usage-panel", { hasText: "AIトークン残高" }).waitFor();
+    const aboutServiceOptions = await appFrame.locator(".chat-options-row select").first().locator("option").evaluateAll((options) => options.map((option) => option.textContent?.trim() ?? ""));
+    for (const expectedProvider of ["OpenAI", "Claude", "DeepSeek", "GLM", "Gemini", "Grok"]) {
+      if (!aboutServiceOptions.some((option) => option.includes(expectedProvider))) {
+        throw new Error(`About AI demo missing provider ${expectedProvider}: ${JSON.stringify(aboutServiceOptions)}`);
+      }
+    }
     const aboutLoginControlCount = await page.locator('a[href*="/api/auth"], button:has-text("Login"), button:has-text("Sign in")').count();
     if (aboutLoginControlCount !== 0) throw new Error(`About page should not expose login/sign-in controls: ${aboutLoginControlCount}`);
-    await page.getByRole("link", { name: /Mind Atlasを使ってみる/ }).first().click();
+    await page.getByRole("link", { name: /MindAtlasに飛び込もう|Mind Atlasを使ってみる/ }).first().click();
     await page.waitForURL((nextUrl) => !nextUrl.pathname.endsWith("/about.html"));
     /*
     await page.getByRole("heading", { name: /考えを、動かせる宇宙にする/ }).waitFor();

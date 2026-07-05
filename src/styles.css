@@ -59,9 +59,10 @@ button {
 }
 
 .app-shell.is-about-demo .global-menu,
+.app-shell.is-about-demo .operation-panel,
 .app-shell.is-about-demo .operation-panel-desktop,
 .app-shell.is-about-demo .tutorial-skip-button {
-  display: none;
+  display: none !important;
 }
 
 .app-shell.is-about-demo .top-bar {
@@ -77,27 +78,18 @@ button {
 }
 
 .app-shell.is-about-demo .minimap {
-  left: 14px;
-  bottom: 14px;
-  width: 112px;
-  height: 112px;
-}
-
-.app-shell.is-about-demo .command-dock {
-  bottom: 22px;
-  grid-template-columns: auto minmax(180px, 1fr) auto;
-  width: min(720px, calc(100vw - 32px));
-  pointer-events: none;
-}
-
-.app-shell.is-about-demo-app .command-dock {
-  top: 96px;
-  bottom: auto;
+  display: none !important;
 }
 
 .app-shell.is-about-demo .command-dock .mode-switch,
 .app-shell.is-about-demo .command-dock .scope-select {
   display: none;
+}
+
+.app-shell.is-about-demo-app .command-dock {
+  grid-template-columns: auto minmax(180px, 1fr) auto;
+  width: min(720px, calc(100vw - 32px));
+  pointer-events: auto;
 }
 
 .app-shell.is-about-demo .command-dock::after {
@@ -109,17 +101,12 @@ button {
 }
 
 .app-shell.is-about-demo .command-dock input,
-.app-shell.is-about-demo .command-dock button,
-.app-shell.is-about-demo .command-dock select {
+.app-shell.is-about-demo .command-dock button {
   pointer-events: none;
 }
 
-@media (max-width: 980px) and (orientation: portrait) {
-  .app-shell.is-about-demo-app .mobile-workspace-panel {
-    top: 94px;
-    bottom: auto;
-    height: min(260px, 42dvh);
-  }
+.app-shell.is-about-demo-app .command-dock select {
+  pointer-events: auto;
 }
 
 .app-shell.is-onboarding-logo-only .top-bar {
@@ -4706,6 +4693,10 @@ button:disabled,
 
   .app-shell:has(.mobile-workspace-panel[data-active-tab="command"]) {
     --mobile-panel-height: min(30dvh, 236px);
+  }
+
+  .app-shell.is-about-demo-app:has(.mobile-workspace-panel[data-active-tab="command"]) {
+    --mobile-panel-height: min(310px, 52dvh);
   }
 
   .app-shell:has(.mobile-workspace-panel[data-active-tab="editor"]) {

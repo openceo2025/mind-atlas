@@ -5,23 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Mind Atlas is a spatial notebook. Scroll through embedded examples for novels, travel planning, and app development."
+      content="Mind Atlasの触れるサンプル。小説、旅行計画、アプリ開発の宇宙をスクロールして確認できます。"
     />
     <meta name="theme-color" content="#07100d" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <title>Mind Atlas | Touch the examples</title>
+    <title>Mind Atlas</title>
     <style>
       :root {
         --bg: #07100d;
         --text: #f5fbef;
-        --muted: rgba(245, 251, 239, 0.68);
+        --muted: rgba(245, 251, 239, 0.72);
         --line: rgba(245, 251, 239, 0.16);
-        --panel: rgba(11, 18, 14, 0.84);
         --lime: #d8f56d;
         --mint: #78dfbb;
-        --gold: #f2cf62;
-        --blue: #8fbfff;
-        --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
+        --panel: rgba(7, 16, 13, 0.78);
+        --shadow: 0 22px 72px rgba(0, 0, 0, 0.34);
       }
 
       * {
@@ -40,7 +38,7 @@
         background:
           linear-gradient(rgba(245, 251, 239, 0.02) 1px, transparent 1px),
           linear-gradient(90deg, rgba(245, 251, 239, 0.02) 1px, transparent 1px),
-          radial-gradient(circle at 50% 0%, rgba(120, 223, 187, 0.14), transparent 34rem),
+          radial-gradient(circle at 50% -14rem, rgba(120, 223, 187, 0.16), transparent 36rem),
           #07100d;
         background-size: 34px 34px, 34px 34px, auto, auto;
         color: var(--text);
@@ -58,7 +56,7 @@
       }
 
       .shell {
-        width: min(1120px, calc(100% - 28px));
+        width: min(1080px, calc(100% - 20px));
         margin: 0 auto;
       }
 
@@ -70,8 +68,8 @@
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        padding: 12px 0;
-        background: rgba(7, 16, 13, 0.86);
+        padding: 10px 0;
+        background: rgba(7, 16, 13, 0.88);
         backdrop-filter: blur(16px);
       }
 
@@ -81,7 +79,7 @@
         gap: 10px;
         color: var(--text);
         text-decoration: none;
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 900;
       }
 
@@ -96,7 +94,7 @@
         min-height: 38px;
         align-items: center;
         justify-content: center;
-        border: 1px solid rgba(216, 245, 109, 0.58);
+        border: 1px solid rgba(216, 245, 109, 0.62);
         border-radius: 8px;
         padding: 9px 13px;
         background: var(--lime);
@@ -108,18 +106,7 @@
       }
 
       .hero {
-        display: grid;
-        gap: 14px;
-        min-height: 54svh;
-        align-content: end;
-        padding: 44px 0 22px;
-      }
-
-      .eyebrow {
-        margin: 0;
-        color: var(--gold);
-        font-size: 12px;
-        font-weight: 900;
+        padding: 16px 0 8px;
       }
 
       h1,
@@ -129,66 +116,41 @@
       }
 
       h1 {
-        max-width: 880px;
         margin-bottom: 0;
-        font-size: clamp(42px, 9vw, 82px);
-        line-height: 1.02;
-      }
-
-      .lead {
-        max-width: 720px;
-        margin-bottom: 0;
-        color: var(--muted);
-        font-size: 16px;
-        line-height: 1.8;
+        font-size: clamp(52px, 17vw, 112px);
+        line-height: 0.92;
       }
 
       .example {
         display: grid;
-        gap: 16px;
-        min-height: 100svh;
-        align-content: center;
-        padding: 28px 0;
-      }
-
-      .example-head {
-        display: grid;
-        gap: 8px;
-      }
-
-      .example-kicker {
-        color: var(--mint);
-        font-size: 12px;
-        font-weight: 900;
+        gap: 12px;
+        padding: 10px 0 54px;
       }
 
       h2 {
         margin-bottom: 0;
-        font-size: clamp(28px, 6vw, 52px);
-        line-height: 1.08;
-      }
-
-      .example-copy {
-        max-width: 680px;
-        margin-bottom: 0;
-        color: var(--muted);
-        font-size: 14px;
-        line-height: 1.7;
+        font-size: clamp(28px, 8vw, 56px);
+        line-height: 1.05;
       }
 
       .view-controls {
         display: flex;
         gap: 8px;
         overflow-x: auto;
-        padding: 2px 0 6px;
+        padding: 2px 0 4px;
+        scrollbar-width: none;
+      }
+
+      .view-controls::-webkit-scrollbar {
+        display: none;
       }
 
       .view-controls button {
         flex: 0 0 auto;
-        min-height: 38px;
+        min-height: 40px;
         border: 1px solid var(--line);
         border-radius: 8px;
-        padding: 8px 11px;
+        padding: 9px 12px;
         background: rgba(245, 251, 239, 0.055);
         color: var(--text);
         cursor: pointer;
@@ -197,15 +159,15 @@
       }
 
       .view-controls button[aria-pressed="true"] {
-        border-color: rgba(216, 245, 109, 0.62);
-        background: rgba(216, 245, 109, 0.14);
+        border-color: rgba(216, 245, 109, 0.66);
+        background: rgba(216, 245, 109, 0.15);
         color: #f9ffe0;
       }
 
       .demo-window {
         position: relative;
-        min-height: 420px;
-        height: min(620px, 68svh);
+        min-height: 520px;
+        height: min(720px, 78svh);
         overflow: hidden;
         border: 1px solid rgba(245, 251, 239, 0.17);
         border-radius: 8px;
@@ -229,59 +191,80 @@
         border: 1px solid rgba(245, 251, 239, 0.14);
         border-radius: 999px;
         padding: 6px 9px;
-        background: rgba(7, 16, 13, 0.74);
+        background: rgba(7, 16, 13, 0.72);
         color: rgba(245, 251, 239, 0.72);
         font-size: 11px;
         font-weight: 850;
         pointer-events: none;
       }
 
+      .app-note,
+      .final-cta p {
+        max-width: 720px;
+        margin-bottom: 0;
+        color: var(--muted);
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.55;
+      }
+
       .final-cta {
         display: grid;
-        gap: 14px;
+        gap: 16px;
         min-height: 58svh;
         align-content: center;
         justify-items: start;
-        padding: 28px 0 72px;
+        padding: 10px 0 72px;
       }
 
-      .final-cta p {
-        max-width: 620px;
-        color: var(--muted);
-        line-height: 1.75;
-      }
-
-      @media (max-width: 760px) {
+      @media (min-width: 820px) {
         .shell {
-          width: min(100% - 18px, 560px);
+          width: min(1120px, calc(100% - 48px));
         }
 
         .topbar {
-          padding: 9px 0;
-        }
-
-        .brand span {
-          display: none;
+          padding: 14px 0;
         }
 
         .hero {
-          min-height: 44svh;
           padding-top: 30px;
         }
 
         .example {
-          min-height: auto;
-          padding: 26px 0 42px;
+          padding-bottom: 72px;
         }
 
         .demo-window {
-          min-height: 470px;
-          height: 72svh;
+          min-height: 620px;
+          height: min(780px, 74svh);
+        }
+      }
+
+      @media (max-width: 520px) {
+        .brand span {
+          display: none;
         }
 
-        .demo-label {
-          top: 8px;
-          right: 8px;
+        .shell {
+          width: min(100% - 14px, 520px);
+        }
+
+        .topbar {
+          padding: 8px 0;
+        }
+
+        .cta {
+          min-height: 36px;
+          padding: 8px 12px;
+        }
+
+        h1 {
+          font-size: clamp(56px, 19vw, 88px);
+        }
+
+        .demo-window {
+          min-height: 560px;
+          height: 76svh;
         }
       }
     </style>
@@ -298,25 +281,14 @@
 
       <main>
         <section class="hero" aria-labelledby="page-title">
-          <p class="eyebrow">TOUCHABLE EXAMPLES</p>
-          <h1 id="page-title">考えを、動かせる宇宙にする。</h1>
-          <p class="lead">
-            説明より先に、触れるサンプルを見てください。小説、旅行の計画、アプリ開発。
-            3つのMind Atlasをスクロールで順に確認できます。
-          </p>
+          <h1 id="page-title">Mind Atlas</h1>
         </section>
 
         <section class="example" aria-labelledby="novel-title">
-          <div class="example-head">
-            <span class="example-kicker">01 / NOVEL</span>
-            <h2 id="novel-title">小説の構成を宇宙で見る</h2>
-            <p class="example-copy">
-              視点、伏線、章立てをノードに分ける。下のボタンで同じ小説をMind Atlas、mind map、tree、editorに切り替えられます。
-            </p>
-          </div>
+          <h2 id="novel-title">Mind Atlasで小説を書く</h2>
           <div class="view-controls" role="group" aria-label="Novel demo views">
             <button type="button" data-demo-view="atlas" aria-pressed="true">Mind Atlas</button>
-            <button type="button" data-demo-view="mind-map" aria-pressed="false">Mind map</button>
+            <button type="button" data-demo-view="mind-map" aria-pressed="false">MindMap</button>
             <button type="button" data-demo-view="tree" aria-pressed="false">Tree</button>
             <button type="button" data-demo-view="editor" aria-pressed="false">Editor</button>
           </div>
@@ -332,13 +304,7 @@
         </section>
 
         <section class="example" aria-labelledby="travel-title">
-          <div class="example-head">
-            <span class="example-kicker">02 / TRAVEL</span>
-            <h2 id="travel-title">旅行の予定と通知を一緒に置く</h2>
-            <p class="example-copy">
-              「新幹線を予約」ノードに通知が立っています。予定、移動、余白を同じ地図で見ながら、忘れたくない行動だけを浮かせます。
-            </p>
-          </div>
+          <h2 id="travel-title">旅行計画を忘れない</h2>
           <div class="demo-window">
             <span class="demo-label">notification demo</span>
             <iframe
@@ -351,13 +317,8 @@
         </section>
 
         <section class="example" aria-labelledby="app-title">
-          <div class="example-head">
-            <span class="example-kicker">03 / APP DEVELOPMENT</span>
-            <h2 id="app-title">AI相談を開発ノードに残す</h2>
-            <p class="example-copy">
-              課金後のAI入力欄が開いた状態の例です。このページでは送信できません。実際のMind Atlasでは返答をノードとして残せます。
-            </p>
-          </div>
+          <h2 id="app-title">AI相談を開発ノードに残す</h2>
+          <p class="app-note">Googleアカウント登録と月$10のMind Atlas ProプランでAI機能が解放されます。</p>
           <div class="demo-window">
             <span class="demo-label">AI window demo</span>
             <iframe
@@ -370,12 +331,9 @@
         </section>
 
         <section class="final-cta" aria-labelledby="cta-title">
-          <p class="eyebrow">START</p>
-          <h2 id="cta-title">空の宇宙から始める。</h2>
-          <p>
-            ログインなしでNotebookは使えます。AI機能は必要になったときだけ開放できます。
-          </p>
-          <a class="cta" href="/">Mind Atlasを使ってみる</a>
+          <h2 id="cta-title">MindAtlasを使ってみる</h2>
+          <p>ログインなしで基本機能は使えます。Mind Atlas Proプランに登録するとAI機能が解放されます。</p>
+          <a class="cta" href="/">MindAtlasに飛び込もう</a>
         </section>
       </main>
     </div>

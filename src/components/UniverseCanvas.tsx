@@ -1049,6 +1049,7 @@ function NavigationController({
       : targetVector.lengthSq() > 0.001
         ? targetVector.clone().normalize()
         : new Vector3(0, 0, -1);
+    const phyllotaxisOverviewFocus = !generatedLayoutActive && !focusRequest.nodeId;
     const targetAngles = directionToYawPitch(targetDirection);
     const generatedFocusDiameter = generatedLayoutFocus?.diameter ?? focusRequest.diameter;
     const targetDiameter = Math.max(focusRequest.diameter, generatedFocusDiameter);
@@ -1059,7 +1060,7 @@ function NavigationController({
             targetDiameter,
             stableLayoutMetrics.height,
             perspective.fov,
-            generatedLayoutActive ? GENERATED_LAYOUT_MAX_CAMERA_DISTANCE : 620,
+            generatedLayoutActive ? GENERATED_LAYOUT_MAX_CAMERA_DISTANCE : phyllotaxisOverviewFocus ? 1400 : 620,
           );
     const targetRadius = generatedLayoutActive ? Math.abs(targetVector.z) : targetVector.length();
     const targetIsRoot = !generatedLayoutActive && focusRequest.nodeId === atlasRoot.id;
@@ -1068,6 +1069,8 @@ function NavigationController({
     const targetOffset =
       generatedLayoutActive
         ? clamp(targetRadius - focusDistance, targetRadius - generatedMaxCameraDistance, MAX_CAMERA_OFFSET)
+        : phyllotaxisOverviewFocus
+        ? Math.min(MAX_CAMERA_OFFSET, targetRadius - focusDistance)
         : targetIsRoot && mobileCamera
         ? getInitialCameraOffset(mobilePortraitCamera)
         : getFocusTargetOffset(
@@ -4930,7 +4933,7 @@ function getGeneratedLayoutFocusView(
     (frame.bounds.minY + frame.bounds.maxY) / 2,
     fallbackZ,
   );
-  const target = focusPosition ? new Vector3(...focusPosition) : boundsCenter;
+  const target = focusNodeId === root.id ? boundsCenter : focusPosition ? new Vector3(...focusPosition) : boundsCenter;
   const width = frame.bounds.maxX - frame.bounds.minX + NOTEBOOK_NODE_RADIUS * 7;
   const height = frame.bounds.maxY - frame.bounds.minY + NOTEBOOK_NODE_RADIUS * 8;
   const aspect = Math.max(0.1, viewportWidth / Math.max(1, viewportHeight));

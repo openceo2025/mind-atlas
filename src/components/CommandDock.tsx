@@ -6,6 +6,7 @@ import { runOpenClawPartnerTurn } from "../ai/openClawPartnerClient";
 import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceSession, type RealtimeSessionState } from "../ai/realtimeClient";
 import { runTextPartnerTurn } from "../ai/textPartnerClient";
 import { buildVoiceLogContext } from "../ai/voiceLogContext";
+import { getAboutDemoChatOptions, readAboutDemoConfig } from "../aboutDemo";
 import { CONTEXT_BUDGET_PRESETS, buildContextPlan } from "../context/contextEngine";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
 import { isHostedServiceMode } from "../hosted/serviceClient";
@@ -47,6 +48,8 @@ const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = ["default", "acceptEdits
 const PUBLIC_SERVICE_MODE = isHostedServiceMode();
 
 export function CommandDock() {
+  const aboutDemoConfig = useMemo(() => readAboutDemoConfig(), []);
+  const aboutDemoChatOptions = useMemo(() => (aboutDemoConfig?.kind === "app" ? getAboutDemoChatOptions() : null), [aboutDemoConfig]);
   const [persistedCommandDraft] = useState(() => loadPersistedUiState()?.commandDraft ?? null);
   const [value, setValue] = useState(() => persistedCommandDraft?.value ?? "");
   const [mode, setMode] = useState<CommandMode>(() => initialCommandMode(persistedCommandDraft?.mode));
@@ -136,7 +139,7 @@ export function CommandDock() {
     ? selectedCodexModel.supportedReasoningEfforts
     : (["low", "medium", "high", "xhigh"] as CodexReasoningEffort[]);
   const fallbackServices = fallbackChatServices();
-  const rawChatServiceOptions = chatOptions?.services.length ? chatOptions.services : fallbackServices;
+  const rawChatServiceOptions = aboutDemoChatOptions?.services.length ? aboutDemoChatOptions.services : chatOptions?.services.length ? chatOptions.services : fallbackServices;
   const chatServiceOptions = visibleChatServices(rawChatServiceOptions);
   const selectedChatService = chatServiceOptions.find((service) => service.id === chatSettings.service) ?? chatServiceOptions[0] ?? fallbackServices[0];
   const chatModelOptions = selectedChatService?.models.length
@@ -270,6 +273,20 @@ export function CommandDock() {
   }, [setChatSettings]);
 
   useEffect(() => {
+    if (aboutDemoChatOptions) {
+      const service = aboutDemoChatOptions.services.find((item) => item.id === aboutDemoChatOptions.defaultService) ?? aboutDemoChatOptions.services[0];
+      const model = service?.defaultModel || service?.models[0]?.model || "";
+      const effort = service?.models.find((item) => item.model === model)?.defaultReasoningEffort ?? service?.defaultReasoningEffort ?? "default";
+      setChatOptions(aboutDemoChatOptions);
+      setMode("chat");
+      setChatSettings({
+        service: service?.id ?? "openai",
+        model,
+        reasoningEffort: effort,
+      });
+      return;
+    }
+
     let alive = true;
     const refreshIfAlive = () => {
       void refreshChatOptions(() => alive).catch(() => {
@@ -317,7 +334,7 @@ export function CommandDock() {
       window.removeEventListener("pageshow", refreshIfAlive);
       if (chatOptionsTimer !== null) window.clearInterval(chatOptionsTimer);
     };
-  }, [refreshChatOptions, setCodexSettings]);
+  }, [aboutDemoChatOptions, refreshChatOptions, setChatSettings, setCodexSettings]);
 
   useEffect(() => {
     if (!openClawOptions?.models.length) return;
@@ -327,6 +344,7 @@ export function CommandDock() {
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
+    if (aboutDemoConfig) return;
     const trimmed = value.trim();
     if (!trimmed) return;
     if (mode === "codex" && !codexSettings.workspace.trim()) {

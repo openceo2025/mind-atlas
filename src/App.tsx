@@ -2,7 +2,7 @@ import { FocusPanel } from "./components/FocusPanel";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CloudDownload, CloudUpload, CreditCard, Download, FileText, GitBranch, Github, GraduationCap, History, Info, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
 import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
-import { createAboutDemoNotebook, getAboutDemoLayoutMode, getAboutDemoNotification, getAboutDemoSelectedNodeId, readAboutDemoConfig } from "./aboutDemo";
+import { createAboutDemoNotebook, getAboutDemoLayoutMode, getAboutDemoNotification, getAboutDemoOverviewFocusRequest, getAboutDemoSelectedNodeId, readAboutDemoConfig } from "./aboutDemo";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
 import { CommandDock } from "./components/CommandDock";
 import { copyContextMarkdown, formatContextCopyStats } from "./context/contextCopy";
@@ -171,7 +171,7 @@ export default function App() {
   const onboarding = useOnboarding();
   const aiFeaturesUnlocked = publicServiceMode ? Boolean(hostedSession?.entitlement.aiEnabled) : onboarding.showMainChrome;
   const voiceLogReadable = publicServiceMode ? onboarding.showMainChrome : aiFeaturesUnlocked;
-  const showCommandDock = aiFeaturesUnlocked && (aboutDemoConfig?.kind === "app" || publicServiceMode || shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport));
+  const showCommandDock = aiFeaturesUnlocked && (aboutDemoConfig ? aboutDemoConfig.kind === "app" : publicServiceMode || shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport));
   const showTutorialOperationFallback = onboarding.showChildCreationFallback;
   const mobileOperationPanelTabAvailable = !mobilePortraitOperationSurface;
   const operationPanelInWorkspace = mobileOperationSurface && mobileOperationPanelTabAvailable;
@@ -301,6 +301,18 @@ export default function App() {
     }
 
     focusNode(selectedDemoNodeId);
+    const overviewFocus = getAboutDemoOverviewFocusRequest(demoRoot, aboutDemoConfig);
+    useAtlasStore.setState((state) => ({
+      titleEditRequestId: null,
+      ...(overviewFocus
+        ? {
+            focusRequest: {
+              ...overviewFocus,
+              nonce: (state.focusRequest?.nonce ?? 0) + 1,
+            },
+          }
+        : {}),
+    }));
 
     const notification = getAboutDemoNotification(aboutDemoConfig);
     if (notification) {
