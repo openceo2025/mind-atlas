@@ -186,7 +186,7 @@ assert.ok(docs.includes("one-pass hosted-service exception"), "docs should expla
 assert.ok(docs.includes("MIND_ATLAS_STRIPE_WEBHOOK_TOLERANCE_SECONDS"), "docs should include Stripe webhook timestamp tolerance");
 assert.ok(conohaNginx.includes("client_max_body_size 30m"), "ConoHa nginx should allow hosted dictation uploads");
 assert.ok(conohaNginx.includes("X-Content-Type-Options"), "ConoHa nginx should send nosniff header");
-assert.ok(conohaNginx.includes("X-Frame-Options"), "ConoHa nginx should deny framing");
+assert.ok(conohaNginx.includes('X-Frame-Options "SAMEORIGIN"'), "ConoHa nginx should allow same-origin demo framing only");
 assert.ok(conohaNginx.includes("Permissions-Policy"), "ConoHa nginx should send a permissions policy");
 assert.ok(serviceDb.includes("export async function reserveCredit"), "service DB should expose atomic credit reservation");
 assert.ok(serviceDb.includes("export async function settleCreditReservation"), "service DB should expose reservation settlement");
