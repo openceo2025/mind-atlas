@@ -109,11 +109,25 @@ try {
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).waitFor();
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).click();
     await page.waitForURL(/\/about\.html$/);
-    await page.locator("#hero-title").waitFor();
-    await page.getByText("AI機能プラン").first().waitFor();
+    await page.getByRole("heading", { name: /考えを、動かせる宇宙にする/ }).waitFor();
+    if ((await page.locator(".sample-tab").count()) !== 3) throw new Error("About page should expose three touchable examples.");
+    if ((await page.locator(".view-button").count()) !== 4) throw new Error("About page should expose four novel view buttons.");
+    await page.getByRole("button", { name: /Mind map/ }).click();
+    await page.getByRole("button", { name: /Tree/ }).click();
+    await page.getByRole("button", { name: /Editor/ }).click();
+    await page.locator(".editor-view.is-visible").waitFor();
+    await page.getByRole("tab", { name: /旅行の計画/ }).click();
+    await page.locator(".notification-card.is-visible").waitFor();
+    await page.getByRole("button", { name: /通知ノードを見る/ }).click();
+    const aboutTravelSelection = cleanText(await page.locator("#foot-title").textContent());
+    if (!aboutTravelSelection.includes("新幹線")) throw new Error(`Travel example notification did not focus train node: ${aboutTravelSelection}`);
+    await page.getByRole("tab", { name: /アプリ開発/ }).click();
+    await page.locator(".ai-dock.is-visible").waitFor();
+    if (!(await page.locator(".ai-input input").isDisabled())) throw new Error("About AI demo input must be disabled.");
+    if (!(await page.locator(".ai-input button").isDisabled())) throw new Error("About AI demo send button must be disabled.");
     const aboutText = cleanText(await page.locator("body").textContent());
     if (/ログイン|サインイン|sign in|login/i.test(aboutText)) throw new Error("About page should not expose login/sign-in copy.");
-    await page.getByRole("link", { name: /Mind Atlas本編/ }).first().click();
+    await page.getByRole("link", { name: /Mind Atlasを使ってみる/ }).first().click();
     await page.waitForURL((nextUrl) => !nextUrl.pathname.endsWith("/about.html"));
 
     mockSessionMode = "exhausted";

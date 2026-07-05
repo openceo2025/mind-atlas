@@ -5,26 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Mind Atlas is a spatial notebook and AI mission-control workspace for thinking, sharing, and supervising parallel AI work."
+      content="Mind Atlas is a spatial notebook. Touch small examples for novels, travel planning, and app development."
     />
-    <meta name="theme-color" content="#061014" />
+    <meta name="theme-color" content="#07100d" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <title>Mind Atlas | 思考宇宙とAIミッションコントロール</title>
+    <title>Mind Atlas | 触れるサンプル</title>
     <style>
       :root {
-        --ink: #06100c;
-        --ink-2: #10251e;
-        --paper: #f6f2e5;
-        --paper-2: #e7f0e9;
-        --text: #f8fff7;
-        --muted: rgba(248, 255, 247, 0.74);
-        --line: rgba(248, 255, 247, 0.18);
-        --mint: #79e0b4;
+        --bg: #07100d;
+        --panel: rgba(12, 20, 16, 0.92);
+        --panel-strong: #0e1914;
+        --text: #f5fbef;
+        --muted: rgba(245, 251, 239, 0.68);
+        --line: rgba(245, 251, 239, 0.15);
+        --lime: #d8f56d;
+        --mint: #7be0bd;
+        --blue: #81b8ff;
+        --coral: #ff8d6d;
         --gold: #f3cf58;
-        --coral: #ff7a68;
-        --sky: #78bdf4;
-        --violet: #a99cf4;
-        --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+        --violet: #b5a4ff;
+        --shadow: 0 22px 70px rgba(0, 0, 0, 0.38);
       }
 
       * {
@@ -32,775 +32,1210 @@
       }
 
       html {
-        scroll-behavior: smooth;
+        min-height: 100%;
+        background: var(--bg);
       }
 
       body {
         margin: 0;
-        background: var(--paper);
-        color: #102018;
+        min-height: 100%;
+        background:
+          linear-gradient(rgba(245, 251, 239, 0.018) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(245, 251, 239, 0.018) 1px, transparent 1px),
+          #07100d;
+        background-size: 34px 34px;
+        color: var(--text);
         font-family:
           Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
           sans-serif;
         letter-spacing: 0;
       }
 
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+        letter-spacing: 0;
+      }
+
+      button {
+        color: inherit;
+      }
+
       a {
         color: inherit;
       }
 
-      .page {
-        min-height: 100vh;
-        overflow: hidden;
+      .page-shell {
+        width: min(1180px, calc(100% - 28px));
+        margin: 0 auto;
       }
 
-      .hero {
-        position: relative;
-        min-height: 84vh;
-        display: grid;
-        align-items: center;
-        padding: 28px min(6vw, 76px) 64px;
-        color: var(--text);
-        background:
-          radial-gradient(circle at 72% 24%, rgba(121, 224, 180, 0.18), transparent 34%),
-          radial-gradient(circle at 22% 74%, rgba(255, 122, 104, 0.16), transparent 30%),
-          linear-gradient(145deg, #06100c 0%, #153226 48%, #091813 100%);
-      }
-
-      .hero::after {
-        content: "";
-        position: absolute;
-        inset: auto 0 0;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(246, 242, 229, 0.36), transparent);
-      }
-
-      .hero-nav {
-        position: absolute;
-        inset: 22px min(6vw, 76px) auto;
-        z-index: 3;
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 30;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 16px;
+        gap: 12px;
+        padding: 12px 0;
+        background: rgba(7, 16, 13, 0.88);
+        backdrop-filter: blur(14px);
       }
 
-      .brand-mark {
+      .brand {
         display: inline-flex;
         align-items: center;
-        gap: 10px;
-        color: var(--text);
-        text-decoration: none;
-        font-weight: 900;
-      }
-
-      .brand-mark img {
-        width: 34px;
-        height: 34px;
-        border-radius: 8px;
-      }
-
-      .nav-links {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-      }
-
-      .nav-links a,
-      .button-link {
-        min-height: 40px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border: 1px solid rgba(248, 255, 247, 0.2);
-        border-radius: 8px;
-        padding: 9px 13px;
-        background: rgba(255, 255, 255, 0.06);
+        gap: 9px;
         color: var(--text);
         text-decoration: none;
         font-size: 14px;
+        font-weight: 900;
+      }
+
+      .brand img {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+      }
+
+      .cta {
+        display: inline-flex;
+        min-height: 38px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(216, 245, 109, 0.55);
+        border-radius: 8px;
+        padding: 9px 13px;
+        background: var(--lime);
+        color: #11180c;
+        text-decoration: none;
+        font-size: 13px;
+        font-weight: 900;
+        white-space: nowrap;
+      }
+
+      .ghost-link {
+        display: inline-flex;
+        min-height: 38px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 12px;
+        background: rgba(245, 251, 239, 0.04);
+        color: var(--text);
+        text-decoration: none;
+        font-size: 13px;
         font-weight: 800;
+        white-space: nowrap;
       }
 
-      .nav-links a:hover,
-      .button-link:hover {
-        border-color: rgba(121, 224, 180, 0.6);
-        background: rgba(121, 224, 180, 0.14);
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+        gap: 22px;
+        align-items: stretch;
+        padding: 14px 0 34px;
       }
 
-      .hero-copy {
-        position: relative;
-        z-index: 2;
-        width: min(760px, 100%);
-        padding-top: 84px;
+      .intro {
+        display: flex;
+        min-width: 0;
+        min-height: 520px;
+        flex-direction: column;
+        justify-content: space-between;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 22px;
+        background: rgba(245, 251, 239, 0.045);
+        box-shadow: var(--shadow);
       }
 
       .eyebrow {
-        margin: 0 0 18px;
+        margin: 0 0 12px;
         color: var(--gold);
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 900;
       }
 
       h1,
       h2,
-      h3,
       p {
         margin-top: 0;
       }
 
       h1 {
-        margin-bottom: 22px;
-        font-size: 64px;
+        margin-bottom: 14px;
+        font-size: clamp(40px, 7vw, 72px);
         line-height: 1.02;
-        letter-spacing: 0;
       }
 
       .lead {
-        width: min(620px, 100%);
+        margin-bottom: 22px;
         color: var(--muted);
-        font-size: 19px;
-        line-height: 1.8;
-      }
-
-      .hero-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-top: 30px;
-      }
-
-      .button-link.primary {
-        border-color: rgba(243, 207, 88, 0.68);
-        background: #f3cf58;
-        color: #102018;
-      }
-
-      .button-link.primary:hover {
-        border-color: #ffe18c;
-        background: #ffe18c;
-      }
-
-      .atlas-scene {
-        position: absolute;
-        inset: 0;
-        z-index: 1;
-        pointer-events: none;
-        opacity: 0.92;
-      }
-
-      .atlas-plane {
-        position: absolute;
-        right: min(5vw, 70px);
-        bottom: 22px;
-        width: min(720px, 66vw);
-        height: min(560px, 62vh);
-        transform: perspective(980px) rotateX(58deg) rotateZ(-12deg);
-        transform-origin: 55% 55%;
-      }
-
-      .orbit-ring,
-      .orbit-line {
-        position: absolute;
-        border: 1px solid rgba(248, 255, 247, 0.2);
-        border-radius: 50%;
-      }
-
-      .orbit-ring.one {
-        inset: 12% 10%;
-      }
-
-      .orbit-ring.two {
-        inset: 24% 24%;
-        border-color: rgba(243, 207, 88, 0.28);
-      }
-
-      .orbit-ring.three {
-        inset: 36% 35%;
-        border-color: rgba(120, 189, 244, 0.24);
-      }
-
-      .orbit-line {
-        left: 8%;
-        right: 7%;
-        top: 50%;
-        height: 1px;
-        transform: rotate(22deg);
-        border-width: 1px 0 0;
-        border-radius: 0;
-      }
-
-      .atlas-node {
-        position: absolute;
-        width: 120px;
-        min-height: 58px;
-        display: grid;
-        place-items: center;
-        border: 1px solid rgba(248, 255, 247, 0.28);
-        border-radius: 8px;
-        padding: 9px;
-        background: rgba(6, 16, 12, 0.72);
-        box-shadow: var(--shadow);
-        color: var(--text);
-        font-size: 12px;
-        font-weight: 900;
-        text-align: center;
-        transform: rotateZ(12deg) rotateX(-58deg);
-      }
-
-      .atlas-node::before {
-        content: "";
-        width: 18px;
-        height: 18px;
-        margin-bottom: 5px;
-        border-radius: 50%;
-        background: currentColor;
-        box-shadow: 0 0 24px currentColor;
-      }
-
-      .atlas-node.root {
-        left: 43%;
-        top: 42%;
-        width: 142px;
-        color: var(--gold);
-      }
-
-      .atlas-node.thinking {
-        left: 22%;
-        top: 24%;
-        color: var(--mint);
-      }
-
-      .atlas-node.agent {
-        left: 61%;
-        top: 25%;
-        color: var(--sky);
-      }
-
-      .atlas-node.voice {
-        left: 64%;
-        top: 62%;
-        color: var(--coral);
-      }
-
-      .atlas-node.share {
-        left: 18%;
-        top: 62%;
-        color: var(--violet);
-      }
-
-      .section {
-        padding: 86px min(6vw, 76px);
-      }
-
-      .section.dark {
-        background: var(--ink);
-        color: var(--text);
-      }
-
-      .section.muted {
-        background: var(--paper-2);
-      }
-
-      .section-header {
-        width: min(780px, 100%);
-        margin-bottom: 34px;
-      }
-
-      .section-header h2 {
-        margin-bottom: 14px;
-        font-size: 34px;
-        line-height: 1.18;
-        letter-spacing: 0;
-      }
-
-      .section-header p {
-        color: rgba(16, 32, 24, 0.72);
         font-size: 16px;
         line-height: 1.8;
       }
 
-      .dark .section-header p {
-        color: var(--muted);
-      }
-
-      .feature-grid,
-      .plan-grid,
-      .roadmap-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 14px;
-      }
-
-      .feature,
-      .plan,
-      .roadmap-item {
-        min-width: 0;
-        border: 1px solid rgba(16, 32, 24, 0.14);
-        border-radius: 8px;
-        padding: 20px;
-        background: rgba(255, 255, 255, 0.66);
-      }
-
-      .dark .feature,
-      .dark .plan,
-      .dark .roadmap-item {
-        border-color: var(--line);
-        background: rgba(255, 255, 255, 0.055);
-      }
-
-      .feature h3,
-      .plan h3,
-      .roadmap-item h3 {
-        margin-bottom: 10px;
-        font-size: 18px;
-        line-height: 1.35;
-        letter-spacing: 0;
-      }
-
-      .feature p,
-      .plan p,
-      .roadmap-item p,
-      .plan li {
-        color: rgba(16, 32, 24, 0.72);
-        font-size: 14px;
-        line-height: 1.72;
-      }
-
-      .dark .feature p,
-      .dark .plan p,
-      .dark .roadmap-item p,
-      .dark .plan li {
-        color: var(--muted);
-      }
-
-      .feature strong,
-      .plan strong,
-      .roadmap-item strong {
-        color: #102018;
-      }
-
-      .dark .feature strong,
-      .dark .plan strong,
-      .dark .roadmap-item strong {
-        color: var(--gold);
-      }
-
-      .plan ul {
+      .sample-tabs {
         display: grid;
         gap: 8px;
-        margin: 16px 0 0;
-        padding-left: 20px;
       }
 
-      .tag {
-        display: inline-block;
-        margin-bottom: 12px;
+      .sample-tab {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 10px;
+        align-items: center;
+        width: 100%;
+        border: 1px solid var(--line);
         border-radius: 8px;
-        padding: 5px 8px;
-        background: rgba(121, 224, 180, 0.16);
-        color: #0b5c43;
+        padding: 12px;
+        background: rgba(245, 251, 239, 0.05);
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .sample-tab[aria-selected="true"] {
+        border-color: rgba(216, 245, 109, 0.62);
+        background: rgba(216, 245, 109, 0.12);
+      }
+
+      .sample-tab strong {
+        display: block;
+        font-size: 14px;
+      }
+
+      .sample-tab small {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .sample-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        background: var(--mint);
+      }
+
+      .sample-tab[data-sample="travel"] .sample-dot {
+        background: var(--coral);
+      }
+
+      .sample-tab[data-sample="app"] .sample-dot {
+        background: var(--blue);
+      }
+
+      .sample-index {
+        color: var(--muted);
         font-size: 12px;
         font-weight: 900;
       }
 
-      .dark .tag {
-        color: var(--mint);
-      }
-
-      .philosophy {
+      .demo-shell {
         display: grid;
-        grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
-        gap: 34px;
-        align-items: start;
+        min-width: 0;
+        min-height: 620px;
+        grid-template-rows: auto auto minmax(390px, 1fr) auto;
+        align-content: start;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--panel);
+        box-shadow: var(--shadow);
       }
 
-      .quote {
-        border-left: 4px solid var(--coral);
-        padding-left: 22px;
-        font-size: 28px;
+      .demo-shell.no-view-controls {
+        grid-template-rows: auto minmax(390px, 1fr) auto;
+      }
+
+      .demo-head {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        align-items: start;
+        padding: 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .demo-title {
+        margin: 0 0 4px;
+        font-size: 22px;
+        line-height: 1.2;
+      }
+
+      .demo-subtitle {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .demo-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        border: 1px solid rgba(216, 245, 109, 0.24);
+        border-radius: 999px;
+        padding: 8px 10px;
+        background: rgba(216, 245, 109, 0.08);
+        color: #edffd0;
+        font-size: 12px;
+        font-weight: 900;
+        white-space: nowrap;
+      }
+
+      .view-controls {
+        display: flex;
+        gap: 7px;
+        overflow-x: auto;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--line);
+        scrollbar-width: none;
+      }
+
+      .view-controls[hidden] {
+        display: none;
+      }
+
+      .view-controls::-webkit-scrollbar {
+        display: none;
+      }
+
+      .view-button {
+        min-height: 36px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 8px 12px;
+        background: rgba(245, 251, 239, 0.045);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 900;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .view-button[aria-pressed="true"] {
+        border-color: rgba(216, 245, 109, 0.68);
+        background: var(--lime);
+        color: #11180c;
+      }
+
+      .preview {
+        position: relative;
+        min-height: 390px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 50% 45%, rgba(245, 251, 239, 0.07), transparent 34%),
+          #020503;
+        touch-action: none;
+        user-select: none;
+      }
+
+      .preview.editor-mode {
+        touch-action: pan-y;
+      }
+
+      .preview-grid {
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(245, 251, 239, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(245, 251, 239, 0.035) 1px, transparent 1px);
+        background-size: 44px 44px;
+        opacity: 0.7;
+      }
+
+      .world {
+        position: absolute;
+        inset: 0;
+        transform-origin: 50% 50%;
+      }
+
+      .edges {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+      }
+
+      .edges line {
+        stroke: rgba(245, 251, 239, 0.18);
+        stroke-width: 1.4;
+      }
+
+      .node {
+        position: absolute;
+        display: grid;
+        width: var(--size);
+        height: var(--size);
+        place-items: center;
+        border: 1px solid rgba(245, 251, 239, 0.14);
+        border-radius: 999px;
+        background: var(--node-color);
+        box-shadow:
+          inset -16px -20px 30px rgba(0, 0, 0, 0.28),
+          0 0 0 10px rgba(245, 251, 239, 0.035),
+          0 16px 38px rgba(0, 0, 0, 0.34);
+        color: #fff;
+        text-align: center;
+        transform: translate(-50%, -50%);
+        cursor: pointer;
+      }
+
+      .node.is-selected {
+        outline: 2px solid rgba(216, 245, 109, 0.92);
+        outline-offset: 7px;
+      }
+
+      .node-label {
+        width: 130%;
+        transform: translateY(calc(var(--size) * 0.64));
+        color: rgba(245, 251, 239, 0.9);
+        font-size: 12px;
+        font-weight: 900;
+        line-height: 1.25;
+        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+        pointer-events: none;
+      }
+
+      .node.is-root .node-label {
+        font-size: 13px;
+      }
+
+      .node-notice {
+        position: absolute;
+        top: 4px;
+        right: 2px;
+        display: grid;
+        width: 19px;
+        height: 19px;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.45);
+        border-radius: 999px;
+        background: var(--coral);
+        color: #150702;
+        font-size: 12px;
+        font-weight: 900;
+        box-shadow: 0 0 0 7px rgba(255, 141, 109, 0.16);
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+
+      .side-panel {
+        position: absolute;
+        right: 12px;
+        top: 12px;
+        z-index: 5;
+        width: min(270px, calc(100% - 24px));
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        background: rgba(7, 16, 13, 0.9);
+        backdrop-filter: blur(10px);
+      }
+
+      .side-panel h3 {
+        margin: 0 0 5px;
+        font-size: 14px;
+      }
+
+      .side-panel p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
         line-height: 1.55;
+      }
+
+      .notification-card {
+        display: none;
+        position: absolute;
+        left: 12px;
+        top: 12px;
+        z-index: 6;
+        width: min(292px, calc(100% - 24px));
+        border: 1px solid rgba(255, 141, 109, 0.42);
+        border-radius: 8px;
+        padding: 11px;
+        background: rgba(27, 10, 6, 0.92);
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
+      }
+
+      .notification-card.is-visible {
+        display: block;
+      }
+
+      .notification-card button {
+        width: 100%;
+        margin-top: 9px;
+        border: 1px solid rgba(255, 141, 109, 0.5);
+        border-radius: 8px;
+        padding: 8px;
+        background: rgba(255, 141, 109, 0.14);
+        font-size: 12px;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .ai-dock {
+        display: none;
+        position: absolute;
+        right: 12px;
+        bottom: 12px;
+        z-index: 7;
+        width: min(360px, calc(100% - 24px));
+        border: 1px solid rgba(216, 245, 109, 0.28);
+        border-radius: 8px;
+        padding: 12px;
+        background: rgba(8, 15, 12, 0.94);
+        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.42);
+      }
+
+      .ai-dock.is-visible {
+        display: block;
+      }
+
+      .ai-dock-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
+      .ai-badge {
+        display: inline-flex;
+        border: 1px solid rgba(216, 245, 109, 0.44);
+        border-radius: 999px;
+        padding: 6px 8px;
+        background: rgba(216, 245, 109, 0.13);
+        color: #edffd0;
+        font-size: 12px;
         font-weight: 900;
       }
 
-      .copy-stack {
+      .ai-input {
         display: grid;
-        gap: 18px;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
       }
 
-      .copy-stack p {
-        color: rgba(16, 32, 24, 0.76);
-        line-height: 1.86;
+      .ai-input input,
+      .ai-input button,
+      .ai-row select {
+        min-height: 36px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(245, 251, 239, 0.06);
+        color: var(--text);
+      }
+
+      .ai-input input {
+        min-width: 0;
+        padding: 0 10px;
+      }
+
+      .ai-input button {
+        width: 42px;
+        color: var(--muted);
+      }
+
+      .ai-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 9px;
+      }
+
+      .ai-row label {
+        display: grid;
+        gap: 5px;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 900;
+      }
+
+      .ai-row select {
+        padding: 0 8px;
+      }
+
+      .demo-foot {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        align-items: center;
+        padding: 13px 16px;
+        border-top: 1px solid var(--line);
+        background: rgba(245, 251, 239, 0.035);
+      }
+
+      .selected-title {
+        margin: 0 0 3px;
+        font-size: 14px;
+        font-weight: 900;
+      }
+
+      .selected-body {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .editor-view {
+        position: absolute;
+        inset: 0;
+        display: none;
+        overflow: auto;
+        padding: 16px;
+        background: #07100d;
+      }
+
+      .editor-view.is-visible {
+        display: block;
+      }
+
+      .outline {
+        display: grid;
+        gap: 7px;
+        max-width: 720px;
+      }
+
+      .outline-row {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 8px;
+        align-items: start;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 10px;
+        background: rgba(245, 251, 239, 0.045);
+        color: var(--text);
+      }
+
+      .outline-row span:first-child {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .outline-row strong {
+        display: block;
+        margin-bottom: 3px;
+        font-size: 13px;
+      }
+
+      .outline-row small {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
       }
 
       .closing {
         display: grid;
+        grid-template-columns: 1fr auto;
         gap: 18px;
-        justify-items: start;
-        background: linear-gradient(135deg, var(--ink-2), #2f1f19);
-        color: var(--text);
+        align-items: center;
+        margin: 0 0 28px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        background: rgba(245, 251, 239, 0.045);
+      }
+
+      .closing h2 {
+        margin: 0 0 5px;
+        font-size: 22px;
       }
 
       .closing p {
-        width: min(680px, 100%);
+        margin: 0;
         color: var(--muted);
-        line-height: 1.8;
+        font-size: 13px;
+        line-height: 1.55;
       }
 
       footer {
-        display: flex;
-        justify-content: space-between;
-        gap: 16px;
-        flex-wrap: wrap;
-        padding: 28px min(6vw, 76px);
-        background: #040806;
-        color: rgba(248, 255, 247, 0.66);
-        font-size: 13px;
+        padding: 0 0 24px;
+        color: var(--muted);
+        font-size: 12px;
+        text-align: center;
       }
 
-      footer a {
-        color: var(--mint);
-        text-decoration: none;
-        font-weight: 800;
-      }
-
-      @media (max-width: 920px) {
-        .hero {
-          min-height: 82vh;
-          padding-bottom: 46px;
+      @media (max-width: 860px) {
+        .page-shell {
+          width: min(100% - 20px, 560px);
         }
 
-        .hero-nav {
-          align-items: flex-start;
+        .topbar {
+          padding: 10px 0;
         }
 
-        .nav-links a:not(.home-link) {
+        .ghost-link {
           display: none;
         }
 
-        h1 {
-          font-size: 48px;
+        .hero {
+          grid-template-columns: 1fr;
+          gap: 12px;
+          padding-top: 4px;
         }
 
-        .lead {
-          font-size: 17px;
+        .intro {
+          min-height: auto;
+          padding: 16px;
         }
 
-        .atlas-plane {
-          right: -18vw;
-          width: 820px;
-          opacity: 0.44;
+        .sample-tabs {
+          display: flex;
+          overflow-x: auto;
+          margin: 0 -16px;
+          padding: 0 16px 2px;
+          scrollbar-width: none;
         }
 
-        .feature-grid,
-        .plan-grid,
-        .roadmap-grid,
-        .philosophy {
+        .sample-tabs::-webkit-scrollbar {
+          display: none;
+        }
+
+        .sample-tab {
+          flex: 0 0 170px;
+        }
+
+        .demo-shell {
+          min-height: 600px;
+          grid-template-rows: auto auto 420px auto;
+        }
+
+        .demo-shell.no-view-controls {
+          grid-template-rows: auto 420px auto;
+        }
+
+        .demo-head,
+        .demo-foot {
+          grid-template-columns: 1fr;
+        }
+
+        .demo-status,
+        .demo-foot .cta {
+          width: 100%;
+        }
+
+        .side-panel {
+          display: none !important;
+        }
+
+        .notification-card {
+          left: 10px;
+          right: 10px;
+          width: auto;
+        }
+
+        .ai-dock {
+          left: 10px;
+          right: 10px;
+          width: auto;
+        }
+
+        .closing {
           grid-template-columns: 1fr;
         }
       }
 
-      @media (max-width: 560px) {
-        .hero {
-          min-height: 78vh;
-          padding: 22px 18px 42px;
+      @media (max-width: 520px) {
+        .brand span {
+          font-size: 13px;
         }
 
-        .hero-nav {
-          inset: 16px 18px auto;
+        .topbar .cta {
+          padding-inline: 10px;
         }
 
-        .brand-mark span {
-          display: none;
+        .demo-shell {
+          grid-template-rows: auto auto 430px auto;
         }
 
-        .hero-copy {
-          padding-top: 70px;
+        .demo-shell.no-view-controls {
+          grid-template-rows: auto 430px auto;
         }
 
-        h1 {
-          font-size: 34px;
-          line-height: 1.08;
+        .demo-title {
+          font-size: 19px;
         }
 
-        .lead {
-          font-size: 15px;
+        .node-label {
+          font-size: 11px;
         }
 
-        .button-link {
-          width: 100%;
-        }
-
-        .atlas-plane {
-          right: -380px;
-          width: 760px;
-          height: 520px;
-        }
-
-        .section {
-          padding: 58px 18px;
-        }
-
-        .section-header h2 {
-          font-size: 27px;
-        }
-
-        .quote {
-          font-size: 23px;
-        }
-      }
-
-      @media (prefers-reduced-motion: no-preference) {
-        .atlas-plane {
-          animation: drift 12s ease-in-out infinite alternate;
-        }
-
-        .atlas-node {
-          animation: pulse 4.6s ease-in-out infinite;
-        }
-
-        .atlas-node.agent,
-        .atlas-node.share {
-          animation-delay: 0.9s;
-        }
-
-        .atlas-node.voice {
-          animation-delay: 1.6s;
-        }
-      }
-
-      @keyframes drift {
-        from {
-          transform: perspective(980px) rotateX(58deg) rotateZ(-14deg) translate3d(0, 0, 0);
-        }
-
-        to {
-          transform: perspective(980px) rotateX(58deg) rotateZ(-10deg) translate3d(-14px, 18px, 0);
+        .ai-row {
+          grid-template-columns: 1fr;
         }
       }
 
       @keyframes pulse {
         0%,
         100% {
-          filter: brightness(1);
+          transform: scale(1);
         }
 
         50% {
-          filter: brightness(1.16);
+          transform: scale(1.08);
         }
       }
     </style>
   </head>
   <body>
-    <main class="page">
-      <section class="hero" aria-labelledby="hero-title">
-        <nav class="hero-nav" aria-label="Mind Atlas overview navigation">
-          <a class="brand-mark" href="./" aria-label="Mind Atlas本編へ">
-            <img src="/favicon.svg" alt="" />
-            <span>Mind Atlas</span>
-          </a>
-          <div class="nav-links">
-            <a href="#philosophy">思想</a>
-            <a href="#features">機能</a>
-            <a href="#ai-plan">AI機能プラン</a>
-            <a class="home-link" href="./">本編へ</a>
-          </div>
-        </nav>
-
-        <div class="atlas-scene" aria-hidden="true">
-          <div class="atlas-plane">
-            <div class="orbit-ring one"></div>
-            <div class="orbit-ring two"></div>
-            <div class="orbit-ring three"></div>
-            <div class="orbit-line"></div>
-            <div class="atlas-node root">Mind Atlas</div>
-            <div class="atlas-node thinking">Thinking universe</div>
-            <div class="atlas-node agent">AI mission control</div>
-            <div class="atlas-node voice">Voice partner</div>
-            <div class="atlas-node share">Shareable worlds</div>
-          </div>
-        </div>
-
-        <div class="hero-copy">
-          <p class="eyebrow">2.5D spatial notebook / AI mission control</p>
-          <h1 id="hero-title">思考が宇宙になり、AI作業が見える。</h1>
-          <p class="lead">
-            Mind Atlasは、ノート、構想、AIとの作業ログを空間上のノードとして扱うワークスペースです。
-            ひとりで考えるための「思考宇宙」と、複数のAI作業を監督する「ミッションコントロール」を同じ土台でつなぎます。
-          </p>
-          <div class="hero-actions">
-            <a class="button-link primary" href="./">Mind Atlas本編を開く</a>
-            <a class="button-link" href="#ai-plan">AI機能プランを見る</a>
-          </div>
-        </div>
-      </section>
-
-      <section id="philosophy" class="section philosophy">
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Mind Atlas本編へ">
+          <img src="/favicon.svg" alt="" />
+          <span>Mind Atlas</span>
+        </a>
         <div>
-          <p class="eyebrow">Product thesis</p>
-          <h2>マインドマップではなく、思考の地形を育てる。</h2>
+          <a class="ghost-link" href="/privacy.html">Privacy</a>
+          <a class="cta" href="/">Mind Atlasを使ってみる</a>
         </div>
-        <div class="copy-stack">
-          <p class="quote">Mind Atlasの中心は、派手な3D表現ではなく「自分の考えがどこにあり、何が動いているか」を見失わないことです。</p>
-          <p>
-            ノードは単なる付箋ではなく、文脈、親子関係、状態、通知、AI実行結果を持つ作業単位です。
-            3D空間は入口であり、日常作業ではアウトライン編集や通知、ログ、検索と組み合わせて使えるようにします。
-          </p>
-          <p>
-            ローカルファーストを基本にしつつ、公開サービスではAI機能、共有、将来の同期やバックアップを重ねられる設計を目指しています。
-          </p>
-        </div>
-      </section>
+      </header>
 
-      <section id="features" class="section muted">
-        <div class="section-header">
-          <p class="eyebrow">Core features</p>
-          <h2>AIなしでも使える、視覚的なノート基盤。</h2>
-          <p>
-            Mind Atlasの無料側の価値は、思考を空間・アウトライン・インポート/エクスポートで扱えることです。
-            AIはこの基盤を強化しますが、ノートそのものをAI専用にはしません。
-          </p>
-        </div>
-        <div class="feature-grid">
-          <article class="feature">
-            <span class="tag">Spatial notebook</span>
-            <h3>2.5Dの宇宙ノード</h3>
-            <p>ノードを宇宙のような空間に配置し、フォーカス、選択、通知、状態を視覚的に追えます。</p>
-          </article>
-          <article class="feature">
-            <span class="tag">Outline editor</span>
-            <h3>日常編集はアウトラインで</h3>
-            <p>3Dが疲れる場面でも、全体構造をアウトラインとして直接編集できます。</p>
-          </article>
-          <article class="feature">
-            <span class="tag">Import / export</span>
-            <h3>MarkdownやOPMLから移行</h3>
-            <p>Markdown、OPML、FreeMind形式の取り込み、画像付きパッケージ、軽量JSONの保存に対応します。</p>
-          </article>
-          <article class="feature">
-            <span class="tag">Durability</span>
-            <h3>IndexedDBと履歴復元</h3>
-            <p>ブラウザ内にノートを保存し、スナップショットから復元できるようにしています。</p>
-          </article>
-          <article class="feature">
-            <span class="tag">Sharing</span>
-            <h3>見せたくなる共有</h3>
-            <p>宇宙ビューをブランド付きPNGとして共有し、必要ならデータ埋め込みURLも作れます。</p>
-          </article>
-          <article class="feature">
-            <span class="tag">Mobile PWA</span>
-            <h3>スマホでも操作できる</h3>
-            <p>縦画面、キーボード表示、低描画品質など、古い端末でも使える方向で調整しています。</p>
-          </article>
-        </div>
-      </section>
+      <main>
+        <section class="hero" aria-labelledby="page-title">
+          <div class="intro">
+            <div>
+              <p class="eyebrow">Touch the examples</p>
+              <h1 id="page-title">考えを、動かせる宇宙にする。</h1>
+              <p class="lead">
+                長い説明より、まず触ってください。小説、旅行、アプリ開発。
+                Mind Atlasがどんな作業空間になるのかを、軽いサンプルで見られます。
+              </p>
+            </div>
 
-      <section id="ai-plan" class="section dark">
-        <div class="section-header">
-          <p class="eyebrow">AI plan</p>
-          <h2>AI機能は「作業を任せる」より先に「作業を監督する」ためにある。</h2>
-          <p>
-            Mind AtlasのAI機能は、チャット、音声、検索、エージェント実行をノード文脈に接続し、
-            複数のAI作業の結果、エラー、承認待ちを見える状態にすることを重視します。
-          </p>
-        </div>
-        <div class="plan-grid">
-          <article class="plan">
-            <span class="tag">Free Notebook</span>
-            <h3>無料の思考宇宙</h3>
-            <p>ノート、アウトライン、インポート/エクスポート、画像共有を中心に使えます。</p>
-            <ul>
-              <li>AI機能を使わなくてもノートとして成立</li>
-              <li>公開ページや共有から作成体験へつなげる</li>
-              <li>将来の同期や履歴強化の土台</li>
-            </ul>
-          </article>
-          <article class="plan">
-            <span class="tag">AI Pro</span>
-            <h3>公開サービス向けAI機能</h3>
-            <p>Chat、Realtime Talk、Dictation、web searchをサーバー側APIキーで提供する有料プラン方針です。</p>
-            <ul>
-              <li>月額USD 10のProプランを基準に設計</li>
-              <li>OpenAI、Anthropic、DeepSeekのモデル選択</li>
-              <li>月次トークン枠と使用量表示</li>
-            </ul>
-          </article>
-          <article class="plan">
-            <span class="tag">Local Power</span>
-            <h3>ローカル上級者向けAI司令室</h3>
-            <p>ローカルブリッジ経由で、AIチャットと開発者向けエージェントCLIを空間上の作業ログに接続します。</p>
-            <ul>
-              <li>Codex、OpenClaw、Claude Code系の実行を可視化</li>
-              <li>承認待ち、失敗、完了結果を通知で追跡</li>
-              <li>BYOKやローカルモデルの余地を残す</li>
-            </ul>
-          </article>
-        </div>
-      </section>
+            <div class="sample-tabs" role="tablist" aria-label="Mind Atlas examples">
+              <button class="sample-tab" type="button" role="tab" aria-selected="true" data-sample="novel">
+                <span class="sample-dot"></span>
+                <span>
+                  <strong>小説</strong>
+                  <small>構成をビューで切り替える</small>
+                </span>
+                <span class="sample-index">01</span>
+              </button>
+              <button class="sample-tab" type="button" role="tab" aria-selected="false" data-sample="travel">
+                <span class="sample-dot"></span>
+                <span>
+                  <strong>旅行の計画</strong>
+                  <small>通知が作業を呼び戻す</small>
+                </span>
+                <span class="sample-index">02</span>
+              </button>
+              <button class="sample-tab" type="button" role="tab" aria-selected="false" data-sample="app">
+                <span class="sample-dot"></span>
+                <span>
+                  <strong>アプリ開発</strong>
+                  <small>AIウィンドウのある状態</small>
+                </span>
+                <span class="sample-index">03</span>
+              </button>
+            </div>
+          </div>
 
-      <section class="section">
-        <div class="section-header">
-          <p class="eyebrow">What AI does inside the atlas</p>
-          <h2>AIがノード文脈を読み、必要な変更だけを返す。</h2>
-          <p>
-            AIは会話の相手であると同時に、現在のノード、選択範囲、通知、実行ログを読んで作業するパートナーです。
-            危険な操作やファイル選択のような操作は、人間の承認を前提にします。
-          </p>
-        </div>
-        <div class="feature-grid">
-          <article class="feature">
-            <span class="tag">Context-aware chat</span>
-            <h3>ノード文脈つきチャット</h3>
-            <p>親子関係、兄弟ノード、選択範囲、本文を構造化してAIに渡します。</p>
-          </article>
-          <article class="feature">
-            <span class="tag">Voice partner</span>
-            <h3>音声で状態を聞く</h3>
-            <p>DictationとRealtime Voice Partnerで、話しながらノートやAI作業を操作する方向を育てています。</p>
-          </article>
-          <article class="feature">
-            <span class="tag">Agent visibility</span>
-            <h3>並列AI作業の見える化</h3>
-            <p>複数のAI実行、承認待ち、エラー、結果をノード分岐やログとして追えるようにします。</p>
-          </article>
-        </div>
-      </section>
+          <section class="demo-shell" aria-label="Interactive Mind Atlas sample">
+            <div class="demo-head">
+              <div>
+                <h2 class="demo-title" id="demo-title"></h2>
+                <p class="demo-subtitle" id="demo-subtitle"></p>
+              </div>
+              <div class="demo-status" id="demo-status"></div>
+            </div>
 
-      <section class="section muted">
-        <div class="section-header">
-          <p class="eyebrow">Roadmap direction</p>
-          <h2>これから強くする領域。</h2>
-        </div>
-        <div class="roadmap-grid">
-          <article class="roadmap-item">
-            <h3>公開・共有</h3>
-            <p>読み取り専用の宇宙ページ、自己完結HTML、テンプレート宇宙で「作ったものを見せる」導線を強めます。</p>
-          </article>
-          <article class="roadmap-item">
-            <h3>耐久性と同期</h3>
-            <p>スナップショット、復元、バックアップ、将来のE2E同期で、長く使えるノートにします。</p>
-          </article>
-          <article class="roadmap-item">
-            <h3>チーム/セルフホスト</h3>
-            <p>実行ログ、承認フロー、監査、コスト配賦を備えたAIミッションコントロールへ拡張します。</p>
-          </article>
-        </div>
-      </section>
+            <div class="view-controls" id="view-controls" aria-label="Novel view modes">
+              <button class="view-button" type="button" data-view="atlas" aria-pressed="true">Mind Atlas</button>
+              <button class="view-button" type="button" data-view="mind" aria-pressed="false">Mind map</button>
+              <button class="view-button" type="button" data-view="tree" aria-pressed="false">Tree</button>
+              <button class="view-button" type="button" data-view="editor" aria-pressed="false">Editor</button>
+            </div>
 
-      <section class="section closing">
-        <p class="eyebrow">Open the workspace</p>
-        <h2>本編で、あなたの宇宙を開く。</h2>
-        <p>
-          このページは紹介用です。実際のノート作成、共有、AI操作はMind Atlas本編から始められます。
-        </p>
-        <a class="button-link primary" href="./">Mind Atlas本編へ</a>
-      </section>
-    </main>
-    <footer>
-      <span>Mind Atlas / 2.5D spatial notebook and AI mission control</span>
-      <a href="./">本編へ戻る</a>
-    </footer>
+            <div class="preview" id="preview" aria-label="Mind Atlas preview">
+              <div class="preview-grid" aria-hidden="true"></div>
+              <div class="world" id="world">
+                <svg class="edges" id="edges" aria-hidden="true"></svg>
+                <div id="nodes"></div>
+              </div>
+              <div class="editor-view" id="editor-view" aria-label="Editor preview"></div>
+              <aside class="notification-card" id="notification-card">
+                <strong>通知</strong>
+                <p id="notification-text"></p>
+                <button type="button" id="focus-notification">通知ノードを見る</button>
+              </aside>
+              <aside class="ai-dock" id="ai-dock" aria-label="AI feature demo">
+                <div class="ai-dock-head">
+                  <strong>AI / waiting</strong>
+                  <span class="ai-badge">AI機能 87%</span>
+                </div>
+                <div class="ai-input">
+                  <input value="このノードから次の実装タスクを整理して" disabled />
+                  <button type="button" disabled aria-label="Demo send disabled">→</button>
+                </div>
+                <div class="ai-row">
+                  <label>
+                    Service
+                    <select disabled>
+                      <option>Anthropic</option>
+                    </select>
+                  </label>
+                  <label>
+                    Model
+                    <select disabled>
+                      <option>claude-opus-4-8</option>
+                    </select>
+                  </label>
+                </div>
+              </aside>
+              <aside class="side-panel" id="side-panel">
+                <h3 id="selected-title"></h3>
+                <p id="selected-body"></p>
+              </aside>
+            </div>
+
+            <div class="demo-foot">
+              <div>
+                <p class="selected-title" id="foot-title"></p>
+                <p class="selected-body" id="foot-body"></p>
+              </div>
+              <a class="cta" href="/">このままMind Atlasを使ってみる</a>
+            </div>
+          </section>
+        </section>
+
+        <section class="closing">
+          <div>
+            <h2>Notebookは無料で始められます。</h2>
+            <p>
+              空間ノートはすぐ触れます。AI機能は必要になった時だけ開いてください。
+            </p>
+          </div>
+          <a class="cta" href="/">Mind Atlasを開く</a>
+        </section>
+      </main>
+
+      <footer>Mind Atlas / Spatial notebook and AI mission control</footer>
+    </div>
+
+    <script>
+      const samples = {
+        novel: {
+          title: "小説: 白い駅の手紙",
+          subtitle: "物語の章、伏線、人物を空間で眺め、ビューを切り替えて構成を確認するサンプルです。",
+          status: "4 views",
+          initial: "root",
+          viewControls: true,
+          nodes: [
+            { id: "root", label: "白い駅の手紙", body: "冬の無人駅に届く、差出人のない手紙から始まる短編ミステリ。", color: "#b9a24a", size: 88, x: 0, y: 0, parent: null },
+            { id: "chapter1", label: "第1章 駅", body: "主人公が終電後の駅で白い封筒を拾う。", color: "#4d79d8", size: 56, x: -170, y: -86, parent: "root" },
+            { id: "letter", label: "手紙の暗号", body: "時計塔、切符、古い喫茶店を示す三つの記号。", color: "#8e4ec6", size: 50, x: 162, y: -104, parent: "root" },
+            { id: "friend", label: "幼なじみ", body: "事件を知っているが、最後まで核心を言わない人物。", color: "#c75252", size: 54, x: -118, y: 128, parent: "root" },
+            { id: "clock", label: "時計塔", body: "毎日17時17分だけ鐘が鳴る。ラストの鍵になる場所。", color: "#5aa785", size: 49, x: 145, y: 118, parent: "letter" },
+            { id: "ending", label: "ラスト", body: "手紙は未来の自分から届いていた、という反転。", color: "#d8903d", size: 58, x: 12, y: 204, parent: "root" },
+          ],
+        },
+        travel: {
+          title: "旅行: 京都3日旅",
+          subtitle: "宿、移動、観光、持ち物をひとつの計画にまとめ、通知が必要なノードへ戻してくれます。",
+          status: "1 notification",
+          initial: "train",
+          viewControls: false,
+          notificationNode: "train",
+          notificationText: "新幹線の早割予約は今日18:00まで。ここを見直す必要があります。",
+          nodes: [
+            { id: "root", label: "京都3日旅", body: "金曜夜に移動し、土日は寺社と食事をゆっくり回る計画。", color: "#3d8a69", size: 86, x: 0, y: 0, parent: null },
+            { id: "hotel", label: "宿", body: "四条烏丸。駅から近く、荷物を預けやすい場所。", color: "#5d7fe0", size: 54, x: -150, y: -110, parent: "root" },
+            { id: "train", label: "新幹線", body: "東京発18:03。早割の期限を忘れない。", color: "#d86d4a", size: 58, x: 148, y: -96, parent: "root", notice: true },
+            { id: "temple", label: "清水寺", body: "朝一番に行く。混む前に写真を撮る。", color: "#ad8a32", size: 52, x: -128, y: 114, parent: "root" },
+            { id: "food", label: "食事", body: "湯豆腐、喫茶店、夜は予約制の店を候補にする。", color: "#b24f7a", size: 53, x: 126, y: 120, parent: "root" },
+            { id: "packing", label: "持ち物", body: "充電器、折りたたみ傘、歩きやすい靴。", color: "#7790a8", size: 46, x: 12, y: 205, parent: "root" },
+          ],
+        },
+        app: {
+          title: "アプリ開発: リリース前チェック",
+          subtitle: "課金済みユーザーのAIウィンドウが開いた状態です。このサンプルでは送信はできません。",
+          status: "AI demo",
+          initial: "ai",
+          viewControls: false,
+          aiDock: true,
+          nodes: [
+            { id: "root", label: "Mind Atlas Mobile", body: "モバイルでの初回体験、課金導線、AI利用上限をリリース前に確認する。", color: "#3f6ed8", size: 86, x: 0, y: 0, parent: null },
+            { id: "billing", label: "課金導線", body: "Stripe Checkout、Webhook、トークン付与を確認済みにする。", color: "#b79a37", size: 54, x: -168, y: -96, parent: "root" },
+            { id: "ai", label: "AI Dock", body: "モデル選択、残量表示、読み取り専用ログをユーザーに分かりやすく見せる。", color: "#48a883", size: 60, x: 152, y: -88, parent: "root" },
+            { id: "context", label: "Context engine", body: "ノードの祖先会話と周辺情報を軽くまとめてAIへ渡す。", color: "#8a6be8", size: 52, x: -108, y: 126, parent: "ai" },
+            { id: "qa", label: "Mobile QA", body: "チュートリアル、キーボード、横向き表示、通知を確認する。", color: "#ca5f56", size: 51, x: 124, y: 128, parent: "root" },
+            { id: "deploy", label: "VPS deploy", body: "ConoHa、nginx、systemd、PostgreSQL、HTTPSを本番URLで確認する。", color: "#627c96", size: 46, x: 18, y: 214, parent: "root" },
+          ],
+        },
+      };
+
+      const layoutPositions = {
+        mind: {
+          root: [0, 0],
+          chapter1: [-170, -120],
+          letter: [160, -116],
+          friend: [-170, 116],
+          clock: [162, 116],
+          ending: [0, 190],
+        },
+        tree: {
+          root: [0, -170],
+          chapter1: [-210, -40],
+          letter: [-70, -40],
+          friend: [70, -40],
+          ending: [210, -40],
+          clock: [-70, 104],
+        },
+      };
+
+      const state = {
+        sample: "novel",
+        view: "atlas",
+        selected: "root",
+        panX: 0,
+        panY: 0,
+        scale: 1,
+        dragging: false,
+        dragStartX: 0,
+        dragStartY: 0,
+        panStartX: 0,
+        panStartY: 0,
+      };
+
+      const preview = document.getElementById("preview");
+      const demoShell = document.querySelector(".demo-shell");
+      const world = document.getElementById("world");
+      const edges = document.getElementById("edges");
+      const nodes = document.getElementById("nodes");
+      const editorView = document.getElementById("editor-view");
+      const sidePanel = document.getElementById("side-panel");
+      const notificationCard = document.getElementById("notification-card");
+      const notificationText = document.getElementById("notification-text");
+      const focusNotification = document.getElementById("focus-notification");
+      const aiDock = document.getElementById("ai-dock");
+
+      document.querySelectorAll(".sample-tab").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.sample = button.dataset.sample;
+          state.view = "atlas";
+          state.selected = samples[state.sample].initial;
+          state.panX = 0;
+          state.panY = 0;
+          state.scale = 1;
+          render();
+        });
+      });
+
+      document.querySelectorAll(".view-button").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.view = button.dataset.view;
+          state.panX = 0;
+          state.panY = 0;
+          state.scale = 1;
+          render();
+        });
+      });
+
+      focusNotification.addEventListener("click", () => {
+        const sample = samples[state.sample];
+        if (!sample.notificationNode) return;
+        state.selected = sample.notificationNode;
+        state.panX = 0;
+        state.panY = 0;
+        render();
+      });
+
+      preview.addEventListener("pointerdown", (event) => {
+        if (state.view === "editor" || event.target.closest(".node, .side-panel, .notification-card, .ai-dock")) return;
+        state.dragging = true;
+        state.dragStartX = event.clientX;
+        state.dragStartY = event.clientY;
+        state.panStartX = state.panX;
+        state.panStartY = state.panY;
+        preview.setPointerCapture(event.pointerId);
+      });
+
+      preview.addEventListener("pointermove", (event) => {
+        if (!state.dragging) return;
+        state.panX = state.panStartX + event.clientX - state.dragStartX;
+        state.panY = state.panStartY + event.clientY - state.dragStartY;
+        applyWorldTransform();
+      });
+
+      preview.addEventListener("pointerup", (event) => {
+        state.dragging = false;
+        if (preview.hasPointerCapture(event.pointerId)) preview.releasePointerCapture(event.pointerId);
+      });
+
+      preview.addEventListener("wheel", (event) => {
+        if (state.view === "editor") return;
+        event.preventDefault();
+        const next = state.scale + (event.deltaY < 0 ? 0.08 : -0.08);
+        state.scale = Math.min(1.35, Math.max(0.72, next));
+        applyWorldTransform();
+      }, { passive: false });
+
+      function render() {
+        const sample = samples[state.sample];
+        document.getElementById("demo-title").textContent = sample.title;
+        document.getElementById("demo-subtitle").textContent = sample.subtitle;
+        document.getElementById("demo-status").textContent = sample.status;
+
+        document.querySelectorAll(".sample-tab").forEach((button) => {
+          button.setAttribute("aria-selected", String(button.dataset.sample === state.sample));
+        });
+
+        const viewControls = document.getElementById("view-controls");
+        viewControls.hidden = !sample.viewControls;
+        demoShell.classList.toggle("no-view-controls", !sample.viewControls);
+        document.querySelectorAll(".view-button").forEach((button) => {
+          button.setAttribute("aria-pressed", String(button.dataset.view === state.view));
+        });
+
+        preview.classList.toggle("editor-mode", state.view === "editor");
+        world.style.display = state.view === "editor" ? "none" : "block";
+        editorView.classList.toggle("is-visible", state.view === "editor");
+        sidePanel.style.display = state.view === "editor" || sample.aiDock ? "none" : "block";
+        notificationCard.classList.toggle("is-visible", Boolean(sample.notificationText));
+        aiDock.classList.toggle("is-visible", Boolean(sample.aiDock));
+        notificationText.textContent = sample.notificationText || "";
+
+        renderWorld(sample);
+        renderEditor(sample);
+        renderSelected(sample);
+        applyWorldTransform();
+      }
+
+      function renderWorld(sample) {
+        nodes.innerHTML = "";
+        edges.innerHTML = "";
+        const rect = preview.getBoundingClientRect();
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+        const positions = getPositions(sample);
+
+        sample.nodes.forEach((node) => {
+          if (!node.parent) return;
+          const from = positions[node.parent];
+          const to = positions[node.id];
+          if (!from || !to) return;
+          const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          line.setAttribute("x1", centerX + from[0]);
+          line.setAttribute("y1", centerY + from[1]);
+          line.setAttribute("x2", centerX + to[0]);
+          line.setAttribute("y2", centerY + to[1]);
+          edges.appendChild(line);
+        });
+
+        sample.nodes.forEach((node) => {
+          const [x, y] = positions[node.id] || [node.x, node.y];
+          const button = document.createElement("button");
+          button.className = `node${node.id === state.selected ? " is-selected" : ""}${node.id === "root" ? " is-root" : ""}`;
+          button.type = "button";
+          button.style.left = `${centerX + x}px`;
+          button.style.top = `${centerY + y}px`;
+          button.style.setProperty("--size", `${node.size}px`);
+          button.style.setProperty("--node-color", node.color);
+          button.setAttribute("aria-label", node.label);
+          button.innerHTML = `<span class="node-label">${escapeHtml(node.label)}</span>${node.notice ? '<span class="node-notice">!</span>' : ""}`;
+          button.addEventListener("click", () => {
+            state.selected = node.id;
+            renderSelected(sample);
+            renderWorld(sample);
+          });
+          nodes.appendChild(button);
+        });
+      }
+
+      function renderEditor(sample) {
+        const byParent = new Map();
+        sample.nodes.forEach((node) => {
+          const key = node.parent || "__root";
+          if (!byParent.has(key)) byParent.set(key, []);
+          byParent.get(key).push(node);
+        });
+        const rows = [];
+        const visit = (node, depth) => {
+          rows.push(`
+            <button class="outline-row" type="button" data-node="${node.id}" style="margin-left:${depth * 14}px">
+              <span>${depth ? "└" : "●"}</span>
+              <span><strong>${escapeHtml(node.label)}</strong><small>${escapeHtml(node.body)}</small></span>
+            </button>
+          `);
+          (byParent.get(node.id) || []).forEach((child) => visit(child, depth + 1));
+        };
+        (byParent.get("__root") || []).forEach((node) => visit(node, 0));
+        editorView.innerHTML = `<div class="outline">${rows.join("")}</div>`;
+        editorView.querySelectorAll(".outline-row").forEach((row) => {
+          row.addEventListener("click", () => {
+            state.selected = row.dataset.node;
+            renderSelected(sample);
+          });
+        });
+      }
+
+      function renderSelected(sample) {
+        const node = sample.nodes.find((item) => item.id === state.selected) || sample.nodes[0];
+        document.getElementById("selected-title").textContent = node.label;
+        document.getElementById("selected-body").textContent = node.body;
+        document.getElementById("foot-title").textContent = node.label;
+        document.getElementById("foot-body").textContent = node.body;
+      }
+
+      function getPositions(sample) {
+        if (state.sample === "novel" && layoutPositions[state.view]) return layoutPositions[state.view];
+        if (state.view === "tree") return makeTreePositions(sample);
+        if (state.view === "mind") return makeMindPositions(sample);
+        return Object.fromEntries(sample.nodes.map((node) => [node.id, [node.x, node.y]]));
+      }
+
+      function makeMindPositions(sample) {
+        const result = { root: [0, 0] };
+        const children = sample.nodes.filter((node) => node.parent === "root");
+        children.forEach((node, index) => {
+          const angle = (-90 + (360 / children.length) * index) * Math.PI / 180;
+          result[node.id] = [Math.cos(angle) * 170, Math.sin(angle) * 145];
+        });
+        sample.nodes.filter((node) => node.parent && node.parent !== "root").forEach((node, index) => {
+          result[node.id] = [120 + index * 46, 160];
+        });
+        return result;
+      }
+
+      function makeTreePositions(sample) {
+        const result = { root: [0, -160] };
+        const children = sample.nodes.filter((node) => node.parent === "root");
+        const spacing = 112;
+        children.forEach((node, index) => {
+          result[node.id] = [(index - (children.length - 1) / 2) * spacing, -20];
+        });
+        sample.nodes.filter((node) => node.parent && node.parent !== "root").forEach((node, index) => {
+          result[node.id] = [(index - 0.5) * spacing, 120];
+        });
+        return result;
+      }
+
+      function applyWorldTransform() {
+        world.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.scale})`;
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      render();
+      window.addEventListener("resize", render);
+    </script>
   </body>
 </html>
