@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isAboutDemoMode } from "../aboutDemo";
 import { ONBOARDING_EVENT } from "../events";
 import { ONBOARDING_TEXT, detectOnboardingLocale, type OnboardingLocale, type OnboardingMessageId } from "./localization";
 
@@ -305,6 +306,7 @@ export function getOnboardingCurrentSpaceStep(): SpaceStepId | null {
 }
 
 function loadProgress(): OnboardingProgress {
+  if (isAboutDemoMode()) return completedProgress(false);
   if (typeof window === "undefined") return completedProgress(false);
   const raw = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
   if (raw) {
@@ -375,6 +377,7 @@ function normalizeProgress(value: unknown): OnboardingProgress {
 }
 
 function saveProgress(progress: OnboardingProgress) {
+  if (isAboutDemoMode()) return;
   if (typeof window === "undefined") return;
   window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(progress));
 }

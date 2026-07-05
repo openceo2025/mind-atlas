@@ -110,6 +110,30 @@ try {
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).click();
     await page.waitForURL(/\/about\.html$/);
     await page.getByRole("heading", { name: /考えを、動かせる宇宙にする/ }).waitFor();
+    if ((await page.locator(".demo-window iframe").count()) !== 3) throw new Error("About page should expose three embedded Mind Atlas examples.");
+    if ((await page.locator(".view-controls button").count()) !== 4) throw new Error("About page should expose four novel view buttons.");
+    await page.frameLocator("#novel-frame").locator("canvas").waitFor();
+    await page.getByRole("button", { name: /Mind map/ }).click();
+    await page.frameLocator("#novel-frame").locator(".app-shell.is-about-demo-view-mind-map").waitFor();
+    await page.getByRole("button", { name: /Tree/ }).click();
+    await page.frameLocator("#novel-frame").locator(".app-shell.is-about-demo-view-tree").waitFor();
+    await page.getByRole("button", { name: /Editor/ }).click();
+    await page.frameLocator("#novel-frame").locator(".outline-editor-shell").waitFor();
+    await page.getByRole("heading", { name: /旅行の予定と通知/ }).scrollIntoViewIfNeeded();
+    const travelFrame = page.frameLocator('iframe[title="Mind Atlas travel planning example"]');
+    await travelFrame.locator("canvas").waitFor();
+    await travelFrame.locator(".unread-notification-link").first().waitFor();
+    await page.getByRole("heading", { name: /AI相談を開発ノードに残す/ }).scrollIntoViewIfNeeded();
+    const appFrame = page.frameLocator('iframe[title="Mind Atlas app development AI example"]');
+    await appFrame.locator(".command-dock").waitFor();
+    const appDemoCommandPointerEvents = await appFrame.locator(".command-dock").evaluate((element) => getComputedStyle(element).pointerEvents);
+    if (appDemoCommandPointerEvents !== "none") throw new Error(`About AI demo command dock should be non-interactive: ${appDemoCommandPointerEvents}`);
+    const aboutLoginControlCount = await page.locator('a[href*="/api/auth"], button:has-text("Login"), button:has-text("Sign in")').count();
+    if (aboutLoginControlCount !== 0) throw new Error(`About page should not expose login/sign-in controls: ${aboutLoginControlCount}`);
+    await page.getByRole("link", { name: /Mind Atlasを使ってみる/ }).first().click();
+    await page.waitForURL((nextUrl) => !nextUrl.pathname.endsWith("/about.html"));
+    /*
+    await page.getByRole("heading", { name: /考えを、動かせる宇宙にする/ }).waitFor();
     if ((await page.locator(".sample-tab").count()) !== 3) throw new Error("About page should expose three touchable examples.");
     if ((await page.locator(".view-button").count()) !== 4) throw new Error("About page should expose four novel view buttons.");
     await page.getByRole("button", { name: /Mind map/ }).click();
@@ -130,6 +154,7 @@ try {
     await page.getByRole("link", { name: /Mind Atlasを使ってみる/ }).first().click();
     await page.waitForURL((nextUrl) => !nextUrl.pathname.endsWith("/about.html"));
 
+    */
     mockSessionMode = "exhausted";
     const exhaustedPage = await browser.newPage({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
     await seedCompletedOnboarding(exhaustedPage);

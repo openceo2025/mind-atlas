@@ -1,4 +1,5 @@
 import type { AtlasNode } from "./types";
+import { isAboutDemoMode } from "./aboutDemo";
 
 export const LEGACY_NOTEBOOK_STORAGE_KEY = "mind-atlas-notebook-v2";
 
@@ -35,6 +36,7 @@ type StoredNotebookSnapshot = NotebookSnapshot & {
 };
 
 export async function loadPersistedNotebook() {
+  if (isAboutDemoMode()) return null;
   const db = await openNotebookDb();
   if (!db) return null;
   try {
@@ -46,6 +48,7 @@ export async function loadPersistedNotebook() {
 }
 
 export async function savePersistedNotebook(root: AtlasNode) {
+  if (isAboutDemoMode()) return createDemoSnapshot(root);
   const serialized = JSON.stringify(root);
   const sizeBytes = new Blob([serialized]).size;
   if (sizeBytes > MAX_SNAPSHOT_BYTES) {
@@ -71,6 +74,7 @@ export async function savePersistedNotebook(root: AtlasNode) {
 }
 
 export async function listNotebookSnapshots() {
+  if (isAboutDemoMode()) return [];
   const db = await openNotebookDb();
   if (!db) return [];
   try {
@@ -82,6 +86,7 @@ export async function listNotebookSnapshots() {
 }
 
 export async function restoreNotebookSnapshot(id: string) {
+  if (isAboutDemoMode()) throw new Error("Notebook history is disabled in the Mind Atlas demo.");
   const db = await openNotebookDb();
   if (!db) throw new Error("IndexedDB is not available in this browser.");
   try {
@@ -95,6 +100,7 @@ export async function restoreNotebookSnapshot(id: string) {
 }
 
 export async function clearPersistedNotebook() {
+  if (isAboutDemoMode()) return;
   if (typeof window !== "undefined") {
     window.localStorage.removeItem(LEGACY_NOTEBOOK_STORAGE_KEY);
   }
@@ -111,6 +117,7 @@ export async function clearPersistedNotebook() {
 }
 
 export async function migrateLegacyNotebookIfNeeded(root: AtlasNode | null) {
+  if (isAboutDemoMode()) return null;
   if (typeof window === "undefined") return null;
   const existing = await loadPersistedNotebook();
   if (existing) return existing;
@@ -123,6 +130,7 @@ export async function migrateLegacyNotebookIfNeeded(root: AtlasNode | null) {
 }
 
 export async function requestDurableNotebookStorage() {
+  if (isAboutDemoMode()) return false;
   if (typeof navigator === "undefined" || !navigator.storage?.persist) return false;
   try {
     return await navigator.storage.persist();
@@ -132,6 +140,7 @@ export async function requestDurableNotebookStorage() {
 }
 
 export function loadLegacyNotebook() {
+  if (isAboutDemoMode()) return null;
   if (typeof window === "undefined") return null;
   const raw = window.localStorage.getItem(LEGACY_NOTEBOOK_STORAGE_KEY);
   if (!raw) return null;
@@ -139,6 +148,7 @@ export function loadLegacyNotebook() {
 }
 
 export function writeLegacyNotebookRecovery(root: AtlasNode) {
+  if (isAboutDemoMode()) return;
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(LEGACY_NOTEBOOK_STORAGE_KEY, JSON.stringify(root));
@@ -162,6 +172,17 @@ function createSnapshot(root: AtlasNode, generation: number, createdAt: string, 
     sizeBytes,
     dayKey: createdAt.slice(0, 10),
     root,
+  };
+}
+
+function createDemoSnapshot(root: AtlasNode): NotebookSnapshot {
+  return {
+    id: "about-demo-snapshot",
+    createdAt: new Date().toISOString(),
+    generation: 0,
+    title: root.title || "Mind Atlas demo",
+    nodeCount: countNodes(root),
+    sizeBytes: 0,
   };
 }
 

@@ -4,6 +4,7 @@ import {
   getStoredAttachmentBlob,
   saveStoredAttachmentBlob,
 } from "../attachmentStorage";
+import { isAboutDemoMode } from "../aboutDemo";
 import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme";
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
 import { getBridgeUrl, getBridgeUrlCandidates, recoverCodexRun, requestAiResponse, requestGitPush } from "../ai/bridgeClient";
@@ -2491,6 +2492,15 @@ void initializeNotebookPersistence();
 
 async function initializeNotebookPersistence() {
   if (typeof window === "undefined") return;
+  if (isAboutDemoMode()) {
+    useAtlasStore.setState({
+      durableNotebookStorage: false,
+      notebookPersistenceStatus: "ready",
+      notebookPersistenceError: "",
+      notebookSnapshots: [],
+    });
+    return;
+  }
   try {
     const durableNotebookStorage = await requestDurableNotebookStorage();
     const migratedRoot = await migrateLegacyNotebookIfNeeded(initialAtlasRoot);
@@ -2666,6 +2676,7 @@ function selectionFromNode(node: AtlasNode): Selection {
 }
 
 function loadStoredUnreadNotifications(): Record<string, UnreadNotification> {
+  if (isAboutDemoMode()) return {};
   if (typeof window === "undefined") return {};
   const raw = window.localStorage.getItem(UNREAD_NOTIFICATIONS_STORAGE_KEY);
   if (!raw) return {};
@@ -2719,6 +2730,7 @@ function restoreUnreadNotifications(
 }
 
 function loadStoredVoiceLog(): VoiceLogEntry[] {
+  if (isAboutDemoMode()) return [];
   if (typeof window === "undefined") return [];
   const raw = window.localStorage.getItem(VOICE_LOG_STORAGE_KEY);
   if (!raw) return [];
@@ -2731,6 +2743,7 @@ function loadStoredVoiceLog(): VoiceLogEntry[] {
 }
 
 function loadStoredVoiceLogLastSeenAt(entries: VoiceLogEntry[]) {
+  if (isAboutDemoMode()) return new Date().toISOString();
   if (typeof window !== "undefined") {
     const raw = window.localStorage.getItem(VOICE_LOG_LAST_SEEN_STORAGE_KEY);
     if (raw && !Number.isNaN(new Date(raw).getTime())) return raw;
@@ -2740,6 +2753,7 @@ function loadStoredVoiceLogLastSeenAt(entries: VoiceLogEntry[]) {
 }
 
 function loadStoredVoiceSessionSummary(): VoiceSessionSummary | null {
+  if (isAboutDemoMode()) return null;
   if (typeof window === "undefined") return null;
   const raw = window.localStorage.getItem(VOICE_SUMMARY_STORAGE_KEY);
   if (!raw) return null;
@@ -2752,6 +2766,7 @@ function loadStoredVoiceSessionSummary(): VoiceSessionSummary | null {
 }
 
 function loadStoredVoicePartnerSettings(): VoicePartnerSettings {
+  if (isAboutDemoMode()) return DEFAULT_VOICE_PARTNER_SETTINGS;
   if (typeof window === "undefined") return DEFAULT_VOICE_PARTNER_SETTINGS;
   const raw = window.localStorage.getItem(VOICE_SETTINGS_STORAGE_KEY);
   if (!raw) return DEFAULT_VOICE_PARTNER_SETTINGS;
@@ -2768,6 +2783,11 @@ function createInitialNotebook() {
 
 function persistNotebook(root: AtlasNode): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
+  if (isAboutDemoMode()) {
+    scheduleMissingTitleMaintenance();
+    useAtlasStore.setState({ notebookPersistenceStatus: "ready", notebookPersistenceError: "" });
+    return Promise.resolve();
+  }
   queuedNotebookSaveRoot = root;
   scheduleMissingTitleMaintenance();
   if (!notebookSaveRunning) {
@@ -2859,6 +2879,7 @@ function isMissingTitleMaintenanceBlockedByActiveElement() {
 }
 
 function persistUnreadNotifications(unreadNotifications: Record<string, UnreadNotification>) {
+  if (isAboutDemoMode()) return;
   if (typeof window === "undefined") return;
   const serializable = Object.fromEntries(
     Object.entries(unreadNotifications).map(([nodeId, notification]) => [
@@ -2875,6 +2896,7 @@ function persistUnreadNotifications(unreadNotifications: Record<string, UnreadNo
 }
 
 function loadNotificationReadState(): Record<string, string> {
+  if (isAboutDemoMode()) return {};
   if (typeof window === "undefined") return {};
   const raw = window.localStorage.getItem(NOTIFICATION_READ_STATE_STORAGE_KEY);
   if (!raw) return {};
@@ -2888,21 +2910,25 @@ function loadNotificationReadState(): Record<string, string> {
 }
 
 function persistNotificationReadState(readState: Record<string, string>) {
+  if (isAboutDemoMode()) return;
   if (typeof window === "undefined") return;
   window.localStorage.setItem(NOTIFICATION_READ_STATE_STORAGE_KEY, JSON.stringify(readState));
 }
 
 function persistVoiceLog(entries: VoiceLogEntry[]) {
+  if (isAboutDemoMode()) return;
   if (typeof window === "undefined") return;
   window.localStorage.setItem(VOICE_LOG_STORAGE_KEY, JSON.stringify(entries));
 }
 
 function persistVoiceLogLastSeenAt(value: string) {
+  if (isAboutDemoMode()) return;
   if (typeof window === "undefined") return;
   window.localStorage.setItem(VOICE_LOG_LAST_SEEN_STORAGE_KEY, value);
 }
 
 function persistVoiceSessionSummary(summary: VoiceSessionSummary | null) {
+  if (isAboutDemoMode()) return;
   if (typeof window === "undefined") return;
   if (!summary) {
     window.localStorage.removeItem(VOICE_SUMMARY_STORAGE_KEY);
@@ -2912,6 +2938,7 @@ function persistVoiceSessionSummary(summary: VoiceSessionSummary | null) {
 }
 
 function persistVoicePartnerSettings(settings: VoicePartnerSettings) {
+  if (isAboutDemoMode()) return;
   if (typeof window === "undefined") return;
   window.localStorage.setItem(VOICE_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
 }
@@ -3034,6 +3061,7 @@ function notebookPersistenceErrorMessage(prefix: string, error: unknown) {
 }
 
 function clearStoredNotificationState() {
+  if (isAboutDemoMode()) return;
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(UNREAD_NOTIFICATIONS_STORAGE_KEY);
   window.localStorage.removeItem(NOTIFICATION_READ_STATE_STORAGE_KEY);

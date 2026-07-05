@@ -1,5 +1,6 @@
 import type { AiExecutionMode, ViewportState } from "./types";
 import { isAtlasLayoutMode, type AtlasLayoutMode } from "./layout/atlasLayout";
+import { isAboutDemoMode } from "./aboutDemo";
 
 export type PersistedCommandMode = AiExecutionMode | "note";
 
@@ -29,6 +30,7 @@ const UI_STATE_STORAGE_KEY = "mind-atlas-ui-state-v1";
 const MAX_UI_STATE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function loadPersistedUiState(): PersistedUiState | null {
+  if (isAboutDemoMode()) return null;
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(UI_STATE_STORAGE_KEY);
@@ -54,6 +56,7 @@ export function loadPersistedUiState(): PersistedUiState | null {
 }
 
 export function persistUiStatePatch(patch: Omit<Partial<PersistedUiState>, "version" | "savedAt">) {
+  if (isAboutDemoMode()) return;
   if (typeof window === "undefined") return;
   const current = loadPersistedUiState();
   const next: PersistedUiState = {

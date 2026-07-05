@@ -1,10 +1,12 @@
 import type { HostedServiceSession } from "../types";
 import { HOSTED_SERVICE_SESSION_REFRESH_EVENT } from "../events";
+import { isAboutDemoMode } from "../aboutDemo";
 
 const PUBLIC_SERVICE_FLAG = "VITE_MIND_ATLAS_PUBLIC_SERVICE";
 const SERVICE_URL_FLAG = "VITE_MIND_ATLAS_SERVICE_URL";
 
 export function isHostedServiceMode() {
+  if (isAboutDemoMode()) return false;
   const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
   const value = env?.[PUBLIC_SERVICE_FLAG] ?? "";
   return value === "1" || value.toLowerCase() === "true";

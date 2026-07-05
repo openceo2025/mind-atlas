@@ -5,26 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Mind Atlas is a spatial notebook. Touch small examples for novels, travel planning, and app development."
+      content="Mind Atlas is a spatial notebook. Scroll through embedded examples for novels, travel planning, and app development."
     />
     <meta name="theme-color" content="#07100d" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <title>Mind Atlas | 触れるサンプル</title>
+    <title>Mind Atlas | Touch the examples</title>
     <style>
       :root {
         --bg: #07100d;
-        --panel: rgba(12, 20, 16, 0.92);
-        --panel-strong: #0e1914;
         --text: #f5fbef;
         --muted: rgba(245, 251, 239, 0.68);
-        --line: rgba(245, 251, 239, 0.15);
+        --line: rgba(245, 251, 239, 0.16);
+        --panel: rgba(11, 18, 14, 0.84);
         --lime: #d8f56d;
-        --mint: #7be0bd;
-        --blue: #81b8ff;
-        --coral: #ff8d6d;
-        --gold: #f3cf58;
-        --violet: #b5a4ff;
-        --shadow: 0 22px 70px rgba(0, 0, 0, 0.38);
+        --mint: #78dfbb;
+        --gold: #f2cf62;
+        --blue: #8fbfff;
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
       }
 
       * {
@@ -33,6 +30,7 @@
 
       html {
         min-height: 100%;
+        scroll-behavior: smooth;
         background: var(--bg);
       }
 
@@ -40,10 +38,11 @@
         margin: 0;
         min-height: 100%;
         background:
-          linear-gradient(rgba(245, 251, 239, 0.018) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(245, 251, 239, 0.018) 1px, transparent 1px),
+          linear-gradient(rgba(245, 251, 239, 0.02) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(245, 251, 239, 0.02) 1px, transparent 1px),
+          radial-gradient(circle at 50% 0%, rgba(120, 223, 187, 0.14), transparent 34rem),
           #07100d;
-        background-size: 34px 34px;
+        background-size: 34px 34px, 34px 34px, auto, auto;
         color: var(--text);
         font-family:
           Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -52,43 +51,34 @@
       }
 
       button,
-      input,
-      textarea,
-      select {
+      a {
+        color: inherit;
         font: inherit;
         letter-spacing: 0;
       }
 
-      button {
-        color: inherit;
-      }
-
-      a {
-        color: inherit;
-      }
-
-      .page-shell {
-        width: min(1180px, calc(100% - 28px));
+      .shell {
+        width: min(1120px, calc(100% - 28px));
         margin: 0 auto;
       }
 
       .topbar {
         position: sticky;
         top: 0;
-        z-index: 30;
+        z-index: 20;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
         padding: 12px 0;
-        background: rgba(7, 16, 13, 0.88);
-        backdrop-filter: blur(14px);
+        background: rgba(7, 16, 13, 0.86);
+        backdrop-filter: blur(16px);
       }
 
       .brand {
         display: inline-flex;
         align-items: center;
-        gap: 9px;
+        gap: 10px;
         color: var(--text);
         text-decoration: none;
         font-size: 14px;
@@ -106,56 +96,27 @@
         min-height: 38px;
         align-items: center;
         justify-content: center;
-        border: 1px solid rgba(216, 245, 109, 0.55);
+        border: 1px solid rgba(216, 245, 109, 0.58);
         border-radius: 8px;
         padding: 9px 13px;
         background: var(--lime);
-        color: #11180c;
+        color: #10180c;
         text-decoration: none;
         font-size: 13px;
         font-weight: 900;
         white-space: nowrap;
       }
 
-      .ghost-link {
-        display: inline-flex;
-        min-height: 38px;
-        align-items: center;
-        justify-content: center;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 9px 12px;
-        background: rgba(245, 251, 239, 0.04);
-        color: var(--text);
-        text-decoration: none;
-        font-size: 13px;
-        font-weight: 800;
-        white-space: nowrap;
-      }
-
       .hero {
         display: grid;
-        grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
-        gap: 22px;
-        align-items: stretch;
-        padding: 14px 0 34px;
-      }
-
-      .intro {
-        display: flex;
-        min-width: 0;
-        min-height: 520px;
-        flex-direction: column;
-        justify-content: space-between;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 22px;
-        background: rgba(245, 251, 239, 0.045);
-        box-shadow: var(--shadow);
+        gap: 14px;
+        min-height: 54svh;
+        align-content: end;
+        padding: 44px 0 22px;
       }
 
       .eyebrow {
-        margin: 0 0 12px;
+        margin: 0;
         color: var(--gold);
         font-size: 12px;
         font-weight: 900;
@@ -168,1074 +129,267 @@
       }
 
       h1 {
-        margin-bottom: 14px;
-        font-size: clamp(40px, 7vw, 72px);
+        max-width: 880px;
+        margin-bottom: 0;
+        font-size: clamp(42px, 9vw, 82px);
         line-height: 1.02;
       }
 
       .lead {
-        margin-bottom: 22px;
+        max-width: 720px;
+        margin-bottom: 0;
         color: var(--muted);
         font-size: 16px;
         line-height: 1.8;
       }
 
-      .sample-tabs {
+      .example {
+        display: grid;
+        gap: 16px;
+        min-height: 100svh;
+        align-content: center;
+        padding: 28px 0;
+      }
+
+      .example-head {
         display: grid;
         gap: 8px;
       }
 
-      .sample-tab {
-        display: grid;
-        grid-template-columns: auto 1fr auto;
-        gap: 10px;
-        align-items: center;
-        width: 100%;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 12px;
-        background: rgba(245, 251, 239, 0.05);
-        text-align: left;
-        cursor: pointer;
+      .example-kicker {
+        color: var(--mint);
+        font-size: 12px;
+        font-weight: 900;
       }
 
-      .sample-tab[aria-selected="true"] {
-        border-color: rgba(216, 245, 109, 0.62);
-        background: rgba(216, 245, 109, 0.12);
+      h2 {
+        margin-bottom: 0;
+        font-size: clamp(28px, 6vw, 52px);
+        line-height: 1.08;
       }
 
-      .sample-tab strong {
-        display: block;
+      .example-copy {
+        max-width: 680px;
+        margin-bottom: 0;
+        color: var(--muted);
         font-size: 14px;
-      }
-
-      .sample-tab small {
-        display: block;
-        margin-top: 3px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .sample-dot {
-        width: 12px;
-        height: 12px;
-        border-radius: 999px;
-        background: var(--mint);
-      }
-
-      .sample-tab[data-sample="travel"] .sample-dot {
-        background: var(--coral);
-      }
-
-      .sample-tab[data-sample="app"] .sample-dot {
-        background: var(--blue);
-      }
-
-      .sample-index {
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 900;
-      }
-
-      .demo-shell {
-        display: grid;
-        min-width: 0;
-        min-height: 620px;
-        grid-template-rows: auto auto minmax(390px, 1fr) auto;
-        align-content: start;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        overflow: hidden;
-        background: var(--panel);
-        box-shadow: var(--shadow);
-      }
-
-      .demo-shell.no-view-controls {
-        grid-template-rows: auto minmax(390px, 1fr) auto;
-      }
-
-      .demo-head {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 12px;
-        align-items: start;
-        padding: 16px;
-        border-bottom: 1px solid var(--line);
-      }
-
-      .demo-title {
-        margin: 0 0 4px;
-        font-size: 22px;
-        line-height: 1.2;
-      }
-
-      .demo-subtitle {
-        margin: 0;
-        color: var(--muted);
-        font-size: 13px;
-        line-height: 1.6;
-      }
-
-      .demo-status {
-        display: inline-flex;
-        align-items: center;
-        gap: 7px;
-        border: 1px solid rgba(216, 245, 109, 0.24);
-        border-radius: 999px;
-        padding: 8px 10px;
-        background: rgba(216, 245, 109, 0.08);
-        color: #edffd0;
-        font-size: 12px;
-        font-weight: 900;
-        white-space: nowrap;
+        line-height: 1.7;
       }
 
       .view-controls {
         display: flex;
-        gap: 7px;
+        gap: 8px;
         overflow-x: auto;
-        padding: 12px 16px;
-        border-bottom: 1px solid var(--line);
-        scrollbar-width: none;
+        padding: 2px 0 6px;
       }
 
-      .view-controls[hidden] {
-        display: none;
-      }
-
-      .view-controls::-webkit-scrollbar {
-        display: none;
-      }
-
-      .view-button {
-        min-height: 36px;
+      .view-controls button {
+        flex: 0 0 auto;
+        min-height: 38px;
         border: 1px solid var(--line);
-        border-radius: 999px;
-        padding: 8px 12px;
-        background: rgba(245, 251, 239, 0.045);
+        border-radius: 8px;
+        padding: 8px 11px;
+        background: rgba(245, 251, 239, 0.055);
         color: var(--text);
-        font-size: 12px;
-        font-weight: 900;
-        white-space: nowrap;
         cursor: pointer;
+        font-size: 13px;
+        font-weight: 850;
       }
 
-      .view-button[aria-pressed="true"] {
-        border-color: rgba(216, 245, 109, 0.68);
-        background: var(--lime);
-        color: #11180c;
+      .view-controls button[aria-pressed="true"] {
+        border-color: rgba(216, 245, 109, 0.62);
+        background: rgba(216, 245, 109, 0.14);
+        color: #f9ffe0;
       }
 
-      .preview {
+      .demo-window {
         position: relative;
-        min-height: 390px;
+        min-height: 420px;
+        height: min(620px, 68svh);
         overflow: hidden;
-        background:
-          radial-gradient(circle at 50% 45%, rgba(245, 251, 239, 0.07), transparent 34%),
-          #020503;
-        touch-action: none;
-        user-select: none;
+        border: 1px solid rgba(245, 251, 239, 0.17);
+        border-radius: 8px;
+        background: #050706;
+        box-shadow: var(--shadow);
       }
 
-      .preview.editor-mode {
-        touch-action: pan-y;
-      }
-
-      .preview-grid {
-        position: absolute;
-        inset: 0;
-        background-image:
-          linear-gradient(rgba(245, 251, 239, 0.035) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(245, 251, 239, 0.035) 1px, transparent 1px);
-        background-size: 44px 44px;
-        opacity: 0.7;
-      }
-
-      .world {
-        position: absolute;
-        inset: 0;
-        transform-origin: 50% 50%;
-      }
-
-      .edges {
-        position: absolute;
-        inset: 0;
+      .demo-window iframe {
+        display: block;
         width: 100%;
         height: 100%;
-        overflow: visible;
+        border: 0;
+        background: #050706;
       }
 
-      .edges line {
-        stroke: rgba(245, 251, 239, 0.18);
-        stroke-width: 1.4;
-      }
-
-      .node {
+      .demo-label {
         position: absolute;
-        display: grid;
-        width: var(--size);
-        height: var(--size);
-        place-items: center;
+        top: 10px;
+        right: 10px;
+        z-index: 2;
         border: 1px solid rgba(245, 251, 239, 0.14);
         border-radius: 999px;
-        background: var(--node-color);
-        box-shadow:
-          inset -16px -20px 30px rgba(0, 0, 0, 0.28),
-          0 0 0 10px rgba(245, 251, 239, 0.035),
-          0 16px 38px rgba(0, 0, 0, 0.34);
-        color: #fff;
-        text-align: center;
-        transform: translate(-50%, -50%);
-        cursor: pointer;
-      }
-
-      .node.is-selected {
-        outline: 2px solid rgba(216, 245, 109, 0.92);
-        outline-offset: 7px;
-      }
-
-      .node-label {
-        width: 130%;
-        transform: translateY(calc(var(--size) * 0.64));
-        color: rgba(245, 251, 239, 0.9);
-        font-size: 12px;
-        font-weight: 900;
-        line-height: 1.25;
-        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+        padding: 6px 9px;
+        background: rgba(7, 16, 13, 0.74);
+        color: rgba(245, 251, 239, 0.72);
+        font-size: 11px;
+        font-weight: 850;
         pointer-events: none;
       }
 
-      .node.is-root .node-label {
-        font-size: 13px;
-      }
-
-      .node-notice {
-        position: absolute;
-        top: 4px;
-        right: 2px;
+      .final-cta {
         display: grid;
-        width: 19px;
-        height: 19px;
-        place-items: center;
-        border: 1px solid rgba(255, 255, 255, 0.45);
-        border-radius: 999px;
-        background: var(--coral);
-        color: #150702;
-        font-size: 12px;
-        font-weight: 900;
-        box-shadow: 0 0 0 7px rgba(255, 141, 109, 0.16);
-        animation: pulse 1.6s ease-in-out infinite;
+        gap: 14px;
+        min-height: 58svh;
+        align-content: center;
+        justify-items: start;
+        padding: 28px 0 72px;
       }
 
-      .side-panel {
-        position: absolute;
-        right: 12px;
-        top: 12px;
-        z-index: 5;
-        width: min(270px, calc(100% - 24px));
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 12px;
-        background: rgba(7, 16, 13, 0.9);
-        backdrop-filter: blur(10px);
-      }
-
-      .side-panel h3 {
-        margin: 0 0 5px;
-        font-size: 14px;
-      }
-
-      .side-panel p {
-        margin: 0;
+      .final-cta p {
+        max-width: 620px;
         color: var(--muted);
-        font-size: 12px;
-        line-height: 1.55;
+        line-height: 1.75;
       }
 
-      .notification-card {
-        display: none;
-        position: absolute;
-        left: 12px;
-        top: 12px;
-        z-index: 6;
-        width: min(292px, calc(100% - 24px));
-        border: 1px solid rgba(255, 141, 109, 0.42);
-        border-radius: 8px;
-        padding: 11px;
-        background: rgba(27, 10, 6, 0.92);
-        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
-      }
-
-      .notification-card.is-visible {
-        display: block;
-      }
-
-      .notification-card button {
-        width: 100%;
-        margin-top: 9px;
-        border: 1px solid rgba(255, 141, 109, 0.5);
-        border-radius: 8px;
-        padding: 8px;
-        background: rgba(255, 141, 109, 0.14);
-        font-size: 12px;
-        font-weight: 900;
-        cursor: pointer;
-      }
-
-      .ai-dock {
-        display: none;
-        position: absolute;
-        right: 12px;
-        bottom: 12px;
-        z-index: 7;
-        width: min(360px, calc(100% - 24px));
-        border: 1px solid rgba(216, 245, 109, 0.28);
-        border-radius: 8px;
-        padding: 12px;
-        background: rgba(8, 15, 12, 0.94);
-        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.42);
-      }
-
-      .ai-dock.is-visible {
-        display: block;
-      }
-
-      .ai-dock-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        margin-bottom: 10px;
-      }
-
-      .ai-badge {
-        display: inline-flex;
-        border: 1px solid rgba(216, 245, 109, 0.44);
-        border-radius: 999px;
-        padding: 6px 8px;
-        background: rgba(216, 245, 109, 0.13);
-        color: #edffd0;
-        font-size: 12px;
-        font-weight: 900;
-      }
-
-      .ai-input {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 8px;
-      }
-
-      .ai-input input,
-      .ai-input button,
-      .ai-row select {
-        min-height: 36px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: rgba(245, 251, 239, 0.06);
-        color: var(--text);
-      }
-
-      .ai-input input {
-        min-width: 0;
-        padding: 0 10px;
-      }
-
-      .ai-input button {
-        width: 42px;
-        color: var(--muted);
-      }
-
-      .ai-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-        margin-top: 9px;
-      }
-
-      .ai-row label {
-        display: grid;
-        gap: 5px;
-        color: var(--muted);
-        font-size: 11px;
-        font-weight: 900;
-      }
-
-      .ai-row select {
-        padding: 0 8px;
-      }
-
-      .demo-foot {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 12px;
-        align-items: center;
-        padding: 13px 16px;
-        border-top: 1px solid var(--line);
-        background: rgba(245, 251, 239, 0.035);
-      }
-
-      .selected-title {
-        margin: 0 0 3px;
-        font-size: 14px;
-        font-weight: 900;
-      }
-
-      .selected-body {
-        margin: 0;
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1.5;
-      }
-
-      .editor-view {
-        position: absolute;
-        inset: 0;
-        display: none;
-        overflow: auto;
-        padding: 16px;
-        background: #07100d;
-      }
-
-      .editor-view.is-visible {
-        display: block;
-      }
-
-      .outline {
-        display: grid;
-        gap: 7px;
-        max-width: 720px;
-      }
-
-      .outline-row {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: 8px;
-        align-items: start;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 9px 10px;
-        background: rgba(245, 251, 239, 0.045);
-        color: var(--text);
-      }
-
-      .outline-row span:first-child {
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .outline-row strong {
-        display: block;
-        margin-bottom: 3px;
-        font-size: 13px;
-      }
-
-      .outline-row small {
-        display: block;
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1.45;
-      }
-
-      .closing {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 18px;
-        align-items: center;
-        margin: 0 0 28px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 18px;
-        background: rgba(245, 251, 239, 0.045);
-      }
-
-      .closing h2 {
-        margin: 0 0 5px;
-        font-size: 22px;
-      }
-
-      .closing p {
-        margin: 0;
-        color: var(--muted);
-        font-size: 13px;
-        line-height: 1.55;
-      }
-
-      footer {
-        padding: 0 0 24px;
-        color: var(--muted);
-        font-size: 12px;
-        text-align: center;
-      }
-
-      @media (max-width: 860px) {
-        .page-shell {
-          width: min(100% - 20px, 560px);
+      @media (max-width: 760px) {
+        .shell {
+          width: min(100% - 18px, 560px);
         }
 
         .topbar {
-          padding: 10px 0;
+          padding: 9px 0;
         }
 
-        .ghost-link {
+        .brand span {
           display: none;
         }
 
         .hero {
-          grid-template-columns: 1fr;
-          gap: 12px;
-          padding-top: 4px;
+          min-height: 44svh;
+          padding-top: 30px;
         }
 
-        .intro {
+        .example {
           min-height: auto;
-          padding: 16px;
+          padding: 26px 0 42px;
         }
 
-        .sample-tabs {
-          display: flex;
-          overflow-x: auto;
-          margin: 0 -16px;
-          padding: 0 16px 2px;
-          scrollbar-width: none;
+        .demo-window {
+          min-height: 470px;
+          height: 72svh;
         }
 
-        .sample-tabs::-webkit-scrollbar {
-          display: none;
-        }
-
-        .sample-tab {
-          flex: 0 0 170px;
-        }
-
-        .demo-shell {
-          min-height: 600px;
-          grid-template-rows: auto auto 420px auto;
-        }
-
-        .demo-shell.no-view-controls {
-          grid-template-rows: auto 420px auto;
-        }
-
-        .demo-head,
-        .demo-foot {
-          grid-template-columns: 1fr;
-        }
-
-        .demo-status,
-        .demo-foot .cta {
-          width: 100%;
-        }
-
-        .side-panel {
-          display: none !important;
-        }
-
-        .notification-card {
-          left: 10px;
-          right: 10px;
-          width: auto;
-        }
-
-        .ai-dock {
-          left: 10px;
-          right: 10px;
-          width: auto;
-        }
-
-        .closing {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      @media (max-width: 520px) {
-        .brand span {
-          font-size: 13px;
-        }
-
-        .topbar .cta {
-          padding-inline: 10px;
-        }
-
-        .demo-shell {
-          grid-template-rows: auto auto 430px auto;
-        }
-
-        .demo-shell.no-view-controls {
-          grid-template-rows: auto 430px auto;
-        }
-
-        .demo-title {
-          font-size: 19px;
-        }
-
-        .node-label {
-          font-size: 11px;
-        }
-
-        .ai-row {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      @keyframes pulse {
-        0%,
-        100% {
-          transform: scale(1);
-        }
-
-        50% {
-          transform: scale(1.08);
+        .demo-label {
+          top: 8px;
+          right: 8px;
         }
       }
     </style>
   </head>
   <body>
-    <div class="page-shell">
+    <div class="shell">
       <header class="topbar">
-        <a class="brand" href="/" aria-label="Mind Atlas本編へ">
+        <a class="brand" href="/" aria-label="Open Mind Atlas">
           <img src="/favicon.svg" alt="" />
-          <span>Mind Atlas</span>
+          <span>MIND ATLAS</span>
         </a>
-        <div>
-          <a class="ghost-link" href="/privacy.html">Privacy</a>
-          <a class="cta" href="/">Mind Atlasを使ってみる</a>
-        </div>
+        <a class="cta" href="/">Mind Atlasを使ってみる</a>
       </header>
 
       <main>
         <section class="hero" aria-labelledby="page-title">
-          <div class="intro">
-            <div>
-              <p class="eyebrow">Touch the examples</p>
-              <h1 id="page-title">考えを、動かせる宇宙にする。</h1>
-              <p class="lead">
-                長い説明より、まず触ってください。小説、旅行、アプリ開発。
-                Mind Atlasがどんな作業空間になるのかを、軽いサンプルで見られます。
-              </p>
-            </div>
-
-            <div class="sample-tabs" role="tablist" aria-label="Mind Atlas examples">
-              <button class="sample-tab" type="button" role="tab" aria-selected="true" data-sample="novel">
-                <span class="sample-dot"></span>
-                <span>
-                  <strong>小説</strong>
-                  <small>構成をビューで切り替える</small>
-                </span>
-                <span class="sample-index">01</span>
-              </button>
-              <button class="sample-tab" type="button" role="tab" aria-selected="false" data-sample="travel">
-                <span class="sample-dot"></span>
-                <span>
-                  <strong>旅行の計画</strong>
-                  <small>通知が作業を呼び戻す</small>
-                </span>
-                <span class="sample-index">02</span>
-              </button>
-              <button class="sample-tab" type="button" role="tab" aria-selected="false" data-sample="app">
-                <span class="sample-dot"></span>
-                <span>
-                  <strong>アプリ開発</strong>
-                  <small>AIウィンドウのある状態</small>
-                </span>
-                <span class="sample-index">03</span>
-              </button>
-            </div>
-          </div>
-
-          <section class="demo-shell" aria-label="Interactive Mind Atlas sample">
-            <div class="demo-head">
-              <div>
-                <h2 class="demo-title" id="demo-title"></h2>
-                <p class="demo-subtitle" id="demo-subtitle"></p>
-              </div>
-              <div class="demo-status" id="demo-status"></div>
-            </div>
-
-            <div class="view-controls" id="view-controls" aria-label="Novel view modes">
-              <button class="view-button" type="button" data-view="atlas" aria-pressed="true">Mind Atlas</button>
-              <button class="view-button" type="button" data-view="mind" aria-pressed="false">Mind map</button>
-              <button class="view-button" type="button" data-view="tree" aria-pressed="false">Tree</button>
-              <button class="view-button" type="button" data-view="editor" aria-pressed="false">Editor</button>
-            </div>
-
-            <div class="preview" id="preview" aria-label="Mind Atlas preview">
-              <div class="preview-grid" aria-hidden="true"></div>
-              <div class="world" id="world">
-                <svg class="edges" id="edges" aria-hidden="true"></svg>
-                <div id="nodes"></div>
-              </div>
-              <div class="editor-view" id="editor-view" aria-label="Editor preview"></div>
-              <aside class="notification-card" id="notification-card">
-                <strong>通知</strong>
-                <p id="notification-text"></p>
-                <button type="button" id="focus-notification">通知ノードを見る</button>
-              </aside>
-              <aside class="ai-dock" id="ai-dock" aria-label="AI feature demo">
-                <div class="ai-dock-head">
-                  <strong>AI / waiting</strong>
-                  <span class="ai-badge">AI機能 87%</span>
-                </div>
-                <div class="ai-input">
-                  <input value="このノードから次の実装タスクを整理して" disabled />
-                  <button type="button" disabled aria-label="Demo send disabled">→</button>
-                </div>
-                <div class="ai-row">
-                  <label>
-                    Service
-                    <select disabled>
-                      <option>Anthropic</option>
-                    </select>
-                  </label>
-                  <label>
-                    Model
-                    <select disabled>
-                      <option>claude-opus-4-8</option>
-                    </select>
-                  </label>
-                </div>
-              </aside>
-              <aside class="side-panel" id="side-panel">
-                <h3 id="selected-title"></h3>
-                <p id="selected-body"></p>
-              </aside>
-            </div>
-
-            <div class="demo-foot">
-              <div>
-                <p class="selected-title" id="foot-title"></p>
-                <p class="selected-body" id="foot-body"></p>
-              </div>
-              <a class="cta" href="/">このままMind Atlasを使ってみる</a>
-            </div>
-          </section>
+          <p class="eyebrow">TOUCHABLE EXAMPLES</p>
+          <h1 id="page-title">考えを、動かせる宇宙にする。</h1>
+          <p class="lead">
+            説明より先に、触れるサンプルを見てください。小説、旅行の計画、アプリ開発。
+            3つのMind Atlasをスクロールで順に確認できます。
+          </p>
         </section>
 
-        <section class="closing">
-          <div>
-            <h2>Notebookは無料で始められます。</h2>
-            <p>
-              空間ノートはすぐ触れます。AI機能は必要になった時だけ開いてください。
+        <section class="example" aria-labelledby="novel-title">
+          <div class="example-head">
+            <span class="example-kicker">01 / NOVEL</span>
+            <h2 id="novel-title">小説の構成を宇宙で見る</h2>
+            <p class="example-copy">
+              視点、伏線、章立てをノードに分ける。下のボタンで同じ小説をMind Atlas、mind map、tree、editorに切り替えられます。
             </p>
           </div>
-          <a class="cta" href="/">Mind Atlasを開く</a>
+          <div class="view-controls" role="group" aria-label="Novel demo views">
+            <button type="button" data-demo-view="atlas" aria-pressed="true">Mind Atlas</button>
+            <button type="button" data-demo-view="mind-map" aria-pressed="false">Mind map</button>
+            <button type="button" data-demo-view="tree" aria-pressed="false">Tree</button>
+            <button type="button" data-demo-view="editor" aria-pressed="false">Editor</button>
+          </div>
+          <div class="demo-window">
+            <span class="demo-label">embedded Mind Atlas</span>
+            <iframe
+              id="novel-frame"
+              title="Mind Atlas novel example"
+              src="/?aboutDemo=novel&amp;aboutView=atlas"
+              allow="fullscreen"
+            ></iframe>
+          </div>
+        </section>
+
+        <section class="example" aria-labelledby="travel-title">
+          <div class="example-head">
+            <span class="example-kicker">02 / TRAVEL</span>
+            <h2 id="travel-title">旅行の予定と通知を一緒に置く</h2>
+            <p class="example-copy">
+              「新幹線を予約」ノードに通知が立っています。予定、移動、余白を同じ地図で見ながら、忘れたくない行動だけを浮かせます。
+            </p>
+          </div>
+          <div class="demo-window">
+            <span class="demo-label">notification demo</span>
+            <iframe
+              title="Mind Atlas travel planning example"
+              src="/?aboutDemo=travel&amp;aboutView=atlas"
+              loading="lazy"
+              allow="fullscreen"
+            ></iframe>
+          </div>
+        </section>
+
+        <section class="example" aria-labelledby="app-title">
+          <div class="example-head">
+            <span class="example-kicker">03 / APP DEVELOPMENT</span>
+            <h2 id="app-title">AI相談を開発ノードに残す</h2>
+            <p class="example-copy">
+              課金後のAI入力欄が開いた状態の例です。このページでは送信できません。実際のMind Atlasでは返答をノードとして残せます。
+            </p>
+          </div>
+          <div class="demo-window">
+            <span class="demo-label">AI window demo</span>
+            <iframe
+              title="Mind Atlas app development AI example"
+              src="/?aboutDemo=app&amp;aboutView=atlas"
+              loading="lazy"
+              allow="fullscreen"
+            ></iframe>
+          </div>
+        </section>
+
+        <section class="final-cta" aria-labelledby="cta-title">
+          <p class="eyebrow">START</p>
+          <h2 id="cta-title">空の宇宙から始める。</h2>
+          <p>
+            ログインなしでNotebookは使えます。AI機能は必要になったときだけ開放できます。
+          </p>
+          <a class="cta" href="/">Mind Atlasを使ってみる</a>
         </section>
       </main>
-
-      <footer>Mind Atlas / Spatial notebook and AI mission control</footer>
     </div>
 
     <script>
-      const samples = {
-        novel: {
-          title: "小説: 白い駅の手紙",
-          subtitle: "物語の章、伏線、人物を空間で眺め、ビューを切り替えて構成を確認するサンプルです。",
-          status: "4 views",
-          initial: "root",
-          viewControls: true,
-          nodes: [
-            { id: "root", label: "白い駅の手紙", body: "冬の無人駅に届く、差出人のない手紙から始まる短編ミステリ。", color: "#b9a24a", size: 88, x: 0, y: 0, parent: null },
-            { id: "chapter1", label: "第1章 駅", body: "主人公が終電後の駅で白い封筒を拾う。", color: "#4d79d8", size: 56, x: -170, y: -86, parent: "root" },
-            { id: "letter", label: "手紙の暗号", body: "時計塔、切符、古い喫茶店を示す三つの記号。", color: "#8e4ec6", size: 50, x: 162, y: -104, parent: "root" },
-            { id: "friend", label: "幼なじみ", body: "事件を知っているが、最後まで核心を言わない人物。", color: "#c75252", size: 54, x: -118, y: 128, parent: "root" },
-            { id: "clock", label: "時計塔", body: "毎日17時17分だけ鐘が鳴る。ラストの鍵になる場所。", color: "#5aa785", size: 49, x: 145, y: 118, parent: "letter" },
-            { id: "ending", label: "ラスト", body: "手紙は未来の自分から届いていた、という反転。", color: "#d8903d", size: 58, x: 12, y: 204, parent: "root" },
-          ],
-        },
-        travel: {
-          title: "旅行: 京都3日旅",
-          subtitle: "宿、移動、観光、持ち物をひとつの計画にまとめ、通知が必要なノードへ戻してくれます。",
-          status: "1 notification",
-          initial: "train",
-          viewControls: false,
-          notificationNode: "train",
-          notificationText: "新幹線の早割予約は今日18:00まで。ここを見直す必要があります。",
-          nodes: [
-            { id: "root", label: "京都3日旅", body: "金曜夜に移動し、土日は寺社と食事をゆっくり回る計画。", color: "#3d8a69", size: 86, x: 0, y: 0, parent: null },
-            { id: "hotel", label: "宿", body: "四条烏丸。駅から近く、荷物を預けやすい場所。", color: "#5d7fe0", size: 54, x: -150, y: -110, parent: "root" },
-            { id: "train", label: "新幹線", body: "東京発18:03。早割の期限を忘れない。", color: "#d86d4a", size: 58, x: 148, y: -96, parent: "root", notice: true },
-            { id: "temple", label: "清水寺", body: "朝一番に行く。混む前に写真を撮る。", color: "#ad8a32", size: 52, x: -128, y: 114, parent: "root" },
-            { id: "food", label: "食事", body: "湯豆腐、喫茶店、夜は予約制の店を候補にする。", color: "#b24f7a", size: 53, x: 126, y: 120, parent: "root" },
-            { id: "packing", label: "持ち物", body: "充電器、折りたたみ傘、歩きやすい靴。", color: "#7790a8", size: 46, x: 12, y: 205, parent: "root" },
-          ],
-        },
-        app: {
-          title: "アプリ開発: リリース前チェック",
-          subtitle: "課金済みユーザーのAIウィンドウが開いた状態です。このサンプルでは送信はできません。",
-          status: "AI demo",
-          initial: "ai",
-          viewControls: false,
-          aiDock: true,
-          nodes: [
-            { id: "root", label: "Mind Atlas Mobile", body: "モバイルでの初回体験、課金導線、AI利用上限をリリース前に確認する。", color: "#3f6ed8", size: 86, x: 0, y: 0, parent: null },
-            { id: "billing", label: "課金導線", body: "Stripe Checkout、Webhook、トークン付与を確認済みにする。", color: "#b79a37", size: 54, x: -168, y: -96, parent: "root" },
-            { id: "ai", label: "AI Dock", body: "モデル選択、残量表示、読み取り専用ログをユーザーに分かりやすく見せる。", color: "#48a883", size: 60, x: 152, y: -88, parent: "root" },
-            { id: "context", label: "Context engine", body: "ノードの祖先会話と周辺情報を軽くまとめてAIへ渡す。", color: "#8a6be8", size: 52, x: -108, y: 126, parent: "ai" },
-            { id: "qa", label: "Mobile QA", body: "チュートリアル、キーボード、横向き表示、通知を確認する。", color: "#ca5f56", size: 51, x: 124, y: 128, parent: "root" },
-            { id: "deploy", label: "VPS deploy", body: "ConoHa、nginx、systemd、PostgreSQL、HTTPSを本番URLで確認する。", color: "#627c96", size: 46, x: 18, y: 214, parent: "root" },
-          ],
-        },
-      };
-
-      const layoutPositions = {
-        mind: {
-          root: [0, 0],
-          chapter1: [-170, -120],
-          letter: [160, -116],
-          friend: [-170, 116],
-          clock: [162, 116],
-          ending: [0, 190],
-        },
-        tree: {
-          root: [0, -170],
-          chapter1: [-210, -40],
-          letter: [-70, -40],
-          friend: [70, -40],
-          ending: [210, -40],
-          clock: [-70, 104],
-        },
-      };
-
-      const state = {
-        sample: "novel",
-        view: "atlas",
-        selected: "root",
-        panX: 0,
-        panY: 0,
-        scale: 1,
-        dragging: false,
-        dragStartX: 0,
-        dragStartY: 0,
-        panStartX: 0,
-        panStartY: 0,
-      };
-
-      const preview = document.getElementById("preview");
-      const demoShell = document.querySelector(".demo-shell");
-      const world = document.getElementById("world");
-      const edges = document.getElementById("edges");
-      const nodes = document.getElementById("nodes");
-      const editorView = document.getElementById("editor-view");
-      const sidePanel = document.getElementById("side-panel");
-      const notificationCard = document.getElementById("notification-card");
-      const notificationText = document.getElementById("notification-text");
-      const focusNotification = document.getElementById("focus-notification");
-      const aiDock = document.getElementById("ai-dock");
-
-      document.querySelectorAll(".sample-tab").forEach((button) => {
+      const novelFrame = document.getElementById("novel-frame");
+      const viewButtons = Array.from(document.querySelectorAll("[data-demo-view]"));
+      viewButtons.forEach((button) => {
         button.addEventListener("click", () => {
-          state.sample = button.dataset.sample;
-          state.view = "atlas";
-          state.selected = samples[state.sample].initial;
-          state.panX = 0;
-          state.panY = 0;
-          state.scale = 1;
-          render();
+          const view = button.getAttribute("data-demo-view") || "atlas";
+          viewButtons.forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
+          novelFrame.src = `/?aboutDemo=novel&aboutView=${encodeURIComponent(view)}`;
         });
       });
-
-      document.querySelectorAll(".view-button").forEach((button) => {
-        button.addEventListener("click", () => {
-          state.view = button.dataset.view;
-          state.panX = 0;
-          state.panY = 0;
-          state.scale = 1;
-          render();
-        });
-      });
-
-      focusNotification.addEventListener("click", () => {
-        const sample = samples[state.sample];
-        if (!sample.notificationNode) return;
-        state.selected = sample.notificationNode;
-        state.panX = 0;
-        state.panY = 0;
-        render();
-      });
-
-      preview.addEventListener("pointerdown", (event) => {
-        if (state.view === "editor" || event.target.closest(".node, .side-panel, .notification-card, .ai-dock")) return;
-        state.dragging = true;
-        state.dragStartX = event.clientX;
-        state.dragStartY = event.clientY;
-        state.panStartX = state.panX;
-        state.panStartY = state.panY;
-        preview.setPointerCapture(event.pointerId);
-      });
-
-      preview.addEventListener("pointermove", (event) => {
-        if (!state.dragging) return;
-        state.panX = state.panStartX + event.clientX - state.dragStartX;
-        state.panY = state.panStartY + event.clientY - state.dragStartY;
-        applyWorldTransform();
-      });
-
-      preview.addEventListener("pointerup", (event) => {
-        state.dragging = false;
-        if (preview.hasPointerCapture(event.pointerId)) preview.releasePointerCapture(event.pointerId);
-      });
-
-      preview.addEventListener("wheel", (event) => {
-        if (state.view === "editor") return;
-        event.preventDefault();
-        const next = state.scale + (event.deltaY < 0 ? 0.08 : -0.08);
-        state.scale = Math.min(1.35, Math.max(0.72, next));
-        applyWorldTransform();
-      }, { passive: false });
-
-      function render() {
-        const sample = samples[state.sample];
-        document.getElementById("demo-title").textContent = sample.title;
-        document.getElementById("demo-subtitle").textContent = sample.subtitle;
-        document.getElementById("demo-status").textContent = sample.status;
-
-        document.querySelectorAll(".sample-tab").forEach((button) => {
-          button.setAttribute("aria-selected", String(button.dataset.sample === state.sample));
-        });
-
-        const viewControls = document.getElementById("view-controls");
-        viewControls.hidden = !sample.viewControls;
-        demoShell.classList.toggle("no-view-controls", !sample.viewControls);
-        document.querySelectorAll(".view-button").forEach((button) => {
-          button.setAttribute("aria-pressed", String(button.dataset.view === state.view));
-        });
-
-        preview.classList.toggle("editor-mode", state.view === "editor");
-        world.style.display = state.view === "editor" ? "none" : "block";
-        editorView.classList.toggle("is-visible", state.view === "editor");
-        sidePanel.style.display = state.view === "editor" || sample.aiDock ? "none" : "block";
-        notificationCard.classList.toggle("is-visible", Boolean(sample.notificationText));
-        aiDock.classList.toggle("is-visible", Boolean(sample.aiDock));
-        notificationText.textContent = sample.notificationText || "";
-
-        renderWorld(sample);
-        renderEditor(sample);
-        renderSelected(sample);
-        applyWorldTransform();
-      }
-
-      function renderWorld(sample) {
-        nodes.innerHTML = "";
-        edges.innerHTML = "";
-        const rect = preview.getBoundingClientRect();
-        const centerX = rect.width / 2;
-        const centerY = rect.height / 2;
-        const positions = getPositions(sample);
-
-        sample.nodes.forEach((node) => {
-          if (!node.parent) return;
-          const from = positions[node.parent];
-          const to = positions[node.id];
-          if (!from || !to) return;
-          const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-          line.setAttribute("x1", centerX + from[0]);
-          line.setAttribute("y1", centerY + from[1]);
-          line.setAttribute("x2", centerX + to[0]);
-          line.setAttribute("y2", centerY + to[1]);
-          edges.appendChild(line);
-        });
-
-        sample.nodes.forEach((node) => {
-          const [x, y] = positions[node.id] || [node.x, node.y];
-          const button = document.createElement("button");
-          button.className = `node${node.id === state.selected ? " is-selected" : ""}${node.id === "root" ? " is-root" : ""}`;
-          button.type = "button";
-          button.style.left = `${centerX + x}px`;
-          button.style.top = `${centerY + y}px`;
-          button.style.setProperty("--size", `${node.size}px`);
-          button.style.setProperty("--node-color", node.color);
-          button.setAttribute("aria-label", node.label);
-          button.innerHTML = `<span class="node-label">${escapeHtml(node.label)}</span>${node.notice ? '<span class="node-notice">!</span>' : ""}`;
-          button.addEventListener("click", () => {
-            state.selected = node.id;
-            renderSelected(sample);
-            renderWorld(sample);
-          });
-          nodes.appendChild(button);
-        });
-      }
-
-      function renderEditor(sample) {
-        const byParent = new Map();
-        sample.nodes.forEach((node) => {
-          const key = node.parent || "__root";
-          if (!byParent.has(key)) byParent.set(key, []);
-          byParent.get(key).push(node);
-        });
-        const rows = [];
-        const visit = (node, depth) => {
-          rows.push(`
-            <button class="outline-row" type="button" data-node="${node.id}" style="margin-left:${depth * 14}px">
-              <span>${depth ? "└" : "●"}</span>
-              <span><strong>${escapeHtml(node.label)}</strong><small>${escapeHtml(node.body)}</small></span>
-            </button>
-          `);
-          (byParent.get(node.id) || []).forEach((child) => visit(child, depth + 1));
-        };
-        (byParent.get("__root") || []).forEach((node) => visit(node, 0));
-        editorView.innerHTML = `<div class="outline">${rows.join("")}</div>`;
-        editorView.querySelectorAll(".outline-row").forEach((row) => {
-          row.addEventListener("click", () => {
-            state.selected = row.dataset.node;
-            renderSelected(sample);
-          });
-        });
-      }
-
-      function renderSelected(sample) {
-        const node = sample.nodes.find((item) => item.id === state.selected) || sample.nodes[0];
-        document.getElementById("selected-title").textContent = node.label;
-        document.getElementById("selected-body").textContent = node.body;
-        document.getElementById("foot-title").textContent = node.label;
-        document.getElementById("foot-body").textContent = node.body;
-      }
-
-      function getPositions(sample) {
-        if (state.sample === "novel" && layoutPositions[state.view]) return layoutPositions[state.view];
-        if (state.view === "tree") return makeTreePositions(sample);
-        if (state.view === "mind") return makeMindPositions(sample);
-        return Object.fromEntries(sample.nodes.map((node) => [node.id, [node.x, node.y]]));
-      }
-
-      function makeMindPositions(sample) {
-        const result = { root: [0, 0] };
-        const children = sample.nodes.filter((node) => node.parent === "root");
-        children.forEach((node, index) => {
-          const angle = (-90 + (360 / children.length) * index) * Math.PI / 180;
-          result[node.id] = [Math.cos(angle) * 170, Math.sin(angle) * 145];
-        });
-        sample.nodes.filter((node) => node.parent && node.parent !== "root").forEach((node, index) => {
-          result[node.id] = [120 + index * 46, 160];
-        });
-        return result;
-      }
-
-      function makeTreePositions(sample) {
-        const result = { root: [0, -160] };
-        const children = sample.nodes.filter((node) => node.parent === "root");
-        const spacing = 112;
-        children.forEach((node, index) => {
-          result[node.id] = [(index - (children.length - 1) / 2) * spacing, -20];
-        });
-        sample.nodes.filter((node) => node.parent && node.parent !== "root").forEach((node, index) => {
-          result[node.id] = [(index - 0.5) * spacing, 120];
-        });
-        return result;
-      }
-
-      function applyWorldTransform() {
-        world.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.scale})`;
-      }
-
-      function escapeHtml(value) {
-        return String(value)
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;");
-      }
-
-      render();
-      window.addEventListener("resize", render);
     </script>
   </body>
 </html>

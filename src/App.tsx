@@ -2,6 +2,7 @@ import { FocusPanel } from "./components/FocusPanel";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CloudDownload, CloudUpload, CreditCard, Download, FileText, GitBranch, Github, GraduationCap, History, Info, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
 import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
+import { createAboutDemoNotebook, getAboutDemoLayoutMode, getAboutDemoNotification, getAboutDemoSelectedNodeId, readAboutDemoConfig } from "./aboutDemo";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
 import { CommandDock } from "./components/CommandDock";
 import { copyContextMarkdown, formatContextCopyStats } from "./context/contextCopy";
@@ -78,6 +79,7 @@ interface MergePreviewState {
 }
 
 export default function App() {
+  const aboutDemoConfig = useMemo(() => readAboutDemoConfig(), []);
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const viewport = useAtlasStore((state) => state.viewport);
@@ -169,7 +171,7 @@ export default function App() {
   const onboarding = useOnboarding();
   const aiFeaturesUnlocked = publicServiceMode ? Boolean(hostedSession?.entitlement.aiEnabled) : onboarding.showMainChrome;
   const voiceLogReadable = publicServiceMode ? onboarding.showMainChrome : aiFeaturesUnlocked;
-  const showCommandDock = aiFeaturesUnlocked && (publicServiceMode || shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport));
+  const showCommandDock = aiFeaturesUnlocked && (aboutDemoConfig?.kind === "app" || publicServiceMode || shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport));
   const showTutorialOperationFallback = onboarding.showChildCreationFallback;
   const mobileOperationPanelTabAvailable = !mobilePortraitOperationSurface;
   const operationPanelInWorkspace = mobileOperationSurface && mobileOperationPanelTabAvailable;
@@ -264,6 +266,69 @@ export default function App() {
     ],
   );
   const [renderWorkspacePanel, setRenderWorkspacePanel] = useState(showWorkspacePanel);
+  const aboutDemoAppliedRef = useRef("");
+  useEffect(() => {
+    if (!aboutDemoConfig) return;
+    const key = `${aboutDemoConfig.kind}:${aboutDemoConfig.view}`;
+    if (aboutDemoAppliedRef.current === key) return;
+    aboutDemoAppliedRef.current = key;
+
+    const demoRoot = createAboutDemoNotebook(aboutDemoConfig.kind);
+    const selectedDemoNodeId = getAboutDemoSelectedNodeId(aboutDemoConfig);
+    importNotebook(demoRoot, demoRoot.title);
+    setLayoutMode(getAboutDemoLayoutMode(aboutDemoConfig));
+    setRenderQuality("high");
+    setTheme("dark");
+    setMenuOpen(false);
+    setVoiceLogOpen(false);
+    setVoiceSettingsOpen(false);
+    setRestoreHistoryOpen(false);
+    setCloudLoadOpen(false);
+    setTextImportOpen(false);
+    setMergePreview(null);
+    setSharedNotebookRoot(null);
+    setAiFeatureDialogOpen(false);
+    setMobilePanelTab(aboutDemoConfig.kind === "app" ? "command" : "editor");
+    setMobileWorkspacePanelRevealed(aboutDemoConfig.kind === "app");
+    setRenderWorkspacePanel(aboutDemoConfig.kind === "app");
+
+    if (aboutDemoConfig.view === "editor") {
+      setOutlineEditorRootId(demoRoot.id);
+      setOutlineEditorOpen(true);
+    } else {
+      setOutlineEditorRootId(null);
+      setOutlineEditorOpen(false);
+    }
+
+    focusNode(selectedDemoNodeId);
+
+    const notification = getAboutDemoNotification(aboutDemoConfig);
+    if (notification) {
+      const now = performance.now();
+      useAtlasStore.setState((state) => ({
+        unreadNotifications: {
+          ...state.unreadNotifications,
+          [notification.nodeId]: {
+            nodeId: notification.nodeId,
+            kind: notification.kind,
+            title: notification.title,
+            signature: `about-demo:${notification.nodeId}`,
+            lastPulseAt: now,
+          },
+        },
+        notificationPulses: [
+          ...state.notificationPulses,
+          {
+            id: `about-demo-pulse-${Date.now()}`,
+            nodeId: notification.nodeId,
+            kind: notification.kind,
+            title: notification.title,
+            createdAt: now,
+          },
+        ],
+      }));
+    }
+  }, [aboutDemoConfig, focusNode, importNotebook, setLayoutMode]);
   const appClassName = [
     "app-shell",
     onboarding.showLogoOnly ? "is-onboarding-logo-only" : "",
@@ -271,6 +336,9 @@ export default function App() {
     showTutorialOperationFallback ? "is-onboarding-child-fallback" : "",
     aiFeaturesUnlocked ? "is-ai-unlocked" : "is-ai-locked",
     publicServiceMode ? "is-public-service" : "",
+    aboutDemoConfig ? "is-about-demo" : "",
+    aboutDemoConfig ? `is-about-demo-${aboutDemoConfig.kind}` : "",
+    aboutDemoConfig ? `is-about-demo-view-${aboutDemoConfig.view}` : "",
   ].filter(Boolean).join(" ");
   const unreadNotificationLinks = useMemo(
     () =>
@@ -1143,6 +1211,7 @@ export default function App() {
       className={appClassName}
       data-theme={theme}
       data-focus-panel={focusPanelOpen ? "open" : "closed"}
+      data-about-demo={aboutDemoConfig?.kind}
       onDragEnter={handleImportDragEnter}
       onDragOver={handleImportDragOver}
       onDragLeave={handleImportDragLeave}
@@ -2547,16 +2616,19 @@ function notificationKindLabel(kind: NotificationPulse["kind"]) {
 }
 
 function loadMobileNotificationPreference() {
+  if (readAboutDemoConfig()) return false;
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(MOBILE_NOTIFICATION_STORAGE_KEY) === "true";
 }
 
 function persistMobileNotificationPreference(enabled: boolean) {
+  if (readAboutDemoConfig()) return;
   if (typeof window === "undefined") return;
   window.localStorage.setItem(MOBILE_NOTIFICATION_STORAGE_KEY, String(enabled));
 }
 
 function loadRenderQualityPreference(): RenderQuality {
+  if (readAboutDemoConfig()) return "high";
   if (typeof window === "undefined") return "high";
   const stored = window.localStorage.getItem(RENDER_QUALITY_STORAGE_KEY);
   if (isRenderQuality(stored)) return stored;
@@ -2569,6 +2641,7 @@ function shouldShowCommandDock(rootId: string, selectedNodeId: string, viewport:
 }
 
 function persistRenderQualityPreference(quality: RenderQuality) {
+  if (readAboutDemoConfig()) return;
   if (typeof window === "undefined") return;
   window.localStorage.setItem(RENDER_QUALITY_STORAGE_KEY, quality);
 }
