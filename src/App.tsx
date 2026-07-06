@@ -613,7 +613,7 @@ export default function App() {
     persistRenderQualityPreference(renderQuality);
   }, [renderQuality]);
 
-  usePreventBrowserViewportGestures();
+  usePreventBrowserViewportGestures(Boolean(aboutDemoConfig));
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
@@ -1238,6 +1238,7 @@ export default function App() {
         initialCameraPose={persistedUiState?.cameraPose ?? null}
         shareTargetRef={universeShareTargetRef}
         tutorialRootBirthUnlocked={onboarding.showRootPulse}
+        embedInteractionLocked={Boolean(aboutDemoConfig)}
       />
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
       {onboarding.message ? (
@@ -3267,35 +3268,87 @@ function DatasetTitleInput({
   );
 }
 
-function usePreventBrowserViewportGestures() {
+function usePreventBrowserViewportGestures(bridgeAboutDemoScroll = false) {
+  const aboutDemoTouchYRef = useRef<number | null>(null);
+
   useEffect(() => {
     const preventDefault = (event: Event) => event.preventDefault();
     const preventViewportTouchMove = (event: TouchEvent) => {
+      if (bridgeAboutDemoScroll && shouldBridgeAboutDemoScroll(event.target)) {
+        const centerY = getTouchCenterY(event.touches);
+        const previousY = aboutDemoTouchYRef.current;
+        if (previousY !== null && centerY !== null) {
+          postAboutDemoParentScroll(previousY - centerY);
+        }
+        aboutDemoTouchYRef.current = centerY;
+        event.preventDefault();
+        return;
+      }
       if (shouldAllowNativeTouchScroll(event.target)) return;
       event.preventDefault();
     };
     const preventCtrlWheelZoom = (event: WheelEvent) => {
+      if (bridgeAboutDemoScroll && shouldBridgeAboutDemoScroll(event.target) && !event.ctrlKey) {
+        postAboutDemoParentScroll(event.deltaY);
+        event.preventDefault();
+        return;
+      }
       if (event.ctrlKey) event.preventDefault();
+    };
+    const rememberAboutDemoTouchStart = (event: TouchEvent) => {
+      if (!bridgeAboutDemoScroll || !shouldBridgeAboutDemoScroll(event.target)) return;
+      aboutDemoTouchYRef.current = getTouchCenterY(event.touches);
+    };
+    const clearAboutDemoTouch = () => {
+      aboutDemoTouchYRef.current = null;
     };
 
     document.addEventListener("gesturestart", preventDefault, { passive: false, capture: true });
     document.addEventListener("gesturechange", preventDefault, { passive: false, capture: true });
     document.addEventListener("gestureend", preventDefault, { passive: false, capture: true });
+    document.addEventListener("touchstart", rememberAboutDemoTouchStart, { passive: true, capture: true });
     document.addEventListener("touchmove", preventViewportTouchMove, { passive: false, capture: true });
+    document.addEventListener("touchend", clearAboutDemoTouch, { capture: true });
+    document.addEventListener("touchcancel", clearAboutDemoTouch, { capture: true });
     window.addEventListener("wheel", preventCtrlWheelZoom, { passive: false, capture: true });
     return () => {
       document.removeEventListener("gesturestart", preventDefault, { capture: true });
       document.removeEventListener("gesturechange", preventDefault, { capture: true });
       document.removeEventListener("gestureend", preventDefault, { capture: true });
+      document.removeEventListener("touchstart", rememberAboutDemoTouchStart, { capture: true });
       document.removeEventListener("touchmove", preventViewportTouchMove, { capture: true });
+      document.removeEventListener("touchend", clearAboutDemoTouch, { capture: true });
+      document.removeEventListener("touchcancel", clearAboutDemoTouch, { capture: true });
       window.removeEventListener("wheel", preventCtrlWheelZoom, { capture: true });
     };
-  }, []);
+  }, [bridgeAboutDemoScroll]);
 }
 
 function shouldAllowNativeTouchScroll(target: EventTarget | null) {
   if (!(target instanceof Element)) return false;
   return Boolean(target.closest("textarea, .context-menu, .surface-context-menu, .status-context-menu, .reminder-context-menu, .focus-panel, .event-strip, .voice-log-dialog, .notebook-history-dialog, .text-import-dialog, .merge-preview-dialog, .cloud-load-dialog, .voice-settings-dialog, .outline-editor-panel, .mobile-workspace-panel"));
+}
+
+function shouldBridgeAboutDemoScroll(target: EventTarget | null) {
+  if (!(target instanceof Element)) return true;
+  return !target.closest("textarea, input, select, button, a");
+}
+
+function getTouchCenterY(touches: TouchList) {
+  if (!touches.length) return null;
+  let total = 0;
+  for (let index = 0; index < touches.length; index += 1) {
+    const touch = touches.item(index);
+    if (touch) total += touch.clientY;
+  }
+  return total / touches.length;
+}
+
+function postAboutDemoParentScroll(deltaY: number) {
+  if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.5) return;
+  if (window.parent === window) return;
+  const targetOrigin = window.location.origin === "null" ? "*" : window.location.origin;
+  window.parent.postMessage({ type: "mind-atlas-about-scroll", deltaY }, targetOrigin);
 }
 
 function isUniverseTitlePlaceholder(title: string, placeholderTitle: string) {

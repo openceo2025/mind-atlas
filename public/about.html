@@ -341,12 +341,20 @@
     <script>
       const novelFrame = document.getElementById("novel-frame");
       const viewButtons = Array.from(document.querySelectorAll("[data-demo-view]"));
+      const demoFrames = () => Array.from(document.querySelectorAll(".demo-window iframe"));
       viewButtons.forEach((button) => {
         button.addEventListener("click", () => {
           const view = button.getAttribute("data-demo-view") || "atlas";
           viewButtons.forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
           novelFrame.src = `/?aboutDemo=novel&aboutView=${encodeURIComponent(view)}`;
         });
+      });
+      window.addEventListener("message", (event) => {
+        if (!event.data || event.data.type !== "mind-atlas-about-scroll") return;
+        if (!demoFrames().some((frame) => frame.contentWindow === event.source)) return;
+        const deltaY = Number(event.data.deltaY);
+        if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.5) return;
+        window.scrollBy({ top: deltaY, left: 0, behavior: "auto" });
       });
     </script>
   </body>

@@ -81,6 +81,13 @@ button {
   display: none !important;
 }
 
+.app-shell.is-about-demo,
+.app-shell.is-about-demo .universe-shell.is-embed-interaction-locked,
+.app-shell.is-about-demo .universe-shell.is-embed-interaction-locked canvas {
+  touch-action: pan-y !important;
+  overscroll-behavior: auto;
+}
+
 .app-shell.is-about-demo .command-dock .mode-switch,
 .app-shell.is-about-demo .command-dock .scope-select {
   display: none;

@@ -331,6 +331,7 @@ export function UniverseCanvas({
   initialCameraPose,
   shareTargetRef,
   tutorialRootBirthUnlocked,
+  embedInteractionLocked = false,
 }: {
   theme: AtlasTheme;
   vrPanEnabled: boolean;
@@ -340,6 +341,7 @@ export function UniverseCanvas({
   initialCameraPose: PersistedCameraPose | null;
   shareTargetRef?: RefObject<HTMLElement | null>;
   tutorialRootBirthUnlocked?: boolean;
+  embedInteractionLocked?: boolean;
 }) {
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeContextMenuState | null>(null);
   const mobilePerformanceMode = useMobilePerformanceMode();
@@ -451,7 +453,12 @@ export function UniverseCanvas({
   }, []);
 
   return (
-    <section ref={shareTargetRef} className="universe-shell" aria-label="Mind Atlas universe view">
+    <section
+      ref={shareTargetRef}
+      className={`universe-shell ${embedInteractionLocked ? "is-embed-interaction-locked" : ""}`}
+      data-embed-interaction={embedInteractionLocked ? "locked" : undefined}
+      aria-label="Mind Atlas universe view"
+    >
       <Canvas
         camera={{ position: [0, 0, INITIAL_CAMERA_OFFSET], fov: CAMERA_FOV, near: 0.1, far: 120000 }}
         dpr={canvasDpr}
@@ -475,8 +482,16 @@ export function UniverseCanvas({
           pageActive={pageActive}
           initialCameraPose={initialCameraPose}
           tutorialRootBirthUnlocked={Boolean(tutorialRootBirthUnlocked)}
+          embedInteractionLocked={embedInteractionLocked}
         />
-        <NotebookNodes theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} pageActive={pageActive} onOpenNodeContextMenu={setNodeContextMenu} />
+        <NotebookNodes
+          theme={theme}
+          renderQuality={renderQuality}
+          layoutMode={layoutMode}
+          pageActive={pageActive}
+          embedInteractionLocked={embedInteractionLocked}
+          onOpenNodeContextMenu={setNodeContextMenu}
+        />
         <NotificationPulseLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} pageActive={pageActive} />
       </Canvas>
       <NodeContextMenu menu={nodeContextMenu} onClose={() => setNodeContextMenu(null)} />
@@ -830,6 +845,7 @@ function NavigationController({
   pageActive,
   initialCameraPose,
   tutorialRootBirthUnlocked,
+  embedInteractionLocked,
 }: {
   theme: AtlasTheme;
   vrPanEnabled: boolean;
@@ -838,6 +854,7 @@ function NavigationController({
   pageActive: boolean;
   initialCameraPose: PersistedCameraPose | null;
   tutorialRootBirthUnlocked: boolean;
+  embedInteractionLocked: boolean;
 }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const focusRequest = useAtlasStore((state) => state.focusRequest);
@@ -942,9 +959,21 @@ function NavigationController({
     const handleDomWheel = (event: WheelEvent) => {
       if (event.target instanceof HTMLElement && event.target.closest("textarea, input, select")) return;
       event.preventDefault();
+      if (embedInteractionLocked) {
+        handleWheelDelta(event.deltaY, { allowCameraZoom: false });
+        return;
+      }
       handleWheelDelta(event.deltaY);
     };
     const handleTouchStart = (event: TouchEvent) => {
+      if (embedInteractionLocked) {
+        dragRef.current = null;
+        backgroundClickRef.current = null;
+        setBirthEffect(null);
+        multiTouchRef.current = event.touches.length >= 2;
+        pinchGestureRef.current = event.touches.length >= 2 ? { lastDistance: getTouchDistance(event.touches) } : null;
+        return;
+      }
       if (event.touches.length < 2) {
         multiTouchRef.current = false;
         pinchGestureRef.current = null;
@@ -974,6 +1003,20 @@ function NavigationController({
       pinchGestureRef.current = { lastDistance: getTouchDistance(event.touches) };
     };
     const handleTouchMove = (event: TouchEvent) => {
+      if (embedInteractionLocked) {
+        if (event.touches.length < 2 || !multiTouchRef.current) return;
+        const distance = getTouchDistance(event.touches);
+        const pinchGesture = pinchGestureRef.current;
+        if (!pinchGesture) {
+          pinchGestureRef.current = { lastDistance: distance };
+          return;
+        }
+        const distanceDelta = distance - pinchGesture.lastDistance;
+        pinchGesture.lastDistance = distance;
+        if (Math.abs(distanceDelta) < PINCH_MIN_DISTANCE_DELTA_PX) return;
+        handleWheelDelta(-distanceDelta * PINCH_ZOOM_WHEEL_SCALE, { allowCameraZoom: false });
+        return;
+      }
       const drag = dragRef.current;
       if (drag?.pointerId === DOM_TOUCH_SPACE_POINTER_ID && event.touches.length === 1) {
         if (event.cancelable) event.preventDefault();
@@ -999,6 +1042,15 @@ function NavigationController({
       handleWheelDelta(-distanceDelta * PINCH_ZOOM_WHEEL_SCALE, { allowLayerNavigation: false });
     };
     const handleTouchEnd = (event: TouchEvent) => {
+      if (embedInteractionLocked) {
+        if (event.touches.length >= 2) {
+          pinchGestureRef.current = { lastDistance: getTouchDistance(event.touches) };
+          return;
+        }
+        multiTouchRef.current = false;
+        pinchGestureRef.current = null;
+        return;
+      }
       const drag = dragRef.current;
       if (drag?.pointerId === DOM_TOUCH_SPACE_POINTER_ID) {
         const touch = event.changedTouches[0];
@@ -1368,6 +1420,7 @@ function NavigationController({
   };
 
   const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
+    if (embedInteractionLocked) return;
     const pointerType = event.pointerType || "mouse";
     if (pointerType === "mouse" && event.button !== 0 && event.button !== 2) return;
     event.stopPropagation();
@@ -1397,6 +1450,7 @@ function NavigationController({
     deltaY: number,
     options: { emitOnboarding?: boolean } = {},
   ) => {
+    if (embedInteractionLocked) return;
     if (Math.abs(deltaX) < 0.01 && Math.abs(deltaY) < 0.01) return;
     if (options.emitOnboarding !== false && Math.hypot(deltaX, deltaY) > 4) emitOnboardingEvent("pan");
     const state = yawPitchRef.current;
@@ -1496,8 +1550,9 @@ function NavigationController({
     handlePointerUp(event);
   };
 
-  const handleWheelDelta = (deltaY: number, options: { allowLayerNavigation?: boolean } = {}) => {
+  const handleWheelDelta = (deltaY: number, options: { allowLayerNavigation?: boolean; allowCameraZoom?: boolean } = {}) => {
     const allowLayerNavigation = options.allowLayerNavigation ?? true;
+    const allowCameraZoom = options.allowCameraZoom ?? true;
     const now = performance.now();
     if (now < wheelSuppressUntilRef.current) return;
     if (tutorialRootBirthUnlocked) {
@@ -1514,11 +1569,13 @@ function NavigationController({
     }
     if (Math.abs(deltaY) > 0.5) emitOnboardingEvent("zoom");
 
-    const state = yawPitchRef.current;
-    state.offset = clamp(state.offset - deltaY * 0.35, getMinCameraOffset(mobilePortraitCamera), MAX_CAMERA_OFFSET);
-    transitionRef.current = null;
-    applyCameraPose(perspective, state);
-    setViewportFromCameraState(state);
+    if (allowCameraZoom) {
+      const state = yawPitchRef.current;
+      state.offset = clamp(state.offset - deltaY * 0.35, getMinCameraOffset(mobilePortraitCamera), MAX_CAMERA_OFFSET);
+      transitionRef.current = null;
+      applyCameraPose(perspective, state);
+      setViewportFromCameraState(state);
+    }
 
     const zoomOutState = wheelZoomOutRef.current;
     const zoomInState = wheelZoomInRef.current;
@@ -2037,12 +2094,14 @@ function NotebookNodes({
   renderQuality,
   layoutMode,
   pageActive,
+  embedInteractionLocked,
   onOpenNodeContextMenu,
 }: {
   theme: AtlasTheme;
   renderQuality: RenderQuality;
   layoutMode: AtlasLayoutMode;
   pageActive: boolean;
+  embedInteractionLocked: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -2346,6 +2405,7 @@ function NotebookNodes({
               enteringNodeIds={enteringNodeIds}
               layoutMode={layoutMode}
               rootOverviewActive={rootIsSelected}
+              embedInteractionLocked={embedInteractionLocked}
               onOpenNodeContextMenu={onOpenNodeContextMenu}
             />
           );
@@ -2389,6 +2449,7 @@ function NotebookNodes({
           enteringNodeIds={enteringNodeIds}
           layoutMode={layoutMode}
           rootOverviewActive={rootIsSelected}
+          embedInteractionLocked={embedInteractionLocked}
           onOpenNodeContextMenu={onOpenNodeContextMenu}
         />
       </group>
@@ -2432,6 +2493,7 @@ function NotebookNodes({
             enteringNodeIds={enteringNodeIds}
             layoutMode={layoutMode}
             rootOverviewActive={rootIsSelected}
+            embedInteractionLocked={embedInteractionLocked}
             onOpenNodeContextMenu={onOpenNodeContextMenu}
           />
         );
@@ -2655,6 +2717,7 @@ function HierarchyNode({
   enteringNodeIds,
   layoutMode,
   rootOverviewActive,
+  embedInteractionLocked,
   onOpenNodeContextMenu,
 }: {
   node: AtlasNode;
@@ -2685,6 +2748,7 @@ function HierarchyNode({
   enteringNodeIds: Set<string>;
   layoutMode: AtlasLayoutMode;
   rootOverviewActive: boolean;
+  embedInteractionLocked: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
   const selectNodeInPlace = useAtlasStore((state) => state.selectNodeInPlace);
@@ -2822,6 +2886,7 @@ function HierarchyNode({
     lastScreen: { x: number; y: number };
     shiftKey: boolean;
     hasPanned: boolean;
+    allowPan: boolean;
   } | null>(null);
   const groupRef = useRef<Group>(null);
   const parentWorldRef = useRef<Vec3Tuple>(subtractPosition(worldPosition, localPosition));
@@ -2996,6 +3061,29 @@ function HierarchyNode({
   });
 
   const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
+    if (embedInteractionLocked) {
+      if (event.button !== 0) return;
+      event.stopPropagation();
+      try {
+        (event.target as Element | null)?.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Mobile browsers can cancel or retarget touch pointers during gesture negotiation.
+      }
+      passThroughPanRef.current = {
+        pointerId: event.pointerId,
+        startScreen: { x: event.clientX, y: event.clientY },
+        lastScreen: { x: event.clientX, y: event.clientY },
+        shiftKey: event.nativeEvent.shiftKey,
+        hasPanned: false,
+        allowPan: false,
+      };
+      setMobileRaycastMode({ kind: "idle" });
+      dragRef.current = null;
+      setDragVisual(null);
+      setDragBoundary(null);
+      setHiddenDragEdgeNodeId(null);
+      return;
+    }
     if (event.button === 2) {
       event.stopPropagation();
       if (node.id === "atlas-root") return;
@@ -3019,6 +3107,7 @@ function HierarchyNode({
         lastScreen: { x: event.clientX, y: event.clientY },
         shiftKey: event.nativeEvent.shiftKey,
         hasPanned: false,
+        allowPan: true,
       };
       return;
     }
@@ -3061,7 +3150,9 @@ function HierarchyNode({
       const screenDistance = Math.hypot(event.clientX - passThroughPan.startScreen.x, event.clientY - passThroughPan.startScreen.y);
       if (screenDistance > 3 && (Math.abs(deltaX) >= 0.01 || Math.abs(deltaY) >= 0.01)) {
         passThroughPan.hasPanned = true;
-        window.dispatchEvent(new CustomEvent<UniversePanDeltaDetail>(UNIVERSE_PAN_DELTA_EVENT, { detail: { deltaX, deltaY } }));
+        if (passThroughPan.allowPan) {
+          window.dispatchEvent(new CustomEvent<UniversePanDeltaDetail>(UNIVERSE_PAN_DELTA_EVENT, { detail: { deltaX, deltaY } }));
+        }
       }
       passThroughPan.lastScreen = { x: event.clientX, y: event.clientY };
       return;
@@ -3294,6 +3385,7 @@ function HierarchyNode({
         onContextMenu={(event) => {
           event.stopPropagation();
           event.nativeEvent.preventDefault();
+          if (embedInteractionLocked) return;
           if (node.id === "atlas-root") return;
           if (!isSelected) selectNodeInPlace(node.id);
           onOpenNodeContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
@@ -3399,6 +3491,7 @@ function HierarchyNode({
                 enteringNodeIds={enteringNodeIds}
                 layoutMode={layoutMode}
                 rootOverviewActive={rootOverviewActive}
+                embedInteractionLocked={embedInteractionLocked}
                 onOpenNodeContextMenu={onOpenNodeContextMenu}
               />
             );

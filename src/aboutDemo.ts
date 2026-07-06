@@ -290,23 +290,25 @@ function travelNotebook() {
 }
 
 function appNotebook() {
-  return rootNode("about-app-root", "個人アプリ開発", "Googleアカウント登録と月$10のMind Atlas ProプランでAI機能が解放されます。AI相談はノードとして残せます。", "#9fd8ff", [
-    node("about-app-auth", "Googleアカウント登録", "Google OAuthでユーザー登録とセッションを作ります。", {
+  return rootNode("about-app-root", "個人アプリ開発", "小さなアプリを企画し、設計、実装、テスト、リリースまで進めるための作業ノートです。", "#9fd8ff", [
+    node("about-app-plan", "企画", "誰のどんな困りごとを解くのかを短く定義します。", {
       color: "#80d2a6",
       texture: "speckled",
       status: "done",
       children: [
-        node("about-app-auth-callback", "ログイン確認", "戻りURL、Cookie、セッションAPIを確認する。", { color: "#93dfb7", status: "done" }),
-        node("about-app-auth-profile", "ユーザー情報", "メールアドレスと表示名をアカウントに紐づける。", { color: "#6dc796", status: "done" }),
+        node("about-app-plan-user", "ユーザー像", "最初に使ってほしい人を一人に絞って書き出す。", { color: "#93dfb7", status: "done" }),
+        node("about-app-plan-value", "提供価値", "使った直後に何が楽になるのかを一文で決める。", { color: "#6dc796", status: "done" }),
+        node("about-app-plan-scope", "MVP範囲", "初回リリースに必要な機能だけを残す。", { color: "#72d4a3" }),
       ],
     }),
-    node("about-app-pro", "Mind Atlas Pro", "月$10のプランでAIトークンを付与します。", {
+    node("about-app-design", "設計", "画面、データ、状態遷移を先に整理して実装の迷いを減らします。", {
       color: "#e4c565",
       texture: "bands",
       status: "done",
       children: [
-        node("about-app-stripe", "Stripe Billing", "Checkout、Webhook、サブスク状態を同期する。", { color: "#ecd27e", status: "done" }),
-        node("about-app-credit", "AIトークン残高", "利用前に予約し、実使用量で精算する。", { color: "#d7b64b", status: "running" }),
+        node("about-app-design-screen", "画面設計", "ホーム、作成画面、設定画面の役割を分ける。", { color: "#ecd27e", status: "done" }),
+        node("about-app-design-data", "データ設計", "保存する項目、同期の要否、削除時の扱いを決める。", { color: "#d7b64b" }),
+        node("about-app-design-flow", "操作フロー", "初回起動から目的達成までの手順を短くする。", { color: "#f0d98a" }),
       ],
     }),
     node("about-app-ai", "AI相談", "Chatで設計を相談し、返答をこの宇宙のノードとして残します。", {
@@ -314,18 +316,29 @@ function appNotebook() {
       texture: "freckles",
       status: "running",
       children: [
-        node("about-app-ai-models", "モデル選択", "OpenAI、Claude、DeepSeekなどを切り替える。", { color: "#c1adff" }),
-        node("about-app-ai-log", "AI Partner log", "会話とツール実行をあとから読み返す。", { color: "#a691ed" }),
+        node("about-app-ai-stack", "技術選定", "Webアプリ、モバイルアプリ、PWAのどれで始めるか相談する。", { color: "#c1adff" }),
+        node("about-app-ai-copy", "文言作成", "ボタン名、空状態、エラー文を自然な言葉に直す。", { color: "#a691ed" }),
+        node("about-app-ai-debug", "バグ調査", "再現手順とログを渡して原因候補を整理する。", { color: "#9a84dd" }),
       ],
     }),
-    node("about-app-sprint", "実装タスク", "公開前にUI、料金説明、エラー文言を磨きます。", {
+    node("about-app-build", "開発", "画面ごとに小さく作って、動く状態を保ちながら進めます。", {
       color: "#83bdf7",
       texture: "mist",
       status: "waiting",
       children: [
-        node("about-app-task-about", "紹介ページ", "触れるサンプルで魅力を伝える。", { color: "#9ccdf8", status: "running" }),
-        node("about-app-task-mobile", "モバイル確認", "小さい画面でパネルが重ならないか確認する。", { color: "#7bb2e8" }),
-        node("about-app-task-cost", "価格調整", "モデル価格と上限を現実のAPI価格に合わせる。", { color: "#6aa3dc" }),
+        node("about-app-build-core", "コア機能", "入力、保存、一覧表示を先に完成させる。", { color: "#9ccdf8", status: "running" }),
+        node("about-app-build-settings", "設定", "通知、テーマ、エクスポートなどを後から足す。", { color: "#7bb2e8" }),
+        node("about-app-build-polish", "操作感", "余計な確認や待ち時間を減らして使いやすくする。", { color: "#6aa3dc" }),
+      ],
+    }),
+    node("about-app-release", "テストとリリース", "実機で確認し、初期ユーザーに配れる形へ整えます。", {
+      color: "#ef9c89",
+      texture: "craters",
+      status: "waiting",
+      children: [
+        node("about-app-release-test", "動作確認", "スマホ、PC、低速回線で主要操作を試す。", { color: "#f2ad9c" }),
+        node("about-app-release-page", "公開ページ", "何ができるアプリか、最初の画面で伝える。", { color: "#e98f7a" }),
+        node("about-app-release-feedback", "フィードバック", "最初の利用者から詰まった場所を聞いて直す。", { color: "#d97866" }),
       ],
     }),
   ]);
