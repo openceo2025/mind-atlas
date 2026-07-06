@@ -244,6 +244,7 @@ export interface HostedServiceUser {
 
 export interface HostedServiceSubscription {
   status: string;
+  currentPeriodStart?: string;
   currentPeriodEnd?: string;
   cancelAtPeriodEnd?: boolean;
 }
@@ -258,7 +259,7 @@ export interface HostedServiceCredit {
 
 export interface HostedServiceEntitlement {
   aiEnabled: boolean;
-  reason?: "anonymous" | "subscription_required" | "credit_exhausted" | "active";
+  reason?: "anonymous" | "subscription_required" | "billing_period_unavailable" | "credit_exhausted" | "active";
 }
 
 export interface HostedServiceSession {

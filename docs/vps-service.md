@@ -32,11 +32,17 @@ npm run service:start -> server/mind-atlas-service.mjs
 - The top-right AI feature button opens the hosted account panel.
 - Google login creates or updates a user account.
 - A Stripe monthly subscription unlocks Chat and Realtime Talk.
-- Users receive `AI usage token` as a 0-100 percent monthly balance.
-- Internally, 100 percent equals the configured monthly AI credit budget
+- Users receive `AI usage token` as a 0-100 percent balance for the current
+  Stripe subscription billing period.
+- Internally, 100 percent equals the configured per-period AI credit budget
   `MONTHLY_CREDIT_MICRO_USD=5000000`, but the UI does not show dollars.
-- When the monthly token reaches 0 percent, AI requests return HTTP 402 until
-  the next subscription period creates a fresh credit account.
+- When the token reaches 0 percent, AI requests return HTTP 402 until Stripe
+  advances the subscription to the next billing period and creates a fresh
+  credit account.
+- Credit periods must be derived from Stripe subscription item
+  `current_period_start` / `current_period_end`. If those dates are not synced,
+  hosted AI is disabled instead of creating a fallback period from the current
+  date.
 - Chat and web search debit estimated provider cost after each response.
   Dictation debits a small estimated transcription cost. Realtime Talk debits
   a fixed reservation amount when a WebRTC session is successfully opened
@@ -380,6 +386,7 @@ npm run service:admin -- usage user@example.com
 npm run service:admin -- grant-admin user@example.com
 npm run service:admin -- grant-credit user@example.com 20
 npm run service:admin -- set-credit user@example.com 0
+npm run service:admin -- sync-stripe-periods [user@example.com]
 ```
 
 `doctor` checks the built `dist` directory, Google OAuth, Stripe, OpenAI,
@@ -395,6 +402,12 @@ percent for the current credit period.
 
 `set-credit` sets the current period to an exact percent from 0 to 100. Use it
 for staging exhaustion tests and emergency operator adjustments.
+
+`sync-stripe-periods` refreshes stored subscription billing period start/end
+dates from Stripe. Run it after Stripe API-version changes, webhook issues, or
+whenever an active user shows no next token renewal date. When it fixes a
+previously missing period, it moves the latest existing credit account to the
+Stripe period key instead of granting a second 100 percent balance.
 
 ## Local Staging Before ConoHa
 

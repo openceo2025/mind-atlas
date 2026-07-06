@@ -22,6 +22,7 @@ import {
 } from "./service-db.mjs";
 import { getEnv, parseJsonEnv, parseListEnv, readIntEnv, serviceRootDir } from "./service-config.mjs";
 import { hasModelPrice, mergeModelPrices, resolveExactModelPrice } from "./model-pricing.mjs";
+import { stripePatchFromStripeSubscription } from "./stripe-subscription.mjs";
 
 const serviceHost = getEnv("MIND_ATLAS_SERVICE_HOST", "127.0.0.1");
 const servicePort = readIntEnv("MIND_ATLAS_SERVICE_PORT", 8788);
@@ -838,6 +839,7 @@ async function createSessionResponse(user) {
     subscription: subscription
       ? {
           status: subscription.status,
+          currentPeriodStart: subscription.current_period_start?.toISOString?.() ?? subscription.current_period_start ?? undefined,
           currentPeriodEnd: subscription.current_period_end?.toISOString?.() ?? subscription.current_period_end ?? undefined,
           cancelAtPeriodEnd: subscription.cancel_at_period_end === true,
         }
@@ -871,8 +873,11 @@ async function requireAiEntitlement(request) {
   const user = await requireUser(request);
   const { subscription, credit, entitlement } = await buildEntitlement(user);
   if (!isSubscriptionActive(subscription)) throw new ServiceError(402, "Subscription is required for AI features");
+  if (entitlement.reason === "billing_period_unavailable") {
+    throw new ServiceError(409, "Subscription billing period is unavailable");
+  }
   if (!entitlement.aiEnabled || Number(credit?.credit_remaining_micro_usd ?? 0) <= 0) {
-    throw new ServiceError(402, "Monthly Mind Atlas token is exhausted");
+    throw new ServiceError(402, "Mind Atlas token for this billing period is exhausted");
   }
   return { user, subscription, credit };
 }
@@ -1413,7 +1418,7 @@ function enforceChatRequestLimits({ credit, provider, model, payload, outputToke
   const inputOnlyCost = estimateCostMicroUsd(provider.id, model, estimatedInputTokens, 0);
   const remaining = Number(credit?.credit_remaining_micro_usd ?? 0);
   if (!fable5OnePass && inputOnlyCost > remaining) {
-    throw new ServiceError(402, "Monthly Mind Atlas token is too low for this request");
+    throw new ServiceError(402, "Mind Atlas token for this billing period is too low for this request");
   }
 
   const requestCeiling = estimateCostMicroUsd(provider.id, model, estimatedInputTokens, outputTokenLimit);
@@ -1462,7 +1467,7 @@ async function reserveUsageCredit({ user, subscription, requestId, provider, mod
     requestId,
     metadata: { provider, model, reservedMicroUsd, ...metadata },
   });
-  if (!account) throw new ServiceError(402, "Monthly Mind Atlas token is too low for this request");
+  if (!account) throw new ServiceError(402, "Mind Atlas token for this billing period is too low for this request");
   return { requestId, reservedMicroUsd, provider, model, metadata };
 }
 
@@ -1586,13 +1591,13 @@ async function applyStripeEvent(event) {
     if (!userId) return;
     const subscriptionId = stringValue(object.subscription);
     const subscription = subscriptionId ? await stripeGet(`/v1/subscriptions/${subscriptionId}`) : null;
-    await upsertSubscriptionByUserId(userId, stripePatchFromStripeSubscription(subscription, object.customer));
+    await upsertSubscriptionByUserId(userId, stripePatchFromStripeSubscription(subscription, object.customer, stripePriceId));
     return;
   }
   if (event.type?.startsWith("customer.subscription.")) {
     const customerId = stringValue(object.customer);
     const userId = stringValue(object.metadata?.mind_atlas_user_id);
-    await upsertStripeSubscription(customerId, stripePatchFromStripeSubscription(object, customerId), userId);
+    await upsertStripeSubscription(customerId, stripePatchFromStripeSubscription(object, customerId, stripePriceId), userId);
     return;
   }
   if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
@@ -1602,7 +1607,7 @@ async function applyStripeEvent(event) {
     const userId = stringValue(subscription?.metadata?.mind_atlas_user_id)
       || stringValue(object.subscription_details?.metadata?.mind_atlas_user_id)
       || stringValue(object.metadata?.mind_atlas_user_id);
-    await upsertStripeSubscription(customerId, stripePatchFromStripeSubscription(subscription, customerId), userId);
+    await upsertStripeSubscription(customerId, stripePatchFromStripeSubscription(subscription, customerId, stripePriceId), userId);
   }
 }
 
@@ -1612,27 +1617,10 @@ async function upsertStripeSubscription(customerId, patch, fallbackUserId = "") 
   return await upsertSubscriptionByUserId(fallbackUserId, patch);
 }
 
-function stripePatchFromStripeSubscription(subscription, customerIdFallback = "") {
-  return {
-    stripeCustomerId: stringValue(subscription?.customer) || stringValue(customerIdFallback),
-    stripeSubscriptionId: stringValue(subscription?.id),
-    status: stringValue(subscription?.status) || "none",
-    priceId: stringValue(subscription?.items?.data?.[0]?.price?.id) || stripePriceId,
-    currentPeriodStart: stripeTimestamp(subscription?.current_period_start),
-    currentPeriodEnd: stripeTimestamp(subscription?.current_period_end),
-    cancelAtPeriodEnd: subscription?.cancel_at_period_end === true,
-  };
-}
-
 function stripeInvoiceSubscriptionId(invoice) {
   return stringValue(invoice?.subscription)
     || stringValue(invoice?.parent?.subscription_details?.subscription)
     || stringValue(invoice?.lines?.data?.[0]?.subscription);
-}
-
-function stripeTimestamp(value) {
-  const number = numberValue(value);
-  return number ? new Date(number * 1000).toISOString() : null;
 }
 
 async function stripeGet(pathname) {
@@ -1794,6 +1782,7 @@ function serviceErrorCode(status, message) {
   const text = stringValue(message).toLowerCase();
   if (text.includes("google login")) return "auth_required";
   if (status === 402 && text.includes("subscription")) return "subscription_required";
+  if (text.includes("billing period")) return "billing_period_unavailable";
   if (status === 402 && (text.includes("exhausted") || text.includes("too low"))) return "credit_exhausted";
   if (status === 413 && text.includes("audio")) return "audio_too_large";
   if (status === 413 || text.includes("too large") || text.includes("per-request safety limit")) return "request_too_large";
@@ -1813,8 +1802,10 @@ function serviceErrorMessage(code, status, message) {
       return "Google login is required.";
     case "subscription_required":
       return "An active Mind Atlas Pro subscription is required for AI features.";
+    case "billing_period_unavailable":
+      return "Mind Atlas token renewal date is still syncing.";
     case "credit_exhausted":
-      return "Monthly Mind Atlas token is exhausted.";
+      return "Mind Atlas token for this billing period is exhausted.";
     case "audio_too_large":
       return "The audio file is too large for hosted dictation.";
     case "request_too_large":

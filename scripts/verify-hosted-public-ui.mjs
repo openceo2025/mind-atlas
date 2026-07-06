@@ -99,11 +99,10 @@ try {
     await page.locator(".ai-usage-guide-card").waitFor();
     await page.locator(".ai-credit-card > div:first-child span").waitFor();
     await page.locator(".ai-credit-card strong", { hasText: "87%" }).waitFor();
+    await page.locator(".ai-credit-renewal", { hasText: "次回更新日:" }).waitFor();
     await assertNoForbiddenPublicDeveloperSurface(page, "active public AI dialog");
     const oldCapabilityCopyCount = await page.getByText(/Chat \/ web search \/ Dictation \/ Realtime Talk/).count();
     if (oldCapabilityCopyCount !== 0) throw new Error("Public AI dialog exposed old capability-list copy.");
-    const creditMetaCount = await page.locator(".ai-credit-meta").count();
-    if (creditMetaCount !== 0) throw new Error(`Public AI credit card should show percent only: ${creditMetaCount}`);
 
     await page.getByRole("button", { name: "Open atlas menu" }).click();
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).waitFor();
@@ -234,6 +233,7 @@ function createMockSession() {
     },
     subscription: {
       status: "active",
+      currentPeriodStart: "2026-06-30T00:00:00.000Z",
       currentPeriodEnd: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
       cancelAtPeriodEnd: false,
     },

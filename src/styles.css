@@ -1558,6 +1558,15 @@ h1 {
   background: #ff8768;
 }
 
+.ai-credit-renewal {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: #b8cdbf;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ai-credit-meta {
   display: flex;
   flex-wrap: wrap;

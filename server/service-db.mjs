@@ -168,9 +168,9 @@ export async function upsertSubscriptionByUserId(userId, patch) {
         stripe_customer_id = coalesce(excluded.stripe_customer_id, subscriptions.stripe_customer_id),
         stripe_subscription_id = coalesce(excluded.stripe_subscription_id, subscriptions.stripe_subscription_id),
         status = excluded.status,
-        price_id = excluded.price_id,
-        current_period_start = excluded.current_period_start,
-        current_period_end = excluded.current_period_end,
+        price_id = coalesce(nullif(excluded.price_id, ''), subscriptions.price_id),
+        current_period_start = coalesce(excluded.current_period_start, subscriptions.current_period_start),
+        current_period_end = coalesce(excluded.current_period_end, subscriptions.current_period_end),
         cancel_at_period_end = excluded.cancel_at_period_end,
         updated_at = now()
       returning *
@@ -201,16 +201,27 @@ export function isSubscriptionActive(subscription) {
 }
 
 export function creditPeriodKey(subscription = null) {
-  const value = subscription?.current_period_start ?? new Date();
+  const value = subscription?.current_period_start;
+  if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
   const year = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
+export function hasSubscriptionBillingPeriod(subscription = null) {
+  if (!creditPeriodKey(subscription)) return false;
+  const value = subscription?.current_period_end;
+  if (!value) return false;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime());
+}
+
 export async function ensureCreditAccount(userId, subscription = null) {
   const periodKey = creditPeriodKey(subscription);
+  if (!periodKey) return null;
   const result = await pool.query(
     `
       insert into credit_accounts (user_id, period_key, credit_limit_micro_usd, credit_remaining_micro_usd)
@@ -373,6 +384,9 @@ export async function buildEntitlement(user) {
   if (!isSubscriptionActive(subscription)) {
     return { subscription, credit: null, entitlement: { aiEnabled: false, reason: "subscription_required" } };
   }
+  if (!hasSubscriptionBillingPeriod(subscription)) {
+    return { subscription, credit: null, entitlement: { aiEnabled: false, reason: "billing_period_unavailable" } };
+  }
   const credit = await ensureCreditAccount(user.id, subscription);
   const remaining = Number(credit?.credit_remaining_micro_usd ?? 0);
   return {
@@ -395,6 +409,8 @@ export async function listUsers(limit = 100) {
         users.role,
         users.created_at,
         subscriptions.status as subscription_status,
+        subscriptions.current_period_start,
+        subscriptions.current_period_end,
         credit_accounts.period_key,
         credit_accounts.credit_remaining_micro_usd,
         credit_accounts.credit_limit_micro_usd
@@ -455,6 +471,7 @@ export async function grantCreditPercent(email, percent, reason = "admin_grant")
   if (!user) return null;
   const subscription = await getUserSubscription(user.id);
   const account = await ensureCreditAccount(user.id, subscription);
+  if (!account) throw new Error("Credit account could not be created because subscription billing period is unavailable");
   const delta = Math.round(MONTHLY_CREDIT_MICRO_USD * (percent / 100));
   const result = await pool.query(
     `
@@ -478,6 +495,7 @@ export async function setCreditPercent(email, percent, reason = "admin_set") {
   if (!user) return null;
   const subscription = await getUserSubscription(user.id);
   const account = await ensureCreditAccount(user.id, subscription);
+  if (!account) throw new Error("Credit account could not be created because subscription billing period is unavailable");
   const nextRemaining = Math.round(account.credit_limit_micro_usd * (percent / 100));
   const delta = nextRemaining - Number(account.credit_remaining_micro_usd ?? 0);
   const result = await pool.query(

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getEnv, serviceRootDir } from "./service-config.mjs";
 import { mergeModelPrices } from "./model-pricing.mjs";
+import { stripePatchFromStripeSubscription } from "./stripe-subscription.mjs";
 
 const [command, ...args] = process.argv.slice(2);
 let dbModule = null;
@@ -25,6 +26,8 @@ try {
       role: user.role,
       subscription: user.subscription_status ?? "none",
       token: formatPercent(user.credit_remaining_micro_usd, user.credit_limit_micro_usd),
+      period: user.period_key ?? "",
+      renews: user.current_period_end?.toISOString?.() ?? user.current_period_end ?? "",
       created: user.created_at?.toISOString?.() ?? user.created_at,
     })));
   } else if (command === "user") {
@@ -82,6 +85,32 @@ try {
     const result = await db.setCreditPercent(email, percent);
     if (!result) throw new Error("User not found");
     console.log(`Set ${result.user.email} token to ${formatPercent(result.account.credit_remaining_micro_usd, result.account.credit_limit_micro_usd)}`);
+  } else if (command === "sync-stripe-periods") {
+    const db = await getDb();
+    await db.migrateDatabase();
+    const rows = await listSubscriptionsForStripeSync(db, args[0] ?? "");
+    if (!rows.length) {
+      console.log("No Stripe subscriptions to sync.");
+    } else {
+      const results = [];
+      for (const row of rows) {
+        const subscription = await stripeGetSubscription(row.stripe_subscription_id);
+        const patch = stripePatchFromStripeSubscription(subscription, row.stripe_customer_id, getEnv("STRIPE_PRICE_ID"));
+        const updated = await db.upsertSubscriptionByUserId(row.user_id, patch);
+        const migratedCreditPeriod = !row.current_period_start && updated.current_period_start
+          ? await rekeyLatestCreditAccountToSubscriptionPeriod(db, row.user_id, db.creditPeriodKey(updated))
+          : "";
+        results.push({
+          email: row.email,
+          status: updated.status,
+          currentPeriodStart: updated.current_period_start?.toISOString?.() ?? updated.current_period_start,
+          currentPeriodEnd: updated.current_period_end?.toISOString?.() ?? updated.current_period_end,
+          periodSynced: Boolean(updated.current_period_start && updated.current_period_end),
+          migratedCreditPeriod,
+        });
+      }
+      console.table(results);
+    }
   } else {
     throw new Error(`Unknown command: ${command}`);
   }
@@ -95,6 +124,75 @@ try {
 async function getDb() {
   dbModule ??= await import("./service-db.mjs");
   return dbModule;
+}
+
+async function listSubscriptionsForStripeSync(db, email = "") {
+  const params = [];
+  const emailFilter = email ? "and lower(users.email) = lower($1)" : "";
+  if (email) params.push(email);
+  const result = await db.pool.query(
+    `
+      select
+        users.id as user_id,
+        users.email,
+        subscriptions.stripe_customer_id,
+        subscriptions.stripe_subscription_id,
+        subscriptions.current_period_start,
+        subscriptions.current_period_end
+      from subscriptions
+      join users on users.id = subscriptions.user_id
+      where subscriptions.stripe_subscription_id is not null
+        and subscriptions.stripe_subscription_id <> ''
+        ${emailFilter}
+      order by users.email
+    `,
+    params,
+  );
+  return result.rows;
+}
+
+async function rekeyLatestCreditAccountToSubscriptionPeriod(db, userId, targetPeriodKey) {
+  if (!targetPeriodKey) return "";
+  const target = await db.pool.query("select 1 from credit_accounts where user_id = $1 and period_key = $2", [userId, targetPeriodKey]);
+  if (target.rows[0]) return "";
+  const latest = await db.pool.query(
+    "select period_key from credit_accounts where user_id = $1 order by created_at desc limit 1",
+    [userId],
+  );
+  const sourcePeriodKey = latest.rows[0]?.period_key;
+  if (!sourcePeriodKey || sourcePeriodKey === targetPeriodKey) return "";
+  const client = await db.pool.connect();
+  try {
+    await client.query("begin");
+    await client.query(
+      "update credit_accounts set period_key = $3, updated_at = now() where user_id = $1 and period_key = $2",
+      [userId, sourcePeriodKey, targetPeriodKey],
+    );
+    await client.query(
+      "update credit_ledger set period_key = $3 where user_id = $1 and period_key = $2",
+      [userId, sourcePeriodKey, targetPeriodKey],
+    );
+    await client.query("commit");
+    return `${sourcePeriodKey} -> ${targetPeriodKey}`;
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function stripeGetSubscription(subscriptionId) {
+  const stripeSecretKey = getEnv("STRIPE_SECRET_KEY");
+  if (!stripeSecretKey) throw new Error("STRIPE_SECRET_KEY is required for sync-stripe-periods");
+  const response = await fetch(`https://api.stripe.com/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+    headers: { Authorization: `Bearer ${stripeSecretKey}` },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(`Stripe subscription fetch failed for ${subscriptionId}: ${data?.error?.message ?? response.statusText}`);
+  }
+  return data;
 }
 
 async function runDoctor() {
@@ -199,6 +297,7 @@ Usage:
   npm run service:admin -- grant-admin <email>
   npm run service:admin -- grant-credit <email> <percent>
   npm run service:admin -- set-credit <email> <percent>
+  npm run service:admin -- sync-stripe-periods [email]
 `);
 }
 

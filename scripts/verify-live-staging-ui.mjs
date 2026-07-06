@@ -42,8 +42,7 @@ try {
   await page.locator(".ai-feature-dialog").waitFor();
   await page.locator(".ai-usage-guide-card").waitFor();
   await page.locator(".ai-credit-card strong").waitFor();
-  const creditMetaCount = await page.locator(".ai-credit-meta").count();
-  if (creditMetaCount !== 0) throw new Error(`AI credit card should show percent only: ${creditMetaCount}`);
+  await page.locator(".ai-credit-renewal", { hasText: "次回更新日:" }).waitFor();
 
   console.log("Live staging UI verification passed");
   console.log(JSON.stringify({ aiButtonText, serviceOptions, modelOptions }, null, 2));

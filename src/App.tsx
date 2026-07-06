@@ -1725,6 +1725,7 @@ function AiFeatureDialog({
   const [actionBusy, setActionBusy] = useState<"login" | "checkout" | "portal" | "logout" | "refresh" | null>(null);
   const creditPercent = session?.credit ? Math.max(0, Math.min(100, session.credit.remainingPercent)) : 0;
   const roundedCreditPercent = Math.round(creditPercent);
+  const nextCreditRenewalLabel = formatHostedDate(session?.subscription?.currentPeriodEnd);
   const authenticated = Boolean(session?.authenticated && session.user);
   const aiEnabled = Boolean(session?.entitlement.aiEnabled);
   const reason = session?.entitlement.reason;
@@ -1800,11 +1801,11 @@ function AiFeatureDialog({
             <dl>
               <div>
                 <dt>AI利用トークン</dt>
-                <dd>毎月100%付与</dd>
+                <dd>請求期間ごとに100%付与</dd>
               </div>
               <div>
                 <dt>更新</dt>
-                <dd>毎月自動更新</dd>
+                <dd>{nextCreditRenewalLabel ? `次回更新日: ${nextCreditRenewalLabel}` : "Stripeの請求日に自動更新"}</dd>
               </div>
             </dl>
           </div>
@@ -1827,6 +1828,7 @@ function AiFeatureDialog({
             <div className="ai-credit-track" aria-hidden="true">
               <span style={{ width: `${creditPercent}%` }} />
             </div>
+            {nextCreditRenewalLabel ? <small className="ai-credit-renewal">次回更新日: {nextCreditRenewalLabel}</small> : null}
           </div>
         ) : null}
         <div className="ai-feature-actions">
@@ -1869,6 +1871,7 @@ function aiFeatureButtonBadge(session: HostedServiceSession | null, loading: boo
   if (error) return "要確認";
   if (!session?.authenticated) return "未ログイン";
   if (session.credit) return `${Math.round(Math.max(0, Math.min(100, session.credit.remainingPercent)))}%`;
+  if (session.entitlement.reason === "billing_period_unavailable") return "同期中";
   return "未登録";
 }
 
@@ -1877,7 +1880,8 @@ function aiFeatureStatusLabel(session: HostedServiceSession | null, loading: boo
   if (error) return "サービス状況を確認できません";
   if (!session?.authenticated) return "Notebookは無料で使えます。AIはログイン後に登録できます。";
   if (session.entitlement.aiEnabled) return "AI機能を利用できます";
-  if (session.entitlement.reason === "credit_exhausted") return "今月のAI利用トークンは0%です";
+  if (session.entitlement.reason === "billing_period_unavailable") return "AI利用トークンの次回更新日を確認中です";
+  if (session.entitlement.reason === "credit_exhausted") return "この請求期間のAI利用トークンは0%です";
   if (session.subscription?.status === "past_due") return "支払い確認が必要です";
   if (session.subscription?.status === "canceled") return "サブスクリプションは停止しています";
   return "AI機能は未登録です";
@@ -1887,7 +1891,10 @@ function formatHostedDate(value?: string) {
   if (!value) return "";
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
-  return date.toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function TextImportModal({

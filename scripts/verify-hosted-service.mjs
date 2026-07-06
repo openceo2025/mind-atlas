@@ -22,6 +22,7 @@ const stagingLocalEnv = read("deploy/staging/env.service.local.example");
 for (const filePath of [
   "server/mind-atlas-service.mjs",
   "server/service-db.mjs",
+  "server/stripe-subscription.mjs",
   "server/admin.mjs",
   "Dockerfile.staging",
   "docker-compose.staging.yml",
@@ -49,6 +50,7 @@ for (const filePath of [
 for (const filePath of [
   "server/mind-atlas-service.mjs",
   "server/service-db.mjs",
+  "server/stripe-subscription.mjs",
   "server/admin.mjs",
   "scripts/verify-google-staging-ready.mjs",
   "scripts/verify-stripe-staging-ready.mjs",
@@ -164,7 +166,7 @@ for (const providerEnv of [
   assert.ok(stagingLocalEnv.includes(`${providerEnv}=`), `local staging env template should include ${providerEnv}`);
 }
 
-for (const adminCommand of ["doctor", "usage", "grant-credit", "grant-admin", "set-credit"]) {
+for (const adminCommand of ["doctor", "usage", "grant-credit", "grant-admin", "set-credit", "sync-stripe-periods"]) {
   assert.ok(admin.includes(commandNeedle(adminCommand)), `admin CUI should expose ${adminCommand}`);
   assert.ok(docs.includes(`service:admin -- ${adminCommand}`), `docs should mention ${adminCommand}`);
 }
@@ -198,6 +200,14 @@ assert.ok(conohaNginx.includes('X-Frame-Options "SAMEORIGIN"'), "ConoHa nginx sh
 assert.ok(conohaNginx.includes("Permissions-Policy"), "ConoHa nginx should send a permissions policy");
 assert.ok(serviceDb.includes("export async function reserveCredit"), "service DB should expose atomic credit reservation");
 assert.ok(serviceDb.includes("export async function settleCreditReservation"), "service DB should expose reservation settlement");
+assert.equal(serviceDb.includes("subscription?.current_period_start ?? new Date()"), false, "credit periods must not fall back to the current date");
+assert.ok(serviceDb.includes('reason: "billing_period_unavailable"'), "active subscriptions without synced billing periods should not grant credit");
+assert.ok(server.includes("stripePatchFromStripeSubscription(subscription, object.customer, stripePriceId)"), "Stripe checkout completion should use item-aware billing period extraction");
+const stripeSubscription = read("server/stripe-subscription.mjs");
+assert.ok(stripeSubscription.includes("item?.current_period_start"), "Stripe period extraction should read subscription item current_period_start");
+assert.ok(stripeSubscription.includes("item?.current_period_end"), "Stripe period extraction should read subscription item current_period_end");
+assert.ok(admin.includes("stripeGetSubscription"), "admin CUI should be able to backfill Stripe billing periods");
+assert.ok(admin.includes("rekeyLatestCreditAccountToSubscriptionPeriod"), "Stripe period backfill should migrate the existing fallback credit account instead of double-granting");
 assert.ok(stagingDocs.includes("npm run staging:google:doctor"), "staging docs should include Google OAuth doctor");
 assert.ok(stagingDocs.includes("npm run staging:stripe:doctor"), "staging docs should include Stripe doctor");
 assert.ok(stagingDocs.includes("npm run staging:openai:doctor"), "staging docs should include OpenAI doctor");

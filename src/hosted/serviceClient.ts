@@ -63,11 +63,14 @@ export function formatHostedServiceError(status: number, data: Record<string, un
   if (code === "auth_required" || text.includes("google login")) {
     return "Googleログインが必要です。右上のAI機能からログインしてください。";
   }
+  if (code === "billing_period_unavailable" || text.includes("renewal date") || text.includes("billing period")) {
+    return "AI利用トークンの次回更新日をStripeと同期中です。少し待ってから右上のAI機能で更新してください。";
+  }
   if (code === "subscription_required" || text.includes("subscription")) {
     return "AI機能は月額登録後に利用できます。Notebook本体はこのまま使えます。";
   }
-  if (code === "credit_exhausted" || text.includes("token is exhausted") || text.includes("too low")) {
-    return "今月のAI利用トークンを使い切りました。次回更新日までAIリクエストは停止します。";
+  if (code === "credit_exhausted" || text.includes("exhausted") || text.includes("too low")) {
+    return "この請求期間のAI利用トークンを使い切りました。次回更新日までAIリクエストは停止します。";
   }
   if (code === "request_too_large" || code === "audio_too_large" || status === 413) {
     return "今回の入力が大きすぎます。対象ノードや添付、音声の長さを減らしてもう一度試してください。";
