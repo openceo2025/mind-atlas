@@ -420,7 +420,7 @@ export async function listUsers(limit = 100) {
         select *
         from credit_accounts
         where credit_accounts.user_id = users.id
-        order by created_at desc
+          and credit_accounts.period_key = to_char(subscriptions.current_period_start at time zone 'UTC', 'YYYY-MM-DD')
         limit 1
       ) credit_accounts on true
       order by users.created_at desc
