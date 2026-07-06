@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480" role="img" aria-label="Travel ticket QR code sample">
+  <defs>
+    <linearGradient id="ticket-bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#fff7dd"/>
+      <stop offset="1" stop-color="#f4d989"/>
+    </linearGradient>
+    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#2c2306" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect width="720" height="480" rx="42" fill="#11231d"/>
+  <g filter="url(#soft-shadow)">
+    <path d="M72 58h576a24 24 0 0 1 24 24v316a24 24 0 0 1-24 24H72a24 24 0 0 1-24-24v-70a32 32 0 0 0 0-64v-48a32 32 0 0 0 0-64V82a24 24 0 0 1 24-24Z" fill="url(#ticket-bg)"/>
+    <path d="M454 58v364" stroke="#5f4d13" stroke-width="4" stroke-dasharray="12 14" opacity="0.34"/>
+  </g>
+  <g fill="#172015">
+    <text x="92" y="110" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800" letter-spacing="2">TRAVEL PASS</text>
+    <text x="92" y="150" font-family="Arial, Helvetica, sans-serif" font-size="52" font-weight="900">MIND ATLAS</text>
+    <text x="94" y="184" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" opacity="0.72">Sample itinerary ticket</text>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#172015">
+    <text x="96" y="250" font-size="15" font-weight="800" opacity="0.58">DATE</text>
+    <text x="96" y="280" font-size="28" font-weight="900">07 / 18</text>
+    <text x="238" y="250" font-size="15" font-weight="800" opacity="0.58">SEAT</text>
+    <text x="238" y="280" font-size="28" font-weight="900">A-12</text>
+    <text x="352" y="250" font-size="15" font-weight="800" opacity="0.58">GATE</text>
+    <text x="352" y="280" font-size="28" font-weight="900">03</text>
+    <text x="96" y="344" font-size="15" font-weight="800" opacity="0.58">TICKET NO.</text>
+    <text x="96" y="374" font-size="31" font-weight="900" letter-spacing="1">MA-527312</text>
+  </g>
+  <rect x="494" y="92" width="132" height="132" rx="12" fill="#fff" stroke="#172015" stroke-width="8"/>
+  <image x="506" y="104" width="108" height="108" image-rendering="pixelated" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALoAAAC6AQMAAAAjwMWyAAAABlBMVEX///8AAABVwtN+AAAACXBIWXMAAA7EAAAOxAGVKw4bAAABCUlEQVRYhe2Waw6EMAiESXoAj8TVe6QeoAnLDK3urgcAE4mayucPwvBQ5LXHm5rbkCkqR294sQrA7zbEXXKYH8KTDtzVhtpQnNehCBCzjiQWA8HqgJB2+hPgpnkSYBtAVFy3/kgCGw+dx48rFcDlIXoGHRg1rgBc1Imy6/xILmkzAUqN4zUmrLVT2lQgHPd+sdR4zgdIWeRuxb3LLhWsJSSoNl2bMh+g1Ayzlcubm7sAiAwyia7u+NI8E8RI9Wrrk6N2ru9zwRUrS+02ZHPAuYrQAG1UAYK1vXVFi2oFEL+D5066ws0He35xR5YBEWhnTrUCCGkjg9EPFUC0gTFo/FL89UcOeO3R9gH4a0qEX4hEhgAAAABJRU5ErkJggg=="/>
+  <g fill="#172015" font-family="Arial, Helvetica, sans-serif">
+    <text x="488" y="264" font-size="15" font-weight="800" opacity="0.58">BOARDING</text>
+    <text x="488" y="296" font-size="31" font-weight="900">10:20</text>
+    <text x="488" y="344" font-size="15" font-weight="800" opacity="0.58">STATUS</text>
+    <text x="488" y="376" font-size="30" font-weight="900">CHECK</text>
+  </g>
+</svg>

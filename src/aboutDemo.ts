@@ -26,6 +26,9 @@ export interface AboutDemoFocusRequest {
 const DEMO_PARAM = "aboutDemo";
 const VIEW_PARAM = "aboutView";
 const DEMO_DATE = "2026-07-05T00:00:00.000Z";
+const TRAVEL_TICKET_ATTACHMENT_ID = "about-travel-ticket-qr";
+const TRAVEL_TICKET_ASSET_PATH = "/demo/travel-ticket-qr.svg";
+const TRAVEL_TICKET_ATTACHMENT_SIZE = 3157;
 
 export function readAboutDemoConfig(): AboutDemoConfig | null {
   if (typeof window === "undefined") return null;
@@ -60,6 +63,13 @@ export function getAboutDemoNotification(config: AboutDemoConfig): AboutDemoNoti
     nodeId: "about-travel-ticket-pass",
     kind: "needs_review",
     title: "Reminder: チケットを確認",
+  };
+}
+
+export function getAboutDemoAttachmentPreviewUrls(config: AboutDemoConfig): Record<string, string> {
+  if (config.kind !== "travel") return {};
+  return {
+    [TRAVEL_TICKET_ATTACHMENT_ID]: TRAVEL_TICKET_ASSET_PATH,
   };
 }
 
@@ -258,6 +268,7 @@ function travelNotebook() {
           nextDecision: "出発前にチケットを確認する。",
           reminderAt,
           reminderFiredAt: new Date().toISOString(),
+          attachments: [travelTicketAttachment()],
         }),
         node("about-travel-hotel", "宿泊予約", "チェックイン時間と荷物預けをメモする。", { color: "#d7b35b" }),
         node("about-travel-entry", "入場予約", "時間指定がある予定だけ通知対象にする。", { color: "#f0d990" }),
@@ -390,7 +401,7 @@ function node(
   id: string,
   title: string,
   body: string,
-  options: Partial<Pick<AtlasNode, "color" | "texture" | "status" | "summary" | "nextDecision" | "reminderAt" | "reminderFiredAt" | "children">> = {},
+  options: Partial<Pick<AtlasNode, "color" | "texture" | "status" | "summary" | "nextDecision" | "reminderAt" | "reminderFiredAt" | "attachments" | "children">> = {},
 ): AtlasNode {
   return {
     id,
@@ -407,11 +418,24 @@ function node(
     summary: options.summary ?? body.slice(0, 120),
     nextDecision: options.nextDecision ?? "",
     tags: ["about-demo"],
-    attachments: [],
+    attachments: options.attachments ?? [],
     createdAt: DEMO_DATE,
     updatedAt: DEMO_DATE,
     reminderAt: options.reminderAt,
     reminderFiredAt: options.reminderFiredAt,
     children: options.children ?? [],
+  };
+}
+
+function travelTicketAttachment(): AtlasNode["attachments"][number] {
+  return {
+    id: TRAVEL_TICKET_ATTACHMENT_ID,
+    name: "travel-pass-qr.svg",
+    kind: "image",
+    mimeType: "image/svg+xml",
+    size: TRAVEL_TICKET_ATTACHMENT_SIZE,
+    path: TRAVEL_TICKET_ASSET_PATH,
+    assetPath: TRAVEL_TICKET_ASSET_PATH,
+    createdAt: DEMO_DATE,
   };
 }

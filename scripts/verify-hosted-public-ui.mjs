@@ -110,6 +110,7 @@ try {
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).click();
     await page.waitForURL(/\/about\.html$/);
     await page.getByRole("heading", { name: "Mind Atlas", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "小説を書く", exact: true }).waitFor();
     if ((await page.locator(".demo-window iframe").count()) !== 3) throw new Error("About page should expose three embedded Mind Atlas examples.");
     if ((await page.locator(".view-controls button").count()) !== 4) throw new Error("About page should expose four novel view buttons.");
     await page.frameLocator("#novel-frame").locator("canvas").waitFor();
@@ -119,11 +120,13 @@ try {
     await page.frameLocator("#novel-frame").locator(".app-shell.is-about-demo-view-tree").waitFor();
     await page.getByRole("button", { name: /Editor/ }).click();
     await page.frameLocator("#novel-frame").locator(".outline-editor-shell").waitFor();
-    await page.getByRole("heading", { name: /旅行計画を忘れない/ }).scrollIntoViewIfNeeded();
+    await page.getByRole("heading", { name: /旅行計画を立てる/ }).scrollIntoViewIfNeeded();
     const travelFrame = page.frameLocator('iframe[title="Mind Atlas travel planning example"]');
     await travelFrame.locator("canvas").waitFor();
     await travelFrame.locator(".unread-notification-link").first().waitFor();
-    await page.getByRole("heading", { name: /AI相談を開発ノードに残す/ }).scrollIntoViewIfNeeded();
+    await travelFrame.locator(".unread-notification-link").first().click();
+    await travelFrame.locator(".attachment-preview img[alt='travel-pass-qr.svg']").waitFor();
+    await page.getByRole("heading", { name: /アプリ開発のメモ/ }).scrollIntoViewIfNeeded();
     const appFrame = page.frameLocator('iframe[title="Mind Atlas app development AI example"]');
     await appFrame.locator(".command-dock").waitFor();
     const appDemoCommandPointerEvents = await appFrame.locator(".command-dock").evaluate((element) => getComputedStyle(element).pointerEvents);
