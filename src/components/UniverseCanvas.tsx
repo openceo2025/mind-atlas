@@ -960,7 +960,10 @@ function NavigationController({
       if (event.target instanceof HTMLElement && event.target.closest("textarea, input, select")) return;
       event.preventDefault();
       if (embedInteractionLocked) {
-        handleWheelDelta(event.deltaY, { allowCameraZoom: false });
+        wheelZoomOutRef.current.amount = 0;
+        wheelZoomOutRef.current.startedAt = 0;
+        wheelZoomInRef.current.amount = 0;
+        wheelZoomInRef.current.startedAt = 0;
         return;
       }
       handleWheelDelta(event.deltaY);
@@ -970,8 +973,8 @@ function NavigationController({
         dragRef.current = null;
         backgroundClickRef.current = null;
         setBirthEffect(null);
-        multiTouchRef.current = event.touches.length >= 2;
-        pinchGestureRef.current = event.touches.length >= 2 ? { lastDistance: getTouchDistance(event.touches) } : null;
+        multiTouchRef.current = false;
+        pinchGestureRef.current = null;
         return;
       }
       if (event.touches.length < 2) {
@@ -1004,17 +1007,8 @@ function NavigationController({
     };
     const handleTouchMove = (event: TouchEvent) => {
       if (embedInteractionLocked) {
-        if (event.touches.length < 2 || !multiTouchRef.current) return;
-        const distance = getTouchDistance(event.touches);
-        const pinchGesture = pinchGestureRef.current;
-        if (!pinchGesture) {
-          pinchGestureRef.current = { lastDistance: distance };
-          return;
-        }
-        const distanceDelta = distance - pinchGesture.lastDistance;
-        pinchGesture.lastDistance = distance;
-        if (Math.abs(distanceDelta) < PINCH_MIN_DISTANCE_DELTA_PX) return;
-        handleWheelDelta(-distanceDelta * PINCH_ZOOM_WHEEL_SCALE, { allowCameraZoom: false });
+        multiTouchRef.current = false;
+        pinchGestureRef.current = null;
         return;
       }
       const drag = dragRef.current;
@@ -1043,10 +1037,6 @@ function NavigationController({
     };
     const handleTouchEnd = (event: TouchEvent) => {
       if (embedInteractionLocked) {
-        if (event.touches.length >= 2) {
-          pinchGestureRef.current = { lastDistance: getTouchDistance(event.touches) };
-          return;
-        }
         multiTouchRef.current = false;
         pinchGestureRef.current = null;
         return;

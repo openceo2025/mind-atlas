@@ -113,6 +113,22 @@ try {
     if ((await page.locator(".demo-window iframe").count()) !== 3) throw new Error("About page should expose three embedded Mind Atlas examples.");
     if ((await page.locator(".view-controls button").count()) !== 4) throw new Error("About page should expose four novel view buttons.");
     await page.frameLocator("#novel-frame").locator("canvas").waitFor();
+    const aboutWheelFocusState = await page.frameLocator("#novel-frame").locator("canvas").evaluate(async (canvas) => {
+      const appShell = document.querySelector(".app-shell");
+      const before = appShell?.getAttribute("data-focus-panel") ?? "";
+      for (let index = 0; index < 6; index += 1) {
+        canvas.dispatchEvent(new WheelEvent("wheel", { deltaY: -260, bubbles: true, cancelable: true }));
+        canvas.dispatchEvent(new WheelEvent("wheel", { deltaY: 260, bubbles: true, cancelable: true }));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return {
+        before,
+        after: appShell?.getAttribute("data-focus-panel") ?? "",
+      };
+    });
+    if (aboutWheelFocusState.before !== "closed" || aboutWheelFocusState.after !== "closed") {
+      throw new Error(`About embedded wheel should not auto-focus nodes: ${JSON.stringify(aboutWheelFocusState)}`);
+    }
     await page.getByRole("button", { name: /MindMap/ }).click();
     await page.frameLocator("#novel-frame").locator(".app-shell.is-about-demo-view-mind-map").waitFor();
     await page.getByRole("button", { name: /Tree/ }).click();
