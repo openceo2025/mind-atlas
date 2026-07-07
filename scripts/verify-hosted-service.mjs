@@ -14,6 +14,7 @@ const admin = read("server/admin.mjs");
 const envExample = read(".env.example");
 const serviceEnv = read("deploy/conoha/env.service.example");
 const conohaNginx = read("deploy/conoha/nginx.conf");
+const conohaRateLimits = read("deploy/conoha/nginx-rate-limits.conf");
 const stagingEnv = read("deploy/staging/env.service.docker.example");
 const docs = read("docs/vps-service.md");
 const stagingDocs = read("docs/staging-service.md");
@@ -32,6 +33,7 @@ for (const filePath of [
   "deploy/staging/env.service.local.example",
   "deploy/conoha/mind-atlas.service",
   "deploy/conoha/nginx.conf",
+  "deploy/conoha/nginx-rate-limits.conf",
   "deploy/conoha/env.service.example",
   "docs/vps-service.md",
   "docs/staging-service.md",
@@ -127,6 +129,9 @@ for (const requiredEnv of [
   "MIND_ATLAS_SERVICE_CHAT_RESERVE_CHARS_PER_TOKEN",
   "MIND_ATLAS_SERVICE_HIGH_COST_OUTPUT_USD_PER_1M",
   "MIND_ATLAS_SERVICE_HIGH_COST_MAX_OUTPUT_TOKENS",
+  "MIND_ATLAS_REALTIME_SESSION_MICRO_USD",
+  "MIND_ATLAS_REALTIME_MAX_OUTPUT_TOKENS",
+  "MIND_ATLAS_REALTIME_MAX_SESSION_SECONDS",
   "MIND_ATLAS_MODEL_PRICE_POLICY",
   "MIND_ATLAS_PROVIDER_MODEL_FETCH",
   "MIND_ATLAS_PROVIDER_MODEL_CACHE_MS",
@@ -136,6 +141,15 @@ for (const requiredEnv of [
   "MIND_ATLAS_STRIPE_WEBHOOK_TOLERANCE_SECONDS",
   "MIND_ATLAS_WEB_SEARCH_MIN_MICRO_USD",
   "MIND_ATLAS_WEB_SEARCH_MAX_QUERY_CHARS",
+  "MIND_ATLAS_RATE_LIMIT_WINDOW_MS",
+  "MIND_ATLAS_RATE_LIMIT_IP_MAX",
+  "MIND_ATLAS_RATE_LIMIT_AUTH_MAX",
+  "MIND_ATLAS_RATE_LIMIT_USER_AI_MAX",
+  "MIND_ATLAS_AI_CONCURRENT_REQUESTS",
+  "MIND_ATLAS_REALTIME_CONCURRENT_SESSIONS",
+  "MIND_ATLAS_SESSION_IDLE_DAYS",
+  "MIND_ATLAS_STALE_RESERVATION_MINUTES",
+  "MIND_ATLAS_MAINTENANCE_INTERVAL_MS",
   "MIND_ATLAS_STAGING_MOCK_AUTH",
   "MIND_ATLAS_STAGING_MOCK_BILLING",
   "MIND_ATLAS_STAGING_MOCK_PROVIDERS",
@@ -166,7 +180,7 @@ for (const providerEnv of [
   assert.ok(stagingLocalEnv.includes(`${providerEnv}=`), `local staging env template should include ${providerEnv}`);
 }
 
-for (const adminCommand of ["doctor", "usage", "grant-credit", "grant-admin", "set-credit", "sync-stripe-periods"]) {
+for (const adminCommand of ["doctor", "usage", "grant-credit", "grant-admin", "set-credit", "sync-stripe-periods", "reap-stale-reservations", "cleanup-sessions"]) {
   assert.ok(admin.includes(commandNeedle(adminCommand)), `admin CUI should expose ${adminCommand}`);
   assert.ok(docs.includes(`service:admin -- ${adminCommand}`), `docs should mention ${adminCommand}`);
 }
@@ -178,6 +192,16 @@ assert.ok(docs.includes("mind-atlas.org/api/billing/stripe/webhook"), "docs shou
 assert.ok(server.includes("reserveUsageCredit"), "hosted service should reserve credit before upstream calls");
 assert.ok(server.includes("meterReservedUsage"), "hosted service should settle reserved credit after usage");
 assert.ok(server.includes("refundUsageReservation"), "hosted service should refund reserved credit after upstream failures");
+assert.ok(server.includes("refundStaleCreditReservations"), "hosted service should reap stale credit reservations");
+assert.ok(server.includes("deleteExpiredSessions"), "hosted service should clean expired sessions");
+assert.ok(server.includes("markStripeEventProcessing"), "Stripe webhooks should be idempotent by event id");
+assert.ok(server.includes("assertSafeProductionConfig"), "hosted service should refuse unsafe production config");
+assert.ok(server.includes("max_output_tokens: realtimeMaxOutputTokens"), "Realtime sessions should cap response output tokens");
+assert.ok(server.includes("expires_at: expiresAt"), "Realtime sessions should expire server-side");
+assert.ok(server.includes("enterRealtimeSession"), "Realtime sessions should have a user concurrency cap");
+assert.ok(server.includes("isAllowedAudioMimeType"), "hosted dictation should validate audio MIME types");
+assert.ok(server.includes("createPrivateQueryMetadata"), "web search ledger metadata should avoid storing raw queries");
+assert.equal(server.includes('metadata: { kind: "web_search", query }'), false, "web search metadata should not store raw query text");
 assert.ok(server.includes("enforceBrowserOrigin(request, url)"), "hosted service should enforce browser origin on mutable API requests");
 assert.ok(server.includes("function isBrowserMutableApiRequest"), "hosted service should define mutable API origin scope");
 assert.ok(server.includes('url.pathname !== "/api/billing/stripe/webhook"'), "Stripe webhooks should bypass browser origin checks and rely on Stripe signatures");
@@ -198,8 +222,17 @@ assert.ok(conohaNginx.includes("client_max_body_size 30m"), "ConoHa nginx should
 assert.ok(conohaNginx.includes("X-Content-Type-Options"), "ConoHa nginx should send nosniff header");
 assert.ok(conohaNginx.includes('X-Frame-Options "SAMEORIGIN"'), "ConoHa nginx should allow same-origin demo framing only");
 assert.ok(conohaNginx.includes("Permissions-Policy"), "ConoHa nginx should send a permissions policy");
+assert.ok(conohaNginx.includes("Strict-Transport-Security"), "ConoHa nginx should send HSTS");
+assert.ok(conohaNginx.includes("limit_req zone=mind_atlas_api"), "ConoHa nginx should rate-limit API routes");
+assert.ok(conohaNginx.includes("limit_req zone=mind_atlas_auth"), "ConoHa nginx should rate-limit auth routes");
+assert.ok(conohaRateLimits.includes("limit_req_zone"), "ConoHa nginx rate-limit zones should be documented");
 assert.ok(serviceDb.includes("export async function reserveCredit"), "service DB should expose atomic credit reservation");
 assert.ok(serviceDb.includes("export async function settleCreditReservation"), "service DB should expose reservation settlement");
+assert.ok(serviceDb.includes("create table if not exists stripe_events"), "service DB should store Stripe webhook event ids");
+assert.ok(serviceDb.includes("export async function refundStaleCreditReservations"), "service DB should expose stale reservation cleanup");
+assert.ok(serviceDb.includes("export async function deleteExpiredSessions"), "service DB should expose session cleanup");
+assert.equal(serviceDb.includes("email text unique not null"), false, "Google email should not be a unique identity key");
+assert.equal(serviceDb.includes('subscription?.status === "trialing"'), false, "trialing subscriptions should not unlock included AI credit");
 assert.equal(serviceDb.includes("subscription?.current_period_start ?? new Date()"), false, "credit periods must not fall back to the current date");
 assert.ok(serviceDb.includes('reason: "billing_period_unavailable"'), "active subscriptions without synced billing periods should not grant credit");
 assert.ok(server.includes("stripePatchFromStripeSubscription(subscription, object.customer, stripePriceId)"), "Stripe checkout completion should use item-aware billing period extraction");

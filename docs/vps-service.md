@@ -45,7 +45,9 @@ npm run service:start -> server/mind-atlas-service.mjs
   date.
 - Chat and web search debit estimated provider cost after each response.
   Dictation debits a small estimated transcription cost. Realtime Talk debits
-  a fixed reservation amount when a WebRTC session is successfully opened
+  a fixed reservation amount when a WebRTC session is successfully opened.
+  Realtime sessions are additionally capped by session expiration, output-token
+  limit, one-session-per-user concurrency, and a browser-side auto-close timer
   because final Realtime usage is not reported back through the server-side
   SDP exchange.
 
@@ -204,7 +206,9 @@ MIND_ATLAS_SERVICE_CHAT_RESERVE_CHARS_PER_TOKEN=2
 MIND_ATLAS_SERVICE_MAX_REQUEST_ESTIMATE_MICRO_USD=150000
 MIND_ATLAS_SERVICE_HIGH_COST_OUTPUT_USD_PER_1M=50
 MIND_ATLAS_SERVICE_HIGH_COST_MAX_OUTPUT_TOKENS=2048
-MIND_ATLAS_REALTIME_SESSION_MICRO_USD=100000
+MIND_ATLAS_REALTIME_SESSION_MICRO_USD=750000
+MIND_ATLAS_REALTIME_MAX_OUTPUT_TOKENS=512
+MIND_ATLAS_REALTIME_MAX_SESSION_SECONDS=300
 MIND_ATLAS_REALTIME_MODELS=gpt-realtime-2
 MIND_ATLAS_STRIPE_WEBHOOK_MAX_BYTES=1048576
 MIND_ATLAS_STRIPE_WEBHOOK_TOLERANCE_SECONDS=300
@@ -214,6 +218,15 @@ MIND_ATLAS_WEB_SEARCH_MIN_MICRO_USD=15000
 MIND_ATLAS_WEB_SEARCH_MAX_QUERY_CHARS=1000
 MIND_ATLAS_DEFAULT_INPUT_USD_PER_1M=1.5
 MIND_ATLAS_DEFAULT_OUTPUT_USD_PER_1M=8
+MIND_ATLAS_RATE_LIMIT_WINDOW_MS=60000
+MIND_ATLAS_RATE_LIMIT_IP_MAX=180
+MIND_ATLAS_RATE_LIMIT_AUTH_MAX=20
+MIND_ATLAS_RATE_LIMIT_USER_AI_MAX=30
+MIND_ATLAS_AI_CONCURRENT_REQUESTS=2
+MIND_ATLAS_REALTIME_CONCURRENT_SESSIONS=1
+MIND_ATLAS_SESSION_IDLE_DAYS=7
+MIND_ATLAS_STALE_RESERVATION_MINUTES=30
+MIND_ATLAS_MAINTENANCE_INTERVAL_MS=300000
 ```
 
 Provider model lists are fetched server-side from provider APIs when
@@ -291,11 +304,11 @@ Models whose output price is at least
 This keeps high-cost options such as Claude Fable 5 usable without raising the
 global per-request safety limit.
 Claude Fable 5 also has a one-pass hosted-service exception: if the user has
-any Mind Atlas token remaining, the request reserves the user's full remaining
-credit, skips the normal per-request estimate ceiling, and is allowed to settle
-above the reservation. A successful Fable 5 call leaves the user's token at
-0 percent so a second call is rejected by the normal entitlement check. If the
-upstream call fails, the full reservation is refunded.
+enough Mind Atlas token for the estimated input and the request remains within
+the normal per-request safety ceiling, it reserves the user's full remaining
+credit and is allowed to settle above the reservation. A successful Fable 5 call
+leaves the user's token at 0 percent so a second call is rejected by the normal
+entitlement check. If the upstream call fails, the full reservation is refunded.
 Realtime, Dictation, and web search also reserve their configured fixed,
 estimated, or minimum cost before upstream execution, then settle or refund the
 reservation.
@@ -350,6 +363,7 @@ sudo systemctl status mind-atlas
 Install the included nginx template:
 
 ```bash
+sudo cp deploy/conoha/nginx-rate-limits.conf /etc/nginx/conf.d/mind-atlas-rate-limits.conf
 sudo cp deploy/conoha/nginx.conf /etc/nginx/sites-available/mind-atlas
 ```
 
@@ -372,6 +386,7 @@ After Certbot, verify:
 
 ```bash
 curl https://mind-atlas.org/health
+curl -I https://mind-atlas.org/ | grep -i strict-transport-security
 ```
 
 ## Admin CUI
@@ -387,6 +402,8 @@ npm run service:admin -- grant-admin user@example.com
 npm run service:admin -- grant-credit user@example.com 20
 npm run service:admin -- set-credit user@example.com 0
 npm run service:admin -- sync-stripe-periods [user@example.com]
+npm run service:admin -- reap-stale-reservations [minutes]
+npm run service:admin -- cleanup-sessions [idleDays]
 ```
 
 `doctor` checks the built `dist` directory, Google OAuth, Stripe, OpenAI,
@@ -408,6 +425,14 @@ dates from Stripe. Run it after Stripe API-version changes, webhook issues, or
 whenever an active user shows no next token renewal date. When it fixes a
 previously missing period, it moves the latest existing credit account to the
 Stripe period key instead of granting a second 100 percent balance.
+
+`reap-stale-reservations` refunds old AI credit reservations that were created
+before an upstream call but never settled because the service crashed or was
+restarted mid-request. The service also runs this cleanup automatically on
+startup and periodically.
+
+`cleanup-sessions` deletes expired sessions and sessions idle longer than
+`MIND_ATLAS_SESSION_IDLE_DAYS`.
 
 ## Local Staging Before ConoHa
 

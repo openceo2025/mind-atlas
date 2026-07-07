@@ -17,7 +17,7 @@ export async function migrateDatabase() {
     create table if not exists users (
       id text primary key,
       google_sub text unique,
-      email text unique not null,
+      email text not null,
       name text not null default '',
       picture_url text not null default '',
       role text not null default 'user',
@@ -25,15 +25,21 @@ export async function migrateDatabase() {
       updated_at timestamptz not null default now()
     );
 
+    alter table users drop constraint if exists users_email_key;
+    create index if not exists users_email_idx on users(email);
+
     create table if not exists sessions (
       id_hash text primary key,
       user_id text not null references users(id) on delete cascade,
       expires_at timestamptz not null,
+      last_seen_at timestamptz not null default now(),
       created_at timestamptz not null default now()
     );
 
+    alter table sessions add column if not exists last_seen_at timestamptz not null default now();
     create index if not exists sessions_user_id_idx on sessions(user_id);
     create index if not exists sessions_expires_at_idx on sessions(expires_at);
+    create index if not exists sessions_last_seen_at_idx on sessions(last_seen_at);
 
     create table if not exists subscriptions (
       user_id text primary key references users(id) on delete cascade,
@@ -85,6 +91,16 @@ export async function migrateDatabase() {
     );
 
     create index if not exists usage_events_user_created_idx on usage_events(user_id, created_at desc);
+
+    create table if not exists stripe_events (
+      id text primary key,
+      type text not null default '',
+      status text not null default 'processing',
+      created_at timestamptz not null default now(),
+      processed_at timestamptz
+    );
+
+    create index if not exists stripe_events_status_created_idx on stripe_events(status, created_at desc);
   `);
 }
 
@@ -121,11 +137,18 @@ export async function deleteSession(token) {
   await pool.query("delete from sessions where id_hash = $1", [hashSessionToken(token)]);
 }
 
-export async function getSessionUser(token) {
+export async function getSessionUser(token, idleTtlDays = 7) {
   if (!token) return null;
   const result = await pool.query(
     `
-      select
+      update sessions
+      set last_seen_at = now()
+      from users
+      where sessions.user_id = users.id
+        and sessions.id_hash = $1
+        and sessions.expires_at > now()
+        and sessions.last_seen_at > now() - ($2 || ' days')::interval
+      returning
         users.id,
         users.google_sub,
         users.email,
@@ -134,14 +157,22 @@ export async function getSessionUser(token) {
         users.role,
         users.created_at,
         users.updated_at
-      from sessions
-      join users on users.id = sessions.user_id
-      where sessions.id_hash = $1 and sessions.expires_at > now()
-      limit 1
     `,
-    [hashSessionToken(token)],
+    [hashSessionToken(token), idleTtlDays],
   );
   return result.rows[0] ?? null;
+}
+
+export async function deleteExpiredSessions(idleTtlDays = 7) {
+  const result = await pool.query(
+    `
+      delete from sessions
+      where expires_at <= now()
+         or last_seen_at <= now() - ($1 || ' days')::interval
+    `,
+    [idleTtlDays],
+  );
+  return result.rowCount ?? 0;
 }
 
 export async function getUserSubscription(userId) {
@@ -197,7 +228,7 @@ export async function upsertSubscriptionByStripeCustomer(stripeCustomerId, patch
 }
 
 export function isSubscriptionActive(subscription) {
-  return subscription?.status === "active" || subscription?.status === "trialing";
+  return subscription?.status === "active";
 }
 
 export function creditPeriodKey(subscription = null) {
@@ -344,6 +375,138 @@ export async function settleCreditReservation({ userId, subscription, reservedMi
   } finally {
     client.release();
   }
+}
+
+export async function refundStaleCreditReservations({ olderThanMinutes = 30, limit = 100 } = {}) {
+  const cutoffMinutes = Math.max(1, Math.trunc(Number(olderThanMinutes) || 30));
+  const rowLimit = Math.max(1, Math.min(500, Math.trunc(Number(limit) || 100)));
+  const stale = await pool.query(
+    `
+      select
+        credit_ledger.user_id,
+        credit_ledger.period_key,
+        credit_ledger.request_id,
+        -credit_ledger.delta_micro_usd as reserved_micro_usd,
+        credit_ledger.metadata
+      from credit_ledger
+      where credit_ledger.reason = 'ai_usage_reserve'
+        and credit_ledger.request_id is not null
+        and credit_ledger.created_at < now() - ($1 || ' minutes')::interval
+        and not exists (
+          select 1
+          from credit_ledger settled
+          where settled.request_id = credit_ledger.request_id
+            and settled.reason in ('ai_usage_refund', 'ai_usage_overage')
+        )
+        and not exists (
+          select 1
+          from usage_events
+          where usage_events.request_id = credit_ledger.request_id
+        )
+      order by credit_ledger.created_at asc
+      limit $2
+    `,
+    [cutoffMinutes, rowLimit],
+  );
+  let refunded = 0;
+  for (const row of stale.rows) {
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      const stillStale = await client.query(
+        `
+          select 1
+          from credit_ledger reserve
+          where reserve.request_id = $1
+            and reserve.reason = 'ai_usage_reserve'
+            and not exists (
+              select 1
+              from credit_ledger settled
+              where settled.request_id = reserve.request_id
+                and settled.reason in ('ai_usage_refund', 'ai_usage_overage')
+            )
+            and not exists (
+              select 1
+              from usage_events
+              where usage_events.request_id = reserve.request_id
+            )
+          limit 1
+        `,
+        [row.request_id],
+      );
+      if (!stillStale.rows[0]) {
+        await client.query("rollback");
+        continue;
+      }
+      const amount = Math.max(1, Math.round(Number(row.reserved_micro_usd ?? 0)));
+      await client.query(
+        `
+          update credit_accounts
+          set credit_remaining_micro_usd = greatest(0, least(credit_limit_micro_usd, credit_remaining_micro_usd + $3)),
+              updated_at = now()
+          where user_id = $1 and period_key = $2
+        `,
+        [row.user_id, row.period_key, amount],
+      );
+      await client.query(
+        "insert into credit_ledger (id, user_id, period_key, delta_micro_usd, reason, request_id, metadata) values ($1, $2, $3, $4, $5, $6, $7)",
+        [
+          `led_${crypto.randomUUID()}`,
+          row.user_id,
+          row.period_key,
+          amount,
+          "ai_usage_refund",
+          row.request_id,
+          {
+            ...(row.metadata ?? {}),
+            refundReason: "stale_reservation_reaper",
+            staleReservation: true,
+          },
+        ],
+      );
+      await client.query("commit");
+      refunded += 1;
+    } catch (error) {
+      await client.query("rollback").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  return refunded;
+}
+
+export async function markStripeEventProcessing(eventId, type = "") {
+  if (!eventId) return true;
+  const result = await pool.query(
+    `
+      insert into stripe_events (id, type, status)
+      values ($1, $2, 'processing')
+      on conflict (id) do update set
+        type = excluded.type,
+        status = 'processing',
+        created_at = now(),
+        processed_at = null
+      where stripe_events.status = 'processing'
+        and stripe_events.created_at < now() - interval '1 hour'
+      returning id
+    `,
+    [eventId, type],
+  );
+  return Boolean(result.rows[0]);
+}
+
+export async function markStripeEventProcessed(eventId) {
+  if (!eventId) return;
+  await pool.query(
+    "update stripe_events set status = 'processed', processed_at = now() where id = $1",
+    [eventId],
+  );
+}
+
+export async function forgetStripeEvent(eventId) {
+  if (!eventId) return;
+  await pool.query("delete from stripe_events where id = $1 and status = 'processing'", [eventId]);
 }
 
 export async function recordUsageEvent(event) {

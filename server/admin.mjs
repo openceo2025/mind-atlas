@@ -111,6 +111,20 @@ try {
       }
       console.table(results);
     }
+  } else if (command === "reap-stale-reservations") {
+    const db = await getDb();
+    await db.migrateDatabase();
+    const minutes = Number(args[0] ?? 30);
+    if (!Number.isFinite(minutes) || minutes < 1) throw new Error("minutes must be a positive number");
+    const refunded = await db.refundStaleCreditReservations({ olderThanMinutes: minutes });
+    console.log(`Refunded stale reservations: ${refunded}`);
+  } else if (command === "cleanup-sessions") {
+    const db = await getDb();
+    await db.migrateDatabase();
+    const idleDays = Number(args[0] ?? getEnv("MIND_ATLAS_SESSION_IDLE_DAYS", "7"));
+    if (!Number.isFinite(idleDays) || idleDays < 1) throw new Error("idleDays must be a positive number");
+    const deleted = await db.deleteExpiredSessions(idleDays);
+    console.log(`Deleted expired sessions: ${deleted}`);
   } else {
     throw new Error(`Unknown command: ${command}`);
   }
@@ -216,6 +230,7 @@ async function runDoctor() {
   const mockBilling = enabledEnv("MIND_ATLAS_STAGING_MOCK_BILLING");
   const mockProviders = enabledEnv("MIND_ATLAS_STAGING_MOCK_PROVIDERS");
   const modelPricePolicy = getEnv("MIND_ATLAS_MODEL_PRICE_POLICY", "allow-default").toLowerCase();
+  const productionOrigin = isProductionOrigin(publicOrigin);
   const modelPrices = mergeModelPrices(parseJsonEnv("MIND_ATLAS_MODEL_PRICES_JSON", {}));
   const missingProviderPrices = configuredProviders
     .filter((provider) => !modelPrices[`${provider.id}:*`])
@@ -230,9 +245,20 @@ async function runDoctor() {
   add("OpenAI realtime/tools", mockProviders || hasAnyUsableEnv(["MIND_ATLAS_OPENAI_API_KEY", "OPENAI_API_KEY"]), mockProviders ? "staging mock enabled" : "required for Realtime, Dictation, and web_search");
   add("chat providers", configuredProviders.length > 0, configuredProviders.map((provider) => provider.label).join(", ") || "none configured");
   add(
+    "production mocks disabled",
+    !productionOrigin || (!mockAuth && !mockBilling && !mockProviders),
+    productionOrigin ? `auth=${mockAuth} billing=${mockBilling} providers=${mockProviders}` : "not production origin",
+  );
+  add(
     "model price policy",
-    ["allow-default", "require-provider", "require-model"].includes(modelPricePolicy),
+    ["allow-default", "require-provider", "require-model"].includes(modelPricePolicy) && (!productionOrigin || modelPricePolicy === "require-model"),
     modelPricePolicy,
+  );
+  add(
+    "realtime safety caps",
+    envIntInRange("MIND_ATLAS_REALTIME_MAX_OUTPUT_TOKENS", 512, 1, 4096)
+      && envIntInRange("MIND_ATLAS_REALTIME_MAX_SESSION_SECONDS", 300, 30, 1800),
+    `maxOutput=${getEnv("MIND_ATLAS_REALTIME_MAX_OUTPUT_TOKENS", "512")} maxSeconds=${getEnv("MIND_ATLAS_REALTIME_MAX_SESSION_SECONDS", "300")}`,
   );
   add(
     "provider price coverage",
@@ -298,6 +324,8 @@ Usage:
   npm run service:admin -- grant-credit <email> <percent>
   npm run service:admin -- set-credit <email> <percent>
   npm run service:admin -- sync-stripe-periods [email]
+  npm run service:admin -- reap-stale-reservations [minutes]
+  npm run service:admin -- cleanup-sessions [idleDays]
 `);
 }
 
@@ -335,6 +363,21 @@ function isPlaceholderSecret(value) {
 function enabledEnv(name) {
   const value = getEnv(name).toLowerCase();
   return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+function envIntInRange(name, fallback, min, max) {
+  const value = Number(getEnv(name, String(fallback)));
+  return Number.isInteger(value) && value >= min && value <= max;
+}
+
+function isProductionOrigin(origin) {
+  if (!origin) return false;
+  try {
+    const url = new URL(origin);
+    return url.protocol === "https:" && !["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function parseJsonEnv(name, fallback = {}) {

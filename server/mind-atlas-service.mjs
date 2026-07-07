@@ -6,13 +6,18 @@ import path from "node:path";
 import { URL } from "node:url";
 import {
   buildEntitlement,
+  deleteExpiredSessions,
   getSessionUser,
   getUserSubscription,
+  forgetStripeEvent,
   isSubscriptionActive,
+  markStripeEventProcessed,
+  markStripeEventProcessing,
   migrateDatabase,
   MONTHLY_CREDIT_MICRO_USD,
   recordUsageEvent,
   reserveCredit,
+  refundStaleCreditReservations,
   settleCreditReservation,
   upsertGoogleUser,
   upsertSubscriptionByStripeCustomer,
@@ -45,9 +50,11 @@ const realtimeVoice = getEnv("MIND_ATLAS_REALTIME_VOICE", "marin");
 const realtimeTranscriptionModel = getEnv("MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL", "gpt-4o-transcribe");
 const transcriptionModel = getEnv("MIND_ATLAS_TRANSCRIPTION_MODEL", "gpt-4o-transcribe");
 const maxOutputTokens = readIntEnv("MIND_ATLAS_SERVICE_MAX_OUTPUT_TOKENS", 4096);
+const realtimeMaxOutputTokens = readIntEnv("MIND_ATLAS_REALTIME_MAX_OUTPUT_TOKENS", 512);
+const realtimeMaxSessionSeconds = readIntEnv("MIND_ATLAS_REALTIME_MAX_SESSION_SECONDS", 300);
 const highCostMaxOutputTokens = readIntEnv("MIND_ATLAS_SERVICE_HIGH_COST_MAX_OUTPUT_TOKENS", 2048);
 const highCostOutputUsdPer1m = Number(getEnv("MIND_ATLAS_SERVICE_HIGH_COST_OUTPUT_USD_PER_1M", "50"));
-const realtimeSessionMicroUsd = readIntEnv("MIND_ATLAS_REALTIME_SESSION_MICRO_USD", 100_000);
+const realtimeSessionMicroUsd = readIntEnv("MIND_ATLAS_REALTIME_SESSION_MICRO_USD", 750_000);
 const transcriptionMinMicroUsd = readIntEnv("MIND_ATLAS_TRANSCRIPTION_MIN_MICRO_USD", 2_000);
 const transcriptionUsdPerMinute = Number(getEnv("MIND_ATLAS_TRANSCRIPTION_USD_PER_MINUTE", "0.006"));
 const webSearchMinMicroUsd = readIntEnv("MIND_ATLAS_WEB_SEARCH_MIN_MICRO_USD", 15_000);
@@ -68,6 +75,15 @@ const providerModelCacheMs = readIntEnv("MIND_ATLAS_PROVIDER_MODEL_CACHE_MS", 5 
 const providerModelRefreshMs = readIntEnv("MIND_ATLAS_PROVIDER_MODEL_REFRESH_MS", providerModelCacheMs);
 const providerModelFetchTimeoutMs = readIntEnv("MIND_ATLAS_PROVIDER_MODEL_FETCH_TIMEOUT_MS", 10_000);
 const providerModelMaxCount = readIntEnv("MIND_ATLAS_PROVIDER_MODEL_MAX_COUNT", 80);
+const ipRateLimitWindowMs = readIntEnv("MIND_ATLAS_RATE_LIMIT_WINDOW_MS", 60_000);
+const ipRateLimitMax = readIntEnv("MIND_ATLAS_RATE_LIMIT_IP_MAX", 180);
+const authRateLimitMax = readIntEnv("MIND_ATLAS_RATE_LIMIT_AUTH_MAX", 20);
+const userAiRateLimitMax = readIntEnv("MIND_ATLAS_RATE_LIMIT_USER_AI_MAX", 30);
+const userAiConcurrentRequests = readIntEnv("MIND_ATLAS_AI_CONCURRENT_REQUESTS", 2);
+const realtimeConcurrentSessions = readIntEnv("MIND_ATLAS_REALTIME_CONCURRENT_SESSIONS", 1);
+const sessionIdleDays = readIntEnv("MIND_ATLAS_SESSION_IDLE_DAYS", 7);
+const staleReservationMinutes = readIntEnv("MIND_ATLAS_STALE_RESERVATION_MINUTES", 30);
+const maintenanceIntervalMs = readIntEnv("MIND_ATLAS_MAINTENANCE_INTERVAL_MS", 5 * 60 * 1000);
 const stagingMockAuth = readBoolEnv("MIND_ATLAS_STAGING_MOCK_AUTH", false);
 const stagingMockBilling = readBoolEnv("MIND_ATLAS_STAGING_MOCK_BILLING", false);
 const stagingMockProviders = readBoolEnv("MIND_ATLAS_STAGING_MOCK_PROVIDERS", false);
@@ -78,11 +94,17 @@ const openAiApiKeyUsable = isUsableServiceSecret(openAiApiKey);
 const providerCatalog = createProviderCatalog();
 const providerModelCache = new Map();
 const providerModelAvailabilityCache = new Map();
+const rateLimitBuckets = new Map();
+const userConcurrencyCounts = new Map();
+const activeRealtimeSessions = new Map();
 
+assertSafeProductionConfig();
 await migrateDatabase();
+await runServiceMaintenanceOnce("startup");
 
 const server = http.createServer(async (request, response) => {
   try {
+    enforceRateLimit(request);
     setCors(request, response);
     if (request.method === "OPTIONS") {
       response.writeHead(204).end();
@@ -207,6 +229,144 @@ server.listen(servicePort, serviceHost, () => {
   console.log(`Static dist: ${distDir}`);
 });
 scheduleProviderModelRefresh();
+scheduleServiceMaintenance();
+
+function assertSafeProductionConfig() {
+  if (!isProductionOrigin()) return;
+  const enabledMocks = [
+    stagingMockAuth ? "MIND_ATLAS_STAGING_MOCK_AUTH" : "",
+    stagingMockBilling ? "MIND_ATLAS_STAGING_MOCK_BILLING" : "",
+    stagingMockProviders ? "MIND_ATLAS_STAGING_MOCK_PROVIDERS" : "",
+  ].filter(Boolean);
+  if (enabledMocks.length) {
+    throw new Error(`Refusing to start production service with staging mocks enabled: ${enabledMocks.join(", ")}`);
+  }
+  if (!cookieSecure) throw new Error("Refusing to start production service without secure cookies");
+  if (modelPricePolicy !== "require-model") {
+    throw new Error("Refusing to start production service unless MIND_ATLAS_MODEL_PRICE_POLICY=require-model");
+  }
+  if (realtimeMaxOutputTokens < 1 || realtimeMaxOutputTokens > 4096) {
+    throw new Error("MIND_ATLAS_REALTIME_MAX_OUTPUT_TOKENS must be between 1 and 4096");
+  }
+  if (realtimeMaxSessionSeconds < 30 || realtimeMaxSessionSeconds > 1800) {
+    throw new Error("MIND_ATLAS_REALTIME_MAX_SESSION_SECONDS must be between 30 and 1800");
+  }
+}
+
+function isProductionOrigin() {
+  const origin = new URL(publicOrigin);
+  return origin.protocol === "https:" && !["localhost", "127.0.0.1", "::1"].includes(origin.hostname);
+}
+
+async function runServiceMaintenanceOnce(reason) {
+  try {
+    const [deletedSessions, refundedReservations] = await Promise.all([
+      deleteExpiredSessions(sessionIdleDays),
+      refundStaleCreditReservations({ olderThanMinutes: staleReservationMinutes }),
+    ]);
+    if (deletedSessions || refundedReservations) {
+      console.log(`Mind Atlas service maintenance (${reason}): deletedSessions=${deletedSessions} refundedReservations=${refundedReservations}`);
+    }
+  } catch (error) {
+    console.error(`Mind Atlas service maintenance failed (${reason})`, error);
+  }
+}
+
+function scheduleServiceMaintenance() {
+  if (maintenanceIntervalMs <= 0) return;
+  const timer = setInterval(() => {
+    void runServiceMaintenanceOnce("interval");
+  }, maintenanceIntervalMs);
+  timer.unref?.();
+}
+
+function enforceRateLimit(request) {
+  const url = new URL(request.url ?? "/", publicOrigin);
+  if (url.pathname === "/health") return;
+  const ip = requestClientIp(request);
+  consumeRateLimit(`ip:${ip}`, ipRateLimitMax, ipRateLimitWindowMs);
+  if (url.pathname.startsWith("/api/auth/")) {
+    consumeRateLimit(`auth:${ip}`, authRateLimitMax, 10 * 60 * 1000);
+  }
+}
+
+function enforceUserRateLimit(userId, scope, maxRequests) {
+  consumeRateLimit(`user:${scope}:${userId}`, maxRequests, ipRateLimitWindowMs);
+}
+
+function consumeRateLimit(key, maxRequests, windowMs) {
+  if (maxRequests <= 0 || windowMs <= 0) return;
+  const now = Date.now();
+  const current = rateLimitBuckets.get(key);
+  if (!current || current.resetAt <= now) {
+    rateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return;
+  }
+  if (current.count >= maxRequests) {
+    throw new ServiceError(429, "Rate limit exceeded");
+  }
+  current.count += 1;
+}
+
+function requestClientIp(request) {
+  const forwardedFor = stringValue(request.headers["x-forwarded-for"]).split(",")[0]?.trim();
+  return forwardedFor || stringValue(request.headers["x-real-ip"]) || request.socket?.remoteAddress || "unknown";
+}
+
+function enterUserConcurrency(key, limit) {
+  if (limit <= 0) return () => {};
+  const count = userConcurrencyCounts.get(key) ?? 0;
+  if (count >= limit) throw new ServiceError(429, "Too many concurrent AI requests");
+  userConcurrencyCounts.set(key, count + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const next = Math.max(0, (userConcurrencyCounts.get(key) ?? 1) - 1);
+    if (next) userConcurrencyCounts.set(key, next);
+    else userConcurrencyCounts.delete(key);
+  };
+}
+
+function attachReleaseOnResponse(response, release) {
+  let released = false;
+  const once = () => {
+    if (released) return;
+    released = true;
+    release();
+  };
+  response.once?.("finish", once);
+  response.once?.("close", once);
+  response.once?.("error", once);
+}
+
+function enterRealtimeSession(userId) {
+  if (realtimeConcurrentSessions <= 0) return () => {};
+  const key = `realtime:${userId}`;
+  const now = Date.now();
+  const existing = (activeRealtimeSessions.get(key) ?? []).filter((item) => item.expiresAt > now);
+  if (existing.length >= realtimeConcurrentSessions) {
+    activeRealtimeSessions.set(key, existing);
+    throw new ServiceError(429, "Too many concurrent Realtime sessions");
+  }
+  const entry = { id: crypto.randomUUID(), expiresAt: now + realtimeMaxSessionSeconds * 1000 };
+  existing.push(entry);
+  activeRealtimeSessions.set(key, existing);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    const next = (activeRealtimeSessions.get(key) ?? []).filter((item) => item.id !== entry.id && item.expiresAt > Date.now());
+    if (next.length) activeRealtimeSessions.set(key, next);
+    else activeRealtimeSessions.delete(key);
+  };
+  const timer = setTimeout(release, realtimeMaxSessionSeconds * 1000);
+  timer.unref?.();
+  return () => {
+    clearTimeout(timer);
+    release();
+  };
+}
 
 async function handleGoogleStart(_request, response, url) {
   if (stagingMockAuth) {
@@ -253,6 +413,7 @@ async function handleGoogleCallback(request, response, url) {
   const email = stringValue(profile.email);
   const sub = stringValue(profile.sub);
   if (!email || !sub) throw new ServiceError(502, "Google profile did not include email/sub");
+  if (profile.email_verified !== true) throw new ServiceError(403, "Google account email is not verified");
   const user = await upsertGoogleUser({
     sub,
     email,
@@ -342,12 +503,26 @@ async function handleStripeWebhook(request, response) {
   const rawBody = await readRawBody(request, stripeWebhookMaxBytes);
   verifyStripeSignature(rawBody, request.headers["stripe-signature"] ?? "");
   const event = JSON.parse(rawBody.toString("utf8"));
-  await applyStripeEvent(event);
+  const eventId = stringValue(event.id);
+  if (eventId) {
+    const shouldProcess = await markStripeEventProcessing(eventId, stringValue(event.type));
+    if (!shouldProcess) {
+      sendJson(response, 200, { received: true, duplicate: true });
+      return;
+    }
+  }
+  try {
+    await applyStripeEvent(event);
+    await markStripeEventProcessed(eventId);
+  } catch (error) {
+    await forgetStripeEvent(eventId);
+    throw error;
+  }
   sendJson(response, 200, { received: true });
 }
 
 async function handleTextPartnerTurn(request, response) {
-  const { user, subscription, credit } = await requireAiEntitlement(request);
+  const { user, subscription, credit } = await requireAiEntitlement(request, response);
   const payload = await readJson(request);
   const provider = providerCatalog.find((item) => item.id === stringValue(payload.provider));
   if (!provider) throw new ServiceError(400, "Unknown chat provider");
@@ -416,7 +591,7 @@ async function handleTextPartnerTurn(request, response) {
 }
 
 async function handleRealtimeCall(request, response) {
-  const { user, subscription } = await requireAiEntitlement(request);
+  const { user, subscription } = await requireAiEntitlement(request, null, { attachConcurrency: false });
   if (!stagingMockProviders && !openAiApiKeyUsable) throw new ServiceError(503, "OpenAI API key is not configured");
   const payload = await readJson(request);
   const startedAt = Date.now();
@@ -424,15 +599,22 @@ async function handleRealtimeCall(request, response) {
   const model = resolveRealtimeModel(payload.model);
   const sdp = stringValue(payload.sdp);
   if (!sdp.trim()) throw new ServiceError(400, "sdp is required");
-  const reservation = await reserveUsageCredit({
-    user,
-    subscription,
-    requestId,
-    provider: "openai",
-    model,
-    amountMicroUsd: realtimeSessionMicroUsd,
-    metadata: { kind: "realtime_session_reservation" },
-  });
+  const releaseRealtimeSession = enterRealtimeSession(user.id);
+  let reservation;
+  try {
+    reservation = await reserveUsageCredit({
+      user,
+      subscription,
+      requestId,
+      provider: "openai",
+      model,
+      amountMicroUsd: realtimeSessionMicroUsd,
+      metadata: { kind: "realtime_session_reservation", maxSessionSeconds: realtimeMaxSessionSeconds, maxOutputTokens: realtimeMaxOutputTokens },
+    });
+  } catch (error) {
+    releaseRealtimeSession();
+    throw error;
+  }
   if (stagingMockProviders) {
     const account = await meterReservedUsage({
       user,
@@ -453,8 +635,10 @@ async function handleRealtimeCall(request, response) {
     response.writeHead(200, {
       "Content-Type": "application/sdp",
       "X-Mind-Atlas-Credit-Remaining-Percent": String(Math.round(creditPercent(account))),
+      "X-Mind-Atlas-Realtime-Max-Session-Seconds": String(realtimeMaxSessionSeconds),
     });
     response.end(createMockRealtimeSdp());
+    releaseRealtimeSession();
     return;
   }
   const formData = new FormData();
@@ -469,9 +653,11 @@ async function handleRealtimeCall(request, response) {
     });
     text = await upstream.text();
     if (!upstream.ok) {
-      throw new ServiceError(upstream.status, text || `OpenAI Realtime call failed with ${upstream.status}`);
+      console.warn("OpenAI Realtime call failed", { status: upstream.status, bodyPreview: text.slice(0, 500) });
+      throw new ServiceError(upstream.status, `OpenAI Realtime call failed with ${upstream.status}`);
     }
   } catch (error) {
+    releaseRealtimeSession();
     await refundUsageReservation({ user, subscription, reservation, provider: "openai", model, reason: "realtime_upstream_error" });
     throw error;
   }
@@ -494,12 +680,13 @@ async function handleRealtimeCall(request, response) {
   response.writeHead(200, {
     "Content-Type": "application/sdp",
     "X-Mind-Atlas-Credit-Remaining-Percent": String(Math.round(creditPercent(account))),
+    "X-Mind-Atlas-Realtime-Max-Session-Seconds": String(realtimeMaxSessionSeconds),
   });
   response.end(text);
 }
 
 async function handleAudioTranscription(request, response) {
-  const { user, subscription } = await requireAiEntitlement(request);
+  const { user, subscription } = await requireAiEntitlement(request, response);
   if (!stagingMockProviders && !openAiApiKeyUsable) throw new ServiceError(503, "OpenAI API key is not configured");
   const startedAt = Date.now();
   const requestId = `tr_${crypto.randomUUID()}`;
@@ -507,6 +694,7 @@ async function handleAudioTranscription(request, response) {
   const audio = formData.get("audio");
   if (!audio || typeof audio === "string") throw new ServiceError(400, "audio file is required");
   if (typeof audio.size === "number" && audio.size > 26 * 1024 * 1024) throw new ServiceError(413, "Audio file is too large for transcription");
+  if (!isAllowedAudioMimeType(audio.type)) throw new ServiceError(415, "Audio file type is not supported");
   const transcriptionCostMicroUsd = estimateTranscriptionMicroUsd(audio);
   const reservation = await reserveUsageCredit({
     user,
@@ -589,7 +777,7 @@ async function handleAudioTranscription(request, response) {
 }
 
 async function handleWebSearch(request, response) {
-  const { user, subscription } = await requireAiEntitlement(request);
+  const { user, subscription } = await requireAiEntitlement(request, response);
   if (!stagingMockProviders && !openAiApiKeyUsable) throw new ServiceError(503, "OpenAI API key is not configured");
   const startedAt = Date.now();
   const requestId = `ws_${crypto.randomUUID()}`;
@@ -602,6 +790,7 @@ async function handleWebSearch(request, response) {
   const webSearchReserveMicroUsd = stagingMockProviders
     ? webSearchMinMicroUsd
     : Math.max(webSearchMinMicroUsd, estimateCostMicroUsd("openai", webSearchModel, estimateTokens(query), webSearchMaxOutputTokens));
+  const queryMetadata = createPrivateQueryMetadata(query);
   const reservation = await reserveUsageCredit({
     user,
     subscription,
@@ -609,7 +798,7 @@ async function handleWebSearch(request, response) {
     provider: "openai",
     model: webSearchModel,
     amountMicroUsd: webSearchReserveMicroUsd,
-    metadata: { kind: "web_search", query },
+    metadata: { kind: "web_search", ...queryMetadata },
   });
   if (stagingMockProviders) {
     const model = webSearchModel;
@@ -626,7 +815,7 @@ async function handleWebSearch(request, response) {
       model,
       usage,
       reservation,
-      metadata: { kind: "web_search", query, mock: true },
+      metadata: { kind: "web_search", ...queryMetadata, mock: true },
     });
     sendJson(response, 200, {
       text,
@@ -674,7 +863,7 @@ async function handleWebSearch(request, response) {
     model: resultModel,
     usage,
     reservation,
-    metadata: { kind: "web_search", query },
+    metadata: { kind: "web_search", ...queryMetadata },
   });
   sendJson(response, 200, {
     text,
@@ -803,10 +992,13 @@ function buildPartnerSystemPrompt(payload) {
 }
 
 function buildRealtimeSessionConfig(payload) {
+  const expiresAt = Math.floor(Date.now() / 1000) + realtimeMaxSessionSeconds;
   return {
     type: "realtime",
     model: stringValue(payload.model) || realtimeModel,
     instructions: buildPartnerSystemPrompt(payload),
+    expires_at: expiresAt,
+    max_output_tokens: realtimeMaxOutputTokens,
     audio: {
       input: {
         transcription: {
@@ -860,7 +1052,7 @@ async function createSessionResponse(user) {
 
 async function authenticate(request) {
   const token = parseCookies(request.headers.cookie)[sessionCookieName];
-  return await getSessionUser(token);
+  return await getSessionUser(token, sessionIdleDays);
 }
 
 async function requireUser(request) {
@@ -869,8 +1061,9 @@ async function requireUser(request) {
   return user;
 }
 
-async function requireAiEntitlement(request) {
+async function requireAiEntitlement(request, response = null, options = {}) {
   const user = await requireUser(request);
+  enforceUserRateLimit(user.id, "ai", userAiRateLimitMax);
   const { subscription, credit, entitlement } = await buildEntitlement(user);
   if (!isSubscriptionActive(subscription)) throw new ServiceError(402, "Subscription is required for AI features");
   if (entitlement.reason === "billing_period_unavailable") {
@@ -878,6 +1071,9 @@ async function requireAiEntitlement(request) {
   }
   if (!entitlement.aiEnabled || Number(credit?.credit_remaining_micro_usd ?? 0) <= 0) {
     throw new ServiceError(402, "Mind Atlas token for this billing period is exhausted");
+  }
+  if (options.attachConcurrency !== false && response) {
+    attachReleaseOnResponse(response, enterUserConcurrency(`ai:${user.id}`, userAiConcurrentRequests));
   }
   return { user, subscription, credit };
 }
@@ -1417,12 +1613,12 @@ function enforceChatRequestLimits({ credit, provider, model, payload, outputToke
   const estimatedInputTokens = Math.max(1, Math.ceil(estimatedChars / chatReserveCharsPerToken));
   const inputOnlyCost = estimateCostMicroUsd(provider.id, model, estimatedInputTokens, 0);
   const remaining = Number(credit?.credit_remaining_micro_usd ?? 0);
-  if (!fable5OnePass && inputOnlyCost > remaining) {
+  if (inputOnlyCost > remaining) {
     throw new ServiceError(402, "Mind Atlas token for this billing period is too low for this request");
   }
 
   const requestCeiling = estimateCostMicroUsd(provider.id, model, estimatedInputTokens, outputTokenLimit);
-  if (!fable5OnePass && maxRequestEstimateMicroUsd > 0 && requestCeiling > maxRequestEstimateMicroUsd) {
+  if (maxRequestEstimateMicroUsd > 0 && requestCeiling > maxRequestEstimateMicroUsd) {
     throw new ServiceError(413, "Chat request exceeds the hosted service per-request safety limit");
   }
   return {
@@ -1556,6 +1752,32 @@ function estimateTranscriptionMicroUsd(audio) {
   const estimatedMinutes = estimatedSeconds / 60;
   const estimated = Math.ceil(estimatedMinutes * transcriptionUsdPerMinute * 1_000_000);
   return Math.max(transcriptionMinMicroUsd, estimated);
+}
+
+function isAllowedAudioMimeType(type) {
+  const normalized = stringValue(type).split(";")[0].trim().toLowerCase();
+  return [
+    "audio/aac",
+    "audio/flac",
+    "audio/m4a",
+    "audio/mp3",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/opus",
+    "audio/wav",
+    "audio/webm",
+    "audio/x-m4a",
+    "audio/x-wav",
+    "video/webm",
+  ].includes(normalized);
+}
+
+function createPrivateQueryMetadata(query) {
+  return {
+    queryHash: crypto.createHash("sha256").update(query).digest("hex"),
+    queryLength: query.length,
+  };
 }
 
 function createMockRealtimeSdp() {
@@ -1720,18 +1942,19 @@ async function readUpstreamJson(response) {
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
-    throw new ServiceError(response.ok ? 502 : response.status, text || `Upstream returned malformed JSON with ${response.status}`);
+    console.warn("Upstream returned malformed JSON", { status: response.status, bodyPreview: text.slice(0, 500) });
+    throw new ServiceError(response.ok ? 502 : response.status, "Upstream returned malformed JSON");
   }
   if (!response.ok) {
-    const message = stringValue(data.error?.message) || stringValue(data.error) || text || `Upstream failed with ${response.status}`;
-    throw new ServiceError(response.status, message);
+    console.warn("Upstream request failed", { status: response.status, bodyPreview: text.slice(0, 500) });
+    throw new ServiceError(response.status, `Upstream request failed with ${response.status}`);
   }
   return data;
 }
 
 async function serveStatic(response, method, pathname) {
   const safePath = pathname === "/" ? "/index.html" : pathname;
-  const distRoot = path.resolve(distDir);
+  const distRoot = await fsp.realpath(path.resolve(distDir));
   const normalized = path.normalize(decodePathname(safePath).replace(/^[/\\]+/, ""));
   if (normalized === ".." || normalized.startsWith(`..${path.sep}`) || path.isAbsolute(normalized)) {
     throw new ServiceError(403, "Forbidden");
@@ -1739,17 +1962,19 @@ async function serveStatic(response, method, pathname) {
   let filePath = path.resolve(distRoot, normalized);
   if (!isPathWithin(filePath, distRoot)) throw new ServiceError(403, "Forbidden");
   if (!fs.existsSync(filePath)) filePath = path.join(distRoot, "index.html");
-  const stat = await fsp.stat(filePath);
+  const realFilePath = await fsp.realpath(filePath);
+  if (!isPathWithin(realFilePath, distRoot)) throw new ServiceError(403, "Forbidden");
+  const stat = await fsp.stat(realFilePath);
   response.writeHead(200, {
-    "Content-Type": contentType(filePath),
+    "Content-Type": contentType(realFilePath),
     "Content-Length": stat.size,
-    "Cache-Control": filePath.endsWith(".html") ? "no-cache" : "public, max-age=31536000, immutable",
+    "Cache-Control": realFilePath.endsWith(".html") ? "no-cache" : "public, max-age=31536000, immutable",
   });
   if (method === "HEAD") {
     response.end();
     return;
   }
-  fs.createReadStream(filePath).pipe(response);
+  fs.createReadStream(realFilePath).pipe(response);
 }
 
 function sendJson(response, status, payload) {
@@ -1791,7 +2016,8 @@ function serviceErrorCode(status, message) {
   if (text.includes("not configured") || text.includes("api key")) return "service_not_configured";
   if (status === 403 && text.includes("origin")) return "origin_not_allowed";
   if (status === 403) return "request_forbidden";
-  if (status === 429 || status >= 500 || status === 401 || status === 403) return "provider_unavailable";
+  if (status === 429) return "rate_limited";
+  if (status >= 500 || status === 401 || status === 403) return "provider_unavailable";
   if (status === 400) return "bad_request";
   return "service_error";
 }
@@ -1822,6 +2048,8 @@ function serviceErrorMessage(code, status, message) {
       return "This request is not allowed.";
     case "provider_unavailable":
       return "The AI provider is temporarily unavailable.";
+    case "rate_limited":
+      return "Too many requests. Please wait a little and try again.";
     case "bad_request":
       return scrubServiceErrorMessage(message) || "The request could not be accepted.";
     default:
@@ -1857,9 +2085,23 @@ function setCors(request, response) {
 
 function enforceBrowserOrigin(request, url) {
   if (!isBrowserMutableApiRequest(request, url)) return;
-  const origin = stringValue(request.headers.origin);
-  if (!origin) return;
-  if (!allowedOrigins().includes(origin)) {
+  const origin = stringValue(request.headers.origin).replace(/\/+$/, "");
+  if (origin) {
+    if (!allowedOrigins().includes(origin)) {
+      throw new ServiceError(403, "Request origin is not allowed");
+    }
+    return;
+  }
+  const referer = stringValue(request.headers.referer);
+  if (referer) {
+    try {
+      const refererOrigin = new URL(referer).origin.replace(/\/+$/, "");
+      if (allowedOrigins().includes(refererOrigin)) return;
+    } catch {
+      // fall through to fail-closed error
+    }
+  }
+  if (isProductionOrigin()) {
     throw new ServiceError(403, "Request origin is not allowed");
   }
 }

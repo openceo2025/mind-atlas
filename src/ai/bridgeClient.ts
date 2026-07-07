@@ -149,7 +149,7 @@ export async function createRealtimeClientSecret(payload: RealtimeSessionConfig)
   return await readJsonResponse<Record<string, unknown>>(response);
 }
 
-export async function createRealtimeCall(payload: RealtimeSessionConfig & { sdp: string }) {
+export async function createRealtimeCall(payload: RealtimeSessionConfig & { sdp: string }): Promise<{ sdp: string; maxSessionSeconds?: number }> {
   const response = await fetchBridge("/api/realtime/calls", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -161,8 +161,12 @@ export async function createRealtimeCall(payload: RealtimeSessionConfig & { sdp:
     throw new Error(readBridgeErrorText(response.status, text, `Realtime call failed with ${response.status}`));
   }
   const sdp = await response.text();
+  const maxSessionSeconds = Number(response.headers.get("X-Mind-Atlas-Realtime-Max-Session-Seconds") ?? "");
   notifyHostedServiceSessionChanged();
-  return sdp;
+  return {
+    sdp,
+    maxSessionSeconds: Number.isFinite(maxSessionSeconds) && maxSessionSeconds > 0 ? maxSessionSeconds : undefined,
+  };
 }
 
 export async function transcribeAudio(blob: Blob, fileName = "dictation.webm"): Promise<AudioTranscriptionResult> {

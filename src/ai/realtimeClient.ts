@@ -90,6 +90,7 @@ export async function startVoicePartnerSession({
   let awaitingCommitForResponse = false;
   let pendingTurnCommitTimer: number | null = null;
   let commitFallbackTimer: number | null = null;
+  let maxSessionTimer: number | null = null;
   const pendingToolCalls = new Map<string, { name: string; arguments: string }>();
   const completedToolCallKeys = new Set<string>();
   const queuedEvents: Record<string, unknown>[] = [];
@@ -181,8 +182,14 @@ export async function startVoicePartnerSession({
     notificationSummary,
     tools: getVoiceToolDefinitions(),
   };
-  const answerSdp = await createRealtimeCall({ ...session, sdp: offer.sdp });
+  const realtimeCall = await createRealtimeCall({ ...session, sdp: offer.sdp });
+  const answerSdp = realtimeCall.sdp;
   await peerConnection.setRemoteDescription({ type: "answer", sdp: answerSdp });
+  if (realtimeCall.maxSessionSeconds) {
+    maxSessionTimer = window.setTimeout(() => {
+      stop();
+    }, realtimeCall.maxSessionSeconds * 1000);
+  }
 
   async function handleRealtimeEvent(event: unknown) {
     if (!event || typeof event !== "object" || !("type" in event)) return;
@@ -352,6 +359,10 @@ export async function startVoicePartnerSession({
     listening = false;
     clearTurnTimers();
     clearPlaybackSettleTimer();
+    if (maxSessionTimer !== null) {
+      window.clearTimeout(maxSessionTimer);
+      maxSessionTimer = null;
+    }
     summaryRejecter?.(new Error("Realtime session stopped."));
     summaryRejecter = null;
     summaryResolver = null;
