@@ -101,6 +101,23 @@ export async function migrateDatabase() {
     );
 
     create index if not exists stripe_events_status_created_idx on stripe_events(status, created_at desc);
+
+    create table if not exists cloud_notebooks (
+      id text primary key,
+      user_id text not null references users(id) on delete cascade,
+      visibility text not null default 'private',
+      share_token text unique,
+      title text not null default '',
+      data jsonb not null,
+      size_bytes integer not null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      last_accessed_at timestamptz
+    );
+
+    create index if not exists cloud_notebooks_user_updated_idx on cloud_notebooks(user_id, updated_at desc);
+    create index if not exists cloud_notebooks_user_created_idx on cloud_notebooks(user_id, created_at asc);
+    create index if not exists cloud_notebooks_share_token_idx on cloud_notebooks(share_token) where share_token is not null;
   `);
 }
 
@@ -559,6 +576,133 @@ export async function buildEntitlement(user) {
       aiEnabled: remaining > 0,
       reason: remaining > 0 ? "active" : "credit_exhausted",
     },
+  };
+}
+
+export async function createCloudNotebook({ userId, title, data, sizeBytes, visibility = "private", shareToken = null, quotaBytes }) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const result = await client.query(
+      `
+        insert into cloud_notebooks (id, user_id, visibility, share_token, title, data, size_bytes)
+        values ($1, $2, $3, $4, $5, $6::jsonb, $7)
+        returning id, user_id, visibility, share_token, title, size_bytes, created_at, updated_at
+      `,
+      [
+        `cld_${crypto.randomUUID()}`,
+        userId,
+        visibility === "public" ? "public" : "private",
+        shareToken || null,
+        String(title || "Mind Atlas").slice(0, 240),
+        JSON.stringify(data),
+        Math.max(0, Math.round(Number(sizeBytes) || 0)),
+      ],
+    );
+    const prunedCount = await pruneCloudNotebookQuota(client, userId, quotaBytes, result.rows[0].id);
+    const quota = await getCloudNotebookQuota(client, userId, quotaBytes);
+    await client.query("commit");
+    return { notebook: result.rows[0], prunedCount, quota };
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function listCloudNotebooks(userId, quotaBytes) {
+  const result = await pool.query(
+    `
+      select id, visibility, share_token, title, size_bytes, created_at, updated_at
+      from cloud_notebooks
+      where user_id = $1
+      order by updated_at desc
+      limit 100
+    `,
+    [userId],
+  );
+  return {
+    notebooks: result.rows,
+    quota: await getCloudNotebookQuota(pool, userId, quotaBytes),
+  };
+}
+
+export async function getCloudNotebook(userId, notebookId) {
+  const result = await pool.query(
+    `
+      select id, visibility, share_token, title, data, size_bytes, created_at, updated_at
+      from cloud_notebooks
+      where user_id = $1 and id = $2
+      limit 1
+    `,
+    [userId, notebookId],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getCloudNotebookByShareToken(shareToken) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const result = await client.query(
+      `
+        update cloud_notebooks
+        set last_accessed_at = now()
+        where share_token = $1
+          and visibility = 'public'
+        returning id, visibility, share_token, title, data, size_bytes, created_at, updated_at
+      `,
+      [shareToken],
+    );
+    await client.query("commit");
+    return result.rows[0] ?? null;
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function pruneCloudNotebookQuota(client, userId, quotaBytes, keepId) {
+  const quotaLimit = Math.max(1, Math.round(Number(quotaBytes) || 1));
+  const totalResult = await client.query(
+    "select coalesce(sum(size_bytes), 0)::bigint as total from cloud_notebooks where user_id = $1",
+    [userId],
+  );
+  let total = Number(totalResult.rows[0]?.total ?? 0);
+  if (total <= quotaLimit) return 0;
+
+  const candidates = await client.query(
+    `
+      select id, size_bytes
+      from cloud_notebooks
+      where user_id = $1
+        and id <> $2
+      order by created_at asc
+      for update
+    `,
+    [userId, keepId],
+  );
+  let prunedCount = 0;
+  for (const row of candidates.rows) {
+    if (total <= quotaLimit) break;
+    await client.query("delete from cloud_notebooks where id = $1 and user_id = $2", [row.id, userId]);
+    total -= Number(row.size_bytes ?? 0);
+    prunedCount += 1;
+  }
+  return prunedCount;
+}
+
+async function getCloudNotebookQuota(client, userId, quotaBytes) {
+  const result = await client.query(
+    "select coalesce(sum(size_bytes), 0)::bigint as used_bytes from cloud_notebooks where user_id = $1",
+    [userId],
+  );
+  return {
+    usedBytes: Number(result.rows[0]?.used_bytes ?? 0),
+    limitBytes: Math.max(1, Math.round(Number(quotaBytes) || 1)),
   };
 }
 

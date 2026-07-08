@@ -673,18 +673,47 @@ export interface WebSearchResult {
 }
 
 export interface CloudNotebookEntry {
+  id?: string;
   name: string;
+  title?: string;
   size: number;
   updatedAt: string;
+  visibility?: "private" | "public";
+  shareToken?: string;
 }
 
 export interface CloudNotebookListResult {
   directory: string;
   notebooks: CloudNotebookEntry[];
+  quota?: {
+    usedBytes: number;
+    limitBytes: number;
+  };
 }
 
 export interface CloudNotebookSaveResult extends CloudNotebookEntry {
   directory: string;
+  prunedCount?: number;
+  quota?: {
+    usedBytes: number;
+    limitBytes: number;
+  };
+}
+
+export interface CloudNotebookLoadResult {
+  entry: CloudNotebookEntry;
+  root: AtlasNode;
+}
+
+export interface CloudNotebookShareResult {
+  url: string;
+  token: string;
+  entry: CloudNotebookEntry;
+  prunedCount?: number;
+  quota?: {
+    usedBytes: number;
+    limitBytes: number;
+  };
 }
 
 export interface RealtimeSessionConfig {

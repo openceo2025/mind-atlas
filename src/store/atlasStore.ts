@@ -258,6 +258,7 @@ interface AtlasStore {
   attachmentPreviewUrls: Record<string, string>;
   birthMarks: Record<string, number>;
   titleEditRequestId: string | null;
+  bodyEditRequestId: string | null;
   selectNode: (id: string) => void;
   selectNodeInPlace: (id: string) => void;
   focusNode: (id: string) => void;
@@ -301,7 +302,7 @@ interface AtlasStore {
   addChildNodes: (parentId: string, nodes: ChildNodeDraft[], options?: { focus?: boolean }) => string[];
   archivePartnerTurn: (archive: PartnerTurnArchive) => { requestNodeId: string; responseNodeId: string } | undefined;
   pasteNodeSubtree: (parentId: string, copiedRoot: AtlasNode) => string | undefined;
-  addSiblingNode: (id: string) => void;
+  addSiblingNode: (id: string) => string | undefined;
   promoteNodeOneLevel: (id: string) => void;
   deleteNode: (id: string) => void;
   moveNode: (id: string, worldPosition: [number, number, number]) => void;
@@ -310,6 +311,8 @@ interface AtlasStore {
   updateNodeAppearance: (id: string, patch: Pick<Partial<AtlasNode>, "color" | "texture">) => void;
   requestTitleEdit: (id?: string) => void;
   consumeTitleEditRequest: () => void;
+  requestBodyEdit: (id?: string) => void;
+  consumeBodyEditRequest: () => void;
   restoreAttachmentPreviews: () => Promise<void>;
   exportNotebook: () => string;
   importNotebook: (root: AtlasNode, datasetName?: string, attachmentPreviewUrls?: Record<string, string>) => void;
@@ -373,6 +376,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   attachmentPreviewUrls: {},
   birthMarks: {},
   titleEditRequestId: null,
+  bodyEditRequestId: null,
 
   selectNode: (id) => {
     const state = get();
@@ -590,6 +594,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         notificationPulses: [],
         notificationSnoozePrompt: null,
         titleEditRequestId: null,
+        bodyEditRequestId: null,
         notebookPersistenceStatus: "ready",
         notebookPersistenceError: "",
       }));
@@ -1173,7 +1178,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   addSiblingNode: (id) => {
     const state = get();
     const path = findNodePath(state.atlasRoot, id);
-    if (!path || path.length < 2) return;
+    if (!path || path.length < 2) return undefined;
     const parent = path[path.length - 2];
     const siblingDepth = path.length - 1;
     const insertIndex = parent.children.length;
@@ -1200,6 +1205,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       };
     });
     get().focusNode(sibling.id);
+    return sibling.id;
   },
 
   promoteNodeOneLevel: (id) => {
@@ -1287,6 +1293,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       notificationPulses: current.notificationPulses.filter((pulse) => !deletedNodeIds.includes(pulse.nodeId)),
       notificationSnoozePrompt: current.notificationSnoozePrompt && deletedNodeIds.includes(current.notificationSnoozePrompt.nodeId) ? null : current.notificationSnoozePrompt,
       titleEditRequestId: current.titleEditRequestId && deletedNodeIds.includes(current.titleEditRequestId) ? null : current.titleEditRequestId,
+      bodyEditRequestId: current.bodyEditRequestId && deletedNodeIds.includes(current.bodyEditRequestId) ? null : current.bodyEditRequestId,
       focusRequest: {
         x: nextPosition[0],
         y: nextPosition[1],
@@ -1373,6 +1380,15 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   consumeTitleEditRequest: () => set({ titleEditRequestId: null }),
 
+  requestBodyEdit: (id) => {
+    const state = get();
+    const nodeId = id ?? state.selectedNodeId;
+    if (nodeId === state.atlasRoot.id || !findNode(state.atlasRoot, nodeId)) return;
+    set({ bodyEditRequestId: nodeId, titleEditRequestId: null });
+  },
+
+  consumeBodyEditRequest: () => set({ bodyEditRequestId: null }),
+
   restoreAttachmentPreviews: async () => {
     const previewUrls = await createStoredAttachmentPreviewUrls(get().atlasRoot);
     set((state) => {
@@ -1422,6 +1438,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       notificationPulses: [],
       notificationSnoozePrompt: null,
       titleEditRequestId: atlasRoot.children[0]?.id ?? null,
+      bodyEditRequestId: null,
     });
   },
 
@@ -1499,6 +1516,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       notificationPulses: [],
       notificationSnoozePrompt: null,
       titleEditRequestId: null,
+      bodyEditRequestId: null,
     }));
   },
 
@@ -1523,6 +1541,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       cameraFocusNodeId: null,
       attachmentPreviewUrls: filterAttachmentPreviewUrls(state.attachmentPreviewUrls, previous.atlasRoot),
       titleEditRequestId: null,
+      bodyEditRequestId: null,
       unreadNotifications,
       notificationPulses: [],
       notificationSnoozePrompt: null,
@@ -1549,6 +1568,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       cameraFocusNodeId: null,
       attachmentPreviewUrls: filterAttachmentPreviewUrls(state.attachmentPreviewUrls, next.atlasRoot),
       titleEditRequestId: null,
+      bodyEditRequestId: null,
       unreadNotifications,
       notificationPulses: [],
       notificationSnoozePrompt: null,

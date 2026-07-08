@@ -1256,6 +1256,58 @@ async function verifyOperationControls(browser) {
   };
 }
 
+async function verifyEditorTitleAndKeyboardCreateFocus(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  await seedSingleChildNotebook(page);
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  const desktopToolbar = page.locator(".operation-panel-desktop");
+  await desktopToolbar.waitFor();
+  await desktopToolbar.getByRole("button", { name: "Go to child layer" }).click();
+  await page.locator(".focus-panel .node-title-input").waitFor();
+
+  const editedTitle = "Panel Title Edit";
+  await page.locator(".focus-panel .node-title-input").fill(editedTitle);
+  await page.waitForFunction(
+    (title) => document.querySelector('textarea.space-title-editor[data-node-id="verify-child"]')?.value === title,
+    editedTitle,
+  );
+
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  await page.waitForTimeout(80);
+  await page.keyboard.press("Tab");
+  await page.waitForFunction(() => {
+    const active = document.activeElement;
+    const selectedEditor = document.querySelector('textarea.space-title-editor[data-selected="true"]');
+    return active?.classList.contains("node-body-input") && selectedEditor?.getAttribute("data-node-id") !== "verify-child";
+  });
+
+  const state = await page.evaluate(() => {
+    const active = document.activeElement;
+    const selectedEditor = document.querySelector('textarea.space-title-editor[data-selected="true"]');
+    return {
+      activeClass: active instanceof HTMLElement ? active.className : "",
+      activeBody: active?.classList.contains("node-body-input") ?? false,
+      selectedNodeId: selectedEditor?.getAttribute("data-node-id") ?? null,
+      selectedTitle: selectedEditor instanceof HTMLTextAreaElement ? selectedEditor.value : null,
+      panelTitle: document.querySelector(".focus-panel .node-title-input")?.value ?? null,
+    };
+  });
+  if (!state.activeBody) {
+    throw new Error(`Editor title/body focus regression: ${JSON.stringify(state)}`);
+  }
+
+  await context.close();
+  return state;
+}
+
 async function verifyCommandDockAndMobileTextTap(browser) {
   const mobileContext = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -2581,6 +2633,7 @@ try {
     const phyllotaxisFocusOffset = await runStep("phyllotaxisFocusOffset", () => verifyPhyllotaxisFocusOffset(browser));
     const treeWheelZoom = await runStep("treeWheelZoom", () => verifyTreeWheelZoomDoesNotAutoFocus(browser));
     const operationControls = await runStep("operationControls", () => verifyOperationControls(browser));
+    const editorKeyboardCreateFocus = await runStep("editorKeyboardCreateFocus", () => verifyEditorTitleAndKeyboardCreateFocus(browser));
     const commandDock = await runStep("commandDock", () => verifyCommandDockAndMobileTextTap(browser));
     const providerUsage = await runStep("providerUsage", () => verifyProviderUsagePanel(browser));
     const mobileEditorKeyboard = await runStep("mobileEditorKeyboard", () => verifyMobileEditorKeyboardOverlay(browser));
@@ -2588,7 +2641,7 @@ try {
     const mobile = await runStep("mobileViewport", () => verifyViewport(browser, "mobile", { width: 390, height: 844 }));
     const mobileLandscape = await runStep("mobileLandscapeViewport", () => verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 }));
     console.log("UI verification passed");
-    console.log({ desktop, localDeveloperMode, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+    console.log({ desktop, localDeveloperMode, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
   }
 } finally {
   await browser.close();

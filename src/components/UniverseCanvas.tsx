@@ -332,6 +332,7 @@ export function UniverseCanvas({
   shareTargetRef,
   tutorialRootBirthUnlocked,
   embedInteractionLocked = false,
+  attachmentsEnabled = true,
 }: {
   theme: AtlasTheme;
   vrPanEnabled: boolean;
@@ -342,6 +343,7 @@ export function UniverseCanvas({
   shareTargetRef?: RefObject<HTMLElement | null>;
   tutorialRootBirthUnlocked?: boolean;
   embedInteractionLocked?: boolean;
+  attachmentsEnabled?: boolean;
 }) {
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeContextMenuState | null>(null);
   const mobilePerformanceMode = useMobilePerformanceMode();
@@ -388,11 +390,15 @@ export function UniverseCanvas({
         event.stopImmediatePropagation();
         const store = useAtlasStore.getState();
         if (event.key === "Enter") {
-          store.addSiblingNode(shortcutOriginNodeId);
+          const siblingId = store.addSiblingNode(shortcutOriginNodeId);
+          if (siblingId) store.requestBodyEdit(siblingId);
         } else {
           const parentPath = findNodePath(store.atlasRoot, shortcutOriginNodeId);
           const childId = store.addChildNode(shortcutOriginNodeId);
-          if (childId) emitOnboardingEvent("child-node-created", { childDepth: parentPath?.length ?? 1 });
+          if (childId) {
+            store.requestBodyEdit(childId);
+            emitOnboardingEvent("child-node-created", { childDepth: parentPath?.length ?? 1 });
+          }
         }
         setNodeContextMenu(null);
         return;
@@ -490,6 +496,7 @@ export function UniverseCanvas({
           layoutMode={layoutMode}
           pageActive={pageActive}
           embedInteractionLocked={embedInteractionLocked}
+          attachmentsEnabled={attachmentsEnabled}
           onOpenNodeContextMenu={setNodeContextMenu}
         />
         <NotificationPulseLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} pageActive={pageActive} />
@@ -1120,7 +1127,13 @@ function NavigationController({
             focusDistance,
             false,
           );
-    const focusScreenOffset = getGeneratedLayoutFocusScreenOffset(layoutMode, layoutViewport, stableLayoutMetrics.width, stableLayoutMetrics.height);
+    const focusScreenOffset = getGeneratedLayoutFocusScreenOffset(
+      layoutMode,
+      layoutViewport,
+      stableLayoutMetrics.width,
+      stableLayoutMetrics.height,
+      getVisibleCommandDockReservedBottom(stableLayoutMetrics.height),
+    );
     const focusWorldPerPixel = getWorldUnitsPerPixel(focusDistance, stableLayoutMetrics.height, perspective.fov);
     const current = yawPitchRef.current;
     const targetYaw = closestAngle(current.yaw, targetAngles.yaw);
@@ -2085,6 +2098,7 @@ function NotebookNodes({
   layoutMode,
   pageActive,
   embedInteractionLocked,
+  attachmentsEnabled,
   onOpenNodeContextMenu,
 }: {
   theme: AtlasTheme;
@@ -2092,6 +2106,7 @@ function NotebookNodes({
   layoutMode: AtlasLayoutMode;
   pageActive: boolean;
   embedInteractionLocked: boolean;
+  attachmentsEnabled: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -2131,8 +2146,12 @@ function NotebookNodes({
   const multiSelectedNodeIdSet = useMemo(() => new Set(multiSelectedNodeIds), [multiSelectedNodeIds]);
   const aiContextPreviewNodeIds = useMemo(() => {
     if (!commandInputEditing || activeCommandMode === "note") return new Set<string>();
-    return new Set(getAiContextNodeIds(atlasRoot, selectedNodeId, { ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds }));
+    return expandNodeIdsWithRootLineage(
+      atlasRoot,
+      new Set(getAiContextNodeIds(atlasRoot, selectedNodeId, { ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds })),
+    );
   }, [activeCommandMode, aiContextOptions, atlasRoot, commandInputEditing, multiSelectedNodeIds, selectedNodeId]);
+  const runningLineageNodeIds = useMemo(() => buildRunningLineageNodeIds(atlasRoot), [atlasRoot]);
   const nodeRenderMetaById = useMemo(() => buildNodeRenderMeta(atlasRoot), [atlasRoot]);
   const mandatoryRenderNodeIds = useMemo(
     () =>
@@ -2147,6 +2166,7 @@ function NotebookNodes({
           ...multiSelectedNodeIds,
           ...notificationPulses.map((pulse) => pulse.nodeId),
           ...aiContextPreviewNodeIds,
+          ...runningLineageNodeIds,
           activeNotificationSnoozePrompt?.nodeId ?? null,
         ],
       ),
@@ -2161,6 +2181,7 @@ function NotebookNodes({
       notificationPulses,
       renderSelectedNodeId,
       rootIsSelected,
+      runningLineageNodeIds,
       selectedNodeId,
     ],
   );
@@ -2292,8 +2313,8 @@ function NotebookNodes({
   });
 
   const renderVisibleNodeIds = useMemo(
-    () => mergeCameraRenderNodeIds(layoutRenderNodeIds, cameraVisibleNodeIds, mandatoryRenderNodeIds, atlasRoot.id),
-    [atlasRoot.id, cameraVisibleNodeIds, layoutRenderNodeIds, mandatoryRenderNodeIds],
+    () => mergeCameraRenderNodeIds(layoutRenderNodeIds, cameraVisibleNodeIds, mandatoryRenderNodeIds, atlasRoot.id, layoutPositions),
+    [atlasRoot.id, cameraVisibleNodeIds, layoutPositions, layoutRenderNodeIds, mandatoryRenderNodeIds],
   );
 
   useEffect(() => {
@@ -2378,6 +2399,7 @@ function NotebookNodes({
               highlightSelectedNodeId={highlightSelectedNodeId}
               multiSelectedNodeIds={multiSelectedNodeIdSet}
               aiContextPreviewNodeIds={aiContextPreviewNodeIds}
+              runningLineageNodeIds={runningLineageNodeIds}
               selectedPathIndexByNodeId={selectedPathIndexByNodeId}
               selectedPathLength={selectedPath.length}
               selectedParentId={rootIsSelected ? null : selectedParentId}
@@ -2396,6 +2418,7 @@ function NotebookNodes({
               layoutMode={layoutMode}
               rootOverviewActive={rootIsSelected}
               embedInteractionLocked={embedInteractionLocked}
+              attachmentsEnabled={attachmentsEnabled}
               onOpenNodeContextMenu={onOpenNodeContextMenu}
             />
           );
@@ -2422,6 +2445,7 @@ function NotebookNodes({
           highlightSelectedNodeId={highlightSelectedNodeId}
           multiSelectedNodeIds={multiSelectedNodeIdSet}
           aiContextPreviewNodeIds={aiContextPreviewNodeIds}
+          runningLineageNodeIds={runningLineageNodeIds}
           selectedPathIndexByNodeId={selectedPathIndexByNodeId}
           selectedPathLength={selectedPath.length}
           selectedParentId={rootIsSelected ? null : selectedParentId}
@@ -2440,6 +2464,7 @@ function NotebookNodes({
           layoutMode={layoutMode}
           rootOverviewActive={rootIsSelected}
           embedInteractionLocked={embedInteractionLocked}
+          attachmentsEnabled={attachmentsEnabled}
           onOpenNodeContextMenu={onOpenNodeContextMenu}
         />
       </group>
@@ -2466,6 +2491,7 @@ function NotebookNodes({
             highlightSelectedNodeId={highlightSelectedNodeId}
             multiSelectedNodeIds={multiSelectedNodeIdSet}
             aiContextPreviewNodeIds={aiContextPreviewNodeIds}
+            runningLineageNodeIds={runningLineageNodeIds}
             selectedPathIndexByNodeId={selectedPathIndexByNodeId}
             selectedPathLength={selectedPath.length}
             selectedParentId={rootIsSelected ? null : selectedParentId}
@@ -2484,6 +2510,7 @@ function NotebookNodes({
             layoutMode={layoutMode}
             rootOverviewActive={rootIsSelected}
             embedInteractionLocked={embedInteractionLocked}
+            attachmentsEnabled={attachmentsEnabled}
             onOpenNodeContextMenu={onOpenNodeContextMenu}
           />
         );
@@ -2525,6 +2552,35 @@ function buildLowQualityRenderPaths(root: AtlasNode, selectedNodeId: string, not
   }
 
   return entries;
+}
+
+function buildRunningLineageNodeIds(root: AtlasNode) {
+  const ids = new Set<string>();
+  const visit = (node: AtlasNode, path: AtlasNode[]) => {
+    if (node.status === "running") {
+      for (const ancestor of path.slice(1, -1)) {
+        ids.add(ancestor.id);
+      }
+    }
+    for (const child of node.children) {
+      visit(child, [...path, child]);
+    }
+  };
+  visit(root, [root]);
+  return ids;
+}
+
+function expandNodeIdsWithRootLineage(root: AtlasNode, nodeIds: Set<string>) {
+  if (!nodeIds.size) return nodeIds;
+  const expanded = new Set(nodeIds);
+  for (const nodeId of nodeIds) {
+    const path = findNodePath(root, nodeId);
+    if (!path) continue;
+    for (const node of path.slice(1)) {
+      expanded.add(node.id);
+    }
+  }
+  return expanded;
 }
 
 function buildNodeRenderMeta(root: AtlasNode) {
@@ -2622,12 +2678,22 @@ function mergeCameraRenderNodeIds(
   cameraNodeIds: Set<string> | null,
   mandatoryNodeIds: Set<string>,
   rootId: string,
+  layoutPositions: Map<string, Vec3>,
 ) {
-  if (!cameraNodeIds) return layoutNodeIds;
+  if (!cameraNodeIds) {
+    const merged = new Set(layoutNodeIds);
+    for (const nodeId of mandatoryNodeIds) {
+      if (nodeId !== rootId && layoutPositions.has(nodeId)) merged.add(nodeId);
+    }
+    return merged;
+  }
   const merged = new Set<string>();
   for (const nodeId of layoutNodeIds) {
     if (nodeId === rootId) continue;
     if (cameraNodeIds.has(nodeId) || mandatoryNodeIds.has(nodeId)) merged.add(nodeId);
+  }
+  for (const nodeId of mandatoryNodeIds) {
+    if (nodeId !== rootId && layoutPositions.has(nodeId)) merged.add(nodeId);
   }
   return merged;
 }
@@ -2690,6 +2756,7 @@ function HierarchyNode({
   highlightSelectedNodeId,
   multiSelectedNodeIds,
   aiContextPreviewNodeIds,
+  runningLineageNodeIds,
   selectedPathIndexByNodeId,
   selectedPathLength,
   selectedParentId,
@@ -2708,6 +2775,7 @@ function HierarchyNode({
   layoutMode,
   rootOverviewActive,
   embedInteractionLocked,
+  attachmentsEnabled,
   onOpenNodeContextMenu,
 }: {
   node: AtlasNode;
@@ -2721,6 +2789,7 @@ function HierarchyNode({
   highlightSelectedNodeId: string;
   multiSelectedNodeIds: Set<string>;
   aiContextPreviewNodeIds: Set<string>;
+  runningLineageNodeIds: Set<string>;
   selectedPathIndexByNodeId: Map<string, number>;
   selectedPathLength: number;
   selectedParentId: string | null;
@@ -2739,6 +2808,7 @@ function HierarchyNode({
   layoutMode: AtlasLayoutMode;
   rootOverviewActive: boolean;
   embedInteractionLocked: boolean;
+  attachmentsEnabled: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
   const selectNodeInPlace = useAtlasStore((state) => state.selectNodeInPlace);
@@ -2757,6 +2827,8 @@ function HierarchyNode({
   const isSelected = highlightSelectedNodeId === node.id;
   const isMultiSelected = multiSelectedNodeIds.has(node.id);
   const isAiContextPreviewNode = aiContextPreviewNodeIds.has(node.id);
+  const hasRunningDescendant = runningLineageNodeIds.has(node.id);
+  const effectiveStatus = hasRunningDescendant && node.status !== "error" ? "running" : node.status;
   const previewNotificationKind = isAiContextPreviewNode ? "codex" : null;
   const effectiveNotificationKind = notificationKind === "error" ? notificationKind : previewNotificationKind ?? notificationKind;
   const parentId = path.length > 1 ? path[path.length - 2].id : null;
@@ -2780,7 +2852,8 @@ function HierarchyNode({
   const isFocusedBranch = activeDescendantDistance !== null || isActiveAncestor;
   const themeColors = getUniverseThemeColors(theme);
   const structuralColor = theme === "light" ? themeColors.edge : node.color;
-  const statusColor = getStatusColor(node.status);
+  const lineageRunningColor = theme === "light" ? "#0b63ce" : "#86b7ff";
+  const statusColor = hasRunningDescendant && node.status !== "error" ? lineageRunningColor : getStatusColor(effectiveStatus);
   const ringColor = theme === "light" ? themeColors.ring : statusColor;
   const radius = getNodeVisualRadius(node, depth);
   const hitRadius = getNodeHitRadius(node, depth);
@@ -3355,7 +3428,7 @@ function HierarchyNode({
           radius={radius}
           baseColor={ringColor}
           isSelected={isSelected || isMultiSelected || isAiContextPreviewNode}
-          status={node.status}
+          status={effectiveStatus}
           depthFade={depthFade}
           waveDepth={focusWaveDepth}
           waveStartedAt={focusWaveStartedAt}
@@ -3397,7 +3470,7 @@ function HierarchyNode({
           {lowQuality ? (
             <LowQualityPlanetMaterial node={node} depthFade={depthFade} rootActiveDirectChild={rootActiveDirectChild} theme={theme} />
           ) : (
-            <PlanetMaterial node={node} depthFade={depthFade} theme={theme} />
+            <PlanetMaterial node={node} depthFade={depthFade} theme={theme} attachmentsEnabled={attachmentsEnabled} />
           )}
         </mesh>
       </group>
@@ -3464,6 +3537,7 @@ function HierarchyNode({
                 highlightSelectedNodeId={highlightSelectedNodeId}
                 multiSelectedNodeIds={multiSelectedNodeIds}
                 aiContextPreviewNodeIds={aiContextPreviewNodeIds}
+                runningLineageNodeIds={runningLineageNodeIds}
                 selectedPathIndexByNodeId={selectedPathIndexByNodeId}
                 selectedPathLength={selectedPathLength}
                 selectedParentId={selectedParentId}
@@ -3482,6 +3556,7 @@ function HierarchyNode({
                 layoutMode={layoutMode}
                 rootOverviewActive={rootOverviewActive}
                 embedInteractionLocked={embedInteractionLocked}
+                attachmentsEnabled={attachmentsEnabled}
                 onOpenNodeContextMenu={onOpenNodeContextMenu}
               />
             );
@@ -3782,10 +3857,12 @@ function PlanetMaterial({
   node,
   depthFade,
   theme,
+  attachmentsEnabled,
 }: {
   node: AtlasNode;
   depthFade: ReturnType<typeof getDepthFade>;
   theme: AtlasTheme;
+  attachmentsEnabled: boolean;
 }) {
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
   const lightSurfaceWash = theme === "light" ? getLightThemeDepthWash(depthFade.index) : 0;
@@ -3794,8 +3871,8 @@ function PlanetMaterial({
     [lightSurfaceWash, node.color, node.id, node.texture],
   );
   const surfaceAttachment = useMemo(
-    () => getNodeSurfaceAttachment(node.attachments, attachmentPreviewUrls),
-    [attachmentPreviewUrls, node.attachments],
+    () => (attachmentsEnabled ? getNodeSurfaceAttachment(node.attachments, attachmentPreviewUrls) : null),
+    [attachmentPreviewUrls, attachmentsEnabled, node.attachments],
   );
   const attachmentTexture = useAttachmentSurfaceTexture(surfaceAttachment, node.color);
   const texture = attachmentTexture ?? fallbackTexture;
@@ -5046,8 +5123,13 @@ function getGeneratedLayoutFocusScreenOffset(
   viewport: AtlasLayoutViewport,
   viewportWidth: number,
   viewportHeight: number,
+  extraBottomReservedPx = 0,
 ) {
-  const reserved = getGeneratedLayoutReservedScreenArea(viewport, viewportWidth, viewportHeight);
+  const baseReserved = getGeneratedLayoutReservedScreenArea(viewport, viewportWidth, viewportHeight);
+  const reserved = {
+    ...baseReserved,
+    bottom: Math.min(viewportHeight - 1, baseReserved.bottom + Math.max(0, extraBottomReservedPx)),
+  };
   const usableWidth = Math.max(1, viewportWidth - reserved.left - reserved.right);
   const usableHeight = Math.max(1, viewportHeight - reserved.top - reserved.bottom);
   const dialogOffset = {
@@ -5059,6 +5141,15 @@ function getGeneratedLayoutFocusScreenOffset(
     x: dialogOffset.x + treeBias.x,
     y: dialogOffset.y + treeBias.y,
   };
+}
+
+function getVisibleCommandDockReservedBottom(viewportHeight: number) {
+  if (typeof document === "undefined") return 0;
+  const dock = document.querySelector<HTMLElement>(".command-dock");
+  if (!dock || dock.closest(".mobile-workspace-panel")) return 0;
+  const rect = dock.getBoundingClientRect();
+  if (rect.width <= 1 || rect.height <= 1 || rect.bottom <= 0 || rect.top >= viewportHeight) return 0;
+  return clamp(Math.ceil(viewportHeight - rect.top + 18), 0, Math.min(360, Math.max(0, viewportHeight - 80)));
 }
 
 function getGeneratedLayoutReservedScreenArea(viewport: AtlasLayoutViewport, viewportWidth: number, viewportHeight: number) {

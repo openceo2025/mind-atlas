@@ -6,9 +6,13 @@ import path from "node:path";
 import { URL } from "node:url";
 import {
   buildEntitlement,
+  createCloudNotebook,
   deleteExpiredSessions,
+  getCloudNotebook,
+  getCloudNotebookByShareToken,
   getSessionUser,
   getUserSubscription,
+  listCloudNotebooks,
   forgetStripeEvent,
   isSubscriptionActive,
   markStripeEventProcessed,
@@ -63,6 +67,7 @@ const defaultOutputUsdPer1m = Number(getEnv("MIND_ATLAS_DEFAULT_OUTPUT_USD_PER_1
 const modelPrices = mergeModelPrices(parseJsonEnv("MIND_ATLAS_MODEL_PRICES_JSON", {}));
 const modelPricePolicy = getEnv("MIND_ATLAS_MODEL_PRICE_POLICY", "allow-default").toLowerCase();
 const jsonBodyMaxBytes = readIntEnv("MIND_ATLAS_SERVICE_JSON_MAX_BYTES", 2 * 1024 * 1024);
+const cloudNotebookMaxBytes = readIntEnv("MIND_ATLAS_CLOUD_NOTEBOOK_MAX_BYTES", 10 * 1024 * 1024);
 const formBodyMaxBytes = readIntEnv("MIND_ATLAS_SERVICE_FORM_MAX_BYTES", 28 * 1024 * 1024);
 const stripeWebhookMaxBytes = readIntEnv("MIND_ATLAS_STRIPE_WEBHOOK_MAX_BYTES", 1024 * 1024);
 const stripeWebhookToleranceSeconds = readIntEnv("MIND_ATLAS_STRIPE_WEBHOOK_TOLERANCE_SECONDS", 300);
@@ -84,6 +89,7 @@ const realtimeConcurrentSessions = readIntEnv("MIND_ATLAS_REALTIME_CONCURRENT_SE
 const sessionIdleDays = readIntEnv("MIND_ATLAS_SESSION_IDLE_DAYS", 7);
 const staleReservationMinutes = readIntEnv("MIND_ATLAS_STALE_RESERVATION_MINUTES", 30);
 const maintenanceIntervalMs = readIntEnv("MIND_ATLAS_MAINTENANCE_INTERVAL_MS", 5 * 60 * 1000);
+const cloudNotebookMaxNodes = readIntEnv("MIND_ATLAS_CLOUD_NOTEBOOK_MAX_NODES", 5000);
 const stagingMockAuth = readBoolEnv("MIND_ATLAS_STAGING_MOCK_AUTH", false);
 const stagingMockBilling = readBoolEnv("MIND_ATLAS_STAGING_MOCK_BILLING", false);
 const stagingMockProviders = readBoolEnv("MIND_ATLAS_STAGING_MOCK_PROVIDERS", false);
@@ -186,6 +192,31 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/billing/stripe/webhook") {
       await handleStripeWebhook(request, response);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/cloud/notebooks") {
+      await handleCloudNotebookList(request, response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/cloud/notebooks") {
+      await handleCloudNotebookSave(request, response);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/api/cloud/notebooks/")) {
+      await handleCloudNotebookLoad(request, response, url.pathname.slice("/api/cloud/notebooks/".length));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/share/notebooks") {
+      await handleCloudNotebookShare(request, response);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/api/share/notebooks/")) {
+      await handleCloudNotebookPublicLoad(response, url.pathname.slice("/api/share/notebooks/".length));
       return;
     }
 
@@ -519,6 +550,86 @@ async function handleStripeWebhook(request, response) {
     throw error;
   }
   sendJson(response, 200, { received: true });
+}
+
+async function handleCloudNotebookList(request, response) {
+  const user = await requireUser(request);
+  enforceUserRateLimit(user.id, "cloud", 60);
+  const result = await listCloudNotebooks(user.id, cloudNotebookMaxBytes);
+  sendJson(response, 200, {
+    directory: "Mind Atlas cloud text storage",
+    notebooks: result.notebooks.map(formatCloudNotebookEntry),
+    quota: result.quota,
+  });
+}
+
+async function handleCloudNotebookSave(request, response) {
+  const user = await requireUser(request);
+  enforceUserRateLimit(user.id, "cloud", 30);
+  const payload = await readJson(request, cloudNotebookMaxBytes + 64 * 1024);
+  const { root, title, sizeBytes } = normalizeCloudNotebookPayload(payload);
+  const result = await createCloudNotebook({
+    userId: user.id,
+    title,
+    data: root,
+    sizeBytes,
+    visibility: "private",
+    quotaBytes: cloudNotebookMaxBytes,
+  });
+  sendJson(response, 200, {
+    ...formatCloudNotebookEntry(result.notebook),
+    directory: "Mind Atlas cloud text storage",
+    prunedCount: result.prunedCount,
+    quota: result.quota,
+  });
+}
+
+async function handleCloudNotebookLoad(request, response, id) {
+  const user = await requireUser(request);
+  enforceUserRateLimit(user.id, "cloud", 60);
+  const notebookId = decodeURIComponent(id || "");
+  if (!isCloudNotebookId(notebookId)) throw new ServiceError(400, "Invalid cloud notebook id");
+  const notebook = await getCloudNotebook(user.id, notebookId);
+  if (!notebook) throw new ServiceError(404, "Cloud notebook was not found");
+  sendJson(response, 200, {
+    entry: formatCloudNotebookEntry(notebook),
+    root: notebook.data,
+  });
+}
+
+async function handleCloudNotebookShare(request, response) {
+  const user = await requireUser(request);
+  enforceUserRateLimit(user.id, "cloud-share", 20);
+  const payload = await readJson(request, cloudNotebookMaxBytes + 64 * 1024);
+  const { root, title, sizeBytes } = normalizeCloudNotebookPayload(payload);
+  const token = createShareToken();
+  const result = await createCloudNotebook({
+    userId: user.id,
+    title,
+    data: root,
+    sizeBytes,
+    visibility: "public",
+    shareToken: token,
+    quotaBytes: cloudNotebookMaxBytes,
+  });
+  sendJson(response, 200, {
+    url: `${publicOrigin}/#s=${token}`,
+    token,
+    entry: formatCloudNotebookEntry(result.notebook),
+    prunedCount: result.prunedCount,
+    quota: result.quota,
+  });
+}
+
+async function handleCloudNotebookPublicLoad(response, tokenSegment) {
+  const token = decodeURIComponent(tokenSegment || "");
+  if (!isShareToken(token)) throw new ServiceError(400, "Invalid share token");
+  const notebook = await getCloudNotebookByShareToken(token);
+  if (!notebook) throw new ServiceError(404, "Shared Mind Atlas link was not found");
+  sendJson(response, 200, {
+    entry: formatCloudNotebookEntry(notebook),
+    root: notebook.data,
+  });
 }
 
 async function handleTextPartnerTurn(request, response) {
@@ -1900,8 +2011,8 @@ async function fetchFormJson(url, params) {
   return await readUpstreamJson(response);
 }
 
-async function readJson(request) {
-  const raw = await readRawBody(request, jsonBodyMaxBytes);
+async function readJson(request, maxBytes = jsonBodyMaxBytes) {
+  const raw = await readRawBody(request, maxBytes);
   if (!raw.length) return {};
   try {
     return JSON.parse(raw.toString("utf8"));
@@ -2009,6 +2120,7 @@ function serviceErrorCode(status, message) {
   if (status === 402 && text.includes("subscription")) return "subscription_required";
   if (text.includes("billing period")) return "billing_period_unavailable";
   if (status === 402 && (text.includes("exhausted") || text.includes("too low"))) return "credit_exhausted";
+  if (status === 413 && text.includes("cloud notebook")) return "cloud_notebook_too_large";
   if (status === 413 && text.includes("audio")) return "audio_too_large";
   if (status === 413 || text.includes("too large") || text.includes("per-request safety limit")) return "request_too_large";
   if (text.includes("not enabled for") || text.includes("no enabled model")) return "model_not_enabled";
@@ -2032,6 +2144,8 @@ function serviceErrorMessage(code, status, message) {
       return "Mind Atlas token renewal date is still syncing.";
     case "credit_exhausted":
       return "Mind Atlas token for this billing period is exhausted.";
+    case "cloud_notebook_too_large":
+      return "Cloud notebook text data is too large to save.";
     case "audio_too_large":
       return "The audio file is too large for hosted dictation.";
     case "request_too_large":
@@ -2217,6 +2331,121 @@ function safeJsonParse(value, fallback) {
   } catch {
     return fallback;
   }
+}
+
+const cloudNodeKinds = new Set(["root", "workArea", "artifact", "event", "concept", "thread"]);
+const cloudNodeTypes = new Set(["human_prompt", "ai_reply", "tool_call", "tool_result", "approval_request", "note", "file_context"]);
+const cloudStatuses = new Set(["waiting", "done"]);
+const cloudTextures = new Set(["speckled", "bands", "freckles", "craters", "mist", "cell"]);
+const cloudAuthors = new Set(["human", "ai", "tool", "system"]);
+
+function normalizeCloudNotebookPayload(payload) {
+  if (!payload || typeof payload !== "object") throw new ServiceError(400, "Cloud notebook payload is invalid");
+  const rootInput = payload.root ?? payload;
+  const state = { count: 0 };
+  const root = normalizeCloudAtlasNode(rootInput, 0, state);
+  const title = safeCloudText(payload.title || root.title || "Mind Atlas", "Mind Atlas", 240);
+  const encoded = Buffer.byteLength(JSON.stringify(root), "utf8");
+  if (encoded > cloudNotebookMaxBytes) {
+    throw new ServiceError(413, "Cloud notebook is too large to save");
+  }
+  return { root, title, sizeBytes: encoded };
+}
+
+function normalizeCloudAtlasNode(value, depth, state) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ServiceError(400, "Cloud notebook node is invalid");
+  }
+  state.count += 1;
+  if (state.count > cloudNotebookMaxNodes) throw new ServiceError(413, "Cloud notebook has too many nodes");
+  const now = new Date().toISOString();
+  const isRoot = depth === 0;
+  const id = safeCloudText(value.id, `${isRoot ? "root" : "node"}-${crypto.randomUUID()}`, 240);
+  const children = Array.isArray(value.children)
+    ? value.children.map((child) => normalizeCloudAtlasNode(child, depth + 1, state))
+    : [];
+  return compactObject({
+    id,
+    kind: isRoot ? "root" : cloudNodeKinds.has(value.kind) ? value.kind : "thread",
+    nodeType: cloudNodeTypes.has(value.nodeType) ? value.nodeType : "note",
+    title: safeCloudString(value.title, ""),
+    subtitle: safeCloudString(value.subtitle, ""),
+    body: safeCloudString(value.body, ""),
+    author: cloudAuthors.has(value.author) ? value.author : "human",
+    status: cloudStatuses.has(value.status) ? value.status : "waiting",
+    color: safeCloudText(value.color, "#6f8cff", 80),
+    texture: cloudTextures.has(value.texture) ? value.texture : "speckled",
+    radius: safeCloudRadius(value.radius, isRoot ? 80 : 28),
+    summary: safeCloudString(value.summary, ""),
+    nextDecision: safeCloudString(value.nextDecision, ""),
+    tags: Array.isArray(value.tags)
+      ? value.tags.filter((tag) => typeof tag === "string").map((tag) => tag.slice(0, 160)).slice(0, 100)
+      : [],
+    attachments: [],
+    createdAt: safeCloudDate(value.createdAt, now),
+    updatedAt: safeCloudDate(value.updatedAt, now),
+    position: isVec3(value.position) ? value.position : undefined,
+    reminderAt: typeof value.reminderAt === "string" && value.reminderAt ? value.reminderAt.slice(0, 120) : undefined,
+    reminderFiredAt: typeof value.reminderFiredAt === "string" && value.reminderFiredAt ? value.reminderFiredAt.slice(0, 120) : undefined,
+    children,
+  });
+}
+
+function formatCloudNotebookEntry(row) {
+  const title = stringValue(row.title) || "Mind Atlas";
+  return {
+    id: row.id,
+    name: `${sanitizeFileLabel(title)}.mindatlas`,
+    title,
+    size: Number(row.size_bytes ?? 0),
+    updatedAt: dateIso(row.updated_at),
+    visibility: row.visibility === "public" ? "public" : "private",
+    ...(row.share_token ? { shareToken: row.share_token } : {}),
+  };
+}
+
+function createShareToken() {
+  return crypto.randomBytes(18).toString("base64url");
+}
+
+function isShareToken(value) {
+  return /^[A-Za-z0-9_-]{16,64}$/.test(value);
+}
+
+function isCloudNotebookId(value) {
+  return /^cld_[0-9a-fA-F-]{36}$/.test(value);
+}
+
+function safeCloudString(value, fallback) {
+  return typeof value === "string" ? value : fallback;
+}
+
+function safeCloudText(value, fallback, maxLength) {
+  const text = typeof value === "string" && value.trim() ? value.trim() : fallback;
+  return text.length <= maxLength ? text : text.slice(0, maxLength);
+}
+
+function safeCloudDate(value, fallback) {
+  return typeof value === "string" && value.trim() ? value.slice(0, 120) : fallback;
+}
+
+function safeCloudRadius(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.min(240, Math.round(number)) : fallback;
+}
+
+function sanitizeFileLabel(value) {
+  const label = stringValue(value).trim().replace(/[\\/:*?"<>|#\r\n\t]+/g, "-").replace(/\s+/g, " ").slice(0, 80);
+  return label || "Mind Atlas";
+}
+
+function dateIso(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : new Date().toISOString();
+}
+
+function isVec3(value) {
+  return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number" && Number.isFinite(item));
 }
 
 function compactObject(value) {

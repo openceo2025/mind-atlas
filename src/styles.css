@@ -740,6 +740,10 @@ h1 {
   animation: focus-panel-in 920ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.focus-panel.is-text-only {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .focus-panel.is-hidden {
   opacity: 0;
   pointer-events: none;
@@ -2322,6 +2326,9 @@ h1 {
 
 .panel-text-section {
   position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
   min-height: 0;
 }
 
@@ -2359,6 +2366,8 @@ h1 {
 
 .node-title-input {
   min-height: 42px;
+  resize: none;
+  overflow: hidden;
   padding: 7px 9px;
   font-size: 21px;
   font-weight: 800;
@@ -4437,6 +4446,7 @@ button:disabled,
   color: #9a2f2f;
 }
 
+.app-shell[data-theme="light"] .node-title-input::placeholder,
 .app-shell[data-theme="light"] .node-body-input::placeholder,
 .app-shell[data-theme="light"] .node-tags-input::placeholder,
 .app-shell[data-theme="light"] .command-field input::placeholder {
@@ -4895,7 +4905,7 @@ button:disabled,
   }
 
   .panel-text-section {
-    display: block;
+    display: grid;
   }
 
   .node-body-input {

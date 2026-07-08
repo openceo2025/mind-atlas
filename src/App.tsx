@@ -13,12 +13,25 @@ import { HOSTED_SERVICE_SESSION_REFRESH_EVENT, REALTIME_VOICE_RESTART_EVENT, UNI
 import { detectImportFormat, importExternalNotebookFile, importMarkdownText } from "./notebookImport";
 import { createAtlasImageShareData, createAtlasShareImage } from "./notebookImageShare";
 import { createNotebookJsonPackage, createNotebookPackage, importNotebookPackage, type NotebookPackageResult } from "./notebookPackage";
-import { createSharedNotebookLink, readSharedNotebookFromUrl, removeSharedNotebookHash } from "./notebookShare";
+import { createSharedNotebookLink, readHostedShareTokenFromUrl, readSharedNotebookFromUrl, removeSharedNotebookHash } from "./notebookShare";
+import { createTextOnlyNotebookRoot, textOnlyNotebookSizeBytes } from "./notebookTextOnly";
 import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
 import type { OutlineNodeInput } from "./outline/atlasOutline";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
 import { getAtlasLayoutModeLabel, isAtlasLayoutMode, type AtlasLayoutMode } from "./layout/atlasLayout";
-import { fetchHostedServiceSession, isHostedServiceMode, logoutHostedService, openHostedBillingPortal, startHostedBillingCheckout, startHostedGoogleLogin } from "./hosted/serviceClient";
+import {
+  createHostedCloudShare,
+  fetchHostedServiceSession,
+  isHostedServiceMode,
+  listHostedCloudNotebooks,
+  loadHostedCloudNotebook,
+  loadHostedSharedNotebook,
+  logoutHostedService,
+  openHostedBillingPortal,
+  saveHostedCloudNotebook,
+  startHostedBillingCheckout,
+  startHostedGoogleLogin,
+} from "./hosted/serviceClient";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
 import type { AtlasNode, CloudNotebookEntry, HostedServiceSession, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
@@ -33,6 +46,8 @@ const DEFAULT_DATASET_TITLE = "Mind Atlas";
 const MIND_ATLAS_ABOUT_URL = "/about.html";
 const MIND_ATLAS_SOURCE_URL = "https://github.com/openceo2025/mind-atlas";
 const IMPORT_ACCEPT_TYPES = ".mindatlas,.mindatlaspkg,.md,.markdown,.opml,.mm,application/mindatlas+json,application/x-mindatlas-package,text/markdown,text/plain,text/xml,application/xml";
+const HOSTED_IMPORT_ACCEPT_TYPES = ".mindatlas,.md,.markdown,.opml,.mm,application/mindatlas+json,text/markdown,text/plain,text/xml,application/xml";
+const CLOUD_NOTEBOOK_MAX_BYTES = 10 * 1024 * 1024;
 const MODE_OPTIONS: Array<{ mode: AtlasLayoutMode; icon: "orbit" | "tree" | "mind" }> = [
   { mode: "phyllotaxis", icon: "orbit" },
   { mode: "tree", icon: "tree" },
@@ -93,6 +108,7 @@ export default function App() {
   const saveNotebookNow = useAtlasStore((state) => state.saveNotebookNow);
   const addSiblingNode = useAtlasStore((state) => state.addSiblingNode);
   const addChildNode = useAtlasStore((state) => state.addChildNode);
+  const requestBodyEdit = useAtlasStore((state) => state.requestBodyEdit);
   const applyOutlineSubtree = useAtlasStore((state) => state.applyOutlineSubtree);
   const resetNotebook = useAtlasStore((state) => state.resetNotebook);
   const undo = useAtlasStore((state) => state.undo);
@@ -169,7 +185,10 @@ export default function App() {
   const selectedNode = selectedPath[selectedPath.length - 1] ?? atlasRoot;
   const outlineEditorRoot = outlineEditorRootId ? findNode(atlasRoot, outlineEditorRootId) ?? selectedNode : selectedNode;
   const onboarding = useOnboarding();
+  const hostedAuthenticated = Boolean(publicServiceMode && hostedSession?.authenticated && hostedSession.user);
   const aiFeaturesUnlocked = publicServiceMode ? Boolean(hostedSession?.entitlement.aiEnabled) : onboarding.showMainChrome;
+  const cloudNotebooksAvailable = publicServiceMode ? hostedAuthenticated : aiFeaturesUnlocked && !publicServiceMode;
+  const attachmentsEnabled = !publicServiceMode;
   const voiceLogReadable = publicServiceMode ? onboarding.showMainChrome : aiFeaturesUnlocked;
   const showCommandDock = aiFeaturesUnlocked && (aboutDemoConfig ? aboutDemoConfig.kind === "app" : publicServiceMode || shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport));
   const showTutorialOperationFallback = onboarding.showChildCreationFallback;
@@ -199,7 +218,11 @@ export default function App() {
         icon: <GitBranch size={18} />,
         onClick: () => {
           const childId = addChildNode(tutorialFallbackChildParentId);
-          if (childId) emitOnboardingEvent("child-node-created", { childDepth: tutorialFallbackChildParentPath.length });
+          if (childId) {
+            requestBodyEdit(childId);
+            setMobilePanelTab("editor");
+            emitOnboardingEvent("child-node-created", { childDepth: tutorialFallbackChildParentPath.length });
+          }
         },
       },
       {
@@ -208,7 +231,13 @@ export default function App() {
         shortcut: "Enter",
         icon: <Plus size={18} />,
         disabled: selectedNodeId === atlasRoot.id,
-        onClick: () => addSiblingNode(selectedNodeId),
+        onClick: () => {
+          const siblingId = addSiblingNode(selectedNodeId);
+          if (siblingId) {
+            requestBodyEdit(siblingId);
+            setMobilePanelTab("editor");
+          }
+        },
       },
       {
         id: "parent-layer",
@@ -260,6 +289,7 @@ export default function App() {
       operationTargets.nextSiblingId,
       operationTargets.parentId,
       operationTargets.previousSiblingId,
+      requestBodyEdit,
       tutorialFallbackChildParentId,
       tutorialFallbackChildParentPath.length,
       selectedNodeId,
@@ -453,15 +483,39 @@ export default function App() {
   }, [publicServiceMode, refreshHostedSession]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (publicServiceMode) {
+      const hostedShareToken = readHostedShareTokenFromUrl();
+      if (hostedShareToken) {
+        void loadHostedSharedNotebook(hostedShareToken)
+          .then((result) => {
+            if (cancelled) return;
+            setSharedNotebookRoot(createTextOnlyNotebookRoot(result.root));
+          })
+          .catch((error) => {
+            if (cancelled) return;
+            console.error("Failed to read hosted Mind Atlas share URL", error);
+            window.alert(importErrorMessage("Shared Mind Atlas link could not be read.", error));
+            removeSharedNotebookHash();
+          });
+        return () => {
+          cancelled = true;
+        };
+      }
+    }
+
     try {
       const sharedRoot = readSharedNotebookFromUrl();
-      if (sharedRoot) setSharedNotebookRoot(sharedRoot);
+      if (sharedRoot) setSharedNotebookRoot(publicServiceMode ? createTextOnlyNotebookRoot(sharedRoot) : sharedRoot);
     } catch (error) {
       console.error("Failed to read shared Mind Atlas URL", error);
       window.alert(importErrorMessage("Shared Mind Atlas link could not be read.", error));
       removeSharedNotebookHash();
     }
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [publicServiceMode]);
 
   useEffect(() => {
     if (uiRestoreAppliedRef.current) return;
@@ -657,10 +711,10 @@ export default function App() {
 
   useEffect(() => {
     if (!voiceLogReadable) setVoiceLogOpen(false);
+    if (!cloudNotebooksAvailable) setCloudLoadOpen(false);
     if (aiFeaturesUnlocked) return;
     setVoiceSettingsOpen(false);
-    setCloudLoadOpen(false);
-  }, [aiFeaturesUnlocked, voiceLogReadable]);
+  }, [aiFeaturesUnlocked, cloudNotebooksAvailable, voiceLogReadable]);
 
   useEffect(() => {
     if (!onboarding.shouldApplyUniverseTitlePrompt) return;
@@ -735,11 +789,34 @@ export default function App() {
     setMenuOpen(false);
   };
 
+  const prepareHostedCloudNotebook = () => {
+    const root = createTextOnlyNotebookRoot(atlasRoot);
+    const sizeBytes = textOnlyNotebookSizeBytes(root);
+    if (sizeBytes > CLOUD_NOTEBOOK_MAX_BYTES) {
+      throw new Error("容量が大きすぎてクラウドへ保存できません。テキスト量を減らしてください。");
+    }
+    return { root, sizeBytes };
+  };
+
   const handleSaveToCloud = async () => {
     try {
       setCloudError("");
       setCloudStatus("Saving to cloud...");
       await saveNotebookNow();
+      if (publicServiceMode) {
+        if (!hostedAuthenticated) {
+          setCloudStatus("");
+          startHostedGoogleLogin();
+          return;
+        }
+        const { root } = prepareHostedCloudNotebook();
+        const saved = await saveHostedCloudNotebook(root, root.title || atlasRoot.title || "Mind Atlas");
+        const prunedText = saved.prunedCount ? ` Old saves deleted: ${saved.prunedCount}.` : "";
+        setCloudStatus(`Saved: ${saved.title || saved.name}.${prunedText}`);
+        window.alert(`クラウドへ保存しました。\n\n${saved.title || saved.name}${prunedText ? `\n${prunedText}` : ""}`);
+        setMenuOpen(false);
+        return;
+      }
       let result: NotebookPackageResult;
       try {
         result = await createNotebookPackage(atlasRoot, attachmentPreviewUrls);
@@ -769,6 +846,17 @@ export default function App() {
     try {
       setCloudLoading(true);
       setCloudError("");
+      if (publicServiceMode) {
+        if (!hostedAuthenticated) {
+          setCloudNotebooks([]);
+          setCloudDirectory("Google login required");
+          return;
+        }
+        const result = await listHostedCloudNotebooks();
+        setCloudNotebooks(result.notebooks);
+        setCloudDirectory(result.directory || "Mind Atlas cloud text storage");
+        return;
+      }
       const result = await listCloudNotebookPackages();
       setCloudNotebooks(result.notebooks);
       setCloudDirectory(result.directory);
@@ -781,6 +869,10 @@ export default function App() {
   };
 
   const handleOpenCloudLoad = () => {
+    if (publicServiceMode && !hostedAuthenticated) {
+      startHostedGoogleLogin();
+      return;
+    }
     setCloudLoadOpen(true);
     setMenuOpen(false);
     void refreshCloudNotebooks();
@@ -796,6 +888,23 @@ export default function App() {
     if (shareBusy) return;
     try {
       setShareBusy(true);
+      if (publicServiceMode) {
+        if (!hostedAuthenticated) {
+          setContextCopyStatus("Google login is required for cloud share.");
+          startHostedGoogleLogin();
+          return;
+        }
+        setContextCopyStatus("Creating public cloud link...");
+        await saveNotebookNow();
+        const { root } = prepareHostedCloudNotebook();
+        const share = await createHostedCloudShare(root, root.title || atlasRoot.title || "Mind Atlas");
+        await copyTextToClipboard(share.url);
+        setContextCopyStatus("Public Mind Atlas link copied.");
+        window.setTimeout(() => {
+          setContextCopyStatus((current) => (current === "Public Mind Atlas link copied." ? "" : current));
+        }, 7000);
+        return;
+      }
       setContextCopyStatus("Preparing share image...");
       const target = universeShareTargetRef.current;
       if (!target) throw new Error("The universe view is not ready.");
@@ -854,7 +963,8 @@ export default function App() {
     if (!sharedNotebookRoot || sharedNotebookImporting) return;
     try {
       setSharedNotebookImporting(true);
-      importNotebook(sharedNotebookRoot, sharedNotebookRoot.title || "Shared Mind Atlas", {});
+      const root = publicServiceMode ? createTextOnlyNotebookRoot(sharedNotebookRoot) : sharedNotebookRoot;
+      importNotebook(root, root.title || "Shared Mind Atlas", {});
       removeSharedNotebookHash();
       setSharedNotebookRoot(null);
     } catch (error) {
@@ -874,6 +984,13 @@ export default function App() {
     try {
       setCloudLoading(true);
       setCloudError("");
+      if (publicServiceMode) {
+        if (!entry.id) throw new Error("Cloud notebook id is missing.");
+        const result = await loadHostedCloudNotebook(entry.id);
+        importNotebook(createTextOnlyNotebookRoot(result.root), result.entry.title || entry.title || entry.name || "Cloud Mind Atlas", {});
+        setCloudLoadOpen(false);
+        return;
+      }
       const blob = await downloadCloudNotebookPackage(entry.name);
       const file = new File([blob], entry.name, { type: "application/x-mindatlas-package" });
       const { root, attachmentPreviewUrls, attachmentBlobs } = await importNotebookPackage(file);
@@ -891,6 +1008,10 @@ export default function App() {
   const handleImportFile = async (file: File) => {
     const lowerName = file.name.toLowerCase();
     if (lowerName.endsWith(".mindatlaspkg")) {
+      if (publicServiceMode) {
+        window.alert("公開サービスでは画像・動画を含むパッケージは読み込めません。.mindatlas、Markdown、OPML、FreeMind を使ってください。");
+        return;
+      }
       try {
         const { root, attachmentPreviewUrls, attachmentBlobs } = await importNotebookPackage(file);
         await replaceStoredAttachmentBlobs(root, attachmentBlobs);
@@ -907,8 +1028,9 @@ export default function App() {
     if (externalFormat) {
       try {
         const result = await importExternalNotebookFile(file);
-        await replaceStoredAttachmentBlobs(result.root, {});
-        importNotebook(result.root, result.datasetName);
+        const root = publicServiceMode ? createTextOnlyNotebookRoot(result.root) : result.root;
+        await replaceStoredAttachmentBlobs(root, {});
+        importNotebook(root, result.datasetName);
         setMenuOpen(false);
       } catch (error) {
         console.error(`${externalFormat} import failed`, error);
@@ -918,7 +1040,8 @@ export default function App() {
     }
 
     try {
-      const root = JSON.parse(await file.text()) as AtlasNode;
+      const parsedRoot = JSON.parse(await file.text()) as AtlasNode;
+      const root = publicServiceMode ? createTextOnlyNotebookRoot(parsedRoot) : parsedRoot;
       await replaceStoredAttachmentBlobs(root, {});
       importNotebook(root, datasetNameFromFile(file.name));
       setMenuOpen(false);
@@ -1239,6 +1362,7 @@ export default function App() {
         shareTargetRef={universeShareTargetRef}
         tutorialRootBirthUnlocked={onboarding.showRootPulse}
         embedInteractionLocked={Boolean(aboutDemoConfig)}
+        attachmentsEnabled={attachmentsEnabled}
       />
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
       {onboarding.message ? (
@@ -1311,8 +1435,8 @@ export default function App() {
           type="button"
           onClick={handleShareNotebookImage}
           disabled={shareBusy}
-          aria-label="Share atlas image"
-          title="Share atlas image"
+          aria-label={publicServiceMode ? "Create public Mind Atlas cloud link" : "Share atlas image"}
+          title={publicServiceMode ? "Create public Mind Atlas cloud link" : "Share atlas image"}
         >
           <Share2 size={18} />
         </button>
@@ -1460,13 +1584,15 @@ export default function App() {
                 <small>.mindatlas / text and metadata</small>
               </span>
             </button>
-            <button type="button" onClick={handleExportPackage}>
-              <Download size={15} />
-              <span>
-                Export with files
-                <small>.mindatlaspkg / includes images and video</small>
-              </span>
-            </button>
+            {!publicServiceMode ? (
+              <button type="button" onClick={handleExportPackage}>
+                <Download size={15} />
+                <span>
+                  Export with files
+                  <small>.mindatlaspkg / includes images and video</small>
+                </span>
+              </button>
+            ) : null}
             {!publicServiceMode ? (
               <button type="button" onClick={handleCreateSharedNotebookLink} disabled={shareBusy}>
                 <Share2 size={15} />
@@ -1483,6 +1609,24 @@ export default function App() {
                 <small>{notebookHistoryStatusLabel(notebookPersistenceStatus, notebookSnapshots.length, durableNotebookStorage, notebookPersistenceError)}</small>
               </span>
             </button>
+            {publicServiceMode ? (
+              <>
+                <button type="button" onClick={handleSaveToCloud}>
+                  <CloudUpload size={15} />
+                  <span>
+                    Cloud save
+                    <small>{cloudStatus || (hostedAuthenticated ? "text only / max 10 MB" : "Google login required")}</small>
+                  </span>
+                </button>
+                <button type="button" onClick={handleOpenCloudLoad}>
+                  <CloudDownload size={15} />
+                  <span>
+                    Cloud load
+                    <small>{cloudError || (hostedAuthenticated ? "read from your Google account" : "Google login required")}</small>
+                  </span>
+                </button>
+              </>
+            ) : null}
             {aiFeaturesUnlocked && !publicServiceMode ? (
               <>
                 <button type="button" onClick={handleSaveToCloud}>
@@ -1503,7 +1647,7 @@ export default function App() {
             ) : null}
             <label>
               <Upload size={15} /> Import
-              <input type="file" accept={IMPORT_ACCEPT_TYPES} onChange={handleImport} />
+              <input type="file" accept={publicServiceMode ? HOSTED_IMPORT_ACCEPT_TYPES : IMPORT_ACCEPT_TYPES} onChange={handleImport} />
             </label>
             <button type="button" onClick={() => { setTextImportOpen(true); setMenuOpen(false); }}>
               <FileText size={15} />
@@ -1613,7 +1757,7 @@ export default function App() {
             </div>
           ) : null}
           <div className="mobile-panel-slot mobile-editor-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "editor"}>
-            <FocusPanel theme={theme} />
+            <FocusPanel theme={theme} attachmentsEnabled={attachmentsEnabled} />
           </div>
           {mobileOperationPanelTabAvailable ? (
             <div className="mobile-panel-slot mobile-operation-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "operation"}>
@@ -1678,7 +1822,7 @@ export default function App() {
           onRestore={restoreNotebookFromSnapshot}
         />
       ) : null}
-      {aiFeaturesUnlocked && cloudLoadOpen ? (
+      {cloudNotebooksAvailable && cloudLoadOpen ? (
         <CloudLoadDialog
           notebooks={cloudNotebooks}
           directory={cloudDirectory}
@@ -2092,9 +2236,9 @@ function CloudLoadDialog({
           {loading ? <p className="cloud-dialog-status">Loading...</p> : null}
           {!loading && !notebooks.length ? <p className="cloud-dialog-status">No cloud packages found.</p> : null}
           {notebooks.map((entry) => (
-            <button key={entry.name} className="cloud-package-button" type="button" onClick={() => onLoad(entry)} disabled={loading}>
+            <button key={entry.id || entry.name} className="cloud-package-button" type="button" onClick={() => onLoad(entry)} disabled={loading}>
               <span>
-                <strong>{entry.name}</strong>
+                <strong>{entry.title || entry.name}</strong>
                 <small>{formatBytes(entry.size)} / {formatVoiceLogTime(entry.updatedAt)}</small>
               </span>
               <CloudDownload size={16} />

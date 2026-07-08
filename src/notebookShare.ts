@@ -2,6 +2,7 @@ import { strFromU8, strToU8, unzlibSync, zlibSync } from "fflate";
 import type { AtlasNode, PlanetTexture } from "./types";
 
 const SHARE_HASH_PREFIX = "mindatlas=";
+const HOSTED_SHARE_HASH_PREFIX = "s=";
 const SHARE_VERSION = 2;
 const SHARE_SOFT_LIMIT_CHARS = 16_000;
 const DEFAULT_CHILD_RADIUS = 28;
@@ -66,10 +67,18 @@ export function readSharedNotebookFromUrl(urlText = window.location.href): Atlas
   return sharedNodeToAtlasNode(payload.r, 0);
 }
 
+export function readHostedShareTokenFromUrl(urlText = window.location.href): string | null {
+  const url = new URL(urlText);
+  const hash = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
+  if (!hash.startsWith(HOSTED_SHARE_HASH_PREFIX)) return null;
+  const token = hash.slice(HOSTED_SHARE_HASH_PREFIX.length);
+  return /^[A-Za-z0-9_-]{16,64}$/.test(token) ? token : null;
+}
+
 export function removeSharedNotebookHash(urlText = window.location.href) {
   const url = new URL(urlText);
   const hash = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
-  if (!hash.startsWith(SHARE_HASH_PREFIX)) return false;
+  if (!hash.startsWith(SHARE_HASH_PREFIX) && !hash.startsWith(HOSTED_SHARE_HASH_PREFIX)) return false;
   window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}`);
   return true;
 }

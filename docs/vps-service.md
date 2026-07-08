@@ -227,7 +227,15 @@ MIND_ATLAS_REALTIME_CONCURRENT_SESSIONS=1
 MIND_ATLAS_SESSION_IDLE_DAYS=7
 MIND_ATLAS_STALE_RESERVATION_MINUTES=30
 MIND_ATLAS_MAINTENANCE_INTERVAL_MS=300000
+MIND_ATLAS_CLOUD_NOTEBOOK_MAX_BYTES=10485760
+MIND_ATLAS_CLOUD_NOTEBOOK_MAX_NODES=5000
 ```
+
+Hosted cloud save is text-only. Attachments and package export stay local-only,
+and the service stores each Google account's cloud notebooks in PostgreSQL under
+the `MIND_ATLAS_CLOUD_NOTEBOOK_MAX_BYTES` quota. When a new save would exceed
+the quota, the service keeps the new save and deletes older cloud rows for that
+same user until the total is under the limit.
 
 Provider model lists are fetched server-side from provider APIs when
 `MIND_ATLAS_PROVIDER_MODEL_FETCH=1`. In `require-model` mode, the public model

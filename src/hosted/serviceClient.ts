@@ -1,4 +1,4 @@
-import type { HostedServiceSession } from "../types";
+import type { AtlasNode, CloudNotebookListResult, CloudNotebookLoadResult, CloudNotebookSaveResult, CloudNotebookShareResult, HostedServiceSession } from "../types";
 import { HOSTED_SERVICE_SESSION_REFRESH_EVENT } from "../events";
 import { isAboutDemoMode } from "../aboutDemo";
 
@@ -50,6 +50,37 @@ export async function logoutHostedService() {
   await readHostedJson<{ ok: boolean }>(response);
 }
 
+export async function listHostedCloudNotebooks(): Promise<CloudNotebookListResult> {
+  const response = await hostedFetch("/api/cloud/notebooks");
+  return await readHostedJson<CloudNotebookListResult>(response);
+}
+
+export async function saveHostedCloudNotebook(root: AtlasNode, title = root.title): Promise<CloudNotebookSaveResult> {
+  const response = await hostedFetch("/api/cloud/notebooks", {
+    method: "POST",
+    body: JSON.stringify({ root, title }),
+  });
+  return await readHostedJson<CloudNotebookSaveResult>(response);
+}
+
+export async function loadHostedCloudNotebook(id: string): Promise<CloudNotebookLoadResult> {
+  const response = await hostedFetch(`/api/cloud/notebooks/${encodeURIComponent(id)}`);
+  return await readHostedJson<CloudNotebookLoadResult>(response);
+}
+
+export async function createHostedCloudShare(root: AtlasNode, title = root.title): Promise<CloudNotebookShareResult> {
+  const response = await hostedFetch("/api/share/notebooks", {
+    method: "POST",
+    body: JSON.stringify({ root, title }),
+  });
+  return await readHostedJson<CloudNotebookShareResult>(response);
+}
+
+export async function loadHostedSharedNotebook(token: string): Promise<CloudNotebookLoadResult> {
+  const response = await hostedFetch(`/api/share/notebooks/${encodeURIComponent(token)}`);
+  return await readHostedJson<CloudNotebookLoadResult>(response);
+}
+
 export function notifyHostedServiceSessionChanged() {
   if (!isHostedServiceMode() || typeof window === "undefined") return;
   window.dispatchEvent(new Event(HOSTED_SERVICE_SESSION_REFRESH_EVENT));
@@ -71,6 +102,9 @@ export function formatHostedServiceError(status: number, data: Record<string, un
   }
   if (code === "credit_exhausted" || text.includes("exhausted") || text.includes("too low")) {
     return "この請求期間のAI利用トークンを使い切りました。次回更新日までAIリクエストは停止します。";
+  }
+  if (code === "cloud_notebook_too_large") {
+    return "容量が大きすぎてクラウドへ保存できません。テキスト量を減らしてください。";
   }
   if (code === "request_too_large" || code === "audio_too_large" || status === 413) {
     return "今回の入力が大きすぎます。対象ノードや添付、音声の長さを減らしてもう一度試してください。";

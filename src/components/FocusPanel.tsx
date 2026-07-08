@@ -15,7 +15,7 @@ import {
   Presentation,
   X,
 } from "lucide-react";
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { saveStoredAttachmentBlob } from "../attachmentStorage";
 import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
@@ -25,10 +25,12 @@ import type { AtlasNode, AttachmentKind, NodeAttachment } from "../types";
 
 let sessionReminderDraftAt = addDays(new Date(), 1).toISOString();
 
-export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
+export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { theme?: AtlasTheme; attachmentsEnabled?: boolean }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const updateNode = useAtlasStore((state) => state.updateNode);
+  const bodyEditRequestId = useAtlasStore((state) => state.bodyEditRequestId);
+  const consumeBodyEditRequest = useAtlasStore((state) => state.consumeBodyEditRequest);
   const addAttachment = useAtlasStore((state) => state.addAttachment);
   const removeAttachment = useAtlasStore((state) => state.removeAttachment);
   const updateNodeAppearance = useAtlasStore((state) => state.updateNodeAppearance);
@@ -41,6 +43,7 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
   const [reminderMenuOpen, setReminderMenuOpen] = useState(false);
   const [reminderDraftAt, setReminderDraftAt] = useState(sessionReminderDraftAt);
   const [reminderCalendarMonth, setReminderCalendarMonth] = useState(() => startOfMonth(dateFromInput(sessionReminderDraftAt) ?? addDays(new Date(), 1)));
+  const bodyInputRef = useRef<HTMLTextAreaElement>(null);
   const reminderDraft = dateFromInput(reminderDraftAt) ?? addDays(new Date(), 1);
   const reminderMobileLayout = useReminderMobileLayout();
 
@@ -52,6 +55,24 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
     window.addEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenus);
     return () => window.removeEventListener(UNIVERSE_BACKGROUND_INTERACTION_EVENT, closeMenus);
   }, []);
+
+  useEffect(() => {
+    if (isRoot || bodyEditRequestId !== selectedNode.id) return;
+    let cancelled = false;
+    const frame = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      const textarea = bodyInputRef.current;
+      if (!textarea) return;
+      textarea.focus({ preventScroll: true });
+      const cursorPosition = textarea.value.length;
+      textarea.setSelectionRange(cursorPosition, cursorPosition);
+      consumeBodyEditRequest();
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [bodyEditRequestId, consumeBodyEditRequest, isRoot, selectedNode.id]);
 
   const updateReminderDraft = (date: Date) => {
     const iso = date.toISOString();
@@ -171,6 +192,10 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
   const reminderPortalTarget = typeof document === "undefined" ? null : document.body;
 
   const handleAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (!attachmentsEnabled) {
+      event.target.value = "";
+      return;
+    }
     if (!event.target.files?.length) return;
     for (const file of Array.from(event.target.files)) {
       const attachment: NodeAttachment = {
@@ -192,7 +217,11 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
 
   return (
     <>
-      <aside className={`focus-panel ${isRoot ? "is-hidden" : "is-active"}`} aria-label="Focused context" aria-hidden={isRoot}>
+      <aside
+        className={`focus-panel ${isRoot ? "is-hidden" : "is-active"} ${attachmentsEnabled ? "" : "is-text-only"}`}
+        aria-label="Focused context"
+        aria-hidden={isRoot}
+      >
         <div className="panel-toolbar">
           <div className="panel-role-label editor-panel-role" aria-hidden="true">
             <FileText size={14} />
@@ -261,6 +290,25 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
 
       <div className="panel-text-section">
         <textarea
+          className="node-title-input"
+          value={selectedNode.title}
+          rows={1}
+          onChange={(event) =>
+            updateNode(selectedNode.id, {
+              title: event.target.value,
+            })
+          }
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              bodyInputRef.current?.focus({ preventScroll: true });
+            }
+          }}
+          placeholder="Node title"
+          aria-label="Node title"
+        />
+        <textarea
+          ref={bodyInputRef}
           className="node-body-input"
           value={selectedNode.body}
           onChange={(event) =>
@@ -284,28 +332,30 @@ export function FocusPanel({ theme = "dark" }: { theme?: AtlasTheme }) {
         </button>
       </div>
 
-      <section className="panel-preview-area" aria-label="Attachment preview">
-        <div className="panel-preview-frame">
-          <label className="icon-button file-button panel-attach-preview-button" aria-label="Attach file">
-            <Paperclip size={17} />
-            <input type="file" multiple onChange={handleAttachmentChange} />
-          </label>
-          {selectedNode.attachments.length ? (
-            <div className="attachment-list panel-preview-list">
-              {selectedNode.attachments.map((attachment) => (
-                <AttachmentPreviewCard
-                  key={attachment.id}
-                  attachment={attachment}
-                  previewUrl={attachmentPreviewUrls[attachment.id]}
-                  onRemove={() => removeAttachment(selectedNode.id, attachment.id)}
-                />
-              ))}
-            </div>
-          ) : (
-            <p className="preview-empty">No preview</p>
-          )}
-        </div>
-      </section>
+      {attachmentsEnabled ? (
+        <section className="panel-preview-area" aria-label="Attachment preview">
+          <div className="panel-preview-frame">
+            <label className="icon-button file-button panel-attach-preview-button" aria-label="Attach file">
+              <Paperclip size={17} />
+              <input type="file" multiple onChange={handleAttachmentChange} />
+            </label>
+            {selectedNode.attachments.length ? (
+              <div className="attachment-list panel-preview-list">
+                {selectedNode.attachments.map((attachment) => (
+                  <AttachmentPreviewCard
+                    key={attachment.id}
+                    attachment={attachment}
+                    previewUrl={attachmentPreviewUrls[attachment.id]}
+                    onRemove={() => removeAttachment(selectedNode.id, attachment.id)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="preview-empty">No preview</p>
+            )}
+          </div>
+        </section>
+      ) : null}
       </aside>
       {reminderMobileLayout && reminderMenu && reminderPortalTarget ? createPortal(reminderMenu, reminderPortalTarget) : null}
     </>

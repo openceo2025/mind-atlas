@@ -93,6 +93,8 @@ for (const route of [
   "/api/billing/checkout",
   "/api/billing/portal",
   "/api/billing/stripe/webhook",
+  "/api/cloud/notebooks",
+  "/api/share/notebooks",
   "/api/ai/text-partner-turn",
   "/api/realtime/calls",
   "/api/audio/transcriptions",
@@ -150,6 +152,8 @@ for (const requiredEnv of [
   "MIND_ATLAS_SESSION_IDLE_DAYS",
   "MIND_ATLAS_STALE_RESERVATION_MINUTES",
   "MIND_ATLAS_MAINTENANCE_INTERVAL_MS",
+  "MIND_ATLAS_CLOUD_NOTEBOOK_MAX_BYTES",
+  "MIND_ATLAS_CLOUD_NOTEBOOK_MAX_NODES",
   "MIND_ATLAS_STAGING_MOCK_AUTH",
   "MIND_ATLAS_STAGING_MOCK_BILLING",
   "MIND_ATLAS_STAGING_MOCK_PROVIDERS",
@@ -229,6 +233,9 @@ assert.ok(conohaRateLimits.includes("limit_req_zone"), "ConoHa nginx rate-limit 
 assert.ok(serviceDb.includes("export async function reserveCredit"), "service DB should expose atomic credit reservation");
 assert.ok(serviceDb.includes("export async function settleCreditReservation"), "service DB should expose reservation settlement");
 assert.ok(serviceDb.includes("create table if not exists stripe_events"), "service DB should store Stripe webhook event ids");
+assert.ok(serviceDb.includes("create table if not exists cloud_notebooks"), "service DB should store hosted cloud notebooks");
+assert.ok(serviceDb.includes("export async function createCloudNotebook"), "service DB should create hosted cloud notebooks");
+assert.ok(serviceDb.includes("pruneCloudNotebookQuota"), "hosted cloud notebooks should prune old rows by quota");
 assert.ok(serviceDb.includes("export async function refundStaleCreditReservations"), "service DB should expose stale reservation cleanup");
 assert.ok(serviceDb.includes("export async function deleteExpiredSessions"), "service DB should expose session cleanup");
 assert.equal(serviceDb.includes("email text unique not null"), false, "Google email should not be a unique identity key");

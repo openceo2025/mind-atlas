@@ -38,6 +38,41 @@ const mockService = http.createServer((request, response) => {
     sendJson(response, 200, createMockChatOptions());
     return;
   }
+  if (url.pathname === "/api/cloud/notebooks" && request.method === "GET") {
+    sendJson(response, 200, {
+      directory: "Mind Atlas cloud text storage",
+      notebooks: [],
+      quota: { usedBytes: 0, limitBytes: 10485760 },
+    });
+    return;
+  }
+  if (url.pathname === "/api/cloud/notebooks" && request.method === "POST") {
+    sendJson(response, 200, createMockCloudEntry("cld_verify_private", "Verify cloud notebook"));
+    return;
+  }
+  if (url.pathname.startsWith("/api/cloud/notebooks/") && request.method === "GET") {
+    sendJson(response, 200, {
+      entry: createMockCloudEntry("cld_verify_private", "Verify cloud notebook"),
+      root: createMockCloudNotebookRoot(),
+    });
+    return;
+  }
+  if (url.pathname === "/api/share/notebooks" && request.method === "POST") {
+    sendJson(response, 200, {
+      url: "https://mind-atlas.org/#s=verifycloudsharetoken",
+      token: "verifycloudsharetoken",
+      entry: createMockCloudEntry("cld_verify_public", "Verify shared notebook", "public"),
+      quota: { usedBytes: 512, limitBytes: 10485760 },
+    });
+    return;
+  }
+  if (url.pathname.startsWith("/api/share/notebooks/") && request.method === "GET") {
+    sendJson(response, 200, {
+      entry: createMockCloudEntry("cld_verify_public", "Verify shared notebook", "public"),
+      root: createMockCloudNotebookRoot(),
+    });
+    return;
+  }
   sendJson(response, 404, { error: "mock route not found" });
 });
 
@@ -105,6 +140,12 @@ try {
     if (oldCapabilityCopyCount !== 0) throw new Error("Public AI dialog exposed old capability-list copy.");
 
     await page.getByRole("button", { name: "Open atlas menu" }).click();
+    const publicMenu = page.locator(".global-context-menu");
+    await publicMenu.getByText("Cloud save").waitFor();
+    await publicMenu.getByText("Cloud load").waitFor();
+    if ((await publicMenu.getByText("Export with files").count()) !== 0) {
+      throw new Error("Public hosted mode exposed multimedia package export.");
+    }
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).waitFor();
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).click();
     await page.waitForURL(/\/about\.html$/);
@@ -112,6 +153,10 @@ try {
     await page.getByRole("heading", { name: "小説を書く", exact: true }).waitFor();
     if ((await page.locator(".demo-window iframe").count()) !== 3) throw new Error("About page should expose three embedded Mind Atlas examples.");
     if ((await page.locator(".view-controls button").count()) !== 4) throw new Error("About page should expose four novel view buttons.");
+    await page.getByRole("heading", { name: "使い方を選ぶ" }).waitFor();
+    if ((await page.locator(".plan-card").count()) !== 3) throw new Error("About page should expose three plan cards.");
+    await page.getByText("テキストのみクラウドへ保存できます").waitFor();
+    await page.getByText("推定困難な短い公開リンクで共有できます").waitFor();
     await page.frameLocator("#novel-frame").locator("canvas").waitFor();
     const aboutWheelFocusState = await page.frameLocator("#novel-frame").locator("canvas").evaluate(async (canvas) => {
       const appShell = document.querySelector(".app-shell");
@@ -302,6 +347,43 @@ function providerLabel(id) {
     minimax: "MiniMax",
     grok: "Grok",
   }[id] ?? id;
+}
+
+function createMockCloudEntry(id, title, visibility = "private") {
+  return {
+    id,
+    name: `${title}.mindatlas`,
+    title,
+    size: 512,
+    updatedAt: new Date().toISOString(),
+    visibility,
+    ...(visibility === "public" ? { shareToken: "verifycloudsharetoken" } : {}),
+  };
+}
+
+function createMockCloudNotebookRoot() {
+  const now = new Date().toISOString();
+  return {
+    id: "atlas-root",
+    kind: "root",
+    nodeType: "note",
+    title: "Verify cloud notebook",
+    subtitle: "Verify cloud notebook",
+    body: "",
+    author: "human",
+    status: "waiting",
+    color: "#6f8cff",
+    texture: "speckled",
+    radius: 80,
+    summary: "",
+    nextDecision: "",
+    tags: [],
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    position: [0, 0, 0],
+    children: [],
+  };
 }
 
 function setCors(request, response) {
