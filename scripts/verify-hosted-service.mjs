@@ -235,7 +235,14 @@ assert.ok(serviceDb.includes("export async function settleCreditReservation"), "
 assert.ok(serviceDb.includes("create table if not exists stripe_events"), "service DB should store Stripe webhook event ids");
 assert.ok(serviceDb.includes("create table if not exists cloud_notebooks"), "service DB should store hosted cloud notebooks");
 assert.ok(serviceDb.includes("export async function createCloudNotebook"), "service DB should create hosted cloud notebooks");
+assert.ok(serviceDb.includes("export async function updateCloudNotebook"), "service DB should update hosted cloud notebooks");
+assert.ok(serviceDb.includes("export async function renameCloudNotebook"), "service DB should rename hosted cloud notebooks");
+assert.ok(serviceDb.includes("export async function deleteCloudNotebook"), "service DB should delete hosted cloud notebooks");
+assert.ok(serviceDb.includes("export async function shareCloudNotebook"), "service DB should share existing hosted cloud notebooks");
 assert.ok(serviceDb.includes("pruneCloudNotebookQuota"), "hosted cloud notebooks should prune old rows by quota");
+assert.ok(server.includes("handleCloudNotebookUpdate"), "hosted service should expose cloud notebook update");
+assert.ok(server.includes("handleCloudNotebookDelete"), "hosted service should expose cloud notebook delete");
+assert.ok(server.includes("handleCloudNotebookShareExisting"), "hosted service should expose existing cloud notebook share");
 assert.ok(serviceDb.includes("export async function refundStaleCreditReservations"), "service DB should expose stale reservation cleanup");
 assert.ok(serviceDb.includes("export async function deleteExpiredSessions"), "service DB should expose session cleanup");
 assert.equal(serviceDb.includes("email text unique not null"), false, "Google email should not be a unique identity key");

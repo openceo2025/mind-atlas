@@ -716,6 +716,15 @@ export interface CloudNotebookShareResult {
   };
 }
 
+export interface CloudNotebookDeleteResult {
+  ok: boolean;
+  id: string;
+  quota?: {
+    usedBytes: number;
+    limitBytes: number;
+  };
+}
+
 export interface RealtimeSessionConfig {
   context: AiNodeContext;
   instructions?: string;

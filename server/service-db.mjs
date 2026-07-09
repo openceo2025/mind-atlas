@@ -611,6 +611,101 @@ export async function createCloudNotebook({ userId, title, data, sizeBytes, visi
   }
 }
 
+export async function updateCloudNotebook({ userId, notebookId, title, data, sizeBytes, quotaBytes }) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const existing = await client.query(
+      "select id from cloud_notebooks where user_id = $1 and id = $2 for update",
+      [userId, notebookId],
+    );
+    if (!existing.rows[0]) {
+      await client.query("rollback");
+      return null;
+    }
+    const result = await client.query(
+      `
+        update cloud_notebooks
+        set title = $3,
+            data = $4::jsonb,
+            size_bytes = $5,
+            updated_at = now()
+        where user_id = $1 and id = $2
+        returning id, user_id, visibility, share_token, title, size_bytes, created_at, updated_at
+      `,
+      [
+        userId,
+        notebookId,
+        String(title || "Mind Atlas").slice(0, 240),
+        JSON.stringify(data),
+        Math.max(0, Math.round(Number(sizeBytes) || 0)),
+      ],
+    );
+    const prunedCount = await pruneCloudNotebookQuota(client, userId, quotaBytes, notebookId);
+    const quota = await getCloudNotebookQuota(client, userId, quotaBytes);
+    await client.query("commit");
+    return { notebook: result.rows[0], prunedCount, quota };
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function renameCloudNotebook({ userId, notebookId, title, quotaBytes }) {
+  const result = await pool.query(
+    `
+      update cloud_notebooks
+      set title = $3,
+          updated_at = now()
+      where user_id = $1 and id = $2
+      returning id, user_id, visibility, share_token, title, size_bytes, created_at, updated_at
+    `,
+    [userId, notebookId, String(title || "Mind Atlas").slice(0, 240)],
+  );
+  if (!result.rows[0]) return null;
+  return {
+    notebook: result.rows[0],
+    prunedCount: 0,
+    quota: await getCloudNotebookQuota(pool, userId, quotaBytes),
+  };
+}
+
+export async function deleteCloudNotebook(userId, notebookId, quotaBytes) {
+  const result = await pool.query(
+    `
+      delete from cloud_notebooks
+      where user_id = $1 and id = $2
+      returning id
+    `,
+    [userId, notebookId],
+  );
+  return {
+    deleted: Boolean(result.rows[0]),
+    quota: await getCloudNotebookQuota(pool, userId, quotaBytes),
+  };
+}
+
+export async function shareCloudNotebook({ userId, notebookId, shareToken, quotaBytes }) {
+  const result = await pool.query(
+    `
+      update cloud_notebooks
+      set visibility = 'public',
+          share_token = coalesce(share_token, $3),
+          updated_at = now()
+      where user_id = $1 and id = $2
+      returning id, user_id, visibility, share_token, title, size_bytes, created_at, updated_at
+    `,
+    [userId, notebookId, shareToken],
+  );
+  if (!result.rows[0]) return null;
+  return {
+    notebook: result.rows[0],
+    quota: await getCloudNotebookQuota(pool, userId, quotaBytes),
+  };
+}
+
 export async function listCloudNotebooks(userId, quotaBytes) {
   const result = await pool.query(
     `

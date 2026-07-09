@@ -233,9 +233,14 @@ MIND_ATLAS_CLOUD_NOTEBOOK_MAX_NODES=5000
 
 Hosted cloud save is text-only. Attachments and package export stay local-only,
 and the service stores each Google account's cloud notebooks in PostgreSQL under
-the `MIND_ATLAS_CLOUD_NOTEBOOK_MAX_BYTES` quota. When a new save would exceed
-the quota, the service keeps the new save and deletes older cloud rows for that
-same user until the total is under the limit.
+the `MIND_ATLAS_CLOUD_NOTEBOOK_MAX_BYTES` quota. The public UI treats this as a
+small file manager: users can save the current atlas under a new name, overwrite
+an existing cloud file, rename files, delete files, load a selected file, and
+create a public share link from a selected cloud file. Public share links are
+backed by an unguessable token and do not expose local attachments. When a new
+save or overwrite would exceed the quota, the service keeps the new/updated row
+and deletes older cloud rows for that same user until the total is under the
+limit.
 
 Provider model lists are fetched server-side from provider APIs when
 `MIND_ATLAS_PROVIDER_MODEL_FETCH=1`. In `require-model` mode, the public model

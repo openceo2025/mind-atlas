@@ -41,13 +41,43 @@ const mockService = http.createServer((request, response) => {
   if (url.pathname === "/api/cloud/notebooks" && request.method === "GET") {
     sendJson(response, 200, {
       directory: "Mind Atlas cloud text storage",
-      notebooks: [],
-      quota: { usedBytes: 0, limitBytes: 10485760 },
+      notebooks: [createMockCloudEntry("cld_verify_private", "Verify cloud notebook")],
+      quota: { usedBytes: 512, limitBytes: 10485760 },
     });
     return;
   }
   if (url.pathname === "/api/cloud/notebooks" && request.method === "POST") {
     sendJson(response, 200, createMockCloudEntry("cld_verify_private", "Verify cloud notebook"));
+    return;
+  }
+  if (url.pathname.startsWith("/api/cloud/notebooks/") && url.pathname.endsWith("/share") && request.method === "POST") {
+    sendJson(response, 200, {
+      url: "https://mind-atlas.org/#s=verifycloudsharetoken",
+      token: "verifycloudsharetoken",
+      entry: createMockCloudEntry("cld_verify_private", "Verify cloud notebook", "public"),
+      quota: { usedBytes: 512, limitBytes: 10485760 },
+    });
+    return;
+  }
+  if (url.pathname.startsWith("/api/cloud/notebooks/") && request.method === "PATCH") {
+    collectRequestJson(request).then((body) => {
+      sendJson(response, 200, {
+        ...createMockCloudEntry("cld_verify_private", body?.title || "Verify cloud notebook"),
+        directory: "Mind Atlas cloud text storage",
+        prunedCount: 0,
+        quota: { usedBytes: 512, limitBytes: 10485760 },
+      });
+    }).catch(() => {
+      sendJson(response, 400, { error: "invalid mock JSON" });
+    });
+    return;
+  }
+  if (url.pathname.startsWith("/api/cloud/notebooks/") && request.method === "DELETE") {
+    sendJson(response, 200, {
+      ok: true,
+      id: decodeURIComponent(url.pathname.slice("/api/cloud/notebooks/".length)),
+      quota: { usedBytes: 0, limitBytes: 10485760 },
+    });
     return;
   }
   if (url.pathname.startsWith("/api/cloud/notebooks/") && request.method === "GET") {
@@ -146,6 +176,18 @@ try {
     if ((await publicMenu.getByText("Export with files").count()) !== 0) {
       throw new Error("Public hosted mode exposed multimedia package export.");
     }
+    await publicMenu.getByText("Cloud save").click();
+    const cloudDialog = page.getByRole("dialog", { name: "Cloud files" });
+    await cloudDialog.waitFor();
+    await cloudDialog.getByText("Cloud storage").waitFor();
+    await cloudDialog.getByText("Save current as...").waitFor();
+    await cloudDialog.getByText("Overwrite").waitFor();
+    await cloudDialog.getByText("Rename").waitFor();
+    await cloudDialog.getByText("Copy share link").waitFor();
+    await cloudDialog.getByText("Delete").waitFor();
+    await cloudDialog.getByText("Verify cloud notebook").waitFor();
+    await page.getByLabel("Close cloud loader").click();
+    await page.getByRole("button", { name: "Open atlas menu" }).click();
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).waitFor();
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).click();
     await page.waitForURL(/\/about\.html$/);
@@ -394,12 +436,19 @@ function setCors(request, response) {
     response.setHeader("Vary", "Origin");
   }
   response.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  response.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
 }
 
 function sendJson(response, status, payload) {
   response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   response.end(JSON.stringify(payload));
+}
+
+async function collectRequestJson(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  const text = Buffer.concat(chunks).toString("utf8");
+  return text ? JSON.parse(text) : {};
 }
 
 async function assertNoForbiddenPublicDeveloperSurface(page, label) {

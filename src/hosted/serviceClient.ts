@@ -1,4 +1,12 @@
-import type { AtlasNode, CloudNotebookListResult, CloudNotebookLoadResult, CloudNotebookSaveResult, CloudNotebookShareResult, HostedServiceSession } from "../types";
+import type {
+  AtlasNode,
+  CloudNotebookDeleteResult,
+  CloudNotebookListResult,
+  CloudNotebookLoadResult,
+  CloudNotebookSaveResult,
+  CloudNotebookShareResult,
+  HostedServiceSession,
+} from "../types";
 import { HOSTED_SERVICE_SESSION_REFRESH_EVENT } from "../events";
 import { isAboutDemoMode } from "../aboutDemo";
 
@@ -66,6 +74,32 @@ export async function saveHostedCloudNotebook(root: AtlasNode, title = root.titl
 export async function loadHostedCloudNotebook(id: string): Promise<CloudNotebookLoadResult> {
   const response = await hostedFetch(`/api/cloud/notebooks/${encodeURIComponent(id)}`);
   return await readHostedJson<CloudNotebookLoadResult>(response);
+}
+
+export async function updateHostedCloudNotebook(id: string, root: AtlasNode, title = root.title): Promise<CloudNotebookSaveResult> {
+  const response = await hostedFetch(`/api/cloud/notebooks/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ root, title }),
+  });
+  return await readHostedJson<CloudNotebookSaveResult>(response);
+}
+
+export async function renameHostedCloudNotebook(id: string, title: string): Promise<CloudNotebookSaveResult> {
+  const response = await hostedFetch(`/api/cloud/notebooks/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+  return await readHostedJson<CloudNotebookSaveResult>(response);
+}
+
+export async function deleteHostedCloudNotebook(id: string): Promise<CloudNotebookDeleteResult> {
+  const response = await hostedFetch(`/api/cloud/notebooks/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return await readHostedJson<CloudNotebookDeleteResult>(response);
+}
+
+export async function shareHostedCloudNotebook(id: string): Promise<CloudNotebookShareResult> {
+  const response = await hostedFetch(`/api/cloud/notebooks/${encodeURIComponent(id)}/share`, { method: "POST" });
+  return await readHostedJson<CloudNotebookShareResult>(response);
 }
 
 export async function createHostedCloudShare(root: AtlasNode, title = root.title): Promise<CloudNotebookShareResult> {

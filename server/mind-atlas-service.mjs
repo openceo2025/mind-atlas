@@ -7,12 +7,14 @@ import { URL } from "node:url";
 import {
   buildEntitlement,
   createCloudNotebook,
+  deleteCloudNotebook,
   deleteExpiredSessions,
   getCloudNotebook,
   getCloudNotebookByShareToken,
   getSessionUser,
   getUserSubscription,
   listCloudNotebooks,
+  renameCloudNotebook,
   forgetStripeEvent,
   isSubscriptionActive,
   markStripeEventProcessed,
@@ -23,6 +25,8 @@ import {
   reserveCredit,
   refundStaleCreditReservations,
   settleCreditReservation,
+  shareCloudNotebook,
+  updateCloudNotebook,
   upsertGoogleUser,
   upsertSubscriptionByStripeCustomer,
   upsertSubscriptionByUserId,
@@ -203,6 +207,22 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/cloud/notebooks") {
       await handleCloudNotebookSave(request, response);
       return;
+    }
+
+    if (url.pathname.startsWith("/api/cloud/notebooks/")) {
+      const cloudNotebookPath = url.pathname.slice("/api/cloud/notebooks/".length);
+      if (request.method === "POST" && cloudNotebookPath.endsWith("/share")) {
+        await handleCloudNotebookShareExisting(request, response, cloudNotebookPath.slice(0, -"/share".length));
+        return;
+      }
+      if (request.method === "PATCH") {
+        await handleCloudNotebookUpdate(request, response, cloudNotebookPath);
+        return;
+      }
+      if (request.method === "DELETE") {
+        await handleCloudNotebookDelete(request, response, cloudNotebookPath);
+        return;
+      }
     }
 
     if (request.method === "GET" && url.pathname.startsWith("/api/cloud/notebooks/")) {
@@ -597,6 +617,61 @@ async function handleCloudNotebookLoad(request, response, id) {
   });
 }
 
+async function handleCloudNotebookUpdate(request, response, id) {
+  const user = await requireUser(request);
+  enforceUserRateLimit(user.id, "cloud", 30);
+  const notebookId = decodeURIComponent(id || "");
+  if (!isCloudNotebookId(notebookId)) throw new ServiceError(400, "Invalid cloud notebook id");
+  const payload = await readJson(request, cloudNotebookMaxBytes + 64 * 1024);
+  if (payload && typeof payload === "object" && "root" in payload) {
+    const { root, title, sizeBytes } = normalizeCloudNotebookPayload(payload);
+    const result = await updateCloudNotebook({
+      userId: user.id,
+      notebookId,
+      title,
+      data: root,
+      sizeBytes,
+      quotaBytes: cloudNotebookMaxBytes,
+    });
+    if (!result) throw new ServiceError(404, "Cloud notebook was not found");
+    sendJson(response, 200, {
+      ...formatCloudNotebookEntry(result.notebook),
+      directory: "Mind Atlas cloud text storage",
+      prunedCount: result.prunedCount,
+      quota: result.quota,
+    });
+    return;
+  }
+  const title = safeCloudText(payload?.title, "Mind Atlas", 240);
+  const result = await renameCloudNotebook({
+    userId: user.id,
+    notebookId,
+    title,
+    quotaBytes: cloudNotebookMaxBytes,
+  });
+  if (!result) throw new ServiceError(404, "Cloud notebook was not found");
+  sendJson(response, 200, {
+    ...formatCloudNotebookEntry(result.notebook),
+    directory: "Mind Atlas cloud text storage",
+    prunedCount: result.prunedCount,
+    quota: result.quota,
+  });
+}
+
+async function handleCloudNotebookDelete(request, response, id) {
+  const user = await requireUser(request);
+  enforceUserRateLimit(user.id, "cloud", 30);
+  const notebookId = decodeURIComponent(id || "");
+  if (!isCloudNotebookId(notebookId)) throw new ServiceError(400, "Invalid cloud notebook id");
+  const result = await deleteCloudNotebook(user.id, notebookId, cloudNotebookMaxBytes);
+  if (!result.deleted) throw new ServiceError(404, "Cloud notebook was not found");
+  sendJson(response, 200, {
+    ok: true,
+    id: notebookId,
+    quota: result.quota,
+  });
+}
+
 async function handleCloudNotebookShare(request, response) {
   const user = await requireUser(request);
   enforceUserRateLimit(user.id, "cloud-share", 20);
@@ -617,6 +692,29 @@ async function handleCloudNotebookShare(request, response) {
     token,
     entry: formatCloudNotebookEntry(result.notebook),
     prunedCount: result.prunedCount,
+    quota: result.quota,
+  });
+}
+
+async function handleCloudNotebookShareExisting(request, response, id) {
+  const user = await requireUser(request);
+  enforceUserRateLimit(user.id, "cloud-share", 20);
+  const notebookId = decodeURIComponent(id || "");
+  if (!isCloudNotebookId(notebookId)) throw new ServiceError(400, "Invalid cloud notebook id");
+  const result = await shareCloudNotebook({
+    userId: user.id,
+    notebookId,
+    shareToken: createShareToken(),
+    quotaBytes: cloudNotebookMaxBytes,
+  });
+  if (!result) throw new ServiceError(404, "Cloud notebook was not found");
+  const entry = formatCloudNotebookEntry(result.notebook);
+  const token = entry.shareToken;
+  if (!token) throw new ServiceError(500, "Cloud notebook share token could not be created");
+  sendJson(response, 200, {
+    url: `${publicOrigin}/#s=${token}`,
+    token,
+    entry,
     quota: result.quota,
   });
 }

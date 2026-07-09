@@ -20,7 +20,7 @@ import type { OutlineNodeInput } from "./outline/atlasOutline";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
 import { getAtlasLayoutModeLabel, isAtlasLayoutMode, type AtlasLayoutMode } from "./layout/atlasLayout";
 import {
-  createHostedCloudShare,
+  deleteHostedCloudNotebook,
   fetchHostedServiceSession,
   isHostedServiceMode,
   listHostedCloudNotebooks,
@@ -28,13 +28,16 @@ import {
   loadHostedSharedNotebook,
   logoutHostedService,
   openHostedBillingPortal,
+  renameHostedCloudNotebook,
   saveHostedCloudNotebook,
+  shareHostedCloudNotebook,
   startHostedBillingCheckout,
   startHostedGoogleLogin,
+  updateHostedCloudNotebook,
 } from "./hosted/serviceClient";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
-import type { AtlasNode, CloudNotebookEntry, HostedServiceSession, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
+import type { AtlasNode, CloudNotebookEntry, CloudNotebookListResult, HostedServiceSession, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
 import type { NotebookPersistenceStatus, NotebookSnapshot } from "./notebookPersistence";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
@@ -161,6 +164,7 @@ export default function App() {
   const [renderQuality, setRenderQuality] = useState<RenderQuality>(() => loadRenderQualityPreference());
   const [cloudNotebooks, setCloudNotebooks] = useState<CloudNotebookEntry[]>([]);
   const [cloudDirectory, setCloudDirectory] = useState("");
+  const [cloudQuota, setCloudQuota] = useState<CloudNotebookListResult["quota"] | null>(null);
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudStatus, setCloudStatus] = useState("");
   const [cloudError, setCloudError] = useState("");
@@ -855,11 +859,13 @@ export default function App() {
         const result = await listHostedCloudNotebooks();
         setCloudNotebooks(result.notebooks);
         setCloudDirectory(result.directory || "Mind Atlas cloud text storage");
+        setCloudQuota(result.quota ?? null);
         return;
       }
       const result = await listCloudNotebookPackages();
       setCloudNotebooks(result.notebooks);
       setCloudDirectory(result.directory);
+      setCloudQuota(result.quota ?? null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Cloud notebook list failed.";
       setCloudError(message);
@@ -894,15 +900,11 @@ export default function App() {
           startHostedGoogleLogin();
           return;
         }
-        setContextCopyStatus("Creating public cloud link...");
-        await saveNotebookNow();
-        const { root } = prepareHostedCloudNotebook();
-        const share = await createHostedCloudShare(root, root.title || atlasRoot.title || "Mind Atlas");
-        await copyTextToClipboard(share.url);
-        setContextCopyStatus("Public Mind Atlas link copied.");
-        window.setTimeout(() => {
-          setContextCopyStatus((current) => (current === "Public Mind Atlas link copied." ? "" : current));
-        }, 7000);
+        setCloudLoadOpen(true);
+        setMenuOpen(false);
+        void refreshCloudNotebooks();
+        setCloudStatus("Select a cloud file to share, or save current as a new cloud file first.");
+        setContextCopyStatus("Select a cloud file to share.");
         return;
       }
       setContextCopyStatus("Preparing share image...");
@@ -1000,6 +1002,113 @@ export default function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Cloud notebook load failed.";
       setCloudError(message);
+    } finally {
+      setCloudLoading(false);
+    }
+  };
+
+  const handleHostedSaveCloudAs = async () => {
+    if (!publicServiceMode) return;
+    const title = window.prompt("Save current atlas as", atlasRoot.title || "Mind Atlas");
+    if (!title?.trim()) return;
+    try {
+      setCloudLoading(true);
+      setCloudError("");
+      setCloudStatus("Saving...");
+      await saveNotebookNow();
+      const { root } = prepareHostedCloudNotebook();
+      const saved = await saveHostedCloudNotebook(root, title.trim());
+      setCloudStatus(`Saved: ${saved.title || saved.name}`);
+      await refreshCloudNotebooks();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Cloud save failed.";
+      setCloudError(message);
+      setCloudStatus("");
+      window.alert(message);
+    } finally {
+      setCloudLoading(false);
+    }
+  };
+
+  const handleHostedOverwriteCloudNotebook = async (entry: CloudNotebookEntry) => {
+    if (!publicServiceMode || !entry.id) return;
+    const confirmed = window.confirm(`Overwrite "${entry.title || entry.name}" with the current atlas?`);
+    if (!confirmed) return;
+    try {
+      setCloudLoading(true);
+      setCloudError("");
+      setCloudStatus("Overwriting...");
+      await saveNotebookNow();
+      const { root } = prepareHostedCloudNotebook();
+      const saved = await updateHostedCloudNotebook(entry.id, root, entry.title || root.title || atlasRoot.title || "Mind Atlas");
+      setCloudStatus(`Overwritten: ${saved.title || saved.name}`);
+      await refreshCloudNotebooks();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Cloud overwrite failed.";
+      setCloudError(message);
+      setCloudStatus("");
+      window.alert(message);
+    } finally {
+      setCloudLoading(false);
+    }
+  };
+
+  const handleHostedRenameCloudNotebook = async (entry: CloudNotebookEntry) => {
+    if (!publicServiceMode || !entry.id) return;
+    const title = window.prompt("Rename cloud file", entry.title || entry.name.replace(/\.mindatlas$/i, ""));
+    if (!title?.trim()) return;
+    try {
+      setCloudLoading(true);
+      setCloudError("");
+      const renamed = await renameHostedCloudNotebook(entry.id, title.trim());
+      setCloudStatus(`Renamed: ${renamed.title || renamed.name}`);
+      await refreshCloudNotebooks();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Cloud rename failed.";
+      setCloudError(message);
+      window.alert(message);
+    } finally {
+      setCloudLoading(false);
+    }
+  };
+
+  const handleHostedDeleteCloudNotebook = async (entry: CloudNotebookEntry) => {
+    if (!publicServiceMode || !entry.id) return;
+    const confirmed = window.confirm(`Delete "${entry.title || entry.name}" from cloud storage?`);
+    if (!confirmed) return;
+    try {
+      setCloudLoading(true);
+      setCloudError("");
+      await deleteHostedCloudNotebook(entry.id);
+      setCloudStatus(`Deleted: ${entry.title || entry.name}`);
+      await refreshCloudNotebooks();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Cloud delete failed.";
+      setCloudError(message);
+      window.alert(message);
+    } finally {
+      setCloudLoading(false);
+    }
+  };
+
+  const handleHostedShareCloudNotebook = async (entry: CloudNotebookEntry) => {
+    if (!publicServiceMode || !entry.id) return;
+    try {
+      setCloudLoading(true);
+      setCloudError("");
+      const share = await shareHostedCloudNotebook(entry.id);
+      await copyTextToClipboard(share.url);
+      setCloudStatus(`Share link copied: ${share.entry.title || share.entry.name}`);
+      setContextCopyStatus("Public Mind Atlas link copied.");
+      window.setTimeout(() => {
+        setContextCopyStatus((current) => (current === "Public Mind Atlas link copied." ? "" : current));
+      }, 7000);
+      await refreshCloudNotebooks();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Cloud share failed.";
+      setCloudError(message);
+      setContextCopyStatus("");
+      window.alert(message);
     } finally {
       setCloudLoading(false);
     }
@@ -1611,11 +1720,11 @@ export default function App() {
             </button>
             {publicServiceMode ? (
               <>
-                <button type="button" onClick={handleSaveToCloud}>
+                <button type="button" onClick={handleOpenCloudLoad}>
                   <CloudUpload size={15} />
                   <span>
                     Cloud save
-                    <small>{cloudStatus || (hostedAuthenticated ? "text only / max 10 MB" : "Google login required")}</small>
+                    <small>{cloudStatus || (hostedAuthenticated ? "save as or overwrite" : "Google login required")}</small>
                   </span>
                 </button>
                 <button type="button" onClick={handleOpenCloudLoad}>
@@ -1826,11 +1935,19 @@ export default function App() {
         <CloudLoadDialog
           notebooks={cloudNotebooks}
           directory={cloudDirectory}
+          quota={cloudQuota}
+          hosted={publicServiceMode}
           loading={cloudLoading}
           error={cloudError}
+          status={cloudStatus}
           onClose={() => setCloudLoadOpen(false)}
           onRefresh={refreshCloudNotebooks}
           onLoad={handleLoadCloudNotebook}
+          onSaveAs={handleHostedSaveCloudAs}
+          onOverwrite={handleHostedOverwriteCloudNotebook}
+          onRename={handleHostedRenameCloudNotebook}
+          onShare={handleHostedShareCloudNotebook}
+          onDelete={handleHostedDeleteCloudNotebook}
         />
       ) : null}
       {publicServiceMode && aiFeatureDialogOpen ? (
@@ -2200,27 +2317,62 @@ function MergePreviewBlockView({ block, onChoice }: { block: MergePreviewBlock; 
 function CloudLoadDialog({
   notebooks,
   directory,
+  quota,
+  hosted,
   loading,
   error,
+  status,
   onClose,
   onRefresh,
   onLoad,
+  onSaveAs,
+  onOverwrite,
+  onRename,
+  onShare,
+  onDelete,
 }: {
   notebooks: CloudNotebookEntry[];
   directory: string;
+  quota?: CloudNotebookListResult["quota"] | null;
+  hosted?: boolean;
   loading: boolean;
   error: string;
+  status?: string;
   onClose: () => void;
   onRefresh: () => void;
   onLoad: (entry: CloudNotebookEntry) => void;
+  onSaveAs?: () => void;
+  onOverwrite?: (entry: CloudNotebookEntry) => void;
+  onRename?: (entry: CloudNotebookEntry) => void;
+  onShare?: (entry: CloudNotebookEntry) => void;
+  onDelete?: (entry: CloudNotebookEntry) => void;
 }) {
+  const [selectedKey, setSelectedKey] = useState("");
+  const selectedEntry = notebooks.find((entry) => cloudNotebookKey(entry) === selectedKey) ?? notebooks[0] ?? null;
+
+  useEffect(() => {
+    if (!hosted) return;
+    if (!notebooks.length) {
+      setSelectedKey("");
+      return;
+    }
+    if (!selectedKey || !notebooks.some((entry) => cloudNotebookKey(entry) === selectedKey)) {
+      setSelectedKey(cloudNotebookKey(notebooks[0]));
+    }
+  }, [hosted, notebooks, selectedKey]);
+
+  const dialogTitle = hosted ? "Cloud files" : "Cloud load";
+  const selectedDisabled = loading || !selectedEntry;
+  const quotaText = quota ? `${formatBytes(quota.usedBytes)} / ${formatBytes(quota.limitBytes)}` : "";
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="cloud-load-dialog" role="dialog" aria-modal="true" aria-label="クラウドから読み込み" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="cloud-load-dialog" role="dialog" aria-modal="true" aria-label={dialogTitle} onMouseDown={(event) => event.stopPropagation()}>
         <header className="voice-log-header">
           <div>
-            <h2>クラウドから読み込み</h2>
+            <h2>{dialogTitle}</h2>
             <p>{directory || "Server notebook folder"}</p>
+            {quotaText ? <p className="cloud-quota">Cloud storage {quotaText}</p> : null}
           </div>
           <div className="voice-log-actions">
             <button className="icon-button" type="button" onClick={onRefresh} aria-label="Refresh cloud notebooks" disabled={loading}>
@@ -2233,21 +2385,68 @@ function CloudLoadDialog({
         </header>
         <div className="cloud-package-list">
           {error ? <p className="cloud-dialog-status is-error">{error}</p> : null}
+          {status ? <p className="cloud-dialog-status is-ok">{status}</p> : null}
+          {hosted ? (
+            <div className="cloud-manager-actions" aria-label="Cloud file actions">
+              <button type="button" onClick={onSaveAs} disabled={loading || !onSaveAs}>
+                <CloudUpload size={15} />
+                <span>Save current as...</span>
+              </button>
+              <button type="button" onClick={() => selectedEntry && onLoad(selectedEntry)} disabled={selectedDisabled}>
+                <CloudDownload size={15} />
+                <span>Load</span>
+              </button>
+              <button type="button" onClick={() => selectedEntry && onOverwrite?.(selectedEntry)} disabled={selectedDisabled || !onOverwrite}>
+                <FileText size={15} />
+                <span>Overwrite</span>
+              </button>
+              <button type="button" onClick={() => selectedEntry && onRename?.(selectedEntry)} disabled={selectedDisabled || !onRename}>
+                <PenLine size={15} />
+                <span>Rename</span>
+              </button>
+              <button type="button" onClick={() => selectedEntry && onShare?.(selectedEntry)} disabled={selectedDisabled || !onShare}>
+                <Share2 size={15} />
+                <span>Copy share link</span>
+              </button>
+              <button className="danger-button" type="button" onClick={() => selectedEntry && onDelete?.(selectedEntry)} disabled={selectedDisabled || !onDelete}>
+                <Trash2 size={15} />
+                <span>Delete</span>
+              </button>
+            </div>
+          ) : null}
           {loading ? <p className="cloud-dialog-status">Loading...</p> : null}
-          {!loading && !notebooks.length ? <p className="cloud-dialog-status">No cloud packages found.</p> : null}
-          {notebooks.map((entry) => (
-            <button key={entry.id || entry.name} className="cloud-package-button" type="button" onClick={() => onLoad(entry)} disabled={loading}>
-              <span>
-                <strong>{entry.title || entry.name}</strong>
-                <small>{formatBytes(entry.size)} / {formatVoiceLogTime(entry.updatedAt)}</small>
-              </span>
-              <CloudDownload size={16} />
-            </button>
-          ))}
+          {!loading && !notebooks.length ? <p className="cloud-dialog-status">{hosted ? "No cloud files yet." : "No cloud packages found."}</p> : null}
+          {notebooks.map((entry) => {
+            const entryKey = cloudNotebookKey(entry);
+            const selected = hosted && selectedEntry ? cloudNotebookKey(selectedEntry) === entryKey : false;
+            return (
+              <button
+                key={entryKey}
+                className={`cloud-package-button${selected ? " is-selected" : ""}`}
+                type="button"
+                onClick={() => (hosted ? setSelectedKey(entryKey) : onLoad(entry))}
+                disabled={loading}
+                aria-pressed={hosted ? selected : undefined}
+              >
+                <span>
+                  <strong>{entry.title || entry.name}</strong>
+                  <small>
+                    {formatBytes(entry.size)} / {formatVoiceLogTime(entry.updatedAt)}
+                    {entry.visibility === "public" ? " / shared" : ""}
+                  </small>
+                </span>
+                {hosted ? <FileText size={16} /> : <CloudDownload size={16} />}
+              </button>
+            );
+          })}
         </div>
       </section>
     </div>
   );
+}
+
+function cloudNotebookKey(entry: CloudNotebookEntry) {
+  return entry.id || entry.name;
 }
 
 function VoiceSettingsDialog({
