@@ -6,9 +6,9 @@ const outputDir = "artifacts/screenshots";
 
 async function launchBrowser() {
   const attempts = [
-    () => chromium.launch({ headless: true }),
-    () => chromium.launch({ channel: "msedge", headless: true }),
-    () => chromium.launch({ channel: "chrome", headless: true }),
+    () => chromium.launch({ headless: true, args: ["--lang=en-US"] }),
+    () => chromium.launch({ channel: "msedge", headless: true, args: ["--lang=en-US"] }),
+    () => chromium.launch({ channel: "chrome", headless: true, args: ["--lang=en-US"] }),
   ];
 
   let lastError;
@@ -96,9 +96,38 @@ async function verifyLayoutModeSwitch(browser) {
     if (!hasCanvas) throw new Error(`Mode ${label} lost WebGL canvas`);
   }
   await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("TextEditor").click();
+  await page.locator(".global-context-menu").getByTitle("Text editor").click();
   await page.waitForSelector(".outline-editor-shell");
   await page.close();
+}
+
+async function verifyLocaleSwitching(browser) {
+  const context = await browser.newContext({ viewport: { width: 1100, height: 760 }, ignoreHTTPSErrors: true, locale: "en-US" });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.getByLabel("Open atlas menu").click();
+  await page.getByLabel("Interface language").selectOption("ja");
+  await page.getByRole("button", { name: "新しく始める" }).waitFor();
+  const japaneseDocument = await page.evaluate(() => ({
+    lang: document.documentElement.lang,
+    dir: document.documentElement.dir,
+    stored: window.localStorage.getItem("mind-atlas-locale-v1"),
+  }));
+  if (japaneseDocument.lang !== "ja" || japaneseDocument.dir !== "ltr" || japaneseDocument.stored !== "ja") {
+    throw new Error(`Japanese locale did not apply and persist: ${JSON.stringify(japaneseDocument)}`);
+  }
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByLabel("Mind Atlasメニューを開く").click();
+  await page.getByRole("button", { name: "新しく始める" }).waitFor();
+
+  await page.goto(`${baseUrl}?locale=ar-XB`, { waitUntil: "networkidle" });
+  const pseudoDocument = await page.evaluate(() => ({ lang: document.documentElement.lang, dir: document.documentElement.dir }));
+  if (pseudoDocument.lang !== "ar-XB" || pseudoDocument.dir !== "rtl") {
+    throw new Error(`RTL pseudo locale did not apply: ${JSON.stringify(pseudoDocument)}`);
+  }
+  await context.close();
+  return { japaneseDocument, pseudoDocument };
 }
 
 async function verifyLocalDeveloperModeSurface(browser) {
@@ -230,7 +259,7 @@ async function verifyTutorialSkipButton(browser) {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
 
-  const skipButton = page.getByRole("button", { name: "チュートリアルをスキップ" });
+  const skipButton = page.getByRole("button", { name: "Skip tutorial" });
   await skipButton.waitFor();
   await skipButton.click();
   await page.waitForFunction(() => {
@@ -240,7 +269,7 @@ async function verifyTutorialSkipButton(browser) {
     return progress.basicCompleted === true && progress.spaceBasicsCompleted === true && progress.aiUnlocked === false;
   });
   await page.getByLabel("Open atlas menu").waitFor();
-  const remainingSkipButtons = await page.getByRole("button", { name: "チュートリアルをスキップ" }).count();
+  const remainingSkipButtons = await page.getByRole("button", { name: "Skip tutorial" }).count();
   if (remainingSkipButtons > 0) throw new Error("Tutorial skip button remained visible after completion.");
 
   await context.close();
@@ -441,7 +470,7 @@ async function verifyOutlineAndContextCopy(browser) {
   await page.waitForSelector("canvas");
 
   await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("TextEditor").click();
+  await page.locator(".global-context-menu").getByTitle("Text editor").click();
   await page.waitForSelector(".outline-editor-shell");
 
   const titleInputs = page.getByLabel("Node title");
@@ -483,7 +512,7 @@ async function verifyOutlineAndContextCopy(browser) {
   await page.getByRole("button", { name: /Close/i }).click();
   await page.keyboard.press("Control+Z");
   await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("TextEditor").click();
+  await page.locator(".global-context-menu").getByTitle("Text editor").click();
   await page.waitForSelector(".outline-editor-shell");
   const revertedTitleCount = await page.locator('input[aria-label="Node title"]').evaluateAll(
     (inputs, expectedTitle) => inputs.filter((input) => input.value === expectedTitle).length,
@@ -517,7 +546,7 @@ async function verifyOutlineCollapseAndDeletionSafety(browser) {
   }
 
   await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("TextEditor").click();
+  await page.locator(".global-context-menu").getByTitle("Text editor").click();
   await page.waitForSelector(".outline-editor-shell");
   const initialOutlineValues = await readOutlineTitleValues(page);
   if (!initialOutlineValues.includes("Nested Parent") || !initialOutlineValues.includes("Nested Child")) {
@@ -549,7 +578,7 @@ async function verifyOutlineCollapseAndDeletionSafety(browser) {
     value: input.value,
     placeholder: input.getAttribute("placeholder"),
   }));
-  if (newOutlineState.value !== "" || newOutlineState.placeholder !== "ここに入力") {
+  if (newOutlineState.value !== "" || newOutlineState.placeholder !== "Untitled") {
     throw new Error(`New outline nodes should store an empty title and show a placeholder: ${JSON.stringify(newOutlineState)}`);
   }
   await page.getByRole("button", { name: /Close/i }).click();
@@ -609,7 +638,7 @@ async function verifyOutlineThemeAndSubtreeCollapse(browser) {
   await darkPage.goto(baseUrl, { waitUntil: "networkidle" });
   await darkPage.waitForSelector("canvas");
   await darkPage.getByLabel("Open atlas menu").click();
-  await darkPage.locator(".global-context-menu").getByTitle("TextEditor").click();
+  await darkPage.locator(".global-context-menu").getByTitle("Text editor").click();
   await darkPage.waitForSelector(".outline-editor-shell");
 
   const darkThemeStats = await readOutlineThemeStats(darkPage);
@@ -621,7 +650,7 @@ async function verifyOutlineThemeAndSubtreeCollapse(browser) {
   await darkPage.getByRole("button", { name: /Close/i }).click();
   await darkPage.locator(".outline-editor-shell").waitFor({ state: "detached" });
   await darkPage.getByLabel("Open atlas menu").click();
-  await darkPage.locator(".global-context-menu").getByTitle("TextEditor").click();
+  await darkPage.locator(".global-context-menu").getByTitle("Text editor").click();
   await darkPage.waitForSelector(".outline-editor-shell");
   const subtreeInitialValues = await readOutlineTitleValues(darkPage);
   if (JSON.stringify(subtreeInitialValues) !== JSON.stringify(["Nested Parent", "Nested Child"])) {
@@ -660,7 +689,7 @@ async function verifyOutlineThemeAndSubtreeCollapse(browser) {
   await lightPage.goto(baseUrl, { waitUntil: "networkidle" });
   await lightPage.waitForSelector("canvas");
   await lightPage.getByLabel("Open atlas menu").click();
-  await lightPage.locator(".global-context-menu").getByTitle("TextEditor").click();
+  await lightPage.locator(".global-context-menu").getByTitle("Text editor").click();
   await lightPage.waitForSelector(".outline-editor-shell");
 
   const lightThemeStats = await readOutlineThemeStats(lightPage);
@@ -694,7 +723,7 @@ async function verifyMobileOutlinePanel(browser) {
     await page.waitForSelector("canvas");
 
     await page.getByLabel("Open atlas menu").click();
-    await page.locator(".global-context-menu").getByTitle("TextEditor").click();
+    await page.locator(".global-context-menu").getByTitle("Text editor").click();
     const outlinePanel = page.locator(".outline-editor-shell");
     await outlinePanel.waitFor();
     const panelStats = await outlinePanel.evaluate((shell) => {
@@ -1375,7 +1404,7 @@ async function verifyCommandDockAndMobileTextTap(browser) {
   await desktopPage.waitForSelector('textarea.space-title-editor[data-node-id="verify-child"]', { state: "visible" });
   await desktopPage.waitForTimeout(700);
   const desktopLabelState = await readCommandDockProbe(desktopPage);
-  if (desktopLabelState.editorValue !== "Verify Child" || desktopLabelState.editorPlaceholder !== "ここに入力") {
+  if (desktopLabelState.editorValue !== "Verify Child" || desktopLabelState.editorPlaceholder !== "Untitled") {
     throw new Error(`Desktop canvas editor should edit title with the new placeholder: ${JSON.stringify(desktopLabelState)}`);
   }
   await desktopPage.click('textarea.space-title-editor[data-node-id="verify-child"]');
@@ -1738,7 +1767,7 @@ async function verifyExternalImports(browser) {
     );
     await page.getByRole("button", { name: "MindAtlas" }).click();
     await page.getByLabel("Open atlas menu").click();
-    await page.locator(".global-context-menu").getByTitle("TextEditor").click();
+    await page.locator(".global-context-menu").getByTitle("Text editor").click();
     await page.waitForSelector(".outline-editor-shell");
     const outlineTitles = await page.locator('input[aria-label="Node title"]').evaluateAll((inputs) =>
       inputs.map((input) => input.value),
@@ -1757,7 +1786,7 @@ async function verifyExternalImports(browser) {
   await page.getByLabel("Markdown outline text").fill("# Pasted Outline\n\n## Act One\n\n- Beat One");
   await page.getByRole("button", { name: "Append as children" }).click();
   await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("TextEditor").click();
+  await page.locator(".global-context-menu").getByTitle("Text editor").click();
   await page.waitForSelector(".outline-editor-shell");
   const appendedTitles = await page.locator('input[aria-label="Node title"]').evaluateAll((inputs) =>
     inputs.map((input) => input.value),
@@ -1776,7 +1805,7 @@ async function verifyExternalImports(browser) {
   await page.getByRole("dialog", { name: "Preview merge" }).waitFor();
   await page.getByRole("button", { name: "Apply merge" }).click();
   await page.getByLabel("Open atlas menu").click();
-  await page.locator(".global-context-menu").getByTitle("TextEditor").click();
+  await page.locator(".global-context-menu").getByTitle("Text editor").click();
   await page.waitForSelector(".outline-editor-shell");
   const previewTitles = await page.locator('input[aria-label="Node title"]').evaluateAll((inputs) =>
     inputs.map((input) => input.value),
@@ -2129,11 +2158,11 @@ async function verifyTutorialModeMenuActions(browser) {
     const root = JSON.parse(notebookRaw);
     return progress.rootNodeCreated === true && (root.children?.length ?? 0) >= 1;
   });
-  await clickPage.getByRole("button", { name: "チュートリアルをスキップ" }).click();
-  const startSpaceDialog = clickPage.getByRole("dialog", { name: "Start a space" });
+  await clickPage.getByRole("button", { name: "Skip tutorial" }).click();
+  const startSpaceDialog = clickPage.getByRole("dialog", { name: "Choose how to start" });
   await startSpaceDialog.waitFor();
-  await startSpaceDialog.getByRole("heading", { name: "テンプレート", exact: true }).waitFor();
-  await startSpaceDialog.getByRole("button", { name: "テンプレートを使わない" }).click();
+  await startSpaceDialog.getByRole("heading", { name: "Templates", exact: true }).waitFor();
+  await startSpaceDialog.getByRole("button", { name: /Continue with tutorial nodes/ }).click();
   await startSpaceDialog.waitFor({ state: "detached" });
   const preservedTutorialNodeCount = await readPersistedNodeCount(clickPage);
   if (preservedTutorialNodeCount < 2) {
@@ -2620,6 +2649,7 @@ try {
     process.exitCode = 0;
   } else {
     const desktop = await runStep("desktopViewport", () => verifyViewport(browser, "desktop", { width: 1440, height: 920 }));
+    const localeSwitching = await runStep("localeSwitching", () => verifyLocaleSwitching(browser));
     await runStep("layoutModeSwitch", () => verifyLayoutModeSwitch(browser));
     const localDeveloperMode = await runStep("localDeveloperMode", () => verifyLocalDeveloperModeSurface(browser));
     await runStep("generatedLayoutBlocksBackgroundBirth", () => verifyGeneratedLayoutBlocksBackgroundBirth(browser));

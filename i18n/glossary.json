@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "terms": [
+    {
+      "source": "Mind Atlas",
+      "rule": "Never translate the product name. Preserve the space and capitalization."
+    },
+    {
+      "source": "MindAtlas",
+      "rule": "Preserve when it is used as the compact brand or URL label."
+    },
+    {
+      "source": "node",
+      "rule": "Use the target language's standard graph or note-node term, not a network server."
+    },
+    {
+      "source": "Mind Atlas token",
+      "rule": "Keep Mind Atlas untranslated. This is an internal AI usage allowance, not cryptocurrency."
+    },
+    {
+      "source": "AI Partner log",
+      "rule": "Treat as a product surface name. Keep AI and Partner recognizable."
+    },
+    {
+      "source": "Realtime Talk",
+      "rule": "Treat as a feature name. Preserve Realtime if the target market commonly uses it."
+    },
+    {
+      "source": "Text editor",
+      "rule": "Translate as the editor for node title and body, not a source-code IDE."
+    },
+    {
+      "source": "cloud save",
+      "rule": "Translate as account-scoped text notebook storage. Do not imply image attachment backup."
+    }
+  ],
+  "doNotTranslate": [
+    "OpenAI",
+    "Anthropic",
+    "DeepSeek",
+    "Google",
+    "Stripe",
+    "GitHub",
+    "Codex",
+    "Claude Code",
+    "OpenClaw",
+    "SCAMPER",
+    "AGPL-3.0-only"
+  ]
+}

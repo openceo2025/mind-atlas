@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { formatAppMessage } from "../i18n/format";
 import {
   createStoredAttachmentPreviewUrls,
   getStoredAttachmentBlob,
@@ -3901,30 +3902,30 @@ function partnerRunMode(mode: PartnerArchiveMode): AiExecutionMode {
 function partnerModeLabel(mode: PartnerArchiveMode) {
   switch (mode) {
     case "chat":
-      return "Chat";
+      return formatAppMessage("label.mode.chat");
     case "local":
-      return "Local";
+      return formatAppMessage("label.mode.local");
     case "realtime":
-      return "Realtime";
+      return formatAppMessage("label.mode.realtime");
     case "openai":
-      return "OpenAI";
+      return formatAppMessage("label.mode.openAi");
   }
 }
 
 function modeLabel(mode: AiExecutionMode) {
   switch (mode) {
     case "chat":
-      return "Chat";
+      return formatAppMessage("label.mode.chat");
     case "openai":
-      return "OpenAI";
+      return formatAppMessage("label.mode.openAi");
     case "local":
-      return "Local";
+      return formatAppMessage("label.mode.local");
     case "codex":
-      return "Codex";
+      return formatAppMessage("label.mode.codex");
     case "openclaw":
-      return "OpenClaw";
+      return formatAppMessage("label.mode.openClaw");
     case "claude":
-      return "Claude Code";
+      return formatAppMessage("label.mode.claudeCode");
   }
 }
 

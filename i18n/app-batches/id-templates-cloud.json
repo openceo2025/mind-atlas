@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "locale": "id",
+  "scope": "templates-and-cloud",
+  "status": "draft",
+  "messages": {
+    "template.blank.title": "Ruang kosong",
+    "template.blank.description": "Mulai dengan ruang kosong.",
+    "template.daily.title": "Catatan harian",
+    "template.daily.description": "Kelompokkan keputusan hari ini ke dalam empat tempat.",
+    "template.novel.title": "Menulis novel",
+    "template.novel.description": "Kembangkan dunia, karakter, alur, dan naskah dalam satu semesta.",
+    "template.swot.title": "Melakukan analisis SWOT",
+    "template.swot.description": "Atur langkah berikutnya melalui kekuatan, kelemahan, peluang, dan ancaman.",
+    "template.travel.title": "Merencanakan perjalanan",
+    "template.travel.description": "Kumpulkan aktivitas, rencana perjalanan, barang bawaan, dan reservasi.",
+    "template.scamper.title": "Mengembangkan ide",
+    "template.scamper.description": "Kembangkan satu ide dengan pertanyaan SCAMPER.",
+    "startSpace.title": "Pilih cara memulai",
+    "startSpace.nextTitle": "Pilih ruang berikutnya",
+    "startSpace.newTitle": "Mulai ruang baru",
+    "startSpace.tutorialDetail": "Pilih cara melanjutkan setelah tutorial.",
+    "startSpace.newDetail": "Mulai dari template atau salinan notebook cloud.",
+    "startSpace.templates": "Template",
+    "startSpace.cloudCopies": "Mulai dari salinan cloud",
+    "startSpace.keepTutorial": "Lanjutkan dengan node tutorial",
+    "startSpace.googleLogin": "Masuk dengan Google"
+  }
+}

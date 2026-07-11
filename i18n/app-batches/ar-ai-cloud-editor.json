@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "locale": "ar",
+  "scope": "ai-cloud-editor",
+  "status": "draft",
+  "messages": {
+    "ui.commandDock.aiContextPreview.f27df14": "معاينة سياق الذكاء الاصطناعي",
+    "ui.commandDock.aiExecutionMode.ddada7f": "وضع تنفيذ الذكاء الاصطناعي",
+    "ui.commandDock.chatFromThisLocation.03514a3": "الدردشة من هذا الموقع",
+    "ui.commandDock.chatSettings.cebd934": "إعدادات الدردشة",
+    "ui.commandDock.createAChildNodeHere.89972dc": "إنشاء عقدة فرعية هنا",
+    "ui.commandDock.model.11440c3": "النموذج",
+    "ui.commandDock.notebookContext.4fd3df2": "سياق دفتر الملاحظات",
+    "ui.commandDock.previewTheAutoAssembledAi.78a3c87": "معاينة سياق الذكاء الاصطناعي المُجمّع تلقائيًا",
+    "ui.commandDock.sendInstruction.797c542": "إرسال التعليمات",
+    "ui.commandDock.service.dcdd047": "الخدمة",
+    "ui.commandDock.session.a711189": "الجلسة",
+    "ui.app.cloudStorage.94e0556": "التخزين السحابي",
+    "ui.app.copyShareLink.d2e2a6f": "نسخ رابط المشاركة",
+    "ui.app.noCloudFilesYet.17dff2f": "لا توجد ملفات سحابية بعد.",
+    "ui.app.refreshCloudNotebooks.28e31e2": "تحديث دفاتر الملاحظات السحابية",
+    "ui.app.renameCloudFile.88036dc": "إعادة تسمية الملف السحابي",
+    "ui.app.saveCurrentAs.18cbd57": "حفظ المحتوى الحالي باسم...",
+    "ui.focusPanel.nodeBody.eeba394": "محتوى العقدة",
+    "ui.focusPanel.nodeTitle.1768f3e": "عنوان العقدة",
+    "ui.outlineEditor.mindAtlasOutlineEditor.9063b07": "محرر مخطط Mind Atlas"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "locale": "id",
+  "scope": "ai-cloud-editor",
+  "status": "draft",
+  "messages": {
+    "ui.commandDock.aiContextPreview.f27df14": "Pratinjau konteks AI",
+    "ui.commandDock.aiExecutionMode.ddada7f": "Mode eksekusi AI",
+    "ui.commandDock.chatFromThisLocation.03514a3": "Chat dari lokasi ini",
+    "ui.commandDock.chatSettings.cebd934": "Pengaturan chat",
+    "ui.commandDock.createAChildNodeHere.89972dc": "Buat node anak di sini",
+    "ui.commandDock.model.11440c3": "Model",
+    "ui.commandDock.notebookContext.4fd3df2": "Konteks notebook",
+    "ui.commandDock.previewTheAutoAssembledAi.78a3c87": "Pratinjau konteks AI yang dirakit otomatis",
+    "ui.commandDock.sendInstruction.797c542": "Kirim instruksi",
+    "ui.commandDock.service.dcdd047": "Layanan",
+    "ui.commandDock.session.a711189": "Sesi",
+    "ui.app.cloudStorage.94e0556": "Penyimpanan cloud",
+    "ui.app.copyShareLink.d2e2a6f": "Salin tautan berbagi",
+    "ui.app.noCloudFilesYet.17dff2f": "Belum ada file di cloud.",
+    "ui.app.refreshCloudNotebooks.28e31e2": "Segarkan notebook cloud",
+    "ui.app.renameCloudFile.88036dc": "Ganti nama file cloud",
+    "ui.app.saveCurrentAs.18cbd57": "Simpan konten saat ini sebagai...",
+    "ui.focusPanel.nodeBody.eeba394": "Isi node",
+    "ui.focusPanel.nodeTitle.1768f3e": "Judul node",
+    "ui.outlineEditor.mindAtlasOutlineEditor.9063b07": "Editor kerangka Mind Atlas"
+  }
+}

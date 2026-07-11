@@ -1,0 +1,64 @@
+{
+  "metaDescription": "Mind Atlas terms of service for the spatial notebook, cloud notebooks, hosted AI features, billing, and acceptable use.",
+  "title": "Terms of Service",
+  "lead": "These Terms govern use of the Mind Atlas web service, free notebook features, Google sign-in, cloud notebooks, billing, and AI features.",
+  "updated": "Last updated: 2026-07-01",
+  "sections": [
+    { "heading": "1. Agreement", "paragraphs": ["By using Mind Atlas, you agree to these Terms. If you do not agree, do not use the service."] },
+    { "heading": "2. Service", "paragraphs": ["Mind Atlas provides spatial note creation, node editing, import, export, sharing, Google sign-in, subscriptions, AI Chat, Web search, Dictation, Realtime Talk, and related features. Some features are free; others require a paid plan or eligibility."] },
+    {
+      "heading": "3. Accounts",
+      "items": [
+        "A Google sign-in account is required to use paid AI features and account-scoped cloud notebooks.",
+        "You are responsible for keeping your account secure.",
+        "Mind Atlas may temporarily restrict an account or feature when abuse, a security issue, or a violation of these Terms is suspected."
+      ]
+    },
+    { "heading": "4. Free notebook and local storage", "paragraphs": ["Core notebook features primarily use storage inside your browser. Browser settings, device failure, storage clearing, cache clearing, or private browsing may cause data loss. Export or back up important data yourself."] },
+    {
+      "heading": "5. Cloud notebooks",
+      "items": [
+        "Google-account users may save text-only notebook data to Mind Atlas cloud storage within the displayed storage limit.",
+        "Image and multimedia attachments are not included in hosted cloud notebook storage.",
+        "Public share links make the selected cloud copy available to anyone who has the hard-to-guess link. Revoke or delete a share when it should no longer be public.",
+        "Mind Atlas may remove old or excess data to enforce published storage limits and protect service operation."
+      ]
+    },
+    {
+      "heading": "6. Paid AI features, Mind Atlas tokens, and billing",
+      "items": [
+        "Paid plans provide AI features subject to the Mind Atlas token allowance for each Stripe billing period.",
+        "Mind Atlas tokens are an internal usage display. They are not cash, cryptocurrency, electronic money, or a prepaid payment instrument.",
+        "Stripe manages charges, invoices, and payment methods.",
+        "Prices, included features, usage limits, and available models may change.",
+        "Eligibility may remain until the end of a paid billing period after cancellation. Refunds are determined according to the circumstances, Stripe processing, and applicable law."
+      ]
+    },
+    {
+      "heading": "7. AI limitations",
+      "items": [
+        "AI output may be inaccurate, incomplete, outdated, or inappropriate.",
+        "Obtain qualified professional review for important medical, legal, financial, investment, employment, safety, or life decisions.",
+        "Provider outages and changes to provider specifications, prices, or model availability may change Mind Atlas features, models, prices, and usage limits.",
+        "Text, audio, node context, and search queries you submit may be sent to external AI providers as needed to provide the requested feature."
+      ]
+    },
+    {
+      "heading": "8. Prohibited use",
+      "items": [
+        "Use that violates laws, public order, third-party rights, or external-service terms.",
+        "Unauthorized access, excessive load, abusive scraping, or bypassing security controls.",
+        "Creating or distributing malware, phishing, spam, fraud, harassment, or infringing content.",
+        "Improperly sending or publishing API keys, credentials, another person's personal data, or confidential information.",
+        "Fraudulently obtaining, transferring, reselling, or sharing Mind Atlas tokens or subscriptions."
+      ]
+    },
+    { "heading": "9. User content", "paragraphs": ["Rights in notes, text, prompts, and other content you create or submit generally remain with you or the relevant rights holder. You permit Mind Atlas to process that content only as needed to provide storage, display, AI processing, sharing, support, security, and related service functions."] },
+    { "heading": "10. Open source and brand", "paragraphs": ["Code in the public Mind Atlas repository is governed by the licenses stated in that repository. The Mind Atlas name, logo, brand, trademarks, hosted service, billing functions, operational configuration, and secrets may be subject to separate rights and conditions."] },
+    { "heading": "11. Changes, suspension, and termination", "paragraphs": ["Mind Atlas may add, change, suspend, or discontinue features. Maintenance, failures, external-service outages, security response, or legal obligations may make the service unavailable."] },
+    { "heading": "12. Disclaimer", "paragraphs": ["Mind Atlas does not guarantee uninterrupted availability, error-free operation, accurate AI output, preservation of user data, or fitness for a particular purpose. You use the service at your own risk."] },
+    { "heading": "13. Limitation of liability", "paragraphs": ["To the extent permitted by law, Mind Atlas is not liable for indirect or special damages, lost profit, lost data, or third-party claims arising from use of or inability to use the service."] },
+    { "heading": "14. Changes to these Terms", "paragraphs": ["Mind Atlas may update these Terms when needed. Material changes will be announced in the service or through another appropriate method. Continued use after an update constitutes acceptance of the updated Terms."] },
+    { "heading": "15. Contact", "paragraphs": ["For questions about these Terms, contact support@mind-atlas.org."] }
+  ]
+}

@@ -35,10 +35,12 @@ import { buildContextCopy, CONTEXT_COPY_PRESETS, copyContextMarkdown, type Conte
 import { nodeTreeHasAttachments, readNodeClipboard, writeNodeClipboard } from "../nodeClipboard";
 import { emitOnboardingEvent, getOnboardingCurrentSpaceStep } from "../onboarding/useOnboarding";
 import type { AtlasTheme } from "../theme";
-import { NODE_TITLE_PLACEHOLDER } from "../titleMaintenance";
 import { isPersistedCameraPose, persistUiStatePatch, type PersistedCameraPose } from "../uiPersistence";
 import type { AtlasNode, NotificationPulse, NotificationPulseKind } from "../types";
 import { getStatusColor } from "../utils/status";
+import { I18nText } from "../i18n/I18nProvider";
+import { formatAppMessage } from "../i18n/format";
+import { currentAppLocale } from "../i18n/locales";
 
 const FOCUS_DURATION_SECONDS = 1.05;
 const FOCUS_PITCH_LIMIT = Math.PI / 2 - 0.04;
@@ -112,10 +114,10 @@ const UNIVERSE_PAN_DELTA_EVENT = "mindatlas:universe-pan-delta";
 const DOM_TOUCH_SPACE_POINTER_ID = -90001;
 type RenderQuality = "high" | "low";
 const NOTIFICATION_SNOOZE_OPTIONS = [
-  { label: "2時間後", delayMs: 2 * 60 * 60 * 1000 },
-  { label: "半日後", delayMs: 12 * 60 * 60 * 1000 },
-  { label: "1日後", delayMs: 24 * 60 * 60 * 1000 },
-  { label: "1週間後", delayMs: 7 * 24 * 60 * 60 * 1000 },
+  { messageId: "label.snooze.twoHours", delayMs: 2 * 60 * 60 * 1000 },
+  { messageId: "label.snooze.halfDay", delayMs: 12 * 60 * 60 * 1000 },
+  { messageId: "label.snooze.oneDay", delayMs: 24 * 60 * 60 * 1000 },
+  { messageId: "label.snooze.oneWeek", delayMs: 7 * 24 * 60 * 60 * 1000 },
 ] as const;
 
 type Vec3Tuple = [number, number, number];
@@ -463,7 +465,7 @@ export function UniverseCanvas({
       ref={shareTargetRef}
       className={`universe-shell ${embedInteractionLocked ? "is-embed-interaction-locked" : ""}`}
       data-embed-interaction={embedInteractionLocked ? "locked" : undefined}
-      aria-label="Mind Atlas universe view"
+      aria-label={formatAppMessage("ui.universeCanvas.mindAtlasUniverseView.f1af16f")}
     >
       <Canvas
         camera={{ position: [0, 0, INITIAL_CAMERA_OFFSET], fov: CAMERA_FOV, near: 0.1, far: 120000 }}
@@ -577,8 +579,7 @@ function confirmNodeDeletion(node: AtlasNode) {
   const descendantCount = countNodeDescendants(node);
   if (descendantCount <= 0) return true;
   const title = node.title.trim() || "this node";
-  const childLabel = descendantCount === 1 ? "child node" : "child nodes";
-  return window.confirm(`Delete "${title}" and ${descendantCount} ${childLabel}? You can restore it with Undo.`);
+  return window.confirm(formatAppMessage("dynamic.deleteNodeWithChildren", { title, count: descendantCount }));
 }
 
 function countNodeDescendants(node: AtlasNode): number {
@@ -1809,7 +1810,7 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
       const hasAttachments = nodeTreeHasAttachments(node);
       await writeNodeClipboard(node, serializeNodeTreeForLlm(node));
       if (hasAttachments) {
-        window.alert("画像・動画などの添付ファイルが含まれています。クリップボードにはファイル本体ではなくメタデータのみコピーされます。");
+        window.alert(formatAppMessage("ui.universeCanvas.thisSelectionContainsImageOr.340b24f"));
       }
       onClose();
     } catch (error) {
@@ -1822,7 +1823,7 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
       const hasAttachments = nodeTreeHasAttachments(node);
       await writeNodeClipboard(node, serializeNodeTreeForLlm(node));
       if (hasAttachments) {
-        window.alert("画像・動画などの添付ファイルが含まれています。クリップボードにはファイル本体ではなくメタデータのみコピーされます。");
+        window.alert(formatAppMessage("ui.universeCanvas.thisSelectionContainsImageOr.340b24f"));
       }
       deleteNode(node.id);
       onClose();
@@ -1867,33 +1868,28 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
       style={{ left: menu.x, top: menu.y }}
       onPointerDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
-      aria-label="Node actions"
+      aria-label={formatAppMessage("ui.universeCanvas.nodeActions.56c90fd")}
     >
       <button type="button" onClick={handleCopyObject}>
-        <ClipboardCopy size={15} /> オブジェクトコピー
-      </button>
+        <ClipboardCopy size={15} /> {<I18nText id="ui.universeCanvas.copyObject.256054c" />}</button>
       <button type="button" onClick={handleCutObject}>
-        <Scissors size={15} /> 切り取り
-      </button>
+        <Scissors size={15} /> {<I18nText id="ui.universeCanvas.cut.1484f11" />}</button>
       <button
         type="button"
         onClick={handlePasteObject}
         disabled={!canPaste}
-        title={canPaste ? "Mind Atlas object paste" : "Mind Atlasで読み込めるオブジェクトデータがクリップボードにありません"}
+        title={canPaste ? formatAppMessage("ui.universeCanvas.mindAtlasObjectPaste.0c3ed8f") : formatAppMessage("ui.universeCanvas.theClipboardDoesNotContain.00e8362")}
       >
-        <ClipboardPaste size={15} /> 貼り付け
-      </button>
+        <ClipboardPaste size={15} /> {<I18nText id="ui.universeCanvas.paste.f06d057" />}</button>
       <button
         type="button"
         onClick={handlePromoteOneLevel}
         disabled={!canPromote}
-        title={canPromote ? "直接の親と兄弟になるように一つ上の階層へ移動" : "これ以上、上の階層には移動できません"}
+        title={canPromote ? formatAppMessage("ui.universeCanvas.moveUpOneLevelTo.ca47798") : formatAppMessage("ui.universeCanvas.thisNodeCannotMoveTo.5e3b780")}
       >
-        <MoveUp size={15} /> 一つ上の階層に移動
-      </button>
+        <MoveUp size={15} /> {<I18nText id="ui.universeCanvas.moveUpOneLevel.f93496f" />}</button>
       <button type="button" onClick={handleCopyAsText}>
-        <Copy size={15} /> テキストにコピー
-      </button>
+        <Copy size={15} /> {<I18nText id="ui.universeCanvas.copyAsText.51b2b25" />}</button>
       <label className="node-context-copy-select">
         <Copy size={15} />
         <select
@@ -1903,19 +1899,17 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
             setCopyContextPreset(event.target.value);
             if (preset) void handleCopyContext(preset);
           }}
-          aria-label="Copy with context"
+          aria-label={formatAppMessage("ui.universeCanvas.copyWithContext.720b649")}
         >
-          <option value="">Copy with context</option>
+          <option value="">{<I18nText id="ui.universeCanvas.copyWithContext.ac37c56" />}</option>
           {CONTEXT_COPY_PRESETS.map((preset) => (
             <option key={preset.id} value={preset.id}>
-              {preset.label} ({buildContextCopy(atlasRoot, node.id, preset.id)?.stats.estimatedTokens.toLocaleString() ?? "0"} tokens)
-            </option>
+              {preset.label} ({buildContextCopy(atlasRoot, node.id, preset.id)?.stats.estimatedTokens.toLocaleString(currentAppLocale()) ?? "0"} {<I18nText id="ui.universeCanvas.tokens.6732ec1" />}</option>
           ))}
         </select>
       </label>
       <button className="destructive-menu-button" type="button" onClick={handleDelete}>
-        <Trash2 size={15} /> 削除
-      </button>
+        <Trash2 size={15} /> {<I18nText id="ui.universeCanvas.delete.cccef11" />}</button>
     </div>
   );
 }
@@ -3499,10 +3493,10 @@ function HierarchyNode({
 
       {showNotificationSnoozeActions ? (
         <Html center position={[0, 0, radius + (node.action ? 62 : 26)]} transform={false} zIndexRange={[6, 2]}>
-          <div className="node-snooze-actions" role="group" aria-label="Snooze notification">
+          <div className="node-snooze-actions" role="group" aria-label={formatAppMessage("ui.universeCanvas.snoozeNotification.316afb2")}>
             {NOTIFICATION_SNOOZE_OPTIONS.map((option) => (
               <button
-                key={option.label}
+                key={option.messageId}
                 className="node-snooze-button"
                 type="button"
                 onPointerDown={(event) => event.stopPropagation()}
@@ -3511,7 +3505,7 @@ function HierarchyNode({
                   snoozeNodeNotification(node.id, option.delayMs);
                 }}
               >
-                {option.label}
+                {formatAppMessage(option.messageId)}
               </button>
             ))}
           </div>
@@ -3600,14 +3594,14 @@ function SpaceNodePreview({
   isSelected: boolean;
   onFocusNode: () => void;
 }) {
-  const text = node.title.trim() || NODE_TITLE_PLACEHOLDER;
+  const text = node.title.trim() || formatAppMessage("node.untitled");
   return (
     <div
       className={`node-text-card node-text-preview space-title-preview space-body-preview ${isSelected ? "is-selected" : ""}`}
       data-node-id={node.id}
       role="button"
       tabIndex={0}
-      aria-label={`${node.title || "Node"} title preview`}
+      aria-label={formatAppMessage("dynamic.nodeTitlePreview", { title: node.title || formatAppMessage("ui.universeCanvas.node.ff7abe9") })}
       onPointerDown={(event) => {
         event.stopPropagation();
       }}
@@ -3690,7 +3684,7 @@ function SpaceNodeEditor({
       data-selected={isPrimarySelected ? "true" : "false"}
       value={draftTitle}
       rows={1}
-      placeholder={NODE_TITLE_PLACEHOLDER}
+      placeholder={formatAppMessage("node.untitled")}
       onPointerDown={(event) => {
         event.stopPropagation();
         if (isMobilePointerEvent(event) && !isPrimarySelected) {
@@ -3763,7 +3757,7 @@ function SpaceNodeEditor({
         }
         resizeTextarea(event.currentTarget);
       }}
-      aria-label={`${node.title || "Node"} title`}
+      aria-label={formatAppMessage("dynamic.nodeTitle", { title: node.title || formatAppMessage("ui.universeCanvas.node.ff7abe9") })}
     />
   );
 }

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "locale": "es",
+  "scope": "templates-and-cloud",
+  "status": "draft",
+  "messages": {
+    "template.blank.title": "Espacio en blanco",
+    "template.blank.description": "Empieza con un espacio vacío.",
+    "template.daily.title": "Notas diarias",
+    "template.daily.description": "Organiza las decisiones de hoy en cuatro lugares.",
+    "template.novel.title": "Escribir una novela",
+    "template.novel.description": "Desarrolla el mundo, los personajes, la trama y el manuscrito en un solo universo.",
+    "template.swot.title": "Hacer un análisis SWOT",
+    "template.swot.description": "Organiza el siguiente paso mediante fortalezas, debilidades, oportunidades y amenazas.",
+    "template.travel.title": "Planificar un viaje",
+    "template.travel.description": "Reúne actividades, itinerario, equipaje y reservas.",
+    "template.scamper.title": "Desarrollar una idea",
+    "template.scamper.description": "Amplía una idea con las preguntas SCAMPER.",
+    "startSpace.title": "Elige cómo empezar",
+    "startSpace.nextTitle": "Elige el siguiente espacio",
+    "startSpace.newTitle": "Empezar un espacio nuevo",
+    "startSpace.tutorialDetail": "Elige cómo continuar después del tutorial.",
+    "startSpace.newDetail": "Empieza con una plantilla o una copia de un cuaderno en la nube.",
+    "startSpace.templates": "Plantillas",
+    "startSpace.cloudCopies": "Empezar desde una copia en la nube",
+    "startSpace.keepTutorial": "Continuar con los nodos del tutorial",
+    "startSpace.googleLogin": "Iniciar sesión con Google"
+  }
+}

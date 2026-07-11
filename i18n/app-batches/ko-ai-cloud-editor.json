@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "locale": "ko",
+  "scope": "ai-cloud-editor",
+  "status": "draft",
+  "messages": {
+    "ui.commandDock.aiContextPreview.f27df14": "AI 컨텍스트 미리보기",
+    "ui.commandDock.aiExecutionMode.ddada7f": "AI 실행 모드",
+    "ui.commandDock.chatFromThisLocation.03514a3": "이 위치에서 채팅",
+    "ui.commandDock.chatSettings.cebd934": "채팅 설정",
+    "ui.commandDock.createAChildNodeHere.89972dc": "여기에 자식 노드 만들기",
+    "ui.commandDock.model.11440c3": "모델",
+    "ui.commandDock.notebookContext.4fd3df2": "노트북 컨텍스트",
+    "ui.commandDock.previewTheAutoAssembledAi.78a3c87": "자동으로 구성된 AI 컨텍스트 미리보기",
+    "ui.commandDock.sendInstruction.797c542": "지시 보내기",
+    "ui.commandDock.service.dcdd047": "서비스",
+    "ui.commandDock.session.a711189": "세션",
+    "ui.app.cloudStorage.94e0556": "클라우드 저장소",
+    "ui.app.copyShareLink.d2e2a6f": "공유 링크 복사",
+    "ui.app.noCloudFilesYet.17dff2f": "아직 클라우드 파일이 없습니다.",
+    "ui.app.refreshCloudNotebooks.28e31e2": "클라우드 노트북 새로 고침",
+    "ui.app.renameCloudFile.88036dc": "클라우드 파일 이름 바꾸기",
+    "ui.app.saveCurrentAs.18cbd57": "현재 내용을 다른 이름으로 저장...",
+    "ui.focusPanel.nodeBody.eeba394": "노드 본문",
+    "ui.focusPanel.nodeTitle.1768f3e": "노드 제목",
+    "ui.outlineEditor.mindAtlasOutlineEditor.9063b07": "Mind Atlas 개요 편집기"
+  }
+}

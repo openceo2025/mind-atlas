@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isAboutDemoMode } from "../aboutDemo";
 import { ONBOARDING_EVENT } from "../events";
-import { ONBOARDING_TEXT, detectOnboardingLocale, type OnboardingLocale, type OnboardingMessageId } from "./localization";
+import { useMessage, useMindAtlasLocale } from "../i18n/I18nProvider";
+import type { AppLocale } from "../i18n/locales";
+import { ONBOARDING_MESSAGE_IDS, type OnboardingMessageId } from "./localization";
 
 export type OnboardingEventType =
   | "root-birth-start"
@@ -34,7 +36,7 @@ type OnboardingProgress = {
 };
 
 export type OnboardingState = {
-  locale: OnboardingLocale;
+  locale: AppLocale;
   message: string;
   messageId: OnboardingMessageId | null;
   titlePrompt: string;
@@ -71,8 +73,9 @@ const SPACE_STEPS: Array<{ id: SpaceStepId; event: OnboardingEventType; messageI
 ];
 
 export function useOnboarding(): OnboardingState {
-  const locale = useMemo(() => detectOnboardingLocale(), []);
-  const text = ONBOARDING_TEXT[locale];
+  const { locale } = useMindAtlasLocale();
+  const message = useMessage();
+  const text = useCallback((id: OnboardingMessageId) => message(ONBOARDING_MESSAGE_IDS[id]), [message]);
   const [progress, setProgress] = useState<OnboardingProgress>(() => loadProgress());
   const [rootHelpLevel, setRootHelpLevel] = useState<0 | 1 | 2>(0);
   const [rootDeadlineAt, setRootDeadlineAt] = useState(() => Date.now() + ROOT_DISCOVERY_WAIT_MS);
@@ -272,9 +275,9 @@ export function useOnboarding(): OnboardingState {
 
   return {
     locale,
-    message: activeMessageId ? text[activeMessageId] : "",
+    message: activeMessageId ? text(activeMessageId) : "",
     messageId: activeMessageId,
-    titlePrompt: text["title.nameUniverse"],
+    titlePrompt: text("title.nameUniverse"),
     showLogoOnly: progress.firstRun && !progress.spaceBasicsCompleted,
     showMainChrome,
     showRootPulse: progress.firstRun && !progress.rootNodeCreated,

@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, 
 import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT } from "../events";
 import { deriveAtlasLayoutFrame } from "../layout/atlasLayout";
 import { useAtlasStore } from "../store/atlasStore";
+import { formatAppMessage } from "../i18n/format";
 
 export function Minimap() {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -75,7 +76,7 @@ export function Minimap() {
   };
 
   return (
-    <aside className="minimap" aria-label="Universe minimap">
+    <aside className="minimap" aria-label={formatAppMessage("ui.minimap.universeMinimap.fb99fc8")}>
       <div
         className="minimap-space"
         onPointerDown={handlePointerDown}
@@ -97,7 +98,7 @@ export function Minimap() {
                 event.stopPropagation();
                 focusNode(node.id);
               }}
-              aria-label={`Focus ${node.title}`}
+              aria-label={formatAppMessage("dynamic.focusNode", { title: node.title })}
             />
           );
         })}

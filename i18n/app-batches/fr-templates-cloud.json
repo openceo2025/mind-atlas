@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "locale": "fr",
+  "scope": "templates-and-cloud",
+  "status": "draft",
+  "messages": {
+    "template.blank.title": "Espace vierge",
+    "template.blank.description": "Commencez avec un espace vide.",
+    "template.daily.title": "Notes quotidiennes",
+    "template.daily.description": "Répartissez les décisions du jour dans quatre endroits.",
+    "template.novel.title": "Écrire un roman",
+    "template.novel.description": "Développez le monde, les personnages, l’intrigue et le manuscrit dans un seul univers.",
+    "template.swot.title": "Faire une analyse SWOT",
+    "template.swot.description": "Organisez la prochaine étape avec les forces, faiblesses, opportunités et menaces.",
+    "template.travel.title": "Planifier un voyage",
+    "template.travel.description": "Rassemblez les activités, l’itinéraire, les bagages et les réservations.",
+    "template.scamper.title": "Développer une idée",
+    "template.scamper.description": "Développez une idée avec les questions SCAMPER.",
+    "startSpace.title": "Choisissez comment commencer",
+    "startSpace.nextTitle": "Choisissez l’espace suivant",
+    "startSpace.newTitle": "Commencer un nouvel espace",
+    "startSpace.tutorialDetail": "Choisissez comment continuer après le tutoriel.",
+    "startSpace.newDetail": "Commencez avec un modèle ou une copie d’un carnet cloud.",
+    "startSpace.templates": "Modèles",
+    "startSpace.cloudCopies": "Commencer depuis une copie cloud",
+    "startSpace.keepTutorial": "Continuer avec les nœuds du tutoriel",
+    "startSpace.googleLogin": "Se connecter avec Google"
+  }
+}

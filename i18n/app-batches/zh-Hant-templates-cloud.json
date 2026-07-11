@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "locale": "zh-Hant",
+  "scope": "templates-and-cloud",
+  "status": "draft",
+  "messages": {
+    "template.blank.title": "空白空間",
+    "template.blank.description": "從空白空間開始。",
+    "template.daily.title": "日常筆記",
+    "template.daily.description": "將今天的決定整理到四個位置。",
+    "template.novel.title": "寫小說",
+    "template.novel.description": "在一個宇宙中發展世界觀、人物、情節與手稿。",
+    "template.swot.title": "進行 SWOT 分析",
+    "template.swot.description": "透過優勢、劣勢、機會與威脅整理下一步行動。",
+    "template.travel.title": "規劃旅行",
+    "template.travel.description": "整理活動、行程、行李與預訂。",
+    "template.scamper.title": "發展一個想法",
+    "template.scamper.description": "使用 SCAMPER 提問來擴展一個想法。",
+    "startSpace.title": "選擇開始方式",
+    "startSpace.nextTitle": "選擇下一個空間",
+    "startSpace.newTitle": "開始新空間",
+    "startSpace.tutorialDetail": "選擇教學結束後的繼續方式。",
+    "startSpace.newDetail": "從範本或雲端筆記本副本開始。",
+    "startSpace.templates": "範本",
+    "startSpace.cloudCopies": "從雲端副本開始",
+    "startSpace.keepTutorial": "繼續使用教學節點",
+    "startSpace.googleLogin": "使用 Google 登入"
+  }
+}

@@ -22,10 +22,13 @@ import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { findNode, useAtlasStore } from "../store/atlasStore";
 import type { AtlasTheme } from "../theme";
 import type { AtlasNode, AttachmentKind, NodeAttachment } from "../types";
+import { I18nText, useMindAtlasLocale } from "../i18n/I18nProvider";
+import { formatAppMessage } from "../i18n/format";
 
 let sessionReminderDraftAt = addDays(new Date(), 1).toISOString();
 
 export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { theme?: AtlasTheme; attachmentsEnabled?: boolean }) {
+  const { locale } = useMindAtlasLocale();
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const updateNode = useAtlasStore((state) => state.updateNode);
@@ -84,7 +87,7 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
   const handleSetReminder = () => {
     if (reminderDraft.getTime() < Date.now()) {
       const confirmed = window.confirm(
-        `The selected reminder time is in the past:\n\n${formatReminderDate(reminderDraft.toISOString())}\n\nThis notification may fire immediately. Set it anyway?`,
+        formatAppMessage("dynamic.pastReminderConfirm", { date: formatReminderDate(reminderDraft.toISOString(), locale) }),
       );
       if (!confirmed) return;
     }
@@ -96,17 +99,17 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
     <div
       className={`context-menu reminder-context-menu ${reminderMobileLayout ? "is-mobile" : ""} theme-${theme}`}
       role="dialog"
-      aria-label="Reminder settings"
+      aria-label={formatAppMessage("ui.focusPanel.reminderSettings.55472a2")}
       onPointerDown={(event) => event.stopPropagation()}
       onTouchMove={(event) => event.stopPropagation()}
       onWheel={(event) => event.stopPropagation()}
     >
       <div className="reminder-current">
-        <span>Current</span>
-        <strong>{selectedNode.reminderAt ? formatReminderDate(selectedNode.reminderAt) : "No reminder"}</strong>
+        <span>{<I18nText id="ui.focusPanel.current.414194e" />}</span>
+        <strong>{selectedNode.reminderAt ? formatReminderDate(selectedNode.reminderAt, locale) : formatAppMessage("ui.focusPanel.noReminder.3a15176")}</strong>
       </div>
       <label className="reminder-date-field">
-        <span>Date</span>
+        <span>{<I18nText id="ui.focusPanel.date.5c8a1a4" />}</span>
         <input
           type="date"
           value={dateInputValue(reminderDraft)}
@@ -129,7 +132,7 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
           updateReminderDraft(next);
         }}
       />
-      <div className="reminder-time-picker" aria-label="Reminder time">
+      <div className="reminder-time-picker" aria-label={formatAppMessage("ui.focusPanel.reminderTime.964742a")}>
         <TimeStepper
           label="Hour"
           value={reminderDraft.getHours()}
@@ -152,26 +155,25 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
           }}
         />
       </div>
-      <div className="reminder-quick-row" aria-label="Quick reminder offsets">
+      <div className="reminder-quick-row" aria-label={formatAppMessage("ui.focusPanel.quickReminderOffsets.30b5819")}>
         <button type="button" onClick={() => updateReminderDraft(new Date())}>
-          Now
-        </button>
+          {<I18nText id="ui.focusPanel.now.95aec20" />}</button>
         {[15, 30, 60, 180].map((minutes) => (
           <button key={minutes} type="button" onClick={() => updateReminderDraft(addMinutes(reminderDraft, minutes))}>
-            +{minutes < 60 ? `${minutes}m` : `${minutes / 60}h`}
+            +{minutes < 60
+              ? formatAppMessage("dynamic.minutesShort", { count: minutes })
+              : formatAppMessage("dynamic.hoursShort", { count: minutes / 60 })}
           </button>
         ))}
         <button type="button" onClick={() => updateReminderDraft(addDays(reminderDraft, 1))}>
-          +1d
-        </button>
+          {<I18nText id="ui.focusPanel.1d.0a6d11e" />}</button>
       </div>
       <div className="reminder-actions">
         <button
           type="button"
           onClick={handleSetReminder}
         >
-          Set reminder
-        </button>
+          {<I18nText id="ui.focusPanel.setReminder.d405db3" />}</button>
         <button
           type="button"
           onClick={() => {
@@ -180,11 +182,9 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
           }}
           disabled={!selectedNode.reminderAt}
         >
-          Clear reminder
-        </button>
+          {<I18nText id="ui.focusPanel.clearReminder.9ed5d2e" />}</button>
         <button type="button" onClick={() => setReminderMenuOpen(false)}>
-          Close
-        </button>
+          {<I18nText id="ui.focusPanel.close.f433a4a" />}</button>
       </div>
     </div>
   ) : null;
@@ -219,13 +219,13 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
     <>
       <aside
         className={`focus-panel ${isRoot ? "is-hidden" : "is-active"} ${attachmentsEnabled ? "" : "is-text-only"}`}
-        aria-label="Focused context"
+        aria-label={formatAppMessage("ui.focusPanel.focusedContext.924c0f6")}
         aria-hidden={isRoot}
       >
         <div className="panel-toolbar">
           <div className="panel-role-label editor-panel-role" aria-hidden="true">
             <FileText size={14} />
-            <span>Editor</span>
+            <span>{<I18nText id="ui.focusPanel.editor.9d99465" />}</span>
           </div>
           <div className="panel-menu-anchor">
             <button
@@ -235,11 +235,11 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
                 setReminderMenuOpen((open) => !open);
                 setSurfaceMenuOpen(false);
               }}
-              aria-label="Open reminder menu"
-              title={selectedNode.reminderAt ? `Reminder: ${formatReminderDate(selectedNode.reminderAt)}` : "Set reminder"}
+              aria-label={formatAppMessage("ui.focusPanel.openReminderMenu.1375908")}
+              title={selectedNode.reminderAt ? formatAppMessage("dynamic.reminder", { date: formatReminderDate(selectedNode.reminderAt, locale) }) : formatAppMessage("ui.focusPanel.setReminder.baf3274")}
             >
               <CalendarClock size={17} />
-              <span>リマインダー</span>
+              <span>{<I18nText id="ui.focusPanel.reminder.f93016d" />}</span>
             </button>
             {reminderMobileLayout ? null : reminderMenu}
           </div>
@@ -251,36 +251,36 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
               setSurfaceMenuOpen((open) => !open);
               setReminderMenuOpen(false);
             }}
-            aria-label="Open surface menu"
+            aria-label={formatAppMessage("ui.focusPanel.openSurfaceMenu.e5bc0cf")}
           >
             <Paintbrush size={17} />
           </button>
           {surfaceMenuOpen ? (
             <div className="context-menu surface-context-menu">
               <label>
-                <span>Color</span>
+                <span>{<I18nText id="ui.focusPanel.color.18eb1f5" />}</span>
                 <input
                   type="color"
                   value={selectedNode.color}
                   onChange={(event) => updateNodeAppearance(selectedNode.id, { color: event.target.value })}
-                  aria-label="Node color"
+                  aria-label={formatAppMessage("ui.focusPanel.nodeColor.411bcba")}
                 />
               </label>
               <label>
-                <span>Texture</span>
+                <span>{<I18nText id="ui.focusPanel.texture.1bcaf49" />}</span>
                 <select
                   value={selectedNode.texture}
                   onChange={(event) =>
                     updateNodeAppearance(selectedNode.id, { texture: event.target.value as AtlasNode["texture"] })
                   }
-                  aria-label="Node texture"
+                  aria-label={formatAppMessage("ui.focusPanel.nodeTexture.85123ea")}
                 >
-                  <option value="speckled">Speckled</option>
-                  <option value="bands">Bands</option>
-                  <option value="freckles">Freckles</option>
-                  <option value="craters">Craters</option>
-                  <option value="mist">Mist</option>
-                  <option value="cell">Cell</option>
+                  <option value="speckled">{<I18nText id="ui.focusPanel.speckled.476d6ee" />}</option>
+                  <option value="bands">{<I18nText id="ui.focusPanel.bands.2c9011b" />}</option>
+                  <option value="freckles">{<I18nText id="ui.focusPanel.freckles.9a5cf56" />}</option>
+                  <option value="craters">{<I18nText id="ui.focusPanel.craters.7913b70" />}</option>
+                  <option value="mist">{<I18nText id="ui.focusPanel.mist.ec72526" />}</option>
+                  <option value="cell">{<I18nText id="ui.focusPanel.cell.008b6bc" />}</option>
                 </select>
               </label>
             </div>
@@ -304,8 +304,8 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
               bodyInputRef.current?.focus({ preventScroll: true });
             }
           }}
-          placeholder="Node title"
-          aria-label="Node title"
+          placeholder={formatAppMessage("ui.focusPanel.nodeTitle.1768f3e")}
+          aria-label={formatAppMessage("ui.focusPanel.nodeTitle.1847702")}
         />
         <textarea
           ref={bodyInputRef}
@@ -317,8 +317,8 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
               summary: event.target.value.split("\n").find(Boolean) ?? "Empty notebook node.",
             })
           }
-          placeholder={isRoot ? "Atlas memo." : "Memo, details, or context."}
-          aria-label="Node body"
+          placeholder={isRoot ? formatAppMessage("ui.focusPanel.atlasMemo.b78ca47") : formatAppMessage("ui.focusPanel.memoDetailsOrContext.0f619ba")}
+          aria-label={formatAppMessage("ui.focusPanel.nodeBody.eeba394")}
         />
         <button
           className="return-button"
@@ -326,16 +326,16 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
           onClick={() => {
             if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           }}
-          aria-label="Confirm editing"
+          aria-label={formatAppMessage("ui.focusPanel.confirmEditing.c59b1e6")}
         >
           <CornerDownLeft size={17} />
         </button>
       </div>
 
       {attachmentsEnabled ? (
-        <section className="panel-preview-area" aria-label="Attachment preview">
+        <section className="panel-preview-area" aria-label={formatAppMessage("ui.focusPanel.attachmentPreview.975b51d")}>
           <div className="panel-preview-frame">
-            <label className="icon-button file-button panel-attach-preview-button" aria-label="Attach file">
+            <label className="icon-button file-button panel-attach-preview-button" aria-label={formatAppMessage("ui.focusPanel.attachFile.56c4761")}>
               <Paperclip size={17} />
               <input type="file" multiple onChange={handleAttachmentChange} />
             </label>
@@ -351,7 +351,7 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
                 ))}
               </div>
             ) : (
-              <p className="preview-empty">No preview</p>
+              <p className="preview-empty">{<I18nText id="ui.focusPanel.noPreview.f4423c3" />}</p>
             )}
           </div>
         </section>
@@ -407,7 +407,7 @@ function TimeStepper({
   return (
     <div className="time-stepper">
       <span>{label}</span>
-      <button type="button" onClick={() => onChange(wrap(value + 1))} aria-label={`Increase ${label}`}>
+      <button type="button" onClick={() => onChange(wrap(value + 1))} aria-label={formatAppMessage("dynamic.increase", { label })}>
         +
       </button>
       <input
@@ -419,7 +419,7 @@ function TimeStepper({
         }}
         aria-label={label}
       />
-      <button type="button" onClick={() => onChange(wrap(value - 1))} aria-label={`Decrease ${label}`}>
+      <button type="button" onClick={() => onChange(wrap(value - 1))} aria-label={formatAppMessage("dynamic.decrease", { label })}>
         -
       </button>
     </div>
@@ -437,22 +437,27 @@ function CalendarPicker({
   onMonthChange: (month: Date) => void;
   onSelectDate: (date: Date) => void;
 }) {
+  const { locale } = useMindAtlasLocale();
   const cells = calendarCells(month);
-  const monthLabel = month.toLocaleDateString(undefined, { year: "numeric", month: "short" });
+  const monthLabel = month.toLocaleDateString(locale, { year: "numeric", month: "short" });
+  const weekdays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(Date.UTC(2026, 0, 4 + index));
+    return new Intl.DateTimeFormat(locale, { weekday: "narrow", timeZone: "UTC" }).format(date);
+  });
 
   return (
-    <div className="reminder-calendar" aria-label="Reminder calendar">
+    <div className="reminder-calendar" aria-label={formatAppMessage("ui.focusPanel.reminderCalendar.eb37781")}>
       <div className="reminder-calendar-header">
-        <button type="button" onClick={() => onMonthChange(addMonths(month, -1))} aria-label="Previous month">
+        <button type="button" onClick={() => onMonthChange(addMonths(month, -1))} aria-label={formatAppMessage("ui.focusPanel.previousMonth.6aef243")}>
           ‹
         </button>
         <strong>{monthLabel}</strong>
-        <button type="button" onClick={() => onMonthChange(addMonths(month, 1))} aria-label="Next month">
+        <button type="button" onClick={() => onMonthChange(addMonths(month, 1))} aria-label={formatAppMessage("ui.focusPanel.nextMonth.854600a")}>
           ›
         </button>
       </div>
       <div className="reminder-calendar-weekdays" aria-hidden="true">
-        {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+        {weekdays.map((day, index) => (
           <span key={`${day}-${index}`}>{day}</span>
         ))}
       </div>
@@ -518,10 +523,10 @@ function dateInputValue(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function formatReminderDate(value: string) {
+function formatReminderDate(value: string, locale?: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Invalid date";
-  return date.toLocaleString(undefined, {
+  return date.toLocaleString(locale, {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -543,7 +548,7 @@ function AttachmentPreviewCard({
 
   return (
     <div className="attachment-preview">
-      <button className="attachment-remove" type="button" onClick={onRemove} aria-label={`Remove ${attachment.name}`}>
+      <button className="attachment-remove" type="button" onClick={onRemove} aria-label={formatAppMessage("dynamic.remove", { name: attachment.name })}>
         <X size={14} />
       </button>
       <div className="attachment-meta">
@@ -568,7 +573,7 @@ function AttachmentPreviewCard({
       {previewUrl && attachment.kind === "image" ? <img src={previewUrl} alt={attachment.name} /> : null}
       {previewUrl && attachment.kind === "audio" ? <audio src={previewUrl} controls /> : null}
       {previewUrl && attachment.kind === "video" ? <video src={previewUrl} controls /> : null}
-      {!previewUrl ? <p>Stored as metadata: {attachment.path}</p> : null}
+      {!previewUrl ? <p>{<I18nText id="ui.focusPanel.storedAsMetadata.0e06182" />}{attachment.path}</p> : null}
     </div>
   );
 }

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "locale": "zh-Hans",
+  "scope": "ai-cloud-editor",
+  "status": "draft",
+  "messages": {
+    "ui.commandDock.aiContextPreview.f27df14": "AI 上下文预览",
+    "ui.commandDock.aiExecutionMode.ddada7f": "AI 执行模式",
+    "ui.commandDock.chatFromThisLocation.03514a3": "从此位置开始聊天",
+    "ui.commandDock.chatSettings.cebd934": "聊天设置",
+    "ui.commandDock.createAChildNodeHere.89972dc": "在此创建子节点",
+    "ui.commandDock.model.11440c3": "模型",
+    "ui.commandDock.notebookContext.4fd3df2": "笔记本上下文",
+    "ui.commandDock.previewTheAutoAssembledAi.78a3c87": "预览自动组装的 AI 上下文",
+    "ui.commandDock.sendInstruction.797c542": "发送指令",
+    "ui.commandDock.service.dcdd047": "服务",
+    "ui.commandDock.session.a711189": "会话",
+    "ui.app.cloudStorage.94e0556": "云端存储",
+    "ui.app.copyShareLink.d2e2a6f": "复制分享链接",
+    "ui.app.noCloudFilesYet.17dff2f": "云端还没有文件。",
+    "ui.app.refreshCloudNotebooks.28e31e2": "刷新云端笔记本",
+    "ui.app.renameCloudFile.88036dc": "重命名云端文件",
+    "ui.app.saveCurrentAs.18cbd57": "将当前内容另存为...",
+    "ui.focusPanel.nodeBody.eeba394": "节点正文",
+    "ui.focusPanel.nodeTitle.1768f3e": "节点标题",
+    "ui.outlineEditor.mindAtlasOutlineEditor.9063b07": "Mind Atlas 大纲编辑器"
+  }
+}

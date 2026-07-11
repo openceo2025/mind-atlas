@@ -1,4 +1,5 @@
 import type { AtlasNode } from "../types";
+import { formatAppMessage } from "../i18n/format";
 
 export type Vec3 = [number, number, number];
 export type AtlasLayoutMode = "phyllotaxis" | "tree" | "mind-map";
@@ -244,11 +245,11 @@ export function getStoredPositionForWorldDirection(
 export function getAtlasLayoutModeLabel(mode: AtlasLayoutMode) {
   switch (mode) {
     case "phyllotaxis":
-      return "Mind Atlas";
+      return formatAppMessage("label.layout.mindAtlas");
     case "tree":
-      return "Tree";
+      return formatAppMessage("label.layout.tree");
     case "mind-map":
-      return "Mind map";
+      return formatAppMessage("label.layout.mindMap");
   }
 }
 

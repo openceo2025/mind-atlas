@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "locale": "hi",
+  "scope": "ai-cloud-editor",
+  "status": "draft",
+  "messages": {
+    "ui.commandDock.aiContextPreview.f27df14": "AI कॉन्टेक्स्ट प्रीव्यू",
+    "ui.commandDock.aiExecutionMode.ddada7f": "AI एक्ज़ीक्यूशन मोड",
+    "ui.commandDock.chatFromThisLocation.03514a3": "इस स्थान से चैट करें",
+    "ui.commandDock.chatSettings.cebd934": "चैट सेटिंग्स",
+    "ui.commandDock.createAChildNodeHere.89972dc": "यहाँ चाइल्ड नोड बनाएँ",
+    "ui.commandDock.model.11440c3": "मॉडल",
+    "ui.commandDock.notebookContext.4fd3df2": "नोटबुक कॉन्टेक्स्ट",
+    "ui.commandDock.previewTheAutoAssembledAi.78a3c87": "अपने-आप बनाए गए AI कॉन्टेक्स्ट का प्रीव्यू",
+    "ui.commandDock.sendInstruction.797c542": "निर्देश भेजें",
+    "ui.commandDock.service.dcdd047": "सेवा",
+    "ui.commandDock.session.a711189": "सेशन",
+    "ui.app.cloudStorage.94e0556": "क्लाउड स्टोरेज",
+    "ui.app.copyShareLink.d2e2a6f": "शेयर लिंक कॉपी करें",
+    "ui.app.noCloudFilesYet.17dff2f": "अभी क्लाउड में कोई फ़ाइल नहीं है।",
+    "ui.app.refreshCloudNotebooks.28e31e2": "क्लाउड नोटबुक रिफ्रेश करें",
+    "ui.app.renameCloudFile.88036dc": "क्लाउड फ़ाइल का नाम बदलें",
+    "ui.app.saveCurrentAs.18cbd57": "मौजूदा सामग्री को इस नाम से सेव करें...",
+    "ui.focusPanel.nodeBody.eeba394": "नोड बॉडी",
+    "ui.focusPanel.nodeTitle.1768f3e": "नोड शीर्षक",
+    "ui.outlineEditor.mindAtlasOutlineEditor.9063b07": "Mind Atlas आउटलाइन एडिटर"
+  }
+}

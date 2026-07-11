@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "locale": "de",
+  "scope": "ai-cloud-editor",
+  "status": "draft",
+  "messages": {
+    "ui.commandDock.aiContextPreview.f27df14": "KI-Kontextvorschau",
+    "ui.commandDock.aiExecutionMode.ddada7f": "KI-Ausführungsmodus",
+    "ui.commandDock.chatFromThisLocation.03514a3": "Von diesem Ort aus chatten",
+    "ui.commandDock.chatSettings.cebd934": "Chat-Einstellungen",
+    "ui.commandDock.createAChildNodeHere.89972dc": "Hier einen Kindknoten erstellen",
+    "ui.commandDock.model.11440c3": "Modell",
+    "ui.commandDock.notebookContext.4fd3df2": "Notizbuchkontext",
+    "ui.commandDock.previewTheAutoAssembledAi.78a3c87": "Automatisch zusammengestellten KI-Kontext anzeigen",
+    "ui.commandDock.sendInstruction.797c542": "Anweisung senden",
+    "ui.commandDock.service.dcdd047": "Dienst",
+    "ui.commandDock.session.a711189": "Sitzung",
+    "ui.app.cloudStorage.94e0556": "Cloud-Speicher",
+    "ui.app.copyShareLink.d2e2a6f": "Freigabelink kopieren",
+    "ui.app.noCloudFilesYet.17dff2f": "Noch keine Cloud-Dateien vorhanden.",
+    "ui.app.refreshCloudNotebooks.28e31e2": "Cloud-Notizbücher aktualisieren",
+    "ui.app.renameCloudFile.88036dc": "Cloud-Datei umbenennen",
+    "ui.app.saveCurrentAs.18cbd57": "Aktuellen Inhalt speichern unter...",
+    "ui.focusPanel.nodeBody.eeba394": "Knoteninhalt",
+    "ui.focusPanel.nodeTitle.1768f3e": "Knotentitel",
+    "ui.outlineEditor.mindAtlasOutlineEditor.9063b07": "Mind-Atlas-Gliederungseditor"
+  }
+}

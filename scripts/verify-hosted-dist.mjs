@@ -28,4 +28,16 @@ assert.equal(fs.existsSync(assetsDir), true, "dist/assets is missing");
 const jsAssets = fs.readdirSync(assetsDir).filter((name) => name.endsWith(".js"));
 assert.ok(jsAssets.length > 0, "dist/assets has no JavaScript bundle");
 
+for (const locale of ["en", "ja"]) {
+  for (const page of ["about", "privacy", "terms"]) {
+    const localizedPath = path.join(distDir, locale, `${page}.html`);
+    assert.equal(fs.existsSync(localizedPath), true, `localized page is missing: ${locale}/${page}.html`);
+    const html = fs.readFileSync(localizedPath, "utf8");
+    assert.ok(html.includes(`<html lang="${locale}"`), `localized page has wrong html language: ${locale}/${page}.html`);
+    assert.ok(html.includes('hreflang="en"') && html.includes('hreflang="ja"'), `localized page is missing hreflang links: ${locale}/${page}.html`);
+  }
+}
+assert.ok(fs.readFileSync(path.join(distDir, "en", "about.html"), "utf8").includes("Write a novel"), "English introduction copy is missing");
+assert.ok(fs.readFileSync(path.join(distDir, "ja", "about.html"), "utf8").includes("小説を書く"), "Japanese introduction copy is missing");
+
 console.log("Hosted public dist verification passed");

@@ -10,6 +10,12 @@
     <meta name="theme-color" content="#061014" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Terms of Service | Mind Atlas</title>
+    <script>
+      if (location.pathname === "/terms.html" && !new URLSearchParams(location.search).has("locale")) {
+        const languages = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language];
+        if (!languages.some((language) => String(language || "").toLowerCase().startsWith("ja"))) location.replace("/en/terms.html");
+      }
+    </script>
     <style>
       :root {
         --bg: #f6f2e5;

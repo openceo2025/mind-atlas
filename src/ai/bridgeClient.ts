@@ -17,6 +17,7 @@ import type {
   TextPartnerTurnResult,
   WebSearchResult,
 } from "../types";
+import { formatAppMessage } from "../i18n/format";
 import { formatHostedServiceError, getHostedServiceUrl, isHostedServiceMode, notifyHostedServiceSessionChanged } from "../hosted/serviceClient";
 
 const FALLBACK_BRIDGE_URL = "http://127.0.0.1:8787";
@@ -292,11 +293,11 @@ function createBridgeFetchError(path: string, error: unknown, candidates: string
   if (isHostedServiceMode()) {
     return new Error(
       [
-        "Mind Atlasのホストサービスに接続できませんでした。",
+        formatAppMessage("error.bridge.connectionFailed"),
         `Path: ${path}`,
         diagnostics ? `Health: ${diagnostics}` : "",
         `Reason: ${reason}`,
-        "ページを再読み込みしても直らない場合は、サーバーまたはネットワーク設定を確認してください。",
+        formatAppMessage("error.bridge.checkSettings"),
       ].filter(Boolean).join("\n"),
     );
   }

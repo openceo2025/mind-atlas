@@ -3,6 +3,9 @@ import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { getProviderUsage } from "../ai/bridgeClient";
 import { getAboutDemoProviderUsage, readAboutDemoConfig } from "../aboutDemo";
 import type { ProviderUsageMetric, ProviderUsageResult } from "../types";
+import { I18nText } from "../i18n/I18nProvider";
+import { formatAppMessage } from "../i18n/format";
+import { currentAppLocale } from "../i18n/locales";
 
 const PROVIDER_USAGE_SELECTION_KEY = "mind-atlas-provider-usage-selection-v1";
 
@@ -60,21 +63,20 @@ export function ProviderUsagePanel() {
   };
 
   return (
-    <section className={`provider-usage-panel ${configuring ? "is-configuring" : ""}`} aria-label="AI provider usage">
+    <section className={`provider-usage-panel ${configuring ? "is-configuring" : ""}`} aria-label={formatAppMessage("ui.providerUsagePanel.aiProviderUsage.3b4868f")}>
       <header className="provider-usage-header">
         <span className="provider-usage-title">
           <Gauge size={14} />
-          USAGE
-        </span>
-        <span className="provider-usage-updated">{loading ? "SYNC" : formatUpdatedAt(result?.fetchedAt)}</span>
+          {<I18nText id="ui.providerUsagePanel.usage.83f3a8e" />}</span>
+        <span className="provider-usage-updated">{loading ? formatAppMessage("ui.providerUsagePanel.sync.f877560") : formatUpdatedAt(result?.fetchedAt)}</span>
         {!aboutDemoUsage ? (
           <>
             <button
               className="provider-usage-icon-button"
               type="button"
               onClick={() => void refresh(true)}
-              aria-label="Refresh provider usage"
-              title="Refresh provider usage"
+              aria-label={formatAppMessage("ui.providerUsagePanel.refreshProviderUsage.1d40174")}
+              title={formatAppMessage("ui.providerUsagePanel.refreshProviderUsage.6f8e298")}
               disabled={loading}
             >
               <RefreshCw size={13} className={loading ? "is-spinning" : ""} />
@@ -83,9 +85,9 @@ export function ProviderUsagePanel() {
               className={`provider-usage-icon-button ${configuring ? "is-active" : ""}`}
               type="button"
               onClick={() => setConfiguring((current) => !current)}
-              aria-label="Select provider usage metrics"
+              aria-label={formatAppMessage("ui.providerUsagePanel.selectProviderUsageMetrics.481f1cf")}
               aria-expanded={configuring}
-              title="Select provider usage metrics"
+              title={formatAppMessage("ui.providerUsagePanel.selectProviderUsageMetrics.e40b46d")}
             >
               <SlidersHorizontal size={13} />
             </button>
@@ -94,7 +96,7 @@ export function ProviderUsagePanel() {
       </header>
 
       {configuring && result ? (
-        <div className="provider-usage-selector" aria-label="Provider usage metric selection">
+        <div className="provider-usage-selector" aria-label={formatAppMessage("ui.providerUsagePanel.providerUsageMetricSelection.8b11260")}>
           {result.metrics.map((metric) => (
             <label key={metric.id}>
               <input
@@ -103,7 +105,7 @@ export function ProviderUsagePanel() {
                 onChange={() => toggleMetric(metric.id)}
               />
               <span>{metric.vendorLabel}</span>
-              <small>{metric.kind === "balance" ? "BALANCE" : metric.label}</small>
+              <small>{metric.kind === "balance" ? formatAppMessage("ui.providerUsagePanel.balance.bd9d2f7") : metric.label}</small>
             </label>
           ))}
         </div>
@@ -114,9 +116,9 @@ export function ProviderUsagePanel() {
           <ProviderUsageBar key={metric.id} metric={metric} />
         ))}
         {!loading && !error && selectedMetrics.length === 0 ? (
-          <p className="provider-usage-empty">NO METRICS SELECTED</p>
+          <p className="provider-usage-empty">{<I18nText id="ui.providerUsagePanel.noMetricsSelected.3a18c33" />}</p>
         ) : null}
-        {error ? <p className="provider-usage-error">OFFLINE</p> : null}
+        {error ? <p className="provider-usage-error">{<I18nText id="ui.providerUsagePanel.offline.398a963" />}</p> : null}
       </div>
     </section>
   );
@@ -138,7 +140,7 @@ function ProviderUsageBar({ metric }: { metric: ProviderUsageMetric }) {
       <div className="provider-usage-track" aria-label={`${metric.vendorLabel} ${metric.label} ${metric.displayValue}`}>
         <span style={style} />
       </div>
-      {resetLabel ? <small>RESET {resetLabel}</small> : <small>{metric.available ? metric.source.toUpperCase() : "N/A"}</small>}
+      {resetLabel ? <small>{<I18nText id="ui.providerUsagePanel.reset.d78ee67" />}{resetLabel}</small> : <small>{metric.available ? metric.source.toUpperCase() : formatAppMessage("ui.providerUsagePanel.nA.5c37d2e")}</small>}
     </article>
   );
 }
@@ -166,7 +168,7 @@ function formatUpdatedAt(value?: string) {
   if (!value) return "WAIT";
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "READY";
-  return `UPD ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+  return `UPD ${date.toLocaleTimeString(currentAppLocale(), { hour: "2-digit", minute: "2-digit", hour12: false })}`;
 }
 
 function formatResetAt(value?: string) {
@@ -175,9 +177,9 @@ function formatResetAt(value?: string) {
   if (!Number.isFinite(date.getTime())) return "";
   const today = new Date();
   if (date.toDateString() === today.toDateString()) {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    return date.toLocaleTimeString(currentAppLocale(), { hour: "2-digit", minute: "2-digit", hour12: false });
   }
-  return date.toLocaleDateString([], { month: "2-digit", day: "2-digit" });
+  return date.toLocaleDateString(currentAppLocale(), { month: "2-digit", day: "2-digit" });
 }
 
 function clampPercent(value: number) {

@@ -25,13 +25,14 @@ import {
   insertOutlineSiblingAfter,
   moveOutlineSibling,
   outlineDraftToInput,
-  OUTLINE_UNTITLED_TITLE,
   outdentOutlineNode,
   removeOutlineNode,
   updateOutlineNode,
   type OutlineDraftNode,
 } from "../outline/atlasOutline";
 import type { AtlasNode } from "../types";
+import { I18nText } from "../i18n/I18nProvider";
+import { formatAppMessage } from "../i18n/format";
 
 type OutlineEditorProps = {
   root: AtlasNode;
@@ -137,25 +138,21 @@ export function OutlineEditor({ root, selectedNodeId, onClose, onFocusNode, onAp
       <header className="outline-editor-header">
         <div>
           <span className="outline-editor-kicker">
-            <ListTree size={16} /> Text Editor
-          </span>
-          <h2>{root.title || OUTLINE_UNTITLED_TITLE}</h2>
+            <ListTree size={16} /> {<I18nText id="ui.outlineEditor.textEditor.7ce32d9" />}</span>
+          <h2>{root.title || formatAppMessage("node.untitled")}</h2>
           {copyStatus ? <p>{copyStatus}</p> : null}
         </div>
         <div className="outline-editor-actions">
           <button type="button" onClick={onClose}>
-            <X size={17} /> Close
-          </button>
+            <X size={17} /> {<I18nText id="ui.outlineEditor.close.b15eba1" />}</button>
           <button type="button" onClick={() => setCollapsedNodeIds(new Set())}>
-            <ChevronsDown size={17} /> Expand all
-          </button>
+            <ChevronsDown size={17} /> {<I18nText id="ui.outlineEditor.expandAll.01dc620" />}</button>
           <button type="button" onClick={() => setCollapsedNodeIds(new Set(collectCollapsibleOutlineIds(draftRoot, collapseRootOnCollapseAll)))}>
-            <ChevronsUp size={17} /> Collapse all
-          </button>
+            <ChevronsUp size={17} /> {<I18nText id="ui.outlineEditor.collapseAll.f5e2a42" />}</button>
         </div>
       </header>
 
-      <main className="outline-editor-body" aria-label="Mind Atlas outline editor">
+      <main className="outline-editor-body" aria-label={formatAppMessage("ui.outlineEditor.mindAtlasOutlineEditor.9063b07")}>
         <OutlineNodeEditor
           node={draftRoot}
           root={root}
@@ -173,7 +170,7 @@ export function OutlineEditor({ root, selectedNodeId, onClose, onFocusNode, onAp
           onToggleCollapsed={toggleCollapsed}
           onCopy={(key, preset) => {
             void copyContextMarkdown(root, key, preset)
-              .then((result) => setCopyStatus(`Copied ${formatContextCopyStats(result)}`))
+              .then((result) => setCopyStatus(formatAppMessage("status.copy.copied", { stats: formatContextCopyStats(result) })))
               .catch((error) => setCopyStatus(error instanceof Error ? error.message : "Copy failed."));
           }}
           onCommand={(command, key) => {
@@ -183,26 +180,26 @@ export function OutlineEditor({ root, selectedNodeId, onClose, onFocusNode, onAp
         />
       </main>
 
-      <nav className="outline-mobile-toolbar" aria-label="Outline edit controls">
-        <button type="button" onClick={() => run((current, key) => outdentOutlineNode(current, key))} disabled={activeDepth <= 1} aria-label="Outdent node">
+      <nav className="outline-mobile-toolbar" aria-label={formatAppMessage("ui.outlineEditor.outlineEditControls.a18584b")}>
+        <button type="button" onClick={() => run((current, key) => outdentOutlineNode(current, key))} disabled={activeDepth <= 1} aria-label={formatAppMessage("ui.outlineEditor.outdentNode.30df0cf")}>
           <ArrowLeft size={18} />
         </button>
-        <button type="button" onClick={() => run((current, key) => indentOutlineNode(current, key))} disabled={activeDepth === 0} aria-label="Indent node">
+        <button type="button" onClick={() => run((current, key) => indentOutlineNode(current, key))} disabled={activeDepth === 0} aria-label={formatAppMessage("ui.outlineEditor.indentNode.cea22b8")}>
           <ArrowRight size={18} />
         </button>
-        <button type="button" onClick={() => run((current, key) => moveOutlineSibling(current, key, -1))} disabled={activeDepth === 0} aria-label="Move node up">
+        <button type="button" onClick={() => run((current, key) => moveOutlineSibling(current, key, -1))} disabled={activeDepth === 0} aria-label={formatAppMessage("ui.outlineEditor.moveNodeUp.3ecda81")}>
           <ArrowUp size={18} />
         </button>
-        <button type="button" onClick={() => run((current, key) => moveOutlineSibling(current, key, 1))} disabled={activeDepth === 0} aria-label="Move node down">
+        <button type="button" onClick={() => run((current, key) => moveOutlineSibling(current, key, 1))} disabled={activeDepth === 0} aria-label={formatAppMessage("ui.outlineEditor.moveNodeDown.4e79f57")}>
           <ArrowDown size={18} />
         </button>
-        <button type="button" onClick={() => run((current, key) => insertOutlineSiblingAfter(current, key))} disabled={activeDepth === 0} aria-label="Add sibling node">
+        <button type="button" onClick={() => run((current, key) => insertOutlineSiblingAfter(current, key))} disabled={activeDepth === 0} aria-label={formatAppMessage("ui.outlineEditor.addSiblingNode.4b7e5f1")}>
           <ListPlus size={18} />
         </button>
-        <button type="button" onClick={() => run((current, key) => insertOutlineChild(current, key))} aria-label="Add child node">
+        <button type="button" onClick={() => run((current, key) => insertOutlineChild(current, key))} aria-label={formatAppMessage("ui.outlineEditor.addChildNode.9ac1af1")}>
           <GitBranchPlus size={18} />
         </button>
-        <button className="is-primary" type="button" onClick={() => onClose()} aria-label="Close outline">
+        <button className="is-primary" type="button" onClick={() => onClose()} aria-label={formatAppMessage("ui.outlineEditor.closeOutline.1c6a641")}>
           <Check size={18} />
         </button>
       </nav>
@@ -250,7 +247,7 @@ function OutlineNodeEditor({
             if (hasChildren) onToggleCollapsed(node.key);
           }}
           disabled={!hasChildren}
-          aria-label={node.collapsed ? "Expand node" : "Collapse node"}
+          aria-label={node.collapsed ? formatAppMessage("ui.outlineEditor.expandNode.1352475") : formatAppMessage("ui.outlineEditor.collapseNode.a715f06")}
           aria-expanded={hasChildren ? !node.collapsed : undefined}
         >
           {node.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
@@ -261,26 +258,26 @@ function OutlineNodeEditor({
           onFocus={() => onActivate(node.key)}
           onChange={(event) => onUpdate(node.key, { title: event.target.value })}
           onBlur={() => onEndEdit(node.key)}
-          placeholder={OUTLINE_UNTITLED_TITLE}
-          aria-label="Node title"
+          placeholder={formatAppMessage("node.untitled")}
+          aria-label={formatAppMessage("ui.outlineEditor.nodeTitle.0a17b46")}
         />
         <div className="outline-line-actions">
-          <button type="button" onClick={() => onCommand("outdent", node.key)} disabled={depth <= 1} aria-label="Outdent node">
+          <button type="button" onClick={() => onCommand("outdent", node.key)} disabled={depth <= 1} aria-label={formatAppMessage("ui.outlineEditor.outdentNode.30df0cf")}>
             <ArrowLeft size={14} />
           </button>
-          <button type="button" onClick={() => onCommand("indent", node.key)} disabled={depth === 0} aria-label="Indent node">
+          <button type="button" onClick={() => onCommand("indent", node.key)} disabled={depth === 0} aria-label={formatAppMessage("ui.outlineEditor.indentNode.cea22b8")}>
             <ArrowRight size={14} />
           </button>
-          <button type="button" onClick={() => onCommand("up", node.key)} disabled={depth === 0} aria-label="Move node up">
+          <button type="button" onClick={() => onCommand("up", node.key)} disabled={depth === 0} aria-label={formatAppMessage("ui.outlineEditor.moveNodeUp.3ecda81")}>
             <ArrowUp size={14} />
           </button>
-          <button type="button" onClick={() => onCommand("down", node.key)} disabled={depth === 0} aria-label="Move node down">
+          <button type="button" onClick={() => onCommand("down", node.key)} disabled={depth === 0} aria-label={formatAppMessage("ui.outlineEditor.moveNodeDown.4e79f57")}>
             <ArrowDown size={14} />
           </button>
-          <button type="button" onClick={() => onCommand("sibling", node.key)} disabled={depth === 0} aria-label="Add sibling">
+          <button type="button" onClick={() => onCommand("sibling", node.key)} disabled={depth === 0} aria-label={formatAppMessage("ui.outlineEditor.addSibling.d0210ae")}>
             <ListPlus size={14} />
           </button>
-          <button type="button" onClick={() => onCommand("child", node.key)} aria-label="Add child">
+          <button type="button" onClick={() => onCommand("child", node.key)} aria-label={formatAppMessage("ui.outlineEditor.addChild.eb18105")}>
             <GitBranchPlus size={14} />
           </button>
           <div className="outline-copy-menu">
@@ -292,10 +289,10 @@ function OutlineNodeEditor({
                 if (preset) onCopy(node.id ?? node.key, preset);
                 event.currentTarget.value = "";
               }}
-              aria-label="Copy with context"
+              aria-label={formatAppMessage("ui.outlineEditor.copyWithContext.b148fa6")}
               title={formatContextCopyStats(buildContextCopy(root, node.id ?? node.key, "ancestors"))}
             >
-              <option value="">Copy</option>
+              <option value="">{<I18nText id="ui.outlineEditor.copy.48a22f3" />}</option>
               {CONTEXT_COPY_PRESETS.map((preset) => {
                 const preview = buildContextCopy(root, node.id ?? node.key, preset.id);
                 return (
@@ -306,14 +303,14 @@ function OutlineNodeEditor({
               })}
             </select>
           </div>
-          <button type="button" onClick={() => onCommand("delete", node.key)} disabled={depth === 0} aria-label="Delete node">
+          <button type="button" onClick={() => onCommand("delete", node.key)} disabled={depth === 0} aria-label={formatAppMessage("ui.outlineEditor.deleteNode.1c01e20")}>
             <Trash2 size={14} />
           </button>
         </div>
       </div>
       {node.collapsed ? (
         <div className="outline-collapsed-note" style={{ "--outline-depth": depth } as CSSProperties}>
-          collapsed{hiddenCount ? ` / ${hiddenCount} descendant${hiddenCount === 1 ? "" : "s"} hidden` : ""}
+          {<I18nText id="ui.outlineEditor.collapsed.19114ba" />}{hiddenCount ? formatAppMessage("dynamic.collapsedDescendants", { count: hiddenCount }) : ""}
         </div>
       ) : null}
       <>
@@ -330,8 +327,8 @@ function OutlineNodeEditor({
                 autoSizeTextarea(bodyRef.current);
                 onEndEdit(node.key);
               }}
-              placeholder="Body"
-              aria-label="Node body"
+              placeholder={formatAppMessage("ui.outlineEditor.body.3b37e9a")}
+              aria-label={formatAppMessage("ui.outlineEditor.nodeBody.68bf85f")}
               rows={Math.max(2, node.body.split("\n").length)}
             />
           </div>

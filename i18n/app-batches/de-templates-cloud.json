@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "locale": "de",
+  "scope": "templates-and-cloud",
+  "status": "draft",
+  "messages": {
+    "template.blank.title": "Leerer Bereich",
+    "template.blank.description": "Beginne mit einem leeren Bereich.",
+    "template.daily.title": "Tägliche Notizen",
+    "template.daily.description": "Ordne die Entscheidungen von heute vier Bereichen zu.",
+    "template.novel.title": "Einen Roman schreiben",
+    "template.novel.description": "Entwickle Welt, Figuren, Handlung und Manuskript in einem Universum.",
+    "template.swot.title": "Eine SWOT-Analyse durchführen",
+    "template.swot.description": "Ordne den nächsten Schritt anhand von Stärken, Schwächen, Chancen und Risiken.",
+    "template.travel.title": "Eine Reise planen",
+    "template.travel.description": "Sammle Aktivitäten, Reiseplan, Gepäck und Reservierungen.",
+    "template.scamper.title": "Eine Idee entwickeln",
+    "template.scamper.description": "Erweitere eine Idee mit den SCAMPER-Fragen.",
+    "startSpace.title": "Wähle, wie du beginnen möchtest",
+    "startSpace.nextTitle": "Wähle den nächsten Bereich",
+    "startSpace.newTitle": "Einen neuen Bereich beginnen",
+    "startSpace.tutorialDetail": "Wähle, wie du nach dem Tutorial fortfahren möchtest.",
+    "startSpace.newDetail": "Beginne mit einer Vorlage oder einer Kopie eines Cloud-Notizbuchs.",
+    "startSpace.templates": "Vorlagen",
+    "startSpace.cloudCopies": "Mit einer Cloud-Kopie beginnen",
+    "startSpace.keepTutorial": "Mit den Tutorial-Knoten fortfahren",
+    "startSpace.googleLogin": "Mit Google anmelden"
+  }
+}

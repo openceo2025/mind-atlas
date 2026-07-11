@@ -1,6 +1,8 @@
 import { Bot, Circle, Hammer, UserRound } from "lucide-react";
 import { findNodePath, getSelectionWorkArea, useAtlasStore } from "../store/atlasStore";
 import type { EventActor } from "../types";
+import { I18nText } from "../i18n/I18nProvider";
+import { formatAppMessage } from "../i18n/format";
 
 export function EventStrip() {
   const workAreas = useAtlasStore((state) => state.workAreas);
@@ -16,9 +18,9 @@ export function EventStrip() {
   const recent = area.events.slice(-5);
 
   return (
-    <aside className="event-strip" aria-label="Recent events">
+    <aside className="event-strip" aria-label={formatAppMessage("ui.eventStrip.recentEvents.50a6756")}>
       <div className="event-strip-header">
-        <span>Recent events</span>
+        <span>{<I18nText id="ui.eventStrip.recentEvents.5a8aca9" />}</span>
         <strong>{area.title}</strong>
       </div>
       <div className="event-strip-list">

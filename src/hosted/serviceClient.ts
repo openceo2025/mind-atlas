@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import { HOSTED_SERVICE_SESSION_REFRESH_EVENT } from "../events";
 import { isAboutDemoMode } from "../aboutDemo";
+import { formatAppMessage } from "../i18n/format";
 
 const PUBLIC_SERVICE_FLAG = "VITE_MIND_ATLAS_PUBLIC_SERVICE";
 const SERVICE_URL_FLAG = "VITE_MIND_ATLAS_SERVICE_URL";
@@ -126,39 +127,39 @@ export function formatHostedServiceError(status: number, data: Record<string, un
   const text = `${code} ${raw}`.toLowerCase();
 
   if (code === "auth_required" || text.includes("google login")) {
-    return "Googleログインが必要です。右上のAI機能からログインしてください。";
+    return formatAppMessage("service.authRequired");
   }
   if (code === "billing_period_unavailable" || text.includes("renewal date") || text.includes("billing period")) {
-    return "AI利用トークンの次回更新日をStripeと同期中です。少し待ってから右上のAI機能で更新してください。";
+    return formatAppMessage("service.billingPeriodUnavailable");
   }
   if (code === "subscription_required" || text.includes("subscription")) {
-    return "AI機能は月額登録後に利用できます。Notebook本体はこのまま使えます。";
+    return formatAppMessage("service.subscriptionRequired");
   }
   if (code === "credit_exhausted" || text.includes("exhausted") || text.includes("too low")) {
-    return "この請求期間のAI利用トークンを使い切りました。次回更新日までAIリクエストは停止します。";
+    return formatAppMessage("service.creditExhausted");
   }
   if (code === "cloud_notebook_too_large") {
-    return "容量が大きすぎてクラウドへ保存できません。テキスト量を減らしてください。";
+    return formatAppMessage("service.cloudNotebookTooLarge");
   }
   if (code === "request_too_large" || code === "audio_too_large" || status === 413) {
-    return "今回の入力が大きすぎます。対象ノードや添付、音声の長さを減らしてもう一度試してください。";
+    return formatAppMessage("service.requestTooLarge");
   }
   if (code === "model_not_enabled") {
-    return "選択中のモデルは現在利用できません。別のモデルを選んでください。";
+    return formatAppMessage("service.modelNotEnabled");
   }
   if (code === "pricing_not_configured") {
-    return "このモデルは利用上限の計算が未設定です。公開前の安全設定により停止しています。";
+    return formatAppMessage("service.pricingNotConfigured");
   }
   if (code === "service_not_configured") {
-    return "AIサービスのサーバー設定がまだ完了していません。管理者側のキー設定が必要です。";
+    return formatAppMessage("service.notConfigured");
   }
   if (code === "provider_unavailable" || status === 429 || status >= 500) {
-    return "AIサービスに接続できませんでした。少し待つか、別のモデルで再試行してください。";
+    return formatAppMessage("service.providerUnavailable");
   }
   if (status === 400) {
-    return "リクエスト内容を確認してください。入力、モデル、または添付が現在の公開設定に合っていない可能性があります。";
+    return formatAppMessage("service.badRequest");
   }
-  return scrubHostedServiceError(raw) || `Mind Atlas service request failed with ${status}`;
+  return scrubHostedServiceError(raw) || formatAppMessage("service.generic", { status });
 }
 
 async function hostedFetch(path: string, init: RequestInit = {}) {

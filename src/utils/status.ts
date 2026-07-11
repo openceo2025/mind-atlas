@@ -1,19 +1,20 @@
 import type { WorkStatus } from "../types";
+import { formatAppMessage } from "../i18n/format";
 
 export function getStatusLabel(status: WorkStatus) {
   switch (status) {
     case "needs_review":
-      return "Needs review";
+      return formatAppMessage("label.status.needsReview");
     case "running":
-      return "Running";
+      return formatAppMessage("label.status.running");
     case "waiting":
-      return "Waiting";
+      return formatAppMessage("label.status.waiting");
     case "blocked":
-      return "Blocked";
+      return formatAppMessage("label.status.blocked");
     case "error":
-      return "Error";
+      return formatAppMessage("label.status.error");
     case "done":
-      return "Done";
+      return formatAppMessage("label.status.done");
   }
 }
 

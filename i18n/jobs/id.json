@@ -1,0 +1,3396 @@
+{
+  "schemaVersion": 1,
+  "sourceLocale": "en",
+  "targetLocale": "id",
+  "sourceCatalogHash": "b20b65b736619347f8e3f074122153c5e9dd603ecb4293c40de4c47af866e0e1",
+  "glossaryVersion": 1,
+  "instructions": [
+    "Edit only translation values.",
+    "Preserve every ICU argument in braces exactly.",
+    "Do not translate product names, provider names, model ids, paths, or keyboard shortcuts.",
+    "Keep labels compact enough for mobile controls.",
+    "Return valid UTF-8 JSON without markdown fences."
+  ],
+  "messages": {
+    "app.aiFeatures": {
+      "source": "AI features",
+      "sourceHash": "01e2609eb960da96285b2b1eadae51632548159a4c042a104f76069ff9505d51",
+      "translation": "Fitur AI"
+    },
+    "app.openMenu": {
+      "source": "Open atlas menu",
+      "sourceHash": "e96641c79f2e11aa7de01d65ae85d5bbcbe75b8fecd71ffabe61ed1439267a02",
+      "translation": "Buka menu atlas"
+    },
+    "app.shareCloud": {
+      "source": "Create public Mind Atlas cloud link",
+      "sourceHash": "8588dc049592fbbabdd9e8627a56150390ea197d0441e0cda3ee961921e8e9cb",
+      "translation": "Buat tautan publik Mind Atlas di cloud"
+    },
+    "app.shareImage": {
+      "source": "Share atlas image",
+      "sourceHash": "0f16e57c4940c6d0f5356fcc272f7717ae398683cda9cd7a2b1faa0a0bc28582",
+      "translation": "Bagikan gambar atlas"
+    },
+    "app.tutorial.skip": {
+      "source": "Skip tutorial",
+      "sourceHash": "32af200d1d13e8dd5fc8e04ae820a98b602f3fbd2656680f5bd54ae209b0935a",
+      "translation": "Lewati tutorial"
+    },
+    "common.auto": {
+      "source": "Use device language",
+      "sourceHash": "8f25cd7b2bb975af75c13b7fe411bcd41ef31b568204b9245408f7bd050448b9",
+      "translation": "Gunakan bahasa perangkat"
+    },
+    "common.cancel": {
+      "source": "Cancel",
+      "sourceHash": "8ba15cb899182ac205a51c854ab0934887b106bd4694798388d8d9185eaaa656",
+      "translation": "Batal"
+    },
+    "common.close": {
+      "source": "Close",
+      "sourceHash": "366bfec20d88cdfbd2035c58d09c1b1bb3f110c10c3287c96a36cb64843420c1",
+      "translation": "Tutup"
+    },
+    "common.delete": {
+      "source": "Delete",
+      "sourceHash": "0a4ee49378977e867816d58800d580395767b418121acd5cbe61a5a43561006c",
+      "translation": "Hapus"
+    },
+    "common.loading": {
+      "source": "Loading...",
+      "sourceHash": "74eb6cc3ce934dccd958376f8f005f3509b392456237038b91bc9368fdcc5b15",
+      "translation": "Memuat..."
+    },
+    "common.off": {
+      "source": "Off",
+      "sourceHash": "c28594288f43c97c76a8a96a75020f26b41701355d7d8028a74eb8e39688e99c",
+      "translation": "Nonaktif"
+    },
+    "common.on": {
+      "source": "On",
+      "sourceHash": "3a8d498a3ca46d6a520c049f7e746b578025efca1066e7b54eb64697c0308564",
+      "translation": "Aktif"
+    },
+    "common.save": {
+      "source": "Save",
+      "sourceHash": "459df7e771f00df0254b8a2e2892b8d85eb41df8796338006d9a8aa4b12b554e",
+      "translation": "Simpan"
+    },
+    "common.unknown": {
+      "source": "Unknown",
+      "sourceHash": "aa772052ecad606c5739790029a48fb05b61f5f9afc19c6aa68d8c07f2b3c2f2",
+      "translation": "Tidak diketahui"
+    },
+    "dialog.cloud.deleteConfirm": {
+      "source": "Delete \"{name}\" from cloud storage?",
+      "sourceHash": "164cfacaeb29d74b289ae644ad762a81325bd1bd01445d09920ef44f6a18e05d",
+      "translation": "Hapus \"{name}\" dari penyimpanan cloud?"
+    },
+    "dialog.cloud.localSaved": {
+      "source": "Cloud save completed.\n\nSaved file: {name}",
+      "sourceHash": "b7f7b4a7579a1fb9c9749066afa957ca0c6dabf294551612ae806e350cc57d93",
+      "translation": "Penyimpanan cloud selesai.\n\nFile tersimpan: {name}"
+    },
+    "dialog.cloud.oldSavesDeleted": {
+      "source": "Old saves deleted: {count}",
+      "sourceHash": "4727d0206615403a4a394bba80622fa6975c6a9a227ed56124aa03504a3d7a6d",
+      "translation": "Simpanan lama dihapus: {count}"
+    },
+    "dialog.cloud.overwriteConfirm": {
+      "source": "Overwrite \"{name}\" with the current atlas?",
+      "sourceHash": "bf9b8843366e3a72053f502e7e7b693d7b20d484257e81d985f99c21fa971ccf",
+      "translation": "Timpa \"{name}\" dengan atlas saat ini?"
+    },
+    "dialog.cloud.saved": {
+      "source": "Saved to the cloud.\n\n{name}{detail}",
+      "sourceHash": "ebe54da3a41f809c497194698710c711d0464d0664a1802b0495e61acf8ce961",
+      "translation": "Tersimpan ke cloud.\n\n{name}{detail}"
+    },
+    "dialog.cloud.tooLarge": {
+      "source": "This notebook is too large to save to the cloud. Reduce the amount of text.",
+      "sourceHash": "d9fa0b70e213261a0eb974a93a0fb466979e7c32d1a6ca8abb611ccb8551a394",
+      "translation": "Notebook ini terlalu besar untuk disimpan ke cloud. Kurangi jumlah teks."
+    },
+    "dialog.history.restoreConfirm": {
+      "source": "Restore \"{title}\" from {date}? The current notebook will be saved in history first.",
+      "sourceHash": "1acbc8726a779efbfefbb10f849a951fa8f3a87fa4e3ee601ecf1593c5e8042b",
+      "translation": "Pulihkan \"{title}\" dari {date}? Notebook saat ini akan disimpan di riwayat terlebih dahulu."
+    },
+    "dialog.packageFallback": {
+      "source": "{error}\n\nA JSON-only Mind Atlas package can still preserve the notebook text and structure.\nAttachment files will not be embedded in that fallback package.\n\nCreate the JSON-only package instead?",
+      "sourceHash": "425f980c4577d4dea2f55c551430a8658017ffe30510abb5df8af6b40417023f",
+      "translation": "{error}\n\nPaket Mind Atlas JSON-saja masih dapat mempertahankan teks dan struktur notebook.\nFile lampiran tidak akan disertakan dalam paket cadangan tersebut.\n\nBuat paket JSON-saja sebagai gantinya?"
+    },
+    "dialog.packageJsonOnly": {
+      "source": "Created a JSON-only Mind Atlas package. Notebook text is preserved, but attachment files are not embedded.",
+      "sourceHash": "5f2c43f47f66093baa78a123ab1cc795bb97ee9befcb5495091f853e4facb549",
+      "translation": "Paket Mind Atlas JSON-saja telah dibuat. Teks notebook dipertahankan, tetapi file lampiran tidak disertakan."
+    },
+    "dialog.packageMissingAttachments": {
+      "source": "{count, plural, one {# attachment} other {# attachments}} could not be included because this browser session only has their metadata.",
+      "sourceHash": "1648b7e0198581334168bc85f3a49adb1cd5d050a828e0c45292c12c1cf82a03",
+      "translation": "{count, plural, one {# lampiran} other {# lampiran}} tidak dapat disertakan karena sesi browser ini hanya memiliki metadata-nya."
+    },
+    "dynamic.aiPartnerReplies": {
+      "source": "{count, plural, one {# AI Partner reply} other {# AI Partner replies}}",
+      "sourceHash": "8c47910f07924309f0a66d7f79537b28880e5b020ed7697e38cf6da7338e2c08",
+      "translation": "{count, plural, one {# balasan AI Partner} other {# balasan AI Partner}}"
+    },
+    "dynamic.collapsedDescendants": {
+      "source": " / {count, plural, one {# descendant hidden} other {# descendants hidden}}",
+      "sourceHash": "ed853a1987fa9f860a1397febeaaccf3d67d41a8cbca219b4330019c549eaedd",
+      "translation": " / {count, plural, one {# turunan disembunyikan} other {# turunan disembunyikan}}"
+    },
+    "dynamic.contextCopyStats": {
+      "source": "{tokens} tokens / {nodes, plural, one {# node} other {# nodes}}{truncated}",
+      "sourceHash": "0ab2d9b439a2ed9ac27235b0783b8e50885a15f1704693351a3dd653e981c794",
+      "translation": "{tokens} token / {nodes, plural, one {# node} other {# node}}{truncated}"
+    },
+    "dynamic.contextNone": {
+      "source": "No context",
+      "sourceHash": "458d5d132fc724483e666e5cf8522d627a58559fa3f6221a712450f5f4e60a5c",
+      "translation": "Tidak ada konteks"
+    },
+    "dynamic.contextPreviewTitle": {
+      "source": "{context}. Click to preview exactly what will be sent.",
+      "sourceHash": "486071027485ff7f0e1a8976abf632c6a42933f0e56b70b1c6926c6e9763c747",
+      "translation": "{context}. Klik untuk melihat pratinjau apa yang akan dikirim."
+    },
+    "dynamic.contextShort": {
+      "source": "ctx",
+      "sourceHash": "7a75e17275d29734120a39245f8c5524b29344cfea8111ff3df08b5eeb53c65d",
+      "translation": "konteks"
+    },
+    "dynamic.contextStats": {
+      "source": "~{tokens} tokens / {nodes, plural, one {# node} other {# nodes}} / {turns, plural, one {# conversation turn} other {# conversation turns}}{summary}{trimmed}",
+      "sourceHash": "54316baa55516fa6220c5f366f9c385801efb6c41a777690a4f56d75df5ca14e",
+      "translation": "~{tokens} token / {nodes, plural, one {# node} other {# node}} / {turns, plural, one {# percakapan} other {# percakapan}}{summary}{trimmed}"
+    },
+    "dynamic.contextTruncated": {
+      "source": " / truncated",
+      "sourceHash": "a5d4fd66cb20c56d55c31a58406cab18a464b0c450a5ff1a71a70446eeb4183f",
+      "translation": " / dipotong"
+    },
+    "dynamic.decrease": {
+      "source": "Decrease {label}",
+      "sourceHash": "a075f677fa984dbb39273b73dc74bdeaf561739913f9cebaca838d5ca3e6683f",
+      "translation": "Kurangi {label}"
+    },
+    "dynamic.deleteNodeWithChildren": {
+      "source": "Delete \"{title}\" and {count, plural, one {# child node} other {# child nodes}}? You can restore it with Undo.",
+      "sourceHash": "8c594f7cc9c2873cfef86598283eca8c70bc94330b32afc75fecd97f390c9220",
+      "translation": "Hapus \"{title}\" dan {count, plural, one {# node anak} other {# node anak}}? Anda dapat memulihkannya dengan Undo."
+    },
+    "dynamic.focusNode": {
+      "source": "Focus {title}",
+      "sourceHash": "2515a1462c17ebb056ba040154a716c7c0db8d85e3e2570cc683baf5c3dfe34a",
+      "translation": "Fokus {title}"
+    },
+    "dynamic.hoursShort": {
+      "source": "{count}h",
+      "sourceHash": "bca3666c862cbc54faa46a50eed0e28a512b97da165f10238dccfe166fcf4ff6",
+      "translation": "{count}j"
+    },
+    "dynamic.increase": {
+      "source": "Increase {label}",
+      "sourceHash": "893e6f95954d895ec7fae475ea8a1a5cfd8f90810cb8eef1ad42d7978e481560",
+      "translation": "Tambah {label}"
+    },
+    "dynamic.logSummary": {
+      "source": "{entries, plural, one {# entry} other {# entries}}{approvals, plural, =0 {} other { / # approval pending}}{readOnly, select, yes { / read-only} other {}}",
+      "sourceHash": "13bfb9fdfbee0d3529ac58b5514dfa3ab77bc870e8273f4b4af07831b8c1b6b8",
+      "translation": "{entries, plural, one {# entri} other {# entri}}{approvals, plural, =0 {} other { / # menunggu persetujuan}}{readOnly, select, yes { / hanya-baca} other {}}"
+    },
+    "dynamic.mergeChoice": {
+      "source": "Merge choice for {path}",
+      "sourceHash": "cc679575967253bb0b527a35e30b87e82f9c028e2d130ca9be26ba502084dd4d",
+      "translation": "Pilihan penggabungan untuk {path}"
+    },
+    "dynamic.minutesShort": {
+      "source": "{count}m",
+      "sourceHash": "e5a7b7b5e3fa33784fc6d473c8bafd71b3e54db31db13cac7d53850f1d82b751",
+      "translation": "{count}mnt"
+    },
+    "dynamic.nextRenewal": {
+      "source": "Next renewal: {date}",
+      "sourceHash": "2c2cc8729661e38f619c59cd29e7f92d5b924c821c125056d437585dce8cc38f",
+      "translation": "Pembaruan berikutnya: {date}"
+    },
+    "dynamic.nodeTitle": {
+      "source": "{title} title",
+      "sourceHash": "8da17b9408826015b1ebe21ae5f8fefd47443f53d49b07fd4ea5af4f71c39933",
+      "translation": "Judul {title}"
+    },
+    "dynamic.nodeTitlePreview": {
+      "source": "{title} title preview",
+      "sourceHash": "39f7ea392a0f48d8cc1d66716977836c26f34fa7bb37099f9513c12de382b219",
+      "translation": "Pratinjau judul {title}"
+    },
+    "dynamic.pastReminderConfirm": {
+      "source": "The selected reminder time is in the past:\n\n{date}\n\nThis notification may fire immediately. Set it anyway?",
+      "sourceHash": "d3f77c0b036014bc47c0b18a627e8c9a000cc9f74f3d5c94df790808b9c09171",
+      "translation": "Waktu pengingat yang dipilih sudah lewat:\n\n{date}\n\nNotifikasi ini mungkin muncul segera. Tetap atur?"
+    },
+    "dynamic.reminder": {
+      "source": "Reminder: {date}",
+      "sourceHash": "25846407c67d1e3f7f59f693183e30439e4b9eb9cd6d6f07a4db1f80b3850afa",
+      "translation": "Pengingat: {date}"
+    },
+    "dynamic.remove": {
+      "source": "Remove {name}",
+      "sourceHash": "a3612a6fab1f705d47127de56d86def3535f467e04dc6cdf5577ac39439dd9a3",
+      "translation": "Hapus {name}"
+    },
+    "dynamic.summarized": {
+      "source": " ({count} summarized)",
+      "sourceHash": "171b8f560373871b73e02589edb23cd5b16341a5b0c78c627546aac9b4a4cb94",
+      "translation": " ({count} diringkas)"
+    },
+    "dynamic.tokenEstimateShort": {
+      "source": "~{count} tok",
+      "sourceHash": "64839f6881139b99e7c5caeac199c6265fd04233b4bf6f7586e3b919e81c5e1f",
+      "translation": "~{count} tok"
+    },
+    "error.appendChildren": {
+      "source": "Appending children failed.",
+      "sourceHash": "1dd7db1c08020fb301d6df2fb7f5f915e4b002e802c7339c54bcdb8742bc34b7",
+      "translation": "Gagal menambahkan anak."
+    },
+    "error.bridge.checkSettings": {
+      "source": "If reloading the page does not help, check the bridge or network settings.",
+      "sourceHash": "e0396086f0b0dddc74282de306fe366870d8415e711632a64be47c599aa5f648",
+      "translation": "Jika memuat ulang halaman tidak membantu, periksa pengaturan bridge atau jaringan."
+    },
+    "error.bridge.connectionFailed": {
+      "source": "Mind Atlas could not connect to the local bridge.",
+      "sourceHash": "47dc98aea55c03ab20cc04ab49135c6584e3f735fc0d931f97b8f488d75e3877",
+      "translation": "Mind Atlas tidak dapat terhubung ke bridge lokal."
+    },
+    "error.clipboardUnavailable": {
+      "source": "Clipboard writing is not available in this browser.",
+      "sourceHash": "29bf92f599525010d6bd6ffda654601baed35fc5220dda5d892e2b8ca643cde5",
+      "translation": "Penulisan papan klip tidak tersedia di browser ini."
+    },
+    "error.cloudBeforeUpload": {
+      "source": "Cloud save failed before upload completed.",
+      "sourceHash": "94f31b9f97d8aa57ab9ee733753c146c8315046dfd69a5dad53cbd7aa3a42270",
+      "translation": "Penyimpanan cloud gagal sebelum unggahan selesai."
+    },
+    "error.cloudPackageCreation": {
+      "source": "Cloud save package creation failed.",
+      "sourceHash": "1e902bdc4670d00c0f7339dc7bb33435fc62dd9bacf9462af032af6377f84720",
+      "translation": "Pembuatan paket penyimpanan cloud gagal."
+    },
+    "error.cloudSave": {
+      "source": "Cloud save failed.",
+      "sourceHash": "f5585d8c93ea4f31f3baa6a1310e06e0f865e96c1f1920402ca4b629fd627490",
+      "translation": "Penyimpanan cloud gagal."
+    },
+    "error.embeddedUrl": {
+      "source": "Embedded-data URL creation failed.",
+      "sourceHash": "2688dfa2162be63dcd28cd175b8cd34bf9206e880f6bbf9209fe94d547e9b929",
+      "translation": "Pembuatan URL data-tertanam gagal."
+    },
+    "error.externalImport": {
+      "source": "{format} import failed.",
+      "sourceHash": "d9937099b26bad66faafabafdb12fc220d3ae00ebaf0b30e11f2d49a29aa984a",
+      "translation": "Impor {format} gagal."
+    },
+    "error.imageShare": {
+      "source": "Image sharing failed.",
+      "sourceHash": "046e546db6a067186de7fd957f2bbf1029bfc144cf2c1d5230de2c9165100a2d",
+      "translation": "Berbagi gambar gagal."
+    },
+    "error.lightExport": {
+      "source": "Text-only export failed.",
+      "sourceHash": "5979417dc0fc5faced915f2e712443c0da9fa7398d7fef34440a21496e4a01ba",
+      "translation": "Ekspor teks-saja gagal."
+    },
+    "error.notebookImport": {
+      "source": "Notebook import failed.",
+      "sourceHash": "eba9a84a4b0a40fd578328c864fa68266df0124e0fe3626b201ce1194cd0007b",
+      "translation": "Impor notebook gagal."
+    },
+    "error.packageExport": {
+      "source": "Package export failed.",
+      "sourceHash": "6ed6d327481ff85ab0c10fadb9672db33c4020292cfeb74a3013e1cf0e6f38bb",
+      "translation": "Ekspor paket gagal."
+    },
+    "error.packageImport": {
+      "source": "Package import failed.",
+      "sourceHash": "55f2365fc81d392276ced68aca2ec606b274b0490180b229a28b34b3c29577bb",
+      "translation": "Impor paket gagal."
+    },
+    "error.previewMerge": {
+      "source": "Merge preview failed.",
+      "sourceHash": "c47cb124e3076266c633d953ed8db6adf397eac1a378d88619c21d84048a3df3",
+      "translation": "Pratinjau penggabungan gagal."
+    },
+    "error.replaceBody": {
+      "source": "Replacing the active node body failed.",
+      "sourceHash": "60c60df897e1d9d8555b48ddf7dc479633bca6b24dc302687fde76b35e095f11",
+      "translation": "Gagal mengganti tubuh node aktif."
+    },
+    "error.replaceSubtree": {
+      "source": "Replacing the active subtree failed.",
+      "sourceHash": "ccc60c0299bac63f00c3f7c2ab1c4300bedd59af8adff67addb02daa84da5e39",
+      "translation": "Gagal mengganti subpohon aktif."
+    },
+    "error.sharedImport": {
+      "source": "Shared Mind Atlas import failed.",
+      "sourceHash": "44ba64040e8121671ef65b2f9250f5810ed9c04edf8c459431244345a3d22104",
+      "translation": "Impor Mind Atlas bersama gagal."
+    },
+    "error.sharedLinkRead": {
+      "source": "The shared Mind Atlas link could not be read.",
+      "sourceHash": "4283c7fa68420a72dae135b03996eeafc18fbd77476361992b3904c9ce7b8fd1",
+      "translation": "Tautan Mind Atlas bersama tidak dapat dibaca."
+    },
+    "label.ai.attentionShort": {
+      "source": "Review",
+      "sourceHash": "214632340f4948b013ad3cd3f3a758e3d3bbf2e4217cc32cb854007b55612698",
+      "translation": "Periksa"
+    },
+    "label.ai.available": {
+      "source": "AI features are available",
+      "sourceHash": "a06ec41f364b43b3f4578634760ec1ec108c04268d0a69142d2c390d10b76891",
+      "translation": "Fitur AI tersedia"
+    },
+    "label.ai.checking": {
+      "source": "Checking AI usage",
+      "sourceHash": "f59c8353652478023c8b37b6cef332a870d5b48f4218726d6f133b40a45596d0",
+      "translation": "Memeriksa penggunaan AI"
+    },
+    "label.ai.checkingShort": {
+      "source": "Checking",
+      "sourceHash": "ace8b51c9ce7920cd06d746a615e9b56f71867fbc8f630136b01534a15397860",
+      "translation": "Memeriksa"
+    },
+    "label.ai.exhausted": {
+      "source": "AI token balance for this billing period is 0%",
+      "sourceHash": "3f7aa045154cc8321c8834a07620cbc3f1ed8e07f7a8df1a83adeafe37128f23",
+      "translation": "Saldo token AI untuk periode penagihan ini adalah 0%"
+    },
+    "label.ai.freeNotebook": {
+      "source": "The notebook is free. Sign in to subscribe to AI features.",
+      "sourceHash": "1a2863ed38ad5358689ab55bd2d27f09b329e21b987a52680f5d62a73ccff684",
+      "translation": "Notebook gratis. Masuk untuk berlangganan fitur AI."
+    },
+    "label.ai.notSubscribed": {
+      "source": "AI features are not subscribed",
+      "sourceHash": "f871b7ae097325b546e4a6d3ce0583828951f461713bdf9faf55adbdd63ad1e9",
+      "translation": "Fitur AI tidak dilanggan"
+    },
+    "label.ai.notSubscribedShort": {
+      "source": "Not subscribed",
+      "sourceHash": "ca82860f44ca30f9e9e8e4ef535b2a6eea301bde3450bb1a8b7e981a46bdf7db",
+      "translation": "Tidak berlangganan"
+    },
+    "label.ai.paymentRequired": {
+      "source": "Payment review is required",
+      "sourceHash": "03c506ad89340a3ba0a687d3bf77253f1343f31e5c25186ca5eaba82abc7282c",
+      "translation": "Tinjauan pembayaran diperlukan"
+    },
+    "label.ai.renewalSync": {
+      "source": "Checking the next AI token renewal date",
+      "sourceHash": "60dfd8904296246746a9d79c90ca0311ed14e811877a811ae4818d3c9878a60d",
+      "translation": "Memeriksa tanggal pembaruan token AI berikutnya"
+    },
+    "label.ai.signedOutShort": {
+      "source": "Signed out",
+      "sourceHash": "a35377f08dc347b4b833ffafe3c82bac0b93354f08bfe6a662bf7e5f57fa5c96",
+      "translation": "Keluar"
+    },
+    "label.ai.subscriptionStopped": {
+      "source": "The subscription is stopped",
+      "sourceHash": "d67e18ae1f0e02acde26709e368c8a1e840e268bdc59df0333fe7257c37868da",
+      "translation": "Langganan dihentikan"
+    },
+    "label.ai.syncingShort": {
+      "source": "Syncing",
+      "sourceHash": "8a71961cf14708b4a8918e3ad6868c1fe3278f0b8b8831b401b9e7328392e08a",
+      "translation": "Menyinkronkan"
+    },
+    "label.ai.unavailable": {
+      "source": "Service status is unavailable",
+      "sourceHash": "36b74c3ab02a4a49a04c2a866e19c56327da0d3bc4e3c099aa0f8c37e7d1c8a6",
+      "translation": "Status layanan tidak tersedia"
+    },
+    "label.effort.default": {
+      "source": "Default",
+      "sourceHash": "d03fdb0aeb11a37f2223db03a03a880353b021c875756a884f285c52f534b441",
+      "translation": "Standar"
+    },
+    "label.effort.extraHigh": {
+      "source": "Extra high",
+      "sourceHash": "bce1cc52c45dccae3057a6308dfd062b1864e016f995075abc7b4e5b1bc76389",
+      "translation": "Sangat tinggi"
+    },
+    "label.effort.none": {
+      "source": "None",
+      "sourceHash": "9d6e2b97928e5b01474b309a891902f6abb96c861afd0eb24579746737ebf7e3",
+      "translation": "Tidak ada"
+    },
+    "label.effort.providerDefault": {
+      "source": "Provider default",
+      "sourceHash": "0817511fc31fe7c8d2bf8e3a6ff2e8bcd729c6fd71fee7fcda21ee54c7b82163",
+      "translation": "Standar penyedia"
+    },
+    "label.history.durable": {
+      "source": " / durable",
+      "sourceHash": "c1580fd8d0fc2f42205d20d20e7baa49c3f158ad086b14e91f005430b15bd36e",
+      "translation": " / tahan lama"
+    },
+    "label.history.loading": {
+      "source": "Loading snapshots",
+      "sourceHash": "e3080a79b08335b88cf60590d80f603803598b92fc746e603df14ed8b7d69fc0",
+      "translation": "Memuat cuplikan"
+    },
+    "label.history.loadingLocal": {
+      "source": "Loading local notebook history",
+      "sourceHash": "6195f5dab73831810285fb3fb66fad8695e192e15b44f090e7d76feb751269fb",
+      "translation": "Memuat riwayat notebook lokal"
+    },
+    "label.history.needsAttention": {
+      "source": "Notebook persistence needs attention",
+      "sourceHash": "60973f29698922ababa4b2437326d9512179c0945b91f57f8122c48512aeab84",
+      "translation": "Ketahanan notebook perlu perhatian"
+    },
+    "label.history.retainedSnapshots": {
+      "source": "{count, plural, one {# retained snapshot} other {# retained snapshots}}",
+      "sourceHash": "4bc47e82f13a8ce24d56de924cb218f113a49a3e93e5d94e2eb169450fb3bf7f",
+      "translation": "{count, plural, one {# cuplikan disimpan} other {# cuplikan disimpan}}"
+    },
+    "label.history.saveError": {
+      "source": "Save error",
+      "sourceHash": "e757e3e7a8be18be2bdc086564856356f477c460a979a0fc4f280caf1b9487fa",
+      "translation": "Kesalahan penyimpanan"
+    },
+    "label.history.snapshotSummary": {
+      "source": "{count, plural, one {# snapshot} other {# snapshots}}{durable, select, yes { / durable} other {}}",
+      "sourceHash": "08eea63ffc89d639d8bf8854a862efe6726ea6474f14a66a2bb4440fae49e6b2",
+      "translation": "{count, plural, one {# cuplikan} other {# cuplikan}}{durable, select, yes { / tahan lama} other {}}"
+    },
+    "label.layout.mindAtlas": {
+      "source": "Mind Atlas",
+      "sourceHash": "6731db7fd7a62f7218bf73d6e0bd6a243c545af672ff3c8fe13f6176cf697ad3",
+      "translation": "Mind Atlas"
+    },
+    "label.layout.mindMap": {
+      "source": "Mind map",
+      "sourceHash": "5927a8fae64fcc163d0dac5ac57b6da1538053f967215653956ffcc7ccc89557",
+      "translation": "Peta pikiran"
+    },
+    "label.layout.this": {
+      "source": "This layout",
+      "sourceHash": "e03c84128f29c406c0de50b65a05edc7d573db33e6eeecb5c9ae97259ffebd55",
+      "translation": "Tata letak ini"
+    },
+    "label.layout.tree": {
+      "source": "Tree",
+      "sourceHash": "3041e2766b69fd046ff7e0fe5cb910fbc64b5f28b75cfdb20d79d50b22c81868",
+      "translation": "Pohon"
+    },
+    "label.mobile.blocked": {
+      "source": "Blocked",
+      "sourceHash": "ab14493fb4667ccf2dc149aafb72b163441009582f61b913ac05ecb956567544",
+      "translation": "Diblokir"
+    },
+    "label.mobile.only": {
+      "source": "Mobile only",
+      "sourceHash": "b08896edff31c745eb13999f1e23d405d186113090945c46dec0ed390569f9b2",
+      "translation": "Hanya seluler"
+    },
+    "label.mobile.tapToEnable": {
+      "source": "Tap to enable",
+      "sourceHash": "d149731ca45a1e989ad57293819bb8f4b9f55f6acd98f822c063a37ca8cc2f9d",
+      "translation": "Ketuk untuk mengaktifkan"
+    },
+    "label.mobile.unsupported": {
+      "source": "Unsupported",
+      "sourceHash": "32faceab8ec02c12772a44b096a66a5fd0a963c722bb31a2107223de3bf1e796",
+      "translation": "Tidak didukung"
+    },
+    "label.mode.chat": {
+      "source": "Chat",
+      "sourceHash": "188a96ce8de0367330ba4b5505e48054f25dc9e920e3bd7955e98542350f5138",
+      "translation": "Obrolan"
+    },
+    "label.mode.claudeCode": {
+      "source": "Claude Code",
+      "sourceHash": "93d3b41b038c5825f936143ed570f99d44f57e0d707b6dc541afe89eebb215e2",
+      "translation": "Claude Code"
+    },
+    "label.mode.codex": {
+      "source": "Codex",
+      "sourceHash": "4e78eb74dc0711f7f7fe0c0cab822baf2d69abdcfec414a69479ddf5c78e13c2",
+      "translation": "Codex"
+    },
+    "label.mode.local": {
+      "source": "Local",
+      "sourceHash": "6289544de324e2fed2c66710aba67e37228ced19a4a37d1c95626b1d5175da86",
+      "translation": "Lokal"
+    },
+    "label.mode.note": {
+      "source": "Note",
+      "sourceHash": "b5021bc502e89af4634a24edd6e1617373ff8c47f7052ea71f51f3aaf8e111e4",
+      "translation": "Catatan"
+    },
+    "label.mode.openAi": {
+      "source": "OpenAI",
+      "sourceHash": "73cc5386ef4d9903f9a937b319107088bac477fce724a6ca3948e9cbf9a5305e",
+      "translation": "OpenAI"
+    },
+    "label.mode.openClaw": {
+      "source": "OpenClaw",
+      "sourceHash": "d8884f74c6a539ad535b327560f5a8f2ee12b1785f1ebbb88661313a56d5532b",
+      "translation": "OpenClaw"
+    },
+    "label.mode.realtime": {
+      "source": "Realtime",
+      "sourceHash": "05b481d90fb36c5a7b9c0e2d070053729f0b972dace178b71abc8f51aa9265fd",
+      "translation": "Waktu-nyata"
+    },
+    "label.notification.claudeCode": {
+      "source": "Claude Code notification",
+      "sourceHash": "2cbec830fccd78fc829068b0a72cd89e9dc96f0527f9a31c227b164c561c724a",
+      "translation": "Notifikasi Claude Code"
+    },
+    "label.notification.codex": {
+      "source": "Codex notification",
+      "sourceHash": "d28abee35dea4892e25bd0217b2854fa0b466a6477e0d1152f72c1e7d3ab93cf",
+      "translation": "Notifikasi Codex"
+    },
+    "label.notification.completed": {
+      "source": "Completed notification",
+      "sourceHash": "216c8e08e5a0bf91be740ca4a1e862ab4ee2976a5906696783990a6ad124b5cd",
+      "translation": "Notifikasi selesai"
+    },
+    "label.notification.cost": {
+      "source": "Cost notification",
+      "sourceHash": "eb0fe0eae43c012b554d2825cec3af35d74b6dad506b50ea0672986eda6b5522",
+      "translation": "Notifikasi biaya"
+    },
+    "label.notification.error": {
+      "source": "Error notification",
+      "sourceHash": "2ee0d5e525ae1cd8daa193abfb70eca54102c4567dffa446cc497d6ffc0f4154",
+      "translation": "Notifikasi kesalahan"
+    },
+    "label.notification.openClaw": {
+      "source": "OpenClaw notification",
+      "sourceHash": "f511343cf6332a154930ca2051f5f5e021265d46f91e9da122ea62f15bd6999b",
+      "translation": "Notifikasi OpenClaw"
+    },
+    "label.notification.review": {
+      "source": "Review notification",
+      "sourceHash": "ae4fb32dfe21169104e5b206a1559961a0928bd2658c6bc5a9565f0364fd8c54",
+      "translation": "Notifikasi tinjauan"
+    },
+    "label.permission.acceptEdits": {
+      "source": "Accept edits",
+      "sourceHash": "5e08cbca34bb791da378cb9cbc57f7e7a1191d25e9b074a8d66ce9db72235081",
+      "translation": "Terima suntingan"
+    },
+    "label.permission.auto": {
+      "source": "Auto",
+      "sourceHash": "aae7ff30c24dde3a7b0650c4c73f9bbfb50e702adee681d910c8243f39d03cf0",
+      "translation": "Otomatis"
+    },
+    "label.permission.dontAsk": {
+      "source": "Don't ask",
+      "sourceHash": "b8a144a9c7c924b3786ba16ab8f4b854009f64ea048d0e1004caa2f7786b2104",
+      "translation": "Jangan tanya"
+    },
+    "label.permission.plan": {
+      "source": "Plan",
+      "sourceHash": "59579b5cddcb21e12626fa98dbf818bdf622f2bddb5f1cab97322d1d6b700fdb",
+      "translation": "Rencana"
+    },
+    "label.permission.trusted": {
+      "source": "Trusted",
+      "sourceHash": "855e5e6e108a0696e951ab7f9323f3e367fa9755647175f011bfa976073d8efc",
+      "translation": "Tercepercaya"
+    },
+    "label.role.error": {
+      "source": "Error",
+      "sourceHash": "d534173b890b3a16a0432018d1281035827ac733ac846248e8314d0ab90c7616",
+      "translation": "Kesalahan"
+    },
+    "label.role.summary": {
+      "source": "Summary",
+      "sourceHash": "2b9046a07f821feca6753058d2e338db48bee08fb77756902b3cac70bc1edc4f",
+      "translation": "Ringkasan"
+    },
+    "label.role.system": {
+      "source": "System",
+      "sourceHash": "8b2b687376579ce994585190779aa49b1e0bd7bae387d30026c642af01abf4e1",
+      "translation": "Sistem"
+    },
+    "label.role.tool": {
+      "source": "Tool",
+      "sourceHash": "1263866ac04872f818d50885fbc46f46d03fe49eef98de814ba6c652611a6a6d",
+      "translation": "Alat"
+    },
+    "label.role.user": {
+      "source": "User",
+      "sourceHash": "42f194e779ad66a01afec2d713be97834cbf4491fb393a65c5d5a2b24deaa72c",
+      "translation": "Pengguna"
+    },
+    "label.role.voicePartner": {
+      "source": "Voice Partner",
+      "sourceHash": "d4911a78b851e43f3cd6451bc02343cf834bfbc11c9e68a15fc524a013026647",
+      "translation": "Voice Partner"
+    },
+    "label.snooze.halfDay": {
+      "source": "In half a day",
+      "sourceHash": "8a4313d3ec9c0a640256414fc98b4bc1c1e6119b44c57c8e9189c86ad55acdce",
+      "translation": "Dalam setengah hari"
+    },
+    "label.snooze.oneDay": {
+      "source": "In 1 day",
+      "sourceHash": "947dc031cfe5550775dff505d3ac627fc6ced2b3e8f3ea7c32f703dfbccea92b",
+      "translation": "Dalam 1 hari"
+    },
+    "label.snooze.oneWeek": {
+      "source": "In 1 week",
+      "sourceHash": "e5ce84742910aab75d4c12035d174748ab0997fe00eb9274e6319ab81a663539",
+      "translation": "Dalam 1 minggu"
+    },
+    "label.snooze.twoHours": {
+      "source": "In 2 hours",
+      "sourceHash": "c7aa3c4cbb571130583fab834870a68e089eb216764a73dd77e5cc38b92df4ec",
+      "translation": "Dalam 2 jam"
+    },
+    "label.status.blocked": {
+      "source": "Blocked",
+      "sourceHash": "f5c586796bf5c792d98e1515022a956211638ee3fc6092f2b80bed51622016ad",
+      "translation": "Diblokir"
+    },
+    "label.status.done": {
+      "source": "Done",
+      "sourceHash": "bb50ded23d3382ac24fef3c1259aac21291b7db7f806110bda402465bc470b1d",
+      "translation": "Selesai"
+    },
+    "label.status.error": {
+      "source": "Error",
+      "sourceHash": "1be16d2640bb1280dd0bb68edc3384e31565f3f6dbbf5f81c049f3233a2424af",
+      "translation": "Kesalahan"
+    },
+    "label.status.needsReview": {
+      "source": "Needs review",
+      "sourceHash": "50fd9cf41a3f24a1a55ee6c8bcc5d0dcae402090acd54968260f702d42f05b8a",
+      "translation": "Perlu ditinjau"
+    },
+    "label.status.running": {
+      "source": "Running",
+      "sourceHash": "d9504feea72f272ca184e292a283040121200e6c2c4991810e1caaa11a6b4960",
+      "translation": "Berjalan"
+    },
+    "label.status.waiting": {
+      "source": "Waiting",
+      "sourceHash": "5190294e3a4f4463fe8b909a658c31d6cb43d11306a56e5e07d229883a0a7d6e",
+      "translation": "Menunggu"
+    },
+    "label.voice.connecting": {
+      "source": "Voice Partner connecting",
+      "sourceHash": "16061b389a1f2bc17c755a43a86d149446ddad4f293a7ef3a48b838e01a05776",
+      "translation": "Voice Partner menghubungkan"
+    },
+    "label.voice.listening": {
+      "source": "Voice Partner listening",
+      "sourceHash": "47fe3812e267e9f3b208242720b8dda8eb4b0314574b41be9f148c786bf4649f",
+      "translation": "Voice Partner mendengarkan"
+    },
+    "label.voice.ready": {
+      "source": "Voice ready",
+      "sourceHash": "a2e3f49b7ded6679f8d7aa394c51f0e1835eba4d31118ce25d49dcfbb8368faf",
+      "translation": "Suara siap"
+    },
+    "label.voice.recording": {
+      "source": "Dictation recording",
+      "sourceHash": "cdb06104f419a9796feffc72789cb24ecdbfb41b8754b8aca98065b0712ccefb",
+      "translation": "Merekam dikte"
+    },
+    "label.voice.responding": {
+      "source": "Voice Partner responding",
+      "sourceHash": "fd3b43be1ed16501635b739b28a204368cc13cb1ba0766e7f4d0caad0d6df0d0",
+      "translation": "Voice Partner merespons"
+    },
+    "label.voice.transcribing": {
+      "source": "Transcribing",
+      "sourceHash": "84b442adde6b6264986752574987d1f3c1974ab81218e77f7db9a6cd3d8f2b09",
+      "translation": "Menyalin"
+    },
+    "label.vr.tilt": {
+      "source": "On / tilt to pan",
+      "sourceHash": "c294acdec44d3e0b7d3a32c434461eb5e2a935f114bbaa2724100cd33a175b16",
+      "translation": "Aktif / miringkan untuk geser"
+    },
+    "language.current": {
+      "source": "Interface language",
+      "sourceHash": "79c2767a9fce043357af92b545c8fcc87cc225e422e8b1904601195fd4eb9598",
+      "translation": "Bahasa antarmuka"
+    },
+    "language.section": {
+      "source": "Language",
+      "sourceHash": "de1d296c89a51505243068c63caaaf74be7862b598b5bbb9b6b1e4b670f2a9d8",
+      "translation": "Bahasa"
+    },
+    "menu.about": {
+      "source": "About Mind Atlas",
+      "sourceHash": "cc2263c3e85442f51256d3c17809d588269fcb075fe0e7a0d2d5c47044470d59",
+      "translation": "Tentang Mind Atlas"
+    },
+    "menu.about.detail": {
+      "source": "Philosophy, features, and AI plan",
+      "sourceHash": "124be5cfd2bf5a8e3771bc7933582b35bec6559620a07f0a6893938e9669ecd5",
+      "translation": "Filosofi, fitur, dan paket AI"
+    },
+    "menu.aiLog": {
+      "source": "AI Partner log",
+      "sourceHash": "d0f1dfdf7fa998b9f0bd52aa7197a1a4e3e3550924024f3b829b254b097ccafe",
+      "translation": "Log AI Partner"
+    },
+    "menu.background": {
+      "source": "Background",
+      "sourceHash": "e61b828e67488d00b51e446a2b9f3a88f623a1c52884e16e33ba3de719fe7f2b",
+      "translation": "Latar belakang"
+    },
+    "menu.background.black": {
+      "source": "Black",
+      "sourceHash": "138406d663da959ae719ee9a5cd2d85a85cd77896130c768618771ccfc252f79",
+      "translation": "Hitam"
+    },
+    "menu.background.white": {
+      "source": "White",
+      "sourceHash": "135afc4a0bc98099b8303ac92e768d69b8d5f6a2127ebe08559ab32f63765cea",
+      "translation": "Putih"
+    },
+    "menu.cloudLoad": {
+      "source": "Cloud load",
+      "sourceHash": "a86a7d04325e4fa0cf140045225bc4c0430cf8a35f07d3318ee126057cf4c016",
+      "translation": "Muat dari cloud"
+    },
+    "menu.cloudLoad.detail": {
+      "source": "Read from your Google account",
+      "sourceHash": "17d5dd8380a01aed702a899b8621f5adcbdefb72abb74674dd8aa3f0454a120d",
+      "translation": "Baca dari akun Google Anda"
+    },
+    "menu.cloudSave": {
+      "source": "Cloud save",
+      "sourceHash": "0df2f57d470c7cd5340a0d85b6fc3d643935b7f5e09c6036c5d639316e1852c9",
+      "translation": "Simpan ke cloud"
+    },
+    "menu.cloudSave.detail": {
+      "source": "Save as or overwrite",
+      "sourceHash": "8fe4a9544c63aa2e4d090e90040bee80b70a961d9db18d51f5fde312e7a0d5ec",
+      "translation": "Simpan sebagai atau timpa"
+    },
+    "menu.embeddedUrl": {
+      "source": "Create embedded-data URL",
+      "sourceHash": "94ef687b4546de078c79e9ab03d7d19d8b06a4e325fcf2acda5671eba9b2f735",
+      "translation": "Buat URL dengan data tertanam"
+    },
+    "menu.embeddedUrl.detail": {
+      "source": "Copy atlas data inside a link",
+      "sourceHash": "20ebbf481167f41462ba9034a3c4b821cb2070977e777477e8a91aaaeee61b65",
+      "translation": "Salin data atlas ke dalam tautan"
+    },
+    "menu.exportFiles": {
+      "source": "Export with files",
+      "sourceHash": "aab5429c80fd4bbea88beddcfb22faa4d96b3018c6ffa36b88429725526dfd15",
+      "translation": "Ekspor dengan file"
+    },
+    "menu.exportFiles.detail": {
+      "source": ".mindatlaspkg / includes images and video",
+      "sourceHash": "ca337aff890ea0ab941a418da0cebcac77f038dd494b86d2bfeb21c06810ec99",
+      "translation": ".mindatlaspkg / termasuk gambar dan video"
+    },
+    "menu.exportText": {
+      "source": "Export text only",
+      "sourceHash": "7a92b958f5412d3928fded4903e4a1a27d367d0534cf04c3a399b4d15afbef47",
+      "translation": "Ekspor teks saja"
+    },
+    "menu.exportText.detail": {
+      "source": ".mindatlas / text and metadata",
+      "sourceHash": "b6e1b7c22fee4c0aa662857b82c0f32982f3d52d4660db53f2f84b74857f0d5e",
+      "translation": ".mindatlas / teks dan metadata"
+    },
+    "menu.files": {
+      "source": "Files",
+      "sourceHash": "951c2c647d00ad88528dd79f0df06a174150758f815eb7a01991a9becd8e289d",
+      "translation": "File"
+    },
+    "menu.files.label": {
+      "source": "File operations",
+      "sourceHash": "d68aecb8bbb55fc7bf812f9dc8d485dfe77c02429d9c8637d449958347e2c382",
+      "translation": "Operasi file"
+    },
+    "menu.fullscreen": {
+      "source": "Enter fullscreen",
+      "sourceHash": "73654db85b8f3e80120099ae7c066906b7cdb79e9450eea24880f6f593181bd2",
+      "translation": "Masuk layar penuh"
+    },
+    "menu.fullscreen.detail": {
+      "source": "Hide browser bars",
+      "sourceHash": "2a7b05298963120229e86cbd460f5c2d55bd4ef50bcb642f0212856b3d939e4a",
+      "translation": "Sembunyikan bilah browser"
+    },
+    "menu.googleLoginRequired": {
+      "source": "Google login required",
+      "sourceHash": "3c01aba0c0476641a21ff5beed94d6db474bed152c655283a5a8a9fbad030199",
+      "translation": "Login Google diperlukan"
+    },
+    "menu.history": {
+      "source": "History actions",
+      "sourceHash": "77d8640c54c9fa0f6df60ef71ace3d775f5db5969e7c5e192d869d9ab5e4813a",
+      "translation": "Tindakan riwayat"
+    },
+    "menu.import": {
+      "source": "Import",
+      "sourceHash": "87dcd99259522bb02288daf998ac8b79e700a04093213e9e57cdc289b701253c",
+      "translation": "Impor"
+    },
+    "menu.importOutline": {
+      "source": "Import text outline",
+      "sourceHash": "1b140554e071fc1eed82f276b205af9d65dd62482be9abe8ebe351c1af5d2f9b",
+      "translation": "Impor kerangka teks"
+    },
+    "menu.importOutline.detail": {
+      "source": "Markdown headings and lists",
+      "sourceHash": "77ffeb0d3dd648c462d07d722a253e3d0de43b7bb452ecc7bea4db74a543e060",
+      "translation": "Judul dan daftar Markdown"
+    },
+    "menu.mobileNotifications": {
+      "source": "Mobile notifications",
+      "sourceHash": "c3ef54e90525bf50584ae0d67745c05221a6363a5ab2f0bf08994f778e1d2cd8",
+      "translation": "Notifikasi seluler"
+    },
+    "menu.mobileSettings": {
+      "source": "Mobile settings",
+      "sourceHash": "0b4cacf947b53e5829ee32a5702fa8f746e8d358b989b0510e60a19110a10c1d",
+      "translation": "Pengaturan seluler"
+    },
+    "menu.mode": {
+      "source": "Mode",
+      "sourceHash": "a69cd84f2d6cbd8cb6cbcb27321cebb641fc7bf1353f5b4aa195cd921397dbf9",
+      "translation": "Mode"
+    },
+    "menu.newSpace": {
+      "source": "Start new",
+      "sourceHash": "381cd05eb18aa393cb986703226f6cf542f48d0e7ed2062665e022b6ea516034",
+      "translation": "Mulai baru"
+    },
+    "menu.realtime.restart": {
+      "source": "Restart Realtime",
+      "sourceHash": "6db0e5d23268d98e08d84913b369e70884a1f3f418ceea1830c18f08f95515bc",
+      "translation": "Mulai ulang Realtime"
+    },
+    "menu.realtime.restart.detail": {
+      "source": "Reset voice context",
+      "sourceHash": "88cd87b49cb642c842e53c8157c01763ae2c996afbf7b54918b231528787f4b3",
+      "translation": "Atur ulang konteks suara"
+    },
+    "menu.redo": {
+      "source": "Redo",
+      "sourceHash": "0d5aea5a45e7366c78ab08255811f925c70ab5121607be11faab0cecafed5a65",
+      "translation": "Ulangi"
+    },
+    "menu.renderQuality": {
+      "source": "Render quality",
+      "sourceHash": "9f228e8cfc54b728b59a9d10cd0f695cf59b979d177738d8b45a521c661053c1",
+      "translation": "Kualitas render"
+    },
+    "menu.renderQuality.high": {
+      "source": "High",
+      "sourceHash": "f19602ae353091cc239f6adaa35a25196990a7d4bf181ec3450fdc6e04737c55",
+      "translation": "Tinggi"
+    },
+    "menu.renderQuality.low": {
+      "source": "Low",
+      "sourceHash": "fa5ee9d98cd7d8af2f1bfdcb89e33357a3a28aec08a1e7736e46993ecc07f429",
+      "translation": "Rendah"
+    },
+    "menu.restore": {
+      "source": "Restore from history",
+      "sourceHash": "21271f70ba841f105dc1c72e849d26af3443432ad0eec88038614b6c390ccae2",
+      "translation": "Pulihkan dari riwayat"
+    },
+    "menu.source": {
+      "source": "Source code & legal",
+      "sourceHash": "35c6558c0e74bca871010583cb5ef90a2eae67ad33093729183127ae52b2cabf",
+      "translation": "Kode sumber dan lisensi"
+    },
+    "menu.source.detail": {
+      "source": "© 2026 · AGPL-3.0-only · redistribution / no warranty",
+      "sourceHash": "eeee0efa24fa1883fd5bb6d6a29f0abf28f3a6a823e552ae2b05705cc9dcecbb",
+      "translation": "© 2026 · AGPL-3.0-only · redistribusi / tanpa jaminan"
+    },
+    "menu.textEditor": {
+      "source": "Text editor",
+      "sourceHash": "293d081005b0d56e845426cbd0ad57a980f5b34b764036cc25756fcb57c94a5d",
+      "translation": "Editor teks"
+    },
+    "menu.tutorial": {
+      "source": "Tutorial mode",
+      "sourceHash": "0acf7d6a821df83a92dd56556c9e736bd45293620961f2ca30a5026e38f8567a",
+      "translation": "Mode tutorial"
+    },
+    "menu.tutorial.detail": {
+      "source": "Restart the first-run guide",
+      "sourceHash": "1c33fca4645766fd7fd37870f0fd94f84757cd83716ba634523f5dde66cbaea7",
+      "translation": "Mulai ulang panduan awal"
+    },
+    "menu.undo": {
+      "source": "Undo",
+      "sourceHash": "3239839968ac27d53ae09ce0b517809050883617c4946f45dfd18dc5ffa7bc25",
+      "translation": "Urungkan"
+    },
+    "menu.voiceSettings": {
+      "source": "Voice settings",
+      "sourceHash": "fc423e96db67d2faad9b553dc684e8e7ed797e4a2e90099326c648e52aebc824",
+      "translation": "Pengaturan suara"
+    },
+    "menu.vrMode": {
+      "source": "VR mode",
+      "sourceHash": "c732e83e3ca366a8967ee6fc8c370a6983c6b2d0ba10727f793e972055e308eb",
+      "translation": "Mode VR"
+    },
+    "node.untitled": {
+      "source": "Untitled",
+      "sourceHash": "4d0a6b2f8115ea04e72490d01ea1b805d8f61d3f25e524bd809521bbda5ff285",
+      "translation": "Tanpa judul"
+    },
+    "onboarding.ai.unlockConfirm": {
+      "source": "Unlock Mind Atlas AI features?",
+      "sourceHash": "869c52b6142dfebbc68c33bc560b3f249803053de47495e1e5ac3bd4b779d782",
+      "translation": "Buka fitur AI Mind Atlas?"
+    },
+    "onboarding.ai.unlocked": {
+      "source": "Congratulations. Every Mind Atlas feature is unlocked. Use it as your partner for riding the waves of cognition and judgment in the AI era ahead.",
+      "sourceHash": "ecdc49eb2ac0823ac0e4c336a7c538a72d0881f150ce62e8137883b37141d3ac",
+      "translation": "Selamat. Setiap fitur Mind Atlas terbuka. Gunakan sebagai mitra Anda untuk mengarungi gelombang kognisi dan penilaian di era AI mendatang."
+    },
+    "onboarding.basic.complete": {
+      "source": "Congratulations. You have mastered the basic Mind Atlas controls.",
+      "sourceHash": "d86e55d38073893ee55cf00d2e3f7d404aeb24e2ac9102a1c4ffca3491deb8b1",
+      "translation": "Selamat. Anda telah menguasai kontrol dasar Mind Atlas."
+    },
+    "onboarding.root.answer": {
+      "source": "Press and hold the space to create your first node.",
+      "sourceHash": "cc2154320a850ae43c8498f3db7c24128b1ec3c9102fe5eea00e3ede28181c1b",
+      "translation": "Tekan dan tahan ruang untuk membuat node pertama Anda."
+    },
+    "onboarding.root.hint": {
+      "source": "Try pressing and holding.",
+      "sourceHash": "0841a738af934293f22ad029aeeb4982465350edc499e4f1dcaad29cea56d72b",
+      "translation": "Coba tekan dan tahan."
+    },
+    "onboarding.root.zoomOutForNodeCreate": {
+      "source": "Zoom out before creating a node.",
+      "sourceHash": "d700475f7d5abd99910dbd8de9ac747e18ecc831b56e4feb1ab6a15320287604",
+      "translation": "Perkecil tampilan sebelum membuat node."
+    },
+    "onboarding.space.cameraReset": {
+      "source": "Click the MindAtlas logo at the top left to return to the initial camera view.",
+      "sourceHash": "1f3ac5c5d50722e587d49c7d20d3fe4e64e80b0401d3afe134b6269e8c57a56a",
+      "translation": "Klik logo MindAtlas di kiri atas untuk kembali ke tampilan kamera awal."
+    },
+    "onboarding.space.cameraResetMobile": {
+      "source": "Tap the MindAtlas breadcrumb at the top right to return to the initial camera view.",
+      "sourceHash": "faaeea64d14e429ee0f784135e637d74d89873b0e1c28aff7e02779fc78c1ea2",
+      "translation": "Ketuk breadcrumb MindAtlas di kanan atas untuk kembali ke tampilan kamera awal."
+    },
+    "onboarding.space.childNode": {
+      "source": "Quickly drag a node, then keep holding until the creation effect completes.",
+      "sourceHash": "4ea31a217313ef13ce8de279f0fe3ec1e2412302f7c01d468443295f99759944",
+      "translation": "Seret node dengan cepat, lalu tetap tekan sampai efek pembuatan selesai."
+    },
+    "onboarding.space.childNodeFallback": {
+      "source": "Quickly drag a node to create a child. You can also create a child node with the Tab key or the Tab button.",
+      "sourceHash": "b768a2bbfb5b0706397969719cf15a6cd3f3af9c25b09f34f578fd5d8af8bcab",
+      "translation": "Seret node dengan cepat untuk membuat anak. Anda juga dapat membuat node anak dengan tombol Tab atau tombol Tab di layar."
+    },
+    "onboarding.space.complete": {
+      "source": "Congratulations. You have mastered every Space View action.",
+      "sourceHash": "5b071a241dc73acd788e2cc6eae1f8e92cb17a33500405f8ab6122cb36bf3bd0",
+      "translation": "Selamat. Anda telah menguasai semua tindakan Space View."
+    },
+    "onboarding.space.nodeDrag": {
+      "source": "Drag a node slowly for a moment to move it.",
+      "sourceHash": "446d70801c603eb598551bbaad59bfa12ea274f93854bf5c3ec89eb9758704f4",
+      "translation": "Seret node perlahan sejenak untuk memindahkannya."
+    },
+    "onboarding.space.pan": {
+      "source": "Drag the background to turn the universe.",
+      "sourceHash": "a94399ff5cdf791a563a8c24e50726c8d3d8b8c402139efc9575518dd69306c3",
+      "translation": "Seret latar belakang untuk memutar semesta."
+    },
+    "onboarding.space.zoom": {
+      "source": "Scroll or pinch slowly to zoom.",
+      "sourceHash": "83b9cb228c7c3544c72f85f8f27d9e80c67b3045ec527893bf138610a7bab9fc",
+      "translation": "Gulir atau cubit perlahan untuk memperbesar atau memperkecil."
+    },
+    "onboarding.title.nameUniverse": {
+      "source": "Name this universe.",
+      "sourceHash": "c55cc8635e5b530fd7c2305b148160f2f572ddff723bee8d48067017aec5bec8",
+      "translation": "Beri nama untuk semesta ini."
+    },
+    "page.about.app.demoLabel": {
+      "source": "AI window demo",
+      "sourceHash": "c27ba9d639afbce220aa5a1760886a83ef597e478dd0f13102385e5fee82b91b",
+      "translation": "Demo jendela AI"
+    },
+    "page.about.app.proNote": {
+      "source": "AI features unlock with a Google account and the USD 10 monthly Mind Atlas Pro plan.",
+      "sourceHash": "7235eabd2967af48e4b53625dd73989624aa91ddabcbc693ed984289bda5327f",
+      "translation": "Fitur AI terbuka dengan akun Google dan paket Mind Atlas Pro seharga USD 10 per bulan."
+    },
+    "page.about.app.title": {
+      "source": "App development notes",
+      "sourceHash": "0d2da1ee93a24b9f481f89f2dcae6b75028211f3750dcb18ba42f0bf415dbfc8",
+      "translation": "Catatan pengembangan aplikasi"
+    },
+    "page.about.brand.compact": {
+      "source": "MIND ATLAS",
+      "sourceHash": "92c2dc94332fb9ac92465cb36bb9bb10024e475e4beec11923205b3773fae3da",
+      "translation": "MIND ATLAS"
+    },
+    "page.about.embed.label": {
+      "source": "Embedded Mind Atlas",
+      "sourceHash": "8070c4264d1317769dc0e1184dd7c80f2aae18d052cff29aa2036ba1a52fc911",
+      "translation": "Mind Atlas tersemat"
+    },
+    "page.about.final.cta": {
+      "source": "Dive into Mind Atlas",
+      "sourceHash": "44e0943ac82b8144dd7b2a50204995048bafa6e8d89e4b09de9fe2ace8c2c159",
+      "translation": "Masuk ke Mind Atlas"
+    },
+    "page.about.final.detail": {
+      "source": "The core features work without signing in. Subscribe to Mind Atlas Pro to unlock AI features.",
+      "sourceHash": "930869e96b40bcb909907c90c3b533bfc608d1e39fef3c87d423d383c0389a98",
+      "translation": "Fitur inti dapat digunakan tanpa masuk. Berlangganan Mind Atlas Pro untuk membuka fitur AI."
+    },
+    "page.about.final.title": {
+      "source": "Try Mind Atlas",
+      "sourceHash": "a9059c50f22b7800e0723b4ad69ad3dd1af49590d70b9208310e6549cd47a760",
+      "translation": "Coba Mind Atlas"
+    },
+    "page.about.hero": {
+      "source": "Mind Atlas",
+      "sourceHash": "030d6b66704c3f0a506d2ff60c670b21f1dab86452856f277da7ee899ac38e36",
+      "translation": "Mind Atlas"
+    },
+    "page.about.metaDescription": {
+      "source": "Explore interactive Mind Atlas examples for novel writing, trip planning, and app development.",
+      "sourceHash": "82fb840e17295be54f631682749ff99716997082d94daaca750c11863cca11c7",
+      "translation": "Jelajahi contoh interaktif Mind Atlas untuk menulis novel, merencanakan perjalanan, dan mengembangkan aplikasi."
+    },
+    "page.about.novel.title": {
+      "source": "Write a novel",
+      "sourceHash": "61476e1d72743b7172bfc7396286e05a8ad3edc4941d29da4bbec0f2affcacde",
+      "translation": "Menulis novel"
+    },
+    "page.about.novel.view.atlas": {
+      "source": "Mind Atlas",
+      "sourceHash": "554688493be285ce67b1e207dbf0f4615ab83332ed7c0c9cb55bc1437ef4cf53",
+      "translation": "Mind Atlas"
+    },
+    "page.about.novel.view.editor": {
+      "source": "Editor",
+      "sourceHash": "2e4dfaf09dd8a0d6513de5531d4478ff17a741e4e88c0e8360d2c51407f939ae",
+      "translation": "Editor"
+    },
+    "page.about.novel.view.mindmap": {
+      "source": "Mind map",
+      "sourceHash": "b0a6ef83fde40f379f74a60cb5bc9e16ea1059ff4b42702842726bb847890ffa",
+      "translation": "Peta pikiran"
+    },
+    "page.about.novel.view.tree": {
+      "source": "Tree",
+      "sourceHash": "187d9824393d7cf49bc837c183e9f3b9357de5dfaf8f263895ee4141a0e055ac",
+      "translation": "Pohon"
+    },
+    "page.about.plans.anonymous.item1": {
+      "source": "Use the core features directly in your browser",
+      "sourceHash": "99237f82b2cbc065d3a51f3e6a359dbef7a95467a4d9ae5c8335d91a476877cd",
+      "translation": "Gunakan fitur inti langsung di browser"
+    },
+    "page.about.plans.anonymous.item2": {
+      "source": "Try nodes, body text, and view switching",
+      "sourceHash": "5a3d165132dd1f0525caccfdbe0d11bcfb04da3d7998c3483de53035a53d38e9",
+      "translation": "Coba node, teks isi, dan pergantian tampilan"
+    },
+    "page.about.plans.anonymous.item3": {
+      "source": "Your data stays in this browser on this device",
+      "sourceHash": "f952a0bc19d9d1886dbbbba0cdf16eb40f53acb5bc70f3f5a53970fdbb0c12e1",
+      "translation": "Data Anda tetap berada di browser pada perangkat ini"
+    },
+    "page.about.plans.anonymous.title": {
+      "source": "No registration",
+      "sourceHash": "4d10622761dbfe473b05ddfbcfd1decb3a456c2b74deeca5117dd2ec8e4d127d",
+      "translation": "Tanpa pendaftaran"
+    },
+    "page.about.plans.free": {
+      "source": "Free",
+      "sourceHash": "d50cc3bfdc80ed5b2f445dc80f670a9b95651da67fd02d0fc47d73a71688d3c9",
+      "translation": "Gratis"
+    },
+    "page.about.plans.google.free": {
+      "source": "Free",
+      "sourceHash": "85aa311acf12c50297e57db01092686e7830dd628b0e57f990e70de086efeb62",
+      "translation": "Gratis"
+    },
+    "page.about.plans.google.item1": {
+      "source": "Save text-only notebooks to the cloud",
+      "sourceHash": "99beefdb932e69255cedaaed095281147d2cc7a7d8deff471a5a5aafbe54e753",
+      "translation": "Simpan notebook teks saja ke cloud"
+    },
+    "page.about.plans.google.item2": {
+      "source": "Load them on another device with the same Google account",
+      "sourceHash": "8884a9d8a57755365b0e75b5ca35737be47545f2a5b7924b11e597af0e2368ec",
+      "translation": "Muat di perangkat lain dengan akun Google yang sama"
+    },
+    "page.about.plans.google.item3": {
+      "source": "Share with a short, hard-to-guess public link",
+      "sourceHash": "b24b385725a5c4775675572aa8eb12403e3d7708155d8c8d9c446951ef4e62ef",
+      "translation": "Bagikan dengan tautan publik yang singkat dan sulit ditebak"
+    },
+    "page.about.plans.google.item4": {
+      "source": "Up to 10 MB of cloud storage per account",
+      "sourceHash": "ce0a0a709edd5e44bdf8619e1b70e87a5e23db70461babf590843613befd525f",
+      "translation": "Penyimpanan cloud hingga 10 MB per akun"
+    },
+    "page.about.plans.google.title": {
+      "source": "Google account",
+      "sourceHash": "0ccaf7c7666aa4b61c9c660417157ae9d9a74a0cd27729a3ba4b1e1281bcbd3c",
+      "translation": "Akun Google"
+    },
+    "page.about.plans.pro.item1": {
+      "source": "Unlock AI features",
+      "sourceHash": "3e5ab6a5320a62aeb4735e73d235145113972f5bb7c3bef6c22e88d02c8c9583",
+      "translation": "Buka fitur AI"
+    },
+    "page.about.plans.pro.item2": {
+      "source": "Use Chat, Dictation, and Realtime Talk",
+      "sourceHash": "828b0f17e081cb30536c7a6e7dec1e45521e775afcd8064af65e6febfe4ce3db",
+      "translation": "Gunakan Chat, Dikte, dan Percakapan Real-time"
+    },
+    "page.about.plans.pro.item3": {
+      "source": "Track usage with your Mind Atlas token balance",
+      "sourceHash": "80de979c44b161d14f5794a8a3186fd5f6a1d6c1875386f16e6c5b0091e41c7d",
+      "translation": "Pantau penggunaan dengan saldo token Mind Atlas"
+    },
+    "page.about.plans.pro.price": {
+      "source": "$10 / month",
+      "sourceHash": "85343078cb47ad956dcee3a655cd6755eed2041f0d814d4fc8ae519c2a894507",
+      "translation": "$10 / bulan"
+    },
+    "page.about.plans.pro.title": {
+      "source": "Mind Atlas Pro",
+      "sourceHash": "2e678592c0b60accb85582dc95ec4244509f3db73efea3b2d46917f9993707c4",
+      "translation": "Mind Atlas Pro"
+    },
+    "page.about.plans.title": {
+      "source": "Choose how you use it",
+      "sourceHash": "c331b81fd389a7b2945d4406e013fe69362c5869ed2a065edcac47d752b3fffb",
+      "translation": "Pilih cara menggunakannya"
+    },
+    "page.about.title": {
+      "source": "Mind Atlas",
+      "sourceHash": "fe581e1e4c6f5c89ff7e3f5d0805f9649ee0dc4d8e1ea8919d2cc27bffa6064c",
+      "translation": "Mind Atlas"
+    },
+    "page.about.topCta": {
+      "source": "Try Mind Atlas",
+      "sourceHash": "b2a92310b0f3e0ac9c76d7be980e7feee5d8ea75c77dfcc9ceb77b656590c23d",
+      "translation": "Coba Mind Atlas"
+    },
+    "page.about.travel.demoLabel": {
+      "source": "Notification demo",
+      "sourceHash": "35be967fe9da8554d1383419e3183b4400cb337522b7f62db560a91b43a746e7",
+      "translation": "Demo notifikasi"
+    },
+    "page.about.travel.title": {
+      "source": "Plan a trip",
+      "sourceHash": "8a7822ac64770e724c7197f5f05397ee33582c69a3d697f01aaf926738c2875e",
+      "translation": "Merencanakan perjalanan"
+    },
+    "page.privacy.lead": {
+      "source": "This Privacy Policy applies to the Mind Atlas web service, Google sign-in, cloud notebooks, billing, AI features, and related server processing.",
+      "sourceHash": "4bf2b0fa18636cbd2d11d9e9b2857c050beb8419fcd84ea32274be6d99663618",
+      "translation": "Kebijakan Privasi ini berlaku untuk layanan web Mind Atlas, login Google, notebook cloud, penagihan, fitur AI, dan pemrosesan server terkait."
+    },
+    "page.privacy.metaDescription": {
+      "source": "Mind Atlas privacy policy for Google sign-in, cloud notebooks, hosted AI features, billing, and local-first notebook data.",
+      "sourceHash": "4977d30c4b2aa88b79f814d0dde1c05b5b947614044aa0c63357523d0e64a436",
+      "translation": "Kebijakan privasi Mind Atlas untuk login Google, notebook cloud, fitur AI yang di-host, penagihan, dan data lokal."
+    },
+    "page.privacy.sections.0.heading": {
+      "source": "1. Operator and contact",
+      "sourceHash": "e7af516e52e85f615930687e2ed3b6fe53ccc29fbe8bc65836675a37c68a095b",
+      "translation": "1. Operator dan kontak"
+    },
+    "page.privacy.sections.0.paragraphs.0": {
+      "source": "Mind Atlas is operated by the Mind Atlas operator. For privacy questions or requests to delete an account or personal data, contact support@mind-atlas.org.",
+      "sourceHash": "ae81cf41de1410c2ad0bdb91e879fab9247c3e02b2a65e048f2d89f21b979e04",
+      "translation": "Mind Atlas dioperasikan oleh operator Mind Atlas. Untuk pertanyaan privasi atau permintaan penghapusan akun maupun data pribadi, hubungi support@mind-atlas.org."
+    },
+    "page.privacy.sections.1.heading": {
+      "source": "2. Information we collect",
+      "sourceHash": "56168f8e26d09c0c8d3d8491f4eb67db4665220ba6f924d0649ba8b7d79c0f7f",
+      "translation": "2. Informasi yang kami kumpulkan"
+    },
+    "page.privacy.sections.1.items.0": {
+      "source": "Basic Google profile information: Google account ID, email address, display name, and profile image.",
+      "sourceHash": "169a62db5027215fa1ec1c9ce5a93ef708a16f4ca702d3a71a9842574024ecd0",
+      "translation": "Informasi profil Google dasar: ID akun Google, alamat email, nama tampilan, dan gambar profil."
+    },
+    "page.privacy.sections.1.items.1": {
+      "source": "Account and session information: user ID, sign-in state, session cookie, and subscription state.",
+      "sourceHash": "0170caffd5edc50b8f7c373de1dedf3b0a5d251d8521dd462aa1bd4d4a2e4937",
+      "translation": "Informasi akun dan sesi: ID pengguna, status login, cookie sesi, dan status langganan."
+    },
+    "page.privacy.sections.1.items.2": {
+      "source": "Billing information: Stripe customer ID, subscription ID, and payment state. Mind Atlas servers do not store your credit card number.",
+      "sourceHash": "3cc59daafcbf8ecf81c526c554a21a489893fbcb0603143112bc764f290326c6",
+      "translation": "Informasi penagihan: ID pelanggan Stripe, ID langganan, dan status pembayaran. Server Mind Atlas tidak menyimpan nomor kartu kredit Anda."
+    },
+    "page.privacy.sections.1.items.3": {
+      "source": "AI usage information: selected provider and model, estimated usage, Mind Atlas token balance, processing time, and error information.",
+      "sourceHash": "ca4c323ff4ee1354907fb70461c7bd3de0f14016106b09c6c3cebc3baf2ae554",
+      "translation": "Informasi penggunaan AI: penyedia dan model yang dipilih, perkiraan penggunaan, saldo token Mind Atlas, waktu pemrosesan, dan informasi kesalahan."
+    },
+    "page.privacy.sections.1.items.4": {
+      "source": "Content sent to AI features: text, audio, search queries, and selected node context submitted through Chat, Web search, Dictation, Realtime Talk, or related features.",
+      "sourceHash": "08d2ead6d6015dc6f3aa44ceecda4032dadbce9d16c97f54661ba7810c6db2bd",
+      "translation": "Konten yang dikirim ke fitur AI: teks, audio, kueri pencarian, dan konteks node yang dipilih melalui Chat, Pencarian web, Dikte, Percakapan real-time, atau fitur terkait."
+    },
+    "page.privacy.sections.1.items.5": {
+      "source": "Technical information: IP address, browser information, access time, and logs needed for security and incident investigation.",
+      "sourceHash": "6f5ca34f991d088f5627d74d82043d0f3ca23a130e5c1071692250421b01ca7d",
+      "translation": "Informasi teknis: alamat IP, informasi browser, waktu akses, dan log yang diperlukan untuk keamanan serta penyelidikan insiden."
+    },
+    "page.privacy.sections.1.paragraphs.0": {
+      "source": "Mind Atlas collects or processes the following information according to the features you use.",
+      "sourceHash": "ef1ebf4af82449e0dd239fbdc844385e99c105082f6f0b1e1a1852c3521e9bd4",
+      "translation": "Mind Atlas mengumpulkan atau memproses informasi berikut sesuai dengan fitur yang Anda gunakan."
+    },
+    "page.privacy.sections.2.heading": {
+      "source": "3. Local-first notebook data",
+      "sourceHash": "18ed0712e96ffceac6910c78c914e3301060fcf3c623fa6bd0978d0fdd9d2be9",
+      "translation": "3. Data notebook lokal"
+    },
+    "page.privacy.sections.2.paragraphs.0": {
+      "source": "Normal Mind Atlas notebooks are primarily stored in your browser. Notebook content created while signed out is not sent to Mind Atlas servers unless you take an explicit action such as using an AI feature, importing, sharing, or saving to the cloud.",
+      "sourceHash": "cd2a207b48d2e82f21494f9d1b69a885b5976023fdd0f221b7212b382f51a9d7",
+      "translation": "Notebook Mind Atlas biasa terutama disimpan di browser Anda. Konten yang dibuat saat Anda belum login tidak dikirim ke server Mind Atlas kecuali Anda melakukan tindakan eksplisit seperti menggunakan fitur AI, mengimpor, berbagi, atau menyimpan ke cloud."
+    },
+    "page.privacy.sections.3.heading": {
+      "source": "4. How we use information",
+      "sourceHash": "619f81358f0f303377f2be5bb251899c314c72da30ab92bbf21ac01f0d7fc4c6",
+      "translation": "4. Cara kami menggunakan informasi"
+    },
+    "page.privacy.sections.3.items.0": {
+      "source": "Authenticate users and manage accounts through Google sign-in.",
+      "sourceHash": "6d33859ab236d4613b09518d3fb855cfebc0671d76fdfd0a1e7d64bfb9387097",
+      "translation": "Mengautentikasi pengguna dan mengelola akun melalui login Google."
+    },
+    "page.privacy.sections.3.items.1": {
+      "source": "Manage subscriptions through Stripe and determine eligibility for AI features.",
+      "sourceHash": "7bc9129fb7c519153863bf4559ea5c1a6acfb725b1dcba2153ac090dec1c11e9",
+      "translation": "Mengelola langganan melalui Stripe dan menentukan kelayakan fitur AI."
+    },
+    "page.privacy.sections.3.items.2": {
+      "source": "Provide AI features such as Chat, Web search, Dictation, and Realtime Talk.",
+      "sourceHash": "a3648deff86544444d31163e6ece448fed1b595f4f7e3f187e186abc1a765333",
+      "translation": "Menyediakan fitur AI seperti Chat, Pencarian web, Dikte, dan Percakapan real-time."
+    },
+    "page.privacy.sections.3.items.3": {
+      "source": "Record AI token balance, usage, errors, and administrator-facing usage history for each billing period.",
+      "sourceHash": "d3fe7815eb4428ab19a0aa48af770a3bddc0b1a14be77c5b2d21149a8970dafb",
+      "translation": "Mencatat saldo token AI, penggunaan, kesalahan, dan riwayat penggunaan untuk administrator pada setiap periode penagihan."
+    },
+    "page.privacy.sections.3.items.4": {
+      "source": "Respond to abuse, security incidents, service failures, and support requests.",
+      "sourceHash": "9773c565e07d8ed72ba98282a14c68d50ac660610216f508447bcfc7fc8de8c0",
+      "translation": "Menanggapi penyalahgunaan, insiden keamanan, kegagalan layanan, dan permintaan dukungan."
+    },
+    "page.privacy.sections.3.items.5": {
+      "source": "Improve service quality. We do not sell information for advertising in a personally identifiable form.",
+      "sourceHash": "23ff259d6c85a0aecf9b0b292e440cb0e3139b26bfcf1ba6604ec2725271af6c",
+      "translation": "Meningkatkan kualitas layanan. Kami tidak menjual informasi untuk iklan dalam bentuk yang dapat mengidentifikasi seseorang secara pribadi."
+    },
+    "page.privacy.sections.4.heading": {
+      "source": "5. Google user data",
+      "sourceHash": "ae6a45dccd87825c3b6a595c9658cfa660c9214042c5c641b1392938a86e1e91",
+      "translation": "5. Data pengguna Google"
+    },
+    "page.privacy.sections.4.paragraphs.0": {
+      "source": "Mind Atlas uses only the minimum Google user data needed for sign-in. Current uses are authentication, account identification by email address, and sign-in state management.",
+      "sourceHash": "19081d4a8354e00ef2600a97fadf5d69520fc35cd57abdee178f4ad025afff0a",
+      "translation": "Mind Atlas hanya menggunakan data Google minimum yang diperlukan untuk login. Penggunaan saat ini adalah autentikasi, identifikasi akun melalui alamat email, dan pengelolaan status login."
+    },
+    "page.privacy.sections.4.paragraphs.1": {
+      "source": "We do not sell Google user data or provide it to third parties for advertising. Use of Google user data is limited to the purposes stated in this policy.",
+      "sourceHash": "d40b32af3f61d70afb652d0e912449259dfcef0e0c5fef59e5468eb36c89ece8",
+      "translation": "Kami tidak menjual data pengguna Google atau memberikannya kepada pihak ketiga untuk iklan. Penggunaan data Google dibatasi pada tujuan yang dinyatakan dalam kebijakan ini."
+    },
+    "page.privacy.sections.5.after.0": {
+      "source": "When you use an AI feature, input content, selected node context, audio data, and search queries may be sent to the selected AI provider.",
+      "sourceHash": "5aac59f42c4a010eb3ce17a69ebeb63b2b3025b5cb80bd7098e4640707e8f5f2",
+      "translation": "Saat Anda menggunakan fitur AI, konten input, konteks node yang dipilih, data audio, dan kueri pencarian dapat dikirim ke penyedia AI yang dipilih."
+    },
+    "page.privacy.sections.5.heading": {
+      "source": "6. External services",
+      "sourceHash": "211e5996215734166f2d59667643f37b4861739306e4973a256092a059bf060b",
+      "translation": "6. Layanan eksternal"
+    },
+    "page.privacy.sections.5.items.0": {
+      "source": "Google for sign-in authentication.",
+      "sourceHash": "1fe421454c1ba59acc9d2781aea9b3269a08504797e2f31d86c961ded052bf78",
+      "translation": "Google untuk autentikasi login."
+    },
+    "page.privacy.sections.5.items.1": {
+      "source": "Stripe for subscriptions, payments, and billing management.",
+      "sourceHash": "0bdee863fe4f7df43f42defffc0951019e2038120c2be091c0aa16f60c811298",
+      "translation": "Stripe untuk langganan, pembayaran, dan pengelolaan penagihan."
+    },
+    "page.privacy.sections.5.items.2": {
+      "source": "AI providers such as OpenAI, Anthropic, and DeepSeek for inference, speech recognition, Realtime Talk, and Web search when requested by the user.",
+      "sourceHash": "01143585b3c28a51bec7715266249e303720ce343a3dccca8900b439d55c7445",
+      "translation": "Penyedia AI seperti OpenAI, Anthropic, dan DeepSeek untuk inferensi, pengenalan suara, Percakapan real-time, dan Pencarian web saat diminta pengguna."
+    },
+    "page.privacy.sections.5.items.3": {
+      "source": "Infrastructure providers for VPS hosting, DNS, monitoring, and email as needed to operate the service.",
+      "sourceHash": "1ff8f6f8a375f798284b7b39a160486a99084a90907e911e92fcd22d6bb40403",
+      "translation": "Penyedia infrastruktur untuk hosting VPS, DNS, pemantauan, dan email yang diperlukan untuk menjalankan layanan."
+    },
+    "page.privacy.sections.5.paragraphs.0": {
+      "source": "Mind Atlas uses the following external services to provide the service.",
+      "sourceHash": "9abc69a68994b4e26a18710d1087bb196eb582c6da5339f6e2b3574ac84c8b76",
+      "translation": "Mind Atlas menggunakan layanan eksternal berikut untuk menyediakan layanan."
+    },
+    "page.privacy.sections.6.heading": {
+      "source": "7. Cookies",
+      "sourceHash": "f60a016b807a8c0a99885ab83fa626788ed866d740453500c697362168d121ee",
+      "translation": "7. Cookie"
+    },
+    "page.privacy.sections.6.paragraphs.0": {
+      "source": "Mind Atlas uses cookies to maintain sign-in sessions. In the hosted service, session cookies are used for authentication, security, and subscription-state checks.",
+      "sourceHash": "a8743377738a27574f73698c3d912f4e89167310b6c538815d45990d7ab34439",
+      "translation": "Mind Atlas menggunakan cookie untuk mempertahankan sesi login. Pada layanan yang di-host, cookie sesi digunakan untuk autentikasi, keamanan, dan pemeriksaan status langganan."
+    },
+    "page.privacy.sections.7.heading": {
+      "source": "8. Retention and deletion",
+      "sourceHash": "2a5c3b310978c6d9b2007884f438f62d2122fbcf997fe3b9c2386ef2bb49b8d3",
+      "translation": "8. Penyimpanan dan penghapusan"
+    },
+    "page.privacy.sections.7.paragraphs.0": {
+      "source": "Account information, billing state, and usage history are retained for as long as needed to provide the service, meet accounting obligations, protect security, and resolve disputes. To request account or personal-data deletion, contact the support address. Information required by law, payment processing, or security obligations may be retained for a limited period.",
+      "sourceHash": "81bc41a7a869d8763ff1c450472b224888b7f7a2e05f22d25dd73fa50537b4e7",
+      "translation": "Informasi akun, status penagihan, dan riwayat penggunaan disimpan selama diperlukan untuk menyediakan layanan, memenuhi kewajiban akuntansi, melindungi keamanan, dan menyelesaikan sengketa. Untuk meminta penghapusan akun atau data pribadi, hubungi alamat dukungan. Informasi yang diwajibkan oleh hukum atau diperlukan untuk pemrosesan pembayaran maupun kewajiban keamanan dapat disimpan untuk jangka waktu terbatas."
+    },
+    "page.privacy.sections.8.heading": {
+      "source": "9. Security",
+      "sourceHash": "dcde5f836ad7cea859296a89b9fc0282b5973632f0cc2ed39a29b29de9a0b7d5",
+      "translation": "9. Keamanan"
+    },
+    "page.privacy.sections.8.paragraphs.0": {
+      "source": "Mind Atlas keeps provider API keys on the server and does not expose them to browsers. We use reasonable safeguards such as encrypted communications, access controls, and log management. No internet service can guarantee absolute security.",
+      "sourceHash": "6e6e11edcc11cea842584ba7ae6c36a76b735e6b22bcdfc1672ac8526880186b",
+      "translation": "Mind Atlas menyimpan kunci API penyedia di server dan tidak mengeksposnya ke browser. Kami menggunakan perlindungan yang wajar seperti komunikasi terenkripsi, kontrol akses, dan pengelolaan log. Tidak ada layanan internet yang dapat menjamin keamanan mutlak."
+    },
+    "page.privacy.sections.9.heading": {
+      "source": "10. Changes",
+      "sourceHash": "0f9f3200a46495dd2c311ca77ab30d138a8adc62ddb70db570dac5ba56d5d874",
+      "translation": "10. Perubahan"
+    },
+    "page.privacy.sections.9.paragraphs.0": {
+      "source": "We may update this policy when the service, laws, or external-service requirements change. Material changes will be announced in the service or through another appropriate method.",
+      "sourceHash": "dda231c984dda44bce68a6aecff5d6316d77af5d0ff583ebba4c04edaf866a8c",
+      "translation": "Kami dapat memperbarui kebijakan ini saat layanan, hukum, atau persyaratan layanan eksternal berubah. Perubahan penting akan diumumkan dalam layanan atau melalui metode lain yang sesuai."
+    },
+    "page.privacy.title": {
+      "source": "Privacy Policy",
+      "sourceHash": "e1b46a10f308850debc07d2ff23bab162ed68f720c197712166cb994032c9eab",
+      "translation": "Kebijakan Privasi"
+    },
+    "page.privacy.updated": {
+      "source": "Last updated: 2026-07-01",
+      "sourceHash": "a4aaeb01402f13e136b219e3e6a4f6544279f9c526128305aaeb405d736a5988",
+      "translation": "Terakhir diperbarui: 2026-07-01"
+    },
+    "page.terms.lead": {
+      "source": "These Terms govern use of the Mind Atlas web service, free notebook features, Google sign-in, cloud notebooks, billing, and AI features.",
+      "sourceHash": "f7523b5f4f345898299f5c5375b854732e0a8827b0780a1e15b40e05c5e5d0ab",
+      "translation": "Ketentuan ini mengatur penggunaan layanan web Mind Atlas, fitur notebook gratis, login Google, notebook cloud, penagihan, dan fitur AI."
+    },
+    "page.terms.metaDescription": {
+      "source": "Mind Atlas terms of service for the spatial notebook, cloud notebooks, hosted AI features, billing, and acceptable use.",
+      "sourceHash": "bfbbf5adcedf52c6b3a5ecf5137ef70b227a3a2d2a14270189a7cc5bb706a2a5",
+      "translation": "Ketentuan layanan Mind Atlas untuk notebook spasial, notebook cloud, fitur AI yang di-host, penagihan, dan penggunaan yang dapat diterima."
+    },
+    "page.terms.sections.0.heading": {
+      "source": "1. Agreement",
+      "sourceHash": "62871b2e0dc61a103712cb0da02b21941c6fef8b0cc67037d8d932b8a7079e47",
+      "translation": "1. Perjanjian"
+    },
+    "page.terms.sections.0.paragraphs.0": {
+      "source": "By using Mind Atlas, you agree to these Terms. If you do not agree, do not use the service.",
+      "sourceHash": "68bacfd7748b2697e836f95df2ee9e8aebd06bf4ef1ea66c682ee15ca605eec3",
+      "translation": "Dengan menggunakan Mind Atlas, Anda menyetujui Ketentuan ini. Jika tidak setuju, jangan gunakan layanan ini."
+    },
+    "page.terms.sections.1.heading": {
+      "source": "2. Service",
+      "sourceHash": "a07ead82fd54ecfc699198fca82c0d3ed409bf8b4c257424eb4810b169e4d785",
+      "translation": "2. Layanan"
+    },
+    "page.terms.sections.1.paragraphs.0": {
+      "source": "Mind Atlas provides spatial note creation, node editing, import, export, sharing, Google sign-in, subscriptions, AI Chat, Web search, Dictation, Realtime Talk, and related features. Some features are free; others require a paid plan or eligibility.",
+      "sourceHash": "26fb0ae7cbe9f3440cdfc558b441dae77dfc2a7296d2c40ed8fc55ef1fb6c091",
+      "translation": "Mind Atlas menyediakan pembuatan catatan spasial, pengeditan node, impor, ekspor, berbagi, login Google, langganan, Chat AI, Pencarian web, Dikte, Percakapan real-time, dan fitur terkait. Beberapa fitur gratis; fitur lain memerlukan paket berbayar atau kelayakan."
+    },
+    "page.terms.sections.10.heading": {
+      "source": "11. Changes, suspension, and termination",
+      "sourceHash": "191871d4a8cb4a15773c2944b06441e602cd09dd924e8795befeb865d68d4add",
+      "translation": "11. Perubahan, penangguhan, dan penghentian"
+    },
+    "page.terms.sections.10.paragraphs.0": {
+      "source": "Mind Atlas may add, change, suspend, or discontinue features. Maintenance, failures, external-service outages, security response, or legal obligations may make the service unavailable.",
+      "sourceHash": "47efcb40e2119dab66aa5b505ff27afa09220347e1d4dd91839feb2bba8bb70c",
+      "translation": "Mind Atlas dapat menambah, mengubah, menangguhkan, atau menghentikan fitur. Pemeliharaan, kegagalan, gangguan layanan eksternal, respons keamanan, atau kewajiban hukum dapat membuat layanan tidak tersedia."
+    },
+    "page.terms.sections.11.heading": {
+      "source": "12. Disclaimer",
+      "sourceHash": "e8674afb5873744d357307f6d2e67897954b685fbda92089e09a935dd3647d4c",
+      "translation": "12. Penafian"
+    },
+    "page.terms.sections.11.paragraphs.0": {
+      "source": "Mind Atlas does not guarantee uninterrupted availability, error-free operation, accurate AI output, preservation of user data, or fitness for a particular purpose. You use the service at your own risk.",
+      "sourceHash": "550fbbd8a28bcf62f251a421a302f28f7d31d394539dfde05e8e573ef47c25a4",
+      "translation": "Mind Atlas tidak menjamin ketersediaan tanpa gangguan, operasi bebas kesalahan, keakuratan output AI, pelestarian data pengguna, atau kesesuaian untuk tujuan tertentu. Anda menggunakan layanan atas risiko sendiri."
+    },
+    "page.terms.sections.12.heading": {
+      "source": "13. Limitation of liability",
+      "sourceHash": "f2e4b16593ffc07ead838e95312c39e6e7f2f538e9f854561c32c002a0e42dcf",
+      "translation": "13. Batasan tanggung jawab"
+    },
+    "page.terms.sections.12.paragraphs.0": {
+      "source": "To the extent permitted by law, Mind Atlas is not liable for indirect or special damages, lost profit, lost data, or third-party claims arising from use of or inability to use the service.",
+      "sourceHash": "c0b8e8ddbcf91d02b7f67da88fcdb6e2931bf63df7a41b22a81d000f65262a0c",
+      "translation": "Sejauh diizinkan hukum, Mind Atlas tidak bertanggung jawab atas kerugian tidak langsung atau khusus, kehilangan keuntungan, kehilangan data, atau klaim pihak ketiga yang timbul dari penggunaan atau ketidakmampuan menggunakan layanan."
+    },
+    "page.terms.sections.13.heading": {
+      "source": "14. Changes to these Terms",
+      "sourceHash": "d3bf0b0c3fb4f1551f6bf8bf57ea1c161cd1c2c8fce595c7cab6937e53050b6c",
+      "translation": "14. Perubahan pada Ketentuan ini"
+    },
+    "page.terms.sections.13.paragraphs.0": {
+      "source": "Mind Atlas may update these Terms when needed. Material changes will be announced in the service or through another appropriate method. Continued use after an update constitutes acceptance of the updated Terms.",
+      "sourceHash": "268d347e43796516ad2f82a386ae7a8e07b7c4d233dfc7b0c4032cbd55bc93b3",
+      "translation": "Mind Atlas dapat memperbarui Ketentuan ini bila diperlukan. Perubahan penting akan diumumkan dalam layanan atau melalui metode lain yang sesuai. Penggunaan berkelanjutan setelah pembaruan berarti menerima Ketentuan yang telah diperbarui."
+    },
+    "page.terms.sections.14.heading": {
+      "source": "15. Contact",
+      "sourceHash": "b0c3e61e0183cf8c17b3cf0f21df7cf0df1e2e9a710b375530b7279b4dc19131",
+      "translation": "15. Kontak"
+    },
+    "page.terms.sections.14.paragraphs.0": {
+      "source": "For questions about these Terms, contact support@mind-atlas.org.",
+      "sourceHash": "e233d5e14e13b051428bf03a99d5abef592744b4ee9ca941cc92d16cf62aceae",
+      "translation": "Untuk pertanyaan tentang Ketentuan ini, hubungi support@mind-atlas.org."
+    },
+    "page.terms.sections.2.heading": {
+      "source": "3. Accounts",
+      "sourceHash": "ddb0edb31127c23f805139b2c1326b336a37aa7f2e292d86a3954f5f8c8f8aa4",
+      "translation": "3. Akun"
+    },
+    "page.terms.sections.2.items.0": {
+      "source": "A Google sign-in account is required to use paid AI features and account-scoped cloud notebooks.",
+      "sourceHash": "81a4c37aba90dc717542ee5e0dfc9644a31609515f48888d73df08019a12aa88",
+      "translation": "Akun login Google diperlukan untuk menggunakan fitur AI berbayar dan notebook cloud yang terkait dengan akun."
+    },
+    "page.terms.sections.2.items.1": {
+      "source": "You are responsible for keeping your account secure.",
+      "sourceHash": "c48c5be2006a6a17c8e65bdf8d912ac131520ff6b15cd5e002b5b499df40673d",
+      "translation": "Anda bertanggung jawab menjaga keamanan akun."
+    },
+    "page.terms.sections.2.items.2": {
+      "source": "Mind Atlas may temporarily restrict an account or feature when abuse, a security issue, or a violation of these Terms is suspected.",
+      "sourceHash": "949f8349da43b382010af575d092a2d22543b68a255fb974c7af9d976456f57a",
+      "translation": "Mind Atlas dapat membatasi akun atau fitur sementara jika dicurigai terjadi penyalahgunaan, masalah keamanan, atau pelanggaran Ketentuan ini."
+    },
+    "page.terms.sections.3.heading": {
+      "source": "4. Free notebook and local storage",
+      "sourceHash": "6933d1b486f0e893b7541f49e55d95f2c394c8931031c35626ca51fa138d3669",
+      "translation": "4. Notebook gratis dan penyimpanan lokal"
+    },
+    "page.terms.sections.3.paragraphs.0": {
+      "source": "Core notebook features primarily use storage inside your browser. Browser settings, device failure, storage clearing, cache clearing, or private browsing may cause data loss. Export or back up important data yourself.",
+      "sourceHash": "7720cefcfba2bd78c5b99f1025a6976a4d8d1de118c41e772db96d13725e9212",
+      "translation": "Fitur inti notebook terutama menggunakan penyimpanan browser. Pengaturan browser, kegagalan perangkat, pembersihan penyimpanan atau cache, maupun penjelajahan privat dapat menyebabkan kehilangan data. Ekspor atau cadangkan sendiri data penting Anda."
+    },
+    "page.terms.sections.4.heading": {
+      "source": "5. Cloud notebooks",
+      "sourceHash": "b645874f59ebcb35ef04a9c1187e83fd7e7e3647a1f4c3e704bc01d210cf7ff2",
+      "translation": "5. Notebook cloud"
+    },
+    "page.terms.sections.4.items.0": {
+      "source": "Google-account users may save text-only notebook data to Mind Atlas cloud storage within the displayed storage limit.",
+      "sourceHash": "69dab29b4f176ec55da64e4e6cf6a746cfbac439cb35b08e12ff97276d18a93a",
+      "translation": "Pengguna akun Google dapat menyimpan data notebook teks saja ke penyimpanan cloud Mind Atlas dalam batas penyimpanan yang ditampilkan."
+    },
+    "page.terms.sections.4.items.1": {
+      "source": "Image and multimedia attachments are not included in hosted cloud notebook storage.",
+      "sourceHash": "9d1b8cca8bb710ab078a8a024bb2fcf22ef59272ece4c81989e2579f4e9d27dc",
+      "translation": "Lampiran gambar dan multimedia tidak termasuk dalam penyimpanan notebook cloud yang di-host."
+    },
+    "page.terms.sections.4.items.2": {
+      "source": "Public share links make the selected cloud copy available to anyone who has the hard-to-guess link. Revoke or delete a share when it should no longer be public.",
+      "sourceHash": "468cd74534c56abc5bb54c379dfdf18dd2f6eb9edb25c203a0f3f635085a9b15",
+      "translation": "Tautan berbagi publik membuat salinan cloud yang dipilih tersedia bagi siapa pun yang memiliki tautan yang sulit ditebak. Cabut atau hapus berbagi saat tidak lagi boleh bersifat publik."
+    },
+    "page.terms.sections.4.items.3": {
+      "source": "Mind Atlas may remove old or excess data to enforce published storage limits and protect service operation.",
+      "sourceHash": "9bcaab40ebf577ee102b73d09e99fbb337574c47fdce6fc8db875126d4431369",
+      "translation": "Mind Atlas dapat menghapus data lama atau berlebih untuk menerapkan batas penyimpanan yang dipublikasikan dan melindungi operasi layanan."
+    },
+    "page.terms.sections.5.heading": {
+      "source": "6. Paid AI features, Mind Atlas tokens, and billing",
+      "sourceHash": "928d6b567216d5293cbae207f0b2b29166188979240aa6af5a2e8eb130f16f67",
+      "translation": "6. Fitur AI berbayar, token Mind Atlas, dan penagihan"
+    },
+    "page.terms.sections.5.items.0": {
+      "source": "Paid plans provide AI features subject to the Mind Atlas token allowance for each Stripe billing period.",
+      "sourceHash": "7ff2b93103632ba24ac48f90988ed2416676a53841026a996f34d11c23ceeb19",
+      "translation": "Paket berbayar menyediakan fitur AI sesuai jatah token Mind Atlas untuk setiap periode penagihan Stripe."
+    },
+    "page.terms.sections.5.items.1": {
+      "source": "Mind Atlas tokens are an internal usage display. They are not cash, cryptocurrency, electronic money, or a prepaid payment instrument.",
+      "sourceHash": "62d3ffdc84831b142fbd346f45e0b248915ec02998f99fee7eb8f04781d851e9",
+      "translation": "Token Mind Atlas adalah tampilan penggunaan internal. Token bukan uang tunai, mata uang kripto, uang elektronik, atau instrumen pembayaran prabayar."
+    },
+    "page.terms.sections.5.items.2": {
+      "source": "Stripe manages charges, invoices, and payment methods.",
+      "sourceHash": "91f257f2a5db98b0ea5699d65560fc0b886c0462b61cb5d9b40171fbeba89377",
+      "translation": "Stripe mengelola tagihan, invoice, dan metode pembayaran."
+    },
+    "page.terms.sections.5.items.3": {
+      "source": "Prices, included features, usage limits, and available models may change.",
+      "sourceHash": "74d1c00d054e296bdd2787a39d6a64873fd3a9feeca2ae8e68d1339b496e02f9",
+      "translation": "Harga, fitur yang termasuk, batas penggunaan, dan model yang tersedia dapat berubah."
+    },
+    "page.terms.sections.5.items.4": {
+      "source": "Eligibility may remain until the end of a paid billing period after cancellation. Refunds are determined according to the circumstances, Stripe processing, and applicable law.",
+      "sourceHash": "4e0ba83500389e48ce16fb56e06a8f35203ecc67d02d4fdd15ab1ed7b7a00782",
+      "translation": "Kelayakan dapat tetap berlaku sampai akhir periode penagihan berbayar setelah pembatalan. Pengembalian dana ditentukan berdasarkan keadaan, pemrosesan Stripe, dan hukum yang berlaku."
+    },
+    "page.terms.sections.6.heading": {
+      "source": "7. AI limitations",
+      "sourceHash": "16da97e7bf2fe1ecd625143984e8a4dc836163f14e11c4d667ae4e68a4b2cbff",
+      "translation": "7. Batasan AI"
+    },
+    "page.terms.sections.6.items.0": {
+      "source": "AI output may be inaccurate, incomplete, outdated, or inappropriate.",
+      "sourceHash": "f85923f4019f03a56139129110ce3f69a3ad040e9efce4d7b41ce6c2bd7de5ca",
+      "translation": "Output AI dapat tidak akurat, tidak lengkap, sudah usang, atau tidak sesuai."
+    },
+    "page.terms.sections.6.items.1": {
+      "source": "Obtain qualified professional review for important medical, legal, financial, investment, employment, safety, or life decisions.",
+      "sourceHash": "2c9789eacaa6ef74e2791f56613ac876934ec432c2ebf07e344e713c501b7895",
+      "translation": "Dapatkan pemeriksaan profesional yang memenuhi syarat untuk keputusan penting terkait medis, hukum, keuangan, investasi, pekerjaan, keselamatan, atau kehidupan."
+    },
+    "page.terms.sections.6.items.2": {
+      "source": "Provider outages and changes to provider specifications, prices, or model availability may change Mind Atlas features, models, prices, and usage limits.",
+      "sourceHash": "7eb56e3327b7c8ee759c9eddc3515d82fc9d91aaf655404bfbffc85f30a1a9e7",
+      "translation": "Gangguan dan perubahan spesifikasi, harga, atau ketersediaan model penyedia dapat mengubah fitur, model, harga, dan batas penggunaan Mind Atlas."
+    },
+    "page.terms.sections.6.items.3": {
+      "source": "Text, audio, node context, and search queries you submit may be sent to external AI providers as needed to provide the requested feature.",
+      "sourceHash": "a0d080b7e9b0472da2b4a166cb74ccf3fac5bda13985e43a6386a56056aed9a2",
+      "translation": "Teks, audio, konteks node, dan kueri pencarian yang Anda kirim dapat dikirim ke penyedia AI eksternal jika diperlukan untuk menyediakan fitur yang diminta."
+    },
+    "page.terms.sections.7.heading": {
+      "source": "8. Prohibited use",
+      "sourceHash": "dcf7c5abbf35842a3f738522f35416796f7a81aa6fc4e30f9a6a3ca326882af8",
+      "translation": "8. Penggunaan yang dilarang"
+    },
+    "page.terms.sections.7.items.0": {
+      "source": "Use that violates laws, public order, third-party rights, or external-service terms.",
+      "sourceHash": "44cd5603a2214999eab532abdd725706478f35d1c295c7da4f8fcd19a48b081a",
+      "translation": "Penggunaan yang melanggar hukum, ketertiban umum, hak pihak ketiga, atau ketentuan layanan eksternal."
+    },
+    "page.terms.sections.7.items.1": {
+      "source": "Unauthorized access, excessive load, abusive scraping, or bypassing security controls.",
+      "sourceHash": "a20a02a8297dd1206b9a35871159abb411fd1c528c2c0447b0320285cdc24d59",
+      "translation": "Akses tanpa izin, beban berlebihan, scraping yang menyalahgunakan, atau melewati kontrol keamanan."
+    },
+    "page.terms.sections.7.items.2": {
+      "source": "Creating or distributing malware, phishing, spam, fraud, harassment, or infringing content.",
+      "sourceHash": "243e02e24d5eba29b162720e991ca1ac33ac08f0208be8de4d63d21d38336f13",
+      "translation": "Membuat atau menyebarkan malware, phishing, spam, penipuan, pelecehan, atau konten yang melanggar hak."
+    },
+    "page.terms.sections.7.items.3": {
+      "source": "Improperly sending or publishing API keys, credentials, another person's personal data, or confidential information.",
+      "sourceHash": "a3251e11b4380d032ca5fd1b5ba216baa104048da980af0c48597455ba1489a0",
+      "translation": "Mengirim atau menerbitkan kunci API, kredensial, data pribadi orang lain, atau informasi rahasia secara tidak semestinya."
+    },
+    "page.terms.sections.7.items.4": {
+      "source": "Fraudulently obtaining, transferring, reselling, or sharing Mind Atlas tokens or subscriptions.",
+      "sourceHash": "0bd39ebfe6e7395908c0a8d5a6c391191ff534e0550108a025c270a24e195420",
+      "translation": "Mendapatkan, memindahkan, menjual kembali, atau membagikan token atau langganan Mind Atlas secara curang."
+    },
+    "page.terms.sections.8.heading": {
+      "source": "9. User content",
+      "sourceHash": "6f9db7f320b416c3b76c60da2ccfcfc9827bbf294a76e399dd91ca876f43ce95",
+      "translation": "9. Konten pengguna"
+    },
+    "page.terms.sections.8.paragraphs.0": {
+      "source": "Rights in notes, text, prompts, and other content you create or submit generally remain with you or the relevant rights holder. You permit Mind Atlas to process that content only as needed to provide storage, display, AI processing, sharing, support, security, and related service functions.",
+      "sourceHash": "9db60d72dc989a62acd6769c4b14183d22e56bf1fbc6f8d1c376cb8894352a9f",
+      "translation": "Hak atas catatan, teks, prompt, dan konten lain yang Anda buat atau kirim umumnya tetap menjadi milik Anda atau pemegang hak terkait. Anda mengizinkan Mind Atlas memproses konten tersebut hanya jika diperlukan untuk penyimpanan, tampilan, pemrosesan AI, berbagi, dukungan, keamanan, dan fungsi layanan terkait."
+    },
+    "page.terms.sections.9.heading": {
+      "source": "10. Open source and brand",
+      "sourceHash": "2a81bbe6283523c655886785c3ab3d89de994476d3e5f564d2d7207d2acbed2a",
+      "translation": "10. Sumber terbuka dan merek"
+    },
+    "page.terms.sections.9.paragraphs.0": {
+      "source": "Code in the public Mind Atlas repository is governed by the licenses stated in that repository. The Mind Atlas name, logo, brand, trademarks, hosted service, billing functions, operational configuration, and secrets may be subject to separate rights and conditions.",
+      "sourceHash": "7cf638b0f302435a01cececa3156f1afc176c373bb50be6ee37a043ab5fe3491",
+      "translation": "Kode dalam repositori publik Mind Atlas diatur oleh lisensi yang tercantum dalam repositori tersebut. Nama, logo, merek, merek dagang, layanan yang di-host, fungsi penagihan, konfigurasi operasional, dan rahasia Mind Atlas dapat tunduk pada hak dan ketentuan terpisah."
+    },
+    "page.terms.title": {
+      "source": "Terms of Service",
+      "sourceHash": "42ab7c13fa2623e157b2382918a600f891179284b718b10b30c54fbb637b2f0a",
+      "translation": "Ketentuan Layanan"
+    },
+    "page.terms.updated": {
+      "source": "Last updated: 2026-07-01",
+      "sourceHash": "8fd697c4c315f7c961cd576d52cec5d5d25469fc43f23ed9f5b5706ba7be3ea8",
+      "translation": "Terakhir diperbarui: 2026-07-01"
+    },
+    "service.authRequired": {
+      "source": "Google login is required. Sign in from AI features at the top right.",
+      "sourceHash": "b74cfcb431cdd64811ed597b755c7b7a114282986e172b5a40fc2e0b1aa2953f",
+      "translation": "Login Google diperlukan. Masuk dari fitur AI di kanan atas."
+    },
+    "service.badRequest": {
+      "source": "Review the request. The input, model, or attachment may not match the current public settings.",
+      "sourceHash": "47074e93cea922458c5d97ebad3fc5ca621e1c1b55b5cc22f7dd4b50704131e4",
+      "translation": "Periksa permintaan. Input, model, atau lampiran mungkin tidak sesuai dengan pengaturan publik saat ini."
+    },
+    "service.billingPeriodUnavailable": {
+      "source": "Your next AI token renewal date is syncing with Stripe. Wait a moment, then refresh from AI features.",
+      "sourceHash": "f182d7ee5de3189fbd597a6fa94654960546565f4e2f16e08fe34a656fba9f61",
+      "translation": "Tanggal pembaruan token AI berikutnya sedang disinkronkan dengan Stripe. Tunggu sebentar, lalu segarkan dari fitur AI."
+    },
+    "service.cloudNotebookTooLarge": {
+      "source": "This notebook is too large to save to the cloud. Reduce the amount of text.",
+      "sourceHash": "92cef7bf8c7946e0507a008f0b4a93963d248d6d72c1560fd2698edef828f7db",
+      "translation": "Notebook ini terlalu besar untuk disimpan ke cloud. Kurangi jumlah teks."
+    },
+    "service.creditExhausted": {
+      "source": "You have used all AI tokens for this billing period. AI requests resume on the next renewal date.",
+      "sourceHash": "e23d09f7359679d2bc0196caa532ed70325d1a6f3c0f7dafd6f5bbff5879a85f",
+      "translation": "Anda telah menggunakan semua token AI untuk periode penagihan ini. Permintaan AI dilanjutkan pada tanggal pembaruan berikutnya."
+    },
+    "service.generic": {
+      "source": "Mind Atlas service request failed with status {status}.",
+      "sourceHash": "594fbaaaa660b5e7c4a2cb79a8bc61a0bfc185dfea310dbf6d4d13ea6a9243c7",
+      "translation": "Permintaan layanan Mind Atlas gagal dengan status {status}."
+    },
+    "service.modelNotEnabled": {
+      "source": "The selected model is currently unavailable. Choose another model.",
+      "sourceHash": "850cdaa27a77b29b6fab5a1032f9e787fdfbfd108defe77166fe38c3aee31b2c",
+      "translation": "Model yang dipilih saat ini tidak tersedia. Pilih model lain."
+    },
+    "service.notConfigured": {
+      "source": "The server configuration for this AI service is incomplete.",
+      "sourceHash": "0e01ebebac340b12ac235689b5e0a69ae1df3d43ee2f2dd0a0dc3a14c226b976",
+      "translation": "Konfigurasi server untuk layanan AI ini tidak lengkap."
+    },
+    "service.pricingNotConfigured": {
+      "source": "Usage pricing has not been configured for this model, so the public safety policy has stopped the request.",
+      "sourceHash": "e25c456c0566931eda2d742926264c58bf5566fdea39161c5165e086cc292a0e",
+      "translation": "Harga penggunaan belum dikonfigurasi untuk model ini, sehingga kebijakan keamanan publik telah menghentikan permintaan."
+    },
+    "service.providerUnavailable": {
+      "source": "The AI service could not be reached. Wait a moment or try another model.",
+      "sourceHash": "5a12fb6a03b609d4d23582abc4205c07e9cdb6c102134ee0cc52cd46302f186b",
+      "translation": "Layanan AI tidak dapat dijangkau. Tunggu sebentar atau coba model lain."
+    },
+    "service.requestTooLarge": {
+      "source": "This input is too large. Reduce the selected nodes, attachments, or audio length and try again.",
+      "sourceHash": "7733edb95c445e400af3cbaa20dfc494aea78b0783285b2d58ed960f3f32dfe5",
+      "translation": "Input ini terlalu besar. Kurangi node yang dipilih, lampiran, atau panjang audio dan coba lagi."
+    },
+    "service.subscriptionRequired": {
+      "source": "AI features are available after subscribing. You can keep using the notebook for free.",
+      "sourceHash": "4b3e0dd70f83e00e2de333fbb4d9265c9b8ba59c87c0d18dd2163ce17291d595",
+      "translation": "Fitur AI tersedia setelah berlangganan. Anda tetap dapat menggunakan notebook secara gratis."
+    },
+    "startSpace.close": {
+      "source": "Close start choices",
+      "sourceHash": "cd8c8ce27dfc7e4873bccd2498e6b4664ec88253a31eadad54f166be5aff463c",
+      "translation": "Tutup pilihan mulai"
+    },
+    "startSpace.cloudBridgeRequired": {
+      "source": "Cloud notebooks appear after the local bridge starts.",
+      "sourceHash": "e11e18163448d7843369ff075f0055466b712f6b95ed061bab5fd65635e837b0",
+      "translation": "Notebook cloud muncul setelah bridge lokal dimulai."
+    },
+    "startSpace.cloudCopies": {
+      "source": "Start from a cloud copy",
+      "sourceHash": "a42e0f6697e1684005bcfd67394df1e74c2409da75e9a712c0426b5923d2f22a",
+      "translation": "Mulai dari salinan cloud"
+    },
+    "startSpace.cloudEmpty": {
+      "source": "There are no cloud notebooks yet.",
+      "sourceHash": "1360f214056a2d8c243f627bfd92f3acd2aba7781b45e18deaf56aa32fea63a7",
+      "translation": "Belum ada notebook cloud."
+    },
+    "startSpace.cloudLoginDetail": {
+      "source": "Sign in with Google to choose one of your cloud notebooks here.",
+      "sourceHash": "9ae647742513deb6dd817f369c901e1838aa2ae41973cd213fa9d75f2afbf582",
+      "translation": "Masuk dengan Google untuk memilih salah satu notebook cloud Anda di sini."
+    },
+    "startSpace.googleLogin": {
+      "source": "Sign in with Google",
+      "sourceHash": "5cb43d1a3482f244f993ce2c2d43189600bc7a0b347de9769a97de7c3bef378e",
+      "translation": "Masuk dengan Google"
+    },
+    "startSpace.keepTutorial": {
+      "source": "Continue with tutorial nodes",
+      "sourceHash": "cb5586c1e9235c1850b70ab3e69f27cfadaea78a589575b2c9f228c51ac93297",
+      "translation": "Lanjutkan dengan node tutorial"
+    },
+    "startSpace.keepTutorial.detail": {
+      "source": "Keep editing the nodes you created during the tutorial.",
+      "sourceHash": "d0c9e4f1001c17620f6bd7ee89bade9bc61fba7cd6e25587d4af7b850b1ad71a",
+      "translation": "Lanjutkan mengedit node yang Anda buat selama tutorial."
+    },
+    "startSpace.newDetail": {
+      "source": "Start from a template or a copy of a cloud notebook.",
+      "sourceHash": "2c78328a5091fd0ed963b437e5776a955c3e3b61d8d7edc59ad59a211435ebd0",
+      "translation": "Mulai dari template atau salinan notebook cloud."
+    },
+    "startSpace.newTitle": {
+      "source": "Start a new space",
+      "sourceHash": "83cfbfde7d8d0fba5fd575a01df8b3b8f3c4889f79867d9a20bea3d563c4acce",
+      "translation": "Mulai ruang baru"
+    },
+    "startSpace.nextTitle": {
+      "source": "Choose the next space",
+      "sourceHash": "72c0eea83df217dfd5c04b9ffc8f2a5b25d8d05187007e05122feff73923335c",
+      "translation": "Pilih ruang berikutnya"
+    },
+    "startSpace.refresh": {
+      "source": "Refresh start choices",
+      "sourceHash": "49475a79cf53d41db3926b3d3d2c56d58a4c041ba30beeca95bdf977c6cd3b79",
+      "translation": "Segarkan pilihan mulai"
+    },
+    "startSpace.templates": {
+      "source": "Templates",
+      "sourceHash": "e14b6a73a4f7b6a309452ebeb1200192f166fedd4dbb9bf1fa8788fa3ea1719a",
+      "translation": "Template"
+    },
+    "startSpace.title": {
+      "source": "Choose how to start",
+      "sourceHash": "c64421f3388cc0c51bc810c98c6235d4da9963135dace2f518ee8dc14e3b6074",
+      "translation": "Pilih cara memulai"
+    },
+    "startSpace.tutorialDetail": {
+      "source": "Choose how to continue after the tutorial.",
+      "sourceHash": "6b524331b2ffffc50a02054cf3578e44e85f1a09f163145a09505f9c03fc7a37",
+      "translation": "Pilih cara melanjutkan setelah tutorial."
+    },
+    "status.cloud.deleted": {
+      "source": "Deleted: {name}",
+      "sourceHash": "c4821c5b94c2a16c412210edaef27382c24fb1c0d42d456ae38a5f8390023609",
+      "translation": "Dihapus: {name}"
+    },
+    "status.cloud.loginRequired": {
+      "source": "Google login is required for cloud sharing.",
+      "sourceHash": "78ea88e95c0bfb7aa57b6125ee37bc89f4dbedfefcbe6aa4074f7e44ea9bdb52",
+      "translation": "Login Google diperlukan untuk berbagi cloud."
+    },
+    "status.cloud.overwriting": {
+      "source": "Overwriting...",
+      "sourceHash": "6e673a727a013e7254f996c086b439b7e09f31832a68ca14f96362f7873d3a5f",
+      "translation": "Menimpa..."
+    },
+    "status.cloud.overwritten": {
+      "source": "Overwritten: {name}",
+      "sourceHash": "7b0360afcfe19bcc8285a4d62fea6938110dea0f9c8c66ffeb608272b0655af8",
+      "translation": "Ditimpa: {name}"
+    },
+    "status.cloud.publicCopied": {
+      "source": "Public Mind Atlas link copied.",
+      "sourceHash": "b103242c1cb1441d20888ddee5af692b313430d10b386b0d56482f843e0098eb",
+      "translation": "Tautan publik Mind Atlas disalin."
+    },
+    "status.cloud.renamed": {
+      "source": "Renamed: {name}",
+      "sourceHash": "9bde272a01c501951772b23a8f0a298948f2a6c99cbf55e6cb366e6c2737171e",
+      "translation": "Diganti nama: {name}"
+    },
+    "status.cloud.saved": {
+      "source": "Saved: {name}",
+      "sourceHash": "4f91681ea84e94c212b5f787d3201ef5678119b4f2ec31acb8bbcd740dd570f9",
+      "translation": "Tersimpan: {name}"
+    },
+    "status.cloud.savedJsonOnly": {
+      "source": "Saved: {name} (JSON only)",
+      "sourceHash": "aeef75432b63ab34d213baa17ca7661d9d8fc3df15d11e1347eacdd2a9aa9461",
+      "translation": "Tersimpan: {name} (JSON saja)"
+    },
+    "status.cloud.savedPruned": {
+      "source": "Saved: {name}. {detail}",
+      "sourceHash": "0b362f3082c3f0133ed27030a98c172bf2f5dff0eb4cc6b6dbca9682594ed5d1",
+      "translation": "Tersimpan: {name}. {detail}"
+    },
+    "status.cloud.saving": {
+      "source": "Saving to cloud...",
+      "sourceHash": "120dd84ad6c590306efdac3f5f6aa97171b9beb9c9915aa64c7f4d36a9c8b9a0",
+      "translation": "Menyimpan ke cloud..."
+    },
+    "status.cloud.savingShort": {
+      "source": "Saving...",
+      "sourceHash": "3bfcfea71b1765fec6fab6d269341fb95624576d683290a553fb0405ce9385d4",
+      "translation": "Menyimpan..."
+    },
+    "status.cloud.selectFile": {
+      "source": "Select a cloud file to share.",
+      "sourceHash": "4dc78e7ced3b9cd01a369299f1b8192d9babb423cc8aec908cab1c8f2f578b66",
+      "translation": "Pilih file cloud untuk dibagikan."
+    },
+    "status.cloud.selectToShare": {
+      "source": "Select a cloud file to share, or save the current atlas as a new cloud file first.",
+      "sourceHash": "c2bb48bb4e426da00dcfa77f53212c4d2970d5b6ece1ef8b269e8bc6a8aab808",
+      "translation": "Pilih file cloud untuk dibagikan, atau simpan atlas saat ini sebagai file cloud baru terlebih dahulu."
+    },
+    "status.cloud.shareCopied": {
+      "source": "Share link copied: {name}",
+      "sourceHash": "a6a876582e32da047cfe16d064242efa5021c3ea28e0e3328416b967b3eeca60",
+      "translation": "Tautan berbagi disalin: {name}"
+    },
+    "status.copy.copied": {
+      "source": "Copied {stats}",
+      "sourceHash": "dfd082692f810ffdf81a3f473c041fe1f7f2bbf1c204a0366d55b3aad3dcf2a3",
+      "translation": "Disalin {stats}"
+    },
+    "status.device.unsupported": {
+      "source": "Unsupported on this device",
+      "sourceHash": "3b4f105204670e6df627aba61b53ab04570e65769633633893f6c8d1a8102fb6",
+      "translation": "Tidak didukung di perangkat ini"
+    },
+    "status.layoutBirthUnavailable": {
+      "source": "Nodes cannot be created by pressing and holding in {mode}. Create them in Mind Atlas mode.",
+      "sourceHash": "0cb6feb500f4803f371dcd07a17d0c014c185268d9f5aab8bf4c034fca1c9c76",
+      "translation": "Node tidak dapat dibuat dengan menekan dan menahan di {mode}. Buat di mode Mind Atlas."
+    },
+    "status.mobile.notificationsUnsupported": {
+      "source": "Notifications are not supported",
+      "sourceHash": "b05e0b74aa45990facbc712bf705d7ddd277b050e2845cd4a17abe375290cf26",
+      "translation": "Notifikasi tidak didukung"
+    },
+    "status.mobile.only": {
+      "source": "Mobile only on this device",
+      "sourceHash": "8dd1f22ad8fbc36bd5ec7c7d19c53bf9e588ffc9e2255afcca80c8585b1b9675",
+      "translation": "Hanya seluler di perangkat ini"
+    },
+    "status.realtime.workRootRequired": {
+      "source": "Set the Codex work root before sending.",
+      "sourceHash": "3283bd8238aead01d6ce737e75f460302d9d28b0f14e0c9d6cfdee5d22d58a60",
+      "translation": "Atur root kerja Codex sebelum mengirim."
+    },
+    "status.share.creatingEmbeddedUrl": {
+      "source": "Creating embedded-data URL...",
+      "sourceHash": "9d23b8e9bb6730763651807531032f8333df4138766ff99cc76cc2f4e3ca21d8",
+      "translation": "Membuat URL data-tertanam..."
+    },
+    "status.share.embeddedUrlCopied": {
+      "source": "Embedded-data URL copied. {characters} URL characters / {nodes, plural, one {# node} other {# nodes}}.",
+      "sourceHash": "59a7ed660040010eb56bc7045157ea96b645a52668ed9d6bc74d8ae99bd3686c",
+      "translation": "URL data-tertanam disalin. {characters} karakter URL / {nodes, plural, one {# node} other {# node}}."
+    },
+    "status.share.imageDownloaded": {
+      "source": "Share image downloaded.",
+      "sourceHash": "b7c175b581e97d11bae79266cc9004479ebfc79bab829f10f04646833539abad",
+      "translation": "Gambar berbagi diunduh."
+    },
+    "status.share.preparingImage": {
+      "source": "Preparing share image...",
+      "sourceHash": "568d1a16d6b9b36e206d4120102c6dd539b69079e70bc64455046e2327941b07",
+      "translation": "Menyiapkan gambar berbagi..."
+    },
+    "status.share.sheetOpened": {
+      "source": "Share sheet opened.",
+      "sourceHash": "0abddcc1eb27f9368bafe99f3713c6f885420009f2dab86942c5828beec603a8",
+      "translation": "Lembar berbagi dibuka."
+    },
+    "template.blank.description": {
+      "source": "Start with an empty space.",
+      "sourceHash": "6a8a8416962a192ec13dea8d6d7dc2ebbb7ea7c5e130f99388023289ea1da3a5",
+      "translation": "Mulai dengan ruang kosong."
+    },
+    "template.blank.title": {
+      "source": "Blank space",
+      "sourceHash": "46553d7b69225a89ed8ea9bba3026c165d982fe8f1212dd57008db1a35b11cee",
+      "translation": "Ruang kosong"
+    },
+    "template.daily.description": {
+      "source": "Sort today's decisions into four places.",
+      "sourceHash": "4490c175efd54c7430b1f0ae7961f957c9b2f58999790e9912fd500338bbfae3",
+      "translation": "Kelompokkan keputusan hari ini ke dalam empat tempat."
+    },
+    "template.daily.title": {
+      "source": "Daily notes",
+      "sourceHash": "77c5eea7571e09b9f599368f388658613bee7b015c6cb6ab324b6a183aad0aab",
+      "translation": "Catatan harian"
+    },
+    "template.novel.description": {
+      "source": "Grow the world, characters, plot, and manuscript in one universe.",
+      "sourceHash": "2e93028dd4ae3dac4c02d42d36211912a03e9426358549ea7d55438526d22546",
+      "translation": "Kembangkan dunia, karakter, alur, dan naskah dalam satu semesta."
+    },
+    "template.novel.title": {
+      "source": "Write a novel",
+      "sourceHash": "1159e9a9070eff4c0914c9d8db26dd84acce3790d37128a0cf8b1be634abc6fa",
+      "translation": "Menulis novel"
+    },
+    "template.scamper.description": {
+      "source": "Expand one idea with the SCAMPER prompts.",
+      "sourceHash": "efd4d1dc9ac8e4046eca47691715d1a376f19f2922f62f7ba171261cda1d0e4f",
+      "translation": "Kembangkan satu ide dengan pertanyaan SCAMPER."
+    },
+    "template.scamper.title": {
+      "source": "Develop an idea",
+      "sourceHash": "23801a8c5831f57afb26f6ba2e3c6b8c2087f2aed9fb1be4436d4ffc91aa2395",
+      "translation": "Mengembangkan ide"
+    },
+    "template.swot.description": {
+      "source": "Organize the next move through strengths, weaknesses, opportunities, and threats.",
+      "sourceHash": "5b0fdb572e8f115f607d61c542660954afdd17935d4bfe254fb140927aae424d",
+      "translation": "Atur langkah berikutnya melalui kekuatan, kelemahan, peluang, dan ancaman."
+    },
+    "template.swot.title": {
+      "source": "Run a SWOT analysis",
+      "sourceHash": "c100c697024641c9e4b297958177e9dda7656fac70ab9b4a68413c702621006e",
+      "translation": "Melakukan analisis SWOT"
+    },
+    "template.travel.description": {
+      "source": "Collect activities, itinerary, packing, and reservations.",
+      "sourceHash": "3220050fe8377c8aee6f6761d3121c4adc9b5b8a3e4d800966da42b0e3b763ba",
+      "translation": "Kumpulkan aktivitas, rencana perjalanan, barang bawaan, dan reservasi."
+    },
+    "template.travel.title": {
+      "source": "Plan a trip",
+      "sourceHash": "6cc591070a88757a83c020c16b62f78850d4cf1ab116b76f08ad964adfb407ce",
+      "translation": "Merencanakan perjalanan"
+    },
+    "ui.app.100GrantedEachBillingPeriod.753b157": {
+      "source": "100% granted each billing period",
+      "sourceHash": "a9d7d99aa8b3a4af91955c1db7402d1e871d892ea6ee52263bf4e6365646890d",
+      "translation": "100% diberikan setiap periode penagihan"
+    },
+    "ui.app.acceptIncoming.b506f76": {
+      "source": "Accept incoming",
+      "sourceHash": "109b7cff9b6f0b68e87a42a11ad8c844ab7923fb174dacc2a945db88ea56685a",
+      "translation": "Terima masuk"
+    },
+    "ui.app.ai.c7cd197": {
+      "source": "AI",
+      "sourceHash": "043523a835942e50a3954f82ea6e4c3bdc88feeed6178d065e7d2bfd6aaeb869",
+      "translation": "AI"
+    },
+    "ui.app.aiFeatures.8149424": {
+      "source": "AI features",
+      "sourceHash": "bd4428da0e649a1dbe7673c17f1253ef93799ec2ab4235acc1b364433a711de8",
+      "translation": "Fitur AI"
+    },
+    "ui.app.aiFeatures.e64941b": {
+      "source": "AI features",
+      "sourceHash": "14a35cca20db49c5b4e53569afa1e1cb002af623fb847366fdb5ffa14c8e9759",
+      "translation": "Fitur AI"
+    },
+    "ui.app.aiPartnerLog.593b3bf": {
+      "source": "AI Partner log",
+      "sourceHash": "492e63a6097f90396633acdf250ca0ffc6edae0689eb36b2ee97702053504fef",
+      "translation": "Log AI Partner"
+    },
+    "ui.app.aiPartnerLog.c126089": {
+      "source": "AI Partner log",
+      "sourceHash": "e06f580907f240105599c744f9f044a8c39526db9be4a06d8415a7bff38c580d",
+      "translation": "Log AI Partner"
+    },
+    "ui.app.aiPartnerReply.9a33fab": {
+      "source": "AI Partner reply",
+      "sourceHash": "be8366972b8d78f1227926effccab11c39e69e8a55a90a057571a1ab9ffb0eeb",
+      "translation": "Balasan AI Partner"
+    },
+    "ui.app.aiRequest.752b5a1": {
+      "source": "AI request",
+      "sourceHash": "1e934c8326b3f08252d0da0a2bd210ce1f1175411ae8369dca4b83989e3cce62",
+      "translation": "Permintaan AI"
+    },
+    "ui.app.aiTokenBalance.016ef19": {
+      "source": "AI token balance",
+      "sourceHash": "7395b2dc5ae2806f72b23d6c94174036a5fcb1da7e26a1a94591b9a114571147",
+      "translation": "Saldo token AI"
+    },
+    "ui.app.appendAsChildren.a7c96eb": {
+      "source": "Append as children",
+      "sourceHash": "399eafd0a4758d8cda93e43edc1e884c2de8b52c80c29075e171b427644fe289",
+      "translation": "Tambah sebagai anak"
+    },
+    "ui.app.applyMerge.6308788": {
+      "source": "Apply merge",
+      "sourceHash": "4f28ddeba4a32ec02b9d8ca6cbdbb3ff0aa0c8245f5c8cd58623e523dbdb0190",
+      "translation": "Terapkan penggabungan"
+    },
+    "ui.app.askAiServicesSuchAs.a8a8a7f": {
+      "source": "Ask AI services such as ChatGPT and Claude questions or editing instructions. You can also talk with AI in real time while viewing Mind Atlas.",
+      "sourceHash": "005893b6d31f7aa8704d0d0320d65921f56060b4b49537aec1eba925a4dfd3fc",
+      "translation": "Ajukan pertanyaan atau instruksi pengeditan ke layanan AI seperti ChatGPT dan Claude. Anda juga dapat berbicara dengan AI secara real-time sambil melihat Mind Atlas."
+    },
+    "ui.app.atlasActions.8babf3a": {
+      "source": "Atlas actions",
+      "sourceHash": "c60c7365b8096db1809c9fc589186281ce3cc41635220d3768c174bae9777405",
+      "translation": "Tindakan atlas"
+    },
+    "ui.app.atlasPath.c522500": {
+      "source": "Atlas path",
+      "sourceHash": "aa801742cc80e95cd9c525e73716c35b9beedb7a2e3dc95553b1dd908050e4e0",
+      "translation": "Jalur atlas"
+    },
+    "ui.app.automaticallyRenewsOnTheStripe.0be8f92": {
+      "source": "Automatically renews on the Stripe billing date",
+      "sourceHash": "8cbc1afdcd48ada798d0e162f4b68fe652262eab3a77a3ecc010c625a12732ff",
+      "translation": "Memperbarui secara otomatis pada tanggal penagihan Stripe"
+    },
+    "ui.app.bookChapter1Scene1.c445ab3": {
+      "source": "# Book\n\n## Chapter 1\n\n- Scene 1\n- Scene 2",
+      "sourceHash": "e2ab2f5e7cd1c86e52de8fe45285aeb11e2ed6b8504900baefb730869b40fbf6",
+      "translation": "# Buku\n\n## Bab 1\n\n- Adegan 1\n- Adegan 2"
+    },
+    "ui.app.cancel.6a25e9e": {
+      "source": "Cancel",
+      "sourceHash": "82d5b550e531757cdcbc155c760373d73d1db4b8d1d872ceb31d39e588c76a6d",
+      "translation": "Batal"
+    },
+    "ui.app.changed.77cca84": {
+      "source": "Changed",
+      "sourceHash": "e9a71e4ec59e421c6f62f66af6d5109bac42898269fc17edda1626ff62e7a738",
+      "translation": "Berubah"
+    },
+    "ui.app.chooseAServerPackage.23147b3": {
+      "source": "choose a server package",
+      "sourceHash": "c741c859b09d4f3df9fb9e8fdba96e6d2e43aeac68c2f447157c4e1d4a830d7f",
+      "translation": "pilih paket server"
+    },
+    "ui.app.chooseCurrentOrIncomingText.42a85bc": {
+      "source": "Choose current or incoming text per node block before applying.",
+      "sourceHash": "9b2939091ec9a5f5b523473c27d559c332e7d5b88d6784a11ace9840e219fd7e",
+      "translation": "Pilih teks saat ini atau yang masuk per blok node sebelum menerapkan."
+    },
+    "ui.app.clearAiPartnerLog.566017c": {
+      "source": "Clear AI Partner log",
+      "sourceHash": "37c467c8bce781b9d1eb66111b377aeda188c04d7b5845511504eea5f2caf605",
+      "translation": "Hapus log AI Partner"
+    },
+    "ui.app.clearTheLocalAiPartner.74ecd9c": {
+      "source": "Clear the local AI Partner log?",
+      "sourceHash": "363b2ffed686c76ea62190f7c36e58252aabeb6bbc09b3c3c93df8d672c44de7",
+      "translation": "Hapus log AI Partner lokal?"
+    },
+    "ui.app.closeAiPartnerLog.889d998": {
+      "source": "Close AI Partner log",
+      "sourceHash": "64069353f74691d7f36438cc3e9ba66c61d6b15cafc83b8888286c515551961d",
+      "translation": "Tutup log AI Partner"
+    },
+    "ui.app.closeAiSettings.2147ae4": {
+      "source": "Close AI settings",
+      "sourceHash": "38a67b59c83287e7f3aa39283d17c0db3e141500599bf1cc1255baa097fec63f",
+      "translation": "Tutup pengaturan AI"
+    },
+    "ui.app.closeCloudLoader.e2381d8": {
+      "source": "Close cloud loader",
+      "sourceHash": "7ac7c79e433741888b1e92b9f6fe3a6a9b0105a30c461252e76d2d7ee22d239d",
+      "translation": "Tutup pemuat cloud"
+    },
+    "ui.app.closeMergePreview.3c2fdef": {
+      "source": "Close merge preview",
+      "sourceHash": "39d91b56dfe0ec0f83bd886500d178de444615161c28511eaf5098971c1d7ca9",
+      "translation": "Tutup pratinjau penggabungan"
+    },
+    "ui.app.closeNotebookHistory.84b445f": {
+      "source": "Close notebook history",
+      "sourceHash": "e31a782c0a368ba9fa459496c74de378577d648d7c332eb66db8a6885c79e23f",
+      "translation": "Tutup riwayat notebook"
+    },
+    "ui.app.closeSharedAtlasImport.dc949d9": {
+      "source": "Close shared atlas import",
+      "sourceHash": "50505cc0288a6aa39cae4a37a2aa5a50912f2eeb58cab4ff54be0c5231b62bb2",
+      "translation": "Tutup impor atlas bersama"
+    },
+    "ui.app.closeTextImport.6ba6ae0": {
+      "source": "Close text import",
+      "sourceHash": "d5d629942f26cb10c43aca0a30f0d4738a917b81f306e726cc92ad3e536a9766",
+      "translation": "Tutup impor teks"
+    },
+    "ui.app.closeVoiceSettings.7277b7c": {
+      "source": "Close Voice settings",
+      "sourceHash": "75d3f8e203105c9c42a1f64dc6e7d994611895a66131cbbe952d25c78010bb8e",
+      "translation": "Tutup pengaturan Voice"
+    },
+    "ui.app.cloudFileActions.72433a6": {
+      "source": "Cloud file actions",
+      "sourceHash": "77e4af20b41c7746eb5014a966dc8e6fc65dc31efee3f4b2b82216d25b2ea4f6",
+      "translation": "Tindakan file cloud"
+    },
+    "ui.app.cloudNotebookCopies.1f91ff1": {
+      "source": "Cloud notebook copies",
+      "sourceHash": "6fd04f5beb1a57964aa7c29a205461dd6b107500d502358d17747ad97cbd2d21",
+      "translation": "Salinan notebook cloud"
+    },
+    "ui.app.cloudStorage.94e0556": {
+      "source": "Cloud storage",
+      "sourceHash": "51d52bea188877b802e03ccff89b5acb96f03e448c84fab8fe7deaf972a1437b",
+      "translation": "Penyimpanan cloud"
+    },
+    "ui.app.copyShareLink.d2e2a6f": {
+      "source": "Copy share link",
+      "sourceHash": "2908a16fbba07f789dbce7fda6f00979a3d3a47dd7f0312814954a1405baaf51",
+      "translation": "Salin tautan berbagi"
+    },
+    "ui.app.current.51d469d": {
+      "source": "Current",
+      "sourceHash": "cc77d93e13510b292a465044a01a23064f8c2e37dde2518faa6ef5dda620460b",
+      "translation": "Saat ini"
+    },
+    "ui.app.datasetName.4133ac0": {
+      "source": "Dataset name",
+      "sourceHash": "ff33f7c50bd25614f74f2d3073c81efde73e113e75b3983249627fa136afe7ff",
+      "translation": "Nama kumpulan data"
+    },
+    "ui.app.delete.c859ed3": {
+      "source": "Delete",
+      "sourceHash": "76c2996e29d7ceae1b8f9fd3f55222048b4c91cf8a5e6bcadf54f3eb937b0704",
+      "translation": "Hapus"
+    },
+    "ui.app.dropMarkdownOpmlFreemindOr.6670d93": {
+      "source": "Drop Markdown, OPML, FreeMind, or Mind Atlas file",
+      "sourceHash": "18679faa1310eefd6bf3382de38d5cf47b0b9e128fe29034a27cf03c2ff8601d",
+      "translation": "Letakkan file Markdown, OPML, FreeMind, atau Mind Atlas"
+    },
+    "ui.app.editor.127052c": {
+      "source": "Editor",
+      "sourceHash": "14741dfe8000a272ce04d23e45554cf6f3770d1b8541861ff6f83f993c2183c0",
+      "translation": "Editor"
+    },
+    "ui.app.entries.6c074e4": {
+      "source": "entries",
+      "sourceHash": "a02b4c6cf0f6ed2fccef065e656dca2e03595ad058e1da3d9d1cba81b3775ef4",
+      "translation": "entri"
+    },
+    "ui.app.generation.4d2e8b5": {
+      "source": "Generation",
+      "sourceHash": "21e954661b943075d6bc6247d4a5be7806f4b37aefb39caa27a22981fa806cfd",
+      "translation": "Generasi"
+    },
+    "ui.app.gptRealtime2.d780270": {
+      "source": "gpt-realtime-2",
+      "sourceHash": "d309d9319327bb5e1e0c2646ccb0ee4c0054c8b0ee2fa9802c0acb2ed118da60",
+      "translation": "gpt-realtime-2"
+    },
+    "ui.app.humanApprovalRequiredThisTool.bb2ed5d": {
+      "source": "Human approval required. This tool request was logged but not executed.",
+      "sourceHash": "e5676d63e2d270980016bc2e53e9325b9dffaecc9684893cfb0b53ec82ea239d",
+      "translation": "Persetujuan manusia diperlukan. Permintaan alat ini dicatat tetapi tidak dijalankan."
+    },
+    "ui.app.importing.59067a7": {
+      "source": "Importing...",
+      "sourceHash": "4ea6f67829e0660357176876b764b147162b29f1e5ee43dba8209e8b519b2031",
+      "translation": "Mengimpor..."
+    },
+    "ui.app.importingWillReplaceTheCurrent.4aa2bfe": {
+      "source": "Importing will replace the current universe in this browser. Node IDs and metadata are regenerated on import.",
+      "sourceHash": "489a03b46e33795dabea7633748843b192df99e3adbeda993e7135e1207ef833",
+      "translation": "Mengimpor akan mengganti alam semesta saat ini di browser ini. ID node dan metadata dibuat ulang saat impor."
+    },
+    "ui.app.importSharedAtlas.82f80a3": {
+      "source": "Import shared atlas",
+      "sourceHash": "2b859535755894f0cc38f6f48956f2e23594aba3ccfdad90186af750e859cf9c",
+      "translation": "Impor atlas bersama"
+    },
+    "ui.app.importTextOutline.a5e5e7e": {
+      "source": "Import text outline",
+      "sourceHash": "788b495c31a5c54562d4324fa3f22febb8e0c7275805c0f028943c398a893a8a",
+      "translation": "Impor kerangka teks"
+    },
+    "ui.app.importTextOutline.c78f631": {
+      "source": "Import text outline",
+      "sourceHash": "f0614203a88f1c361dcca4bc8d0f0cf790649a7aa3b81d87c3c81353c4d6da41",
+      "translation": "Impor kerangka teks"
+    },
+    "ui.app.incoming.7d163fb": {
+      "source": "Incoming",
+      "sourceHash": "99b046b065ded05ed8dc45ef67ac0297f0e77f59bf2599e338bdac47e57ae04c",
+      "translation": "Masuk"
+    },
+    "ui.app.keepCurrent.bcc3ff7": {
+      "source": "Keep current",
+      "sourceHash": "b85e1b62eb470d0d00483ec05822708d1c7241d7bce0ca4247e27765a09ee12d",
+      "translation": "Pertahankan saat ini"
+    },
+    "ui.app.latestSummary.9f2db38": {
+      "source": "Latest summary",
+      "sourceHash": "9ba0057561f390a0c92e60eb8bcc90b404e7ddee514d12dd789af54c09836515",
+      "translation": "Ringkasan terbaru"
+    },
+    "ui.app.load.872c7f9": {
+      "source": "Load",
+      "sourceHash": "0714feb3401551d1bf9c55c13160354d702a800e7e9be56c3a5ca9ffe36c2a3c",
+      "translation": "Muat"
+    },
+    "ui.app.loading.f82b023": {
+      "source": "Loading...",
+      "sourceHash": "5de43ce49a5cf1a3f0456d106e3d51b57fdbfd6184ae8b9ab108330afd0144d9",
+      "translation": "Memuat..."
+    },
+    "ui.app.logOut.b7f5cb2": {
+      "source": "Log out",
+      "sourceHash": "3e35a16a0cf8fef2836f12d9d078c398e6c69cfeb24d468dd8fefba1a3b77509",
+      "translation": "Keluar"
+    },
+    "ui.app.managePayment.7caea5a": {
+      "source": "Manage payment",
+      "sourceHash": "2fdd3754609eaa3a2997cab764c8e3858e7713736bd913359f3f3881a68e4c16",
+      "translation": "Kelola pembayaran"
+    },
+    "ui.app.markdownOutlineText.4f4c059": {
+      "source": "Markdown outline text",
+      "sourceHash": "d7934b1a2c88650d3253575879af04d1518f0cf494d477350f58b8d7b97358a5",
+      "translation": "Teks kerangka Markdown"
+    },
+    "ui.app.mindatlas.94ba7f6": {
+      "source": "MindAtlas",
+      "sourceHash": "b01f306fc3f2ca05533a6020006589e5acc3761e7506cbdfd947e3749c75b8db",
+      "translation": "MindAtlas"
+    },
+    "ui.app.mindAtlasOverviewAndAi.b1eb8a4": {
+      "source": "Mind Atlas overview and AI plan",
+      "sourceHash": "58065a39fb09a51c97a0180937998b33b2c2b0f756892313a5b335c7b21185ba",
+      "translation": "Gambaran Mind Atlas dan rencana AI"
+    },
+    "ui.app.mindatlaspkgServerFolder.fd2c869": {
+      "source": ".mindatlaspkg / server folder",
+      "sourceHash": "ee214229e956dbba36e9f48aca00f6dcc02cedba18e9392f0ccb412435b9c906",
+      "translation": ".mindatlaspkg / folder server"
+    },
+    "ui.app.mindAtlasPro.cd0a834": {
+      "source": "Mind Atlas Pro",
+      "sourceHash": "774ecd4660428458b5cd829fe8bb48dabae032da0e39cd6ccf64f4483c6345fc",
+      "translation": "Mind Atlas Pro"
+    },
+    "ui.app.mindAtlasStatus.36acaea": {
+      "source": "Mind Atlas status",
+      "sourceHash": "324c4f825128c8787baf309d2b248fdb0b576596bdee10980a22db834bc7d775",
+      "translation": "Status Mind Atlas"
+    },
+    "ui.app.mobileWorkspace.35daa52": {
+      "source": "Mobile workspace",
+      "sourceHash": "3fd6da67df74fa0a98c2dc61b4420054fd823f3683d0d1a43ae3e351b8d7f477",
+      "translation": "Ruang kerja seluler"
+    },
+    "ui.app.nextRenewal.04e732d": {
+      "source": "Next renewal:",
+      "sourceHash": "efd84eb5527445a44b57465b232af5429bdb4d93f475f4e42fabd6076758e2be",
+      "translation": "Pembaruan berikutnya:"
+    },
+    "ui.app.noAiPartnerLogEntries.6435b46": {
+      "source": "No AI Partner log entries yet.",
+      "sourceHash": "4a6a885d4f03b7927994d56b9f06dd8deb632569affca9f396a0c1b2403f7ed0",
+      "translation": "Belum ada entri log AI Partner."
+    },
+    "ui.app.noCloudFilesYet.17dff2f": {
+      "source": "No cloud files yet.",
+      "sourceHash": "3089e092ef6c1b87687d54be1c3aebf9b531e4c1e3c7df123e183245cac5cf64",
+      "translation": "Belum ada file di cloud."
+    },
+    "ui.app.noCloudPackagesFound.85d460d": {
+      "source": "No cloud packages found.",
+      "sourceHash": "d413dfea7f6fa56da3c95755b25e46dbb17e92f217a977b0927b39ec84cb0162",
+      "translation": "Tidak ada paket cloud ditemukan."
+    },
+    "ui.app.nodeOperations.563b68e": {
+      "source": "Node operations",
+      "sourceHash": "517f3077e8042ec1147f72354114947f429490f4b646bfc8813a8766976bad1a",
+      "translation": "Operasi node"
+    },
+    "ui.app.nodes.af90a82": {
+      "source": "nodes /",
+      "sourceHash": "6951868081087b085f8a73b453488d74d2838bb23f3f3b6b047ff0c2b654c3bc",
+      "translation": "node /"
+    },
+    "ui.app.noNotebookSnapshotsYetMake.790ea77": {
+      "source": "No notebook snapshots yet. Make an edit and Mind Atlas will save history automatically.",
+      "sourceHash": "90043e18945a197ce6571485ed564594650e67ff727e6c4a5e15aeb3fbf66a32",
+      "translation": "Belum ada cuplikan notebook. Buat suntingan dan Mind Atlas akan menyimpan riwayat secara otomatis."
+    },
+    "ui.app.notebookTemplates.b6a2c8e": {
+      "source": "Notebook templates",
+      "sourceHash": "a41ee4933af1f2ebf82f5536d1ce1d6bfd20715ef8a8aa1dfc7e4b7046a6a781",
+      "translation": "Template notebook"
+    },
+    "ui.app.operation.c7a1622": {
+      "source": "Operation",
+      "sourceHash": "95a80aabe8ed1785816e7d04c63e8106c8800edee4f111e6f896c48070f3f250",
+      "translation": "Operasi"
+    },
+    "ui.app.overwrite.d7bec6b": {
+      "source": "Overwrite",
+      "sourceHash": "f1d0b67bd56aceee5ee013a1f5e1658262dea49232706db33f2970317cec3827",
+      "translation": "Timpa"
+    },
+    "ui.app.pasteMarkdownFromChatgptThen.e85c67c": {
+      "source": "Paste Markdown from ChatGPT, then choose how to apply it to the active node.",
+      "sourceHash": "ad509308d996c271e788640a5a6fb8da5e505795a9b942390e7ec917c5d210bf",
+      "translation": "Tempel Markdown dari ChatGPT, lalu pilih cara menerapkannya ke node aktif."
+    },
+    "ui.app.pressTheMicrophoneOnceAnd.980ef6c": {
+      "source": "Press the microphone once and stop to transcribe speech into text with low usage. Press and hold it for real-time AI conversation; the button turns red. Keep holding while you speak, and AI replies with audio. Realtime uses more of your allowance. Change the voice from Voice settings in the menu.",
+      "sourceHash": "f6cb60a5d7c588ecef12aeac52b8ae989d555399830008e3f967f852be94c85d",
+      "translation": "Tekan mikrofon sekali dan berhenti untuk menyalin ucapan menjadi teks dengan penggunaan rendah. Tekan dan tahan untuk percakapan AI real-time; tombol berubah merah. Tahan sambil berbicara, dan AI membalas dengan audio. Waktu-nyata menggunakan lebih banyak jatah Anda. Ubah suara dari Voice settings di menu."
+    },
+    "ui.app.previewMerge.113d7f4": {
+      "source": "Preview merge",
+      "sourceHash": "1bdb6140d738a76d588f6a1fd67d840db9bf067c104fa5b61833e0a20ffe0778",
+      "translation": "Pratinjau penggabungan"
+    },
+    "ui.app.previewMerge.23e68fc": {
+      "source": "Preview merge",
+      "sourceHash": "5c037821aca27a1c813e5615b365f014dc2668d8ad200a2c0ff2840c53697505",
+      "translation": "Pratinjau penggabungan"
+    },
+    "ui.app.readOnly.d5d8899": {
+      "source": "/ read-only",
+      "sourceHash": "96407811bd76cc712bf2c3f8b6206fbc5899beb07ec4a8c33f2af093d00d6b08",
+      "translation": "/ hanya-baca"
+    },
+    "ui.app.realtimeModel.dc77751": {
+      "source": "Realtime model",
+      "sourceHash": "dc876d6e57f08582f91d70448bd43a9289217e097be50f6592cb5a94d7fa029c",
+      "translation": "Model real-time"
+    },
+    "ui.app.redoCtrlY.d812f8d": {
+      "source": "Redo (Ctrl+Y)",
+      "sourceHash": "0510f01d4480502410b6c3d699ba538c43f7e0b58d19728fc8833090d0d919ab",
+      "translation": "Ulangi (Ctrl+Y)"
+    },
+    "ui.app.refresh.ca09751": {
+      "source": "Refresh",
+      "sourceHash": "7bfdefb758486444b8fac763e7cb0a28332c6bedb2af86de5e86fe124886920f",
+      "translation": "Segarkan"
+    },
+    "ui.app.refreshCloudNotebooks.28e31e2": {
+      "source": "Refresh cloud notebooks",
+      "sourceHash": "71d5b9756ad092eeb607b1f8fb56c4d39174711566ca5b65db35e38491d50cbe",
+      "translation": "Segarkan notebook cloud"
+    },
+    "ui.app.refreshNotebookHistory.f80e50c": {
+      "source": "Refresh notebook history",
+      "sourceHash": "14766c7853b7ceb4d09a7a09dc87e49baeec4f19a70e3e793552c49cba003dd7",
+      "translation": "Segarkan riwayat notebook"
+    },
+    "ui.app.rename.974d17f": {
+      "source": "Rename",
+      "sourceHash": "14ff777b690643dbce19237a6ba2bfdc150d6966d76fef9029404e73ab127cab",
+      "translation": "Ganti nama"
+    },
+    "ui.app.renameCloudFile.88036dc": {
+      "source": "Rename cloud file",
+      "sourceHash": "46bc155cfeb84bcbff848d5590387a0beca887c92347fd8b22968413cbc61809",
+      "translation": "Ganti nama file cloud"
+    },
+    "ui.app.replaceActiveNodeBody.33d9b7d": {
+      "source": "Replace active node body",
+      "sourceHash": "3dbf9d6e811436efffb192d7d337e861a7196b4db5890904105581e9da04db0c",
+      "translation": "Ganti tubuh node aktif"
+    },
+    "ui.app.replaceActiveSubtree.7e1046b": {
+      "source": "Replace active subtree",
+      "sourceHash": "f6b6d0b1b9317c34208ebba659b497829338a989f98f1018cb2e7b1b456ae7d1",
+      "translation": "Ganti subpohon aktif"
+    },
+    "ui.app.restore.eb5d724": {
+      "source": "Restore",
+      "sourceHash": "c71cd5b78170eea8296862b8348d327d2f3481041e7f0f158e6120dffc976979",
+      "translation": "Pulihkan"
+    },
+    "ui.app.restoreFromHistory.6e67ff4": {
+      "source": "Restore from history",
+      "sourceHash": "fc27d3ac84ee90fd96b2ab70fb6b6ab98bb6516dcfb946e5a30b4df00bb80a3d",
+      "translation": "Pulihkan dari riwayat"
+    },
+    "ui.app.restoreFromHistory.8ed4723": {
+      "source": "Restore from history",
+      "sourceHash": "35ca0bfdeae93877b3f444437fc759df9622eb96e1d8964eef14d6f838436299",
+      "translation": "Pulihkan dari riwayat"
+    },
+    "ui.app.restoring.f27168d": {
+      "source": "Restoring...",
+      "sourceHash": "481c48f19bb28b2be6eabd2f3cfb824a5b9660b54f69a5b3bb08886c5639f562",
+      "translation": "Memulihkan..."
+    },
+    "ui.app.reviewPayment.03db055": {
+      "source": "Review payment",
+      "sourceHash": "90d043f30d4095f959646d56fa82e1b1b53dc32d8d4ea4431de8015e4f6c84e0",
+      "translation": "Tinjau pembayaran"
+    },
+    "ui.app.save.d5d1067": {
+      "source": "Save",
+      "sourceHash": "17949df90b87456bbf795606f737c9c212747f0b2da67fee635cbd3152ac8cdc",
+      "translation": "Simpan"
+    },
+    "ui.app.saveAndRestart.76f0768": {
+      "source": "Save and restart",
+      "sourceHash": "ec87f8ddd60be16423c0f95e9f60e5fa8dd1edf74d6a52d913af8dc5069e9481",
+      "translation": "Simpan dan mulai ulang"
+    },
+    "ui.app.saveCurrentAs.18cbd57": {
+      "source": "Save current as...",
+      "sourceHash": "0127947ffa9310a99a370afd6eb6fc6e19954f1f014d01767322861b32b4305a",
+      "translation": "Simpan konten saat ini sebagai..."
+    },
+    "ui.app.saveCurrentAtlasAs.999bb1c": {
+      "source": "Save current atlas as",
+      "sourceHash": "5efe7cdf7d77493e3318be48fa3d8a4978c29189687177d50e1d531efe6556b4",
+      "translation": "Simpan atlas saat ini sebagai"
+    },
+    "ui.app.serverNotebookFolder.b9a7320": {
+      "source": "Server notebook folder",
+      "sourceHash": "b0bdb30ba4323d5d3e9c5ba9eb5ea9f5934059692bcc471ef3796096bb846624",
+      "translation": "Folder notebook server"
+    },
+    "ui.app.shared.f6ca971": {
+      "source": "/ shared",
+      "sourceHash": "71053cd0bb21d8def420fe15eff3c7610f74e5bd06fbf5dcf47a3db37203724c",
+      "translation": "/ dibagikan"
+    },
+    "ui.app.sharedMindAtlas.5a0a271": {
+      "source": "Shared Mind Atlas",
+      "sourceHash": "54a10c6cd6c272d3a26f6a6e752351f76fe700398ded20fe5682496caedeb08b",
+      "translation": "Mind Atlas Bersama"
+    },
+    "ui.app.sharedMindAtlas.feaf518": {
+      "source": "Shared Mind Atlas",
+      "sourceHash": "043f2aab59565520b03a696b25b22145fb854dea3b4d644dd8d0a549b31c834c",
+      "translation": "Mind Atlas Bersama"
+    },
+    "ui.app.signInWithGoogle.adee61b": {
+      "source": "Sign in with Google",
+      "sourceHash": "5d1645342b9c49c2f91f1fb550d6b39d1481ab38b2cbb9c899e4ef27642f4cb5",
+      "translation": "Masuk dengan Google"
+    },
+    "ui.app.sourceCodeAndLicense.ba82518": {
+      "source": "Source code and license",
+      "sourceHash": "ff5bc816b481c61b4a458072b3a4a606a719105f438de9609fef6bc3d6499e32",
+      "translation": "Kode sumber dan lisensi"
+    },
+    "ui.app.subscribeForUs10Per.ec14079": {
+      "source": "Subscribe for US$10 per month",
+      "sourceHash": "51ae3a052eebd3e1c6dea7470010706eebb60a315236c40738fc44e68439ff21",
+      "translation": "Berlangganan sebesar US$10 per bulan"
+    },
+    "ui.app.texteditor.0e3c5aa": {
+      "source": "TextEditor",
+      "sourceHash": "7184d9541ecafb8a9c8a227b9603d4c4d16496454231bdb39e0b2e7e0d8c5fe1",
+      "translation": "TextEditor"
+    },
+    "ui.app.theArrowShapedSendButton.74bf26f": {
+      "source": "The arrow-shaped Send button sends your input to the selected AI and uses your AI token balance. If you send from a selected node, that node's context is included and the reply is added as a child node. If no node is selected, the reply returns to the AI Partner log.",
+      "sourceHash": "2f05f6be94309f88d6948be5b8662213e9fda7a685366c9bd658f736a32717b7",
+      "translation": "Tombol Kirim berbentuk panah mengirimkan input Anda ke AI yang dipilih dan menggunakan saldo token AI Anda. Jika Anda mengirim dari node yang dipilih, konteks node tersebut disertakan dan balasan ditambahkan sebagai node anak. Jika tidak ada node yang dipilih, balasan kembali ke log AI Partner."
+    },
+    "ui.app.theHostedServiceCannotImport.a105a9c": {
+      "source": "The hosted service cannot import packages containing images or video. Use .mindatlas, Markdown, OPML, or FreeMind.",
+      "sourceHash": "f47e245b803ed53420b004f31890e57f5a17bc52908c4d25582844c7d1d0f861",
+      "translation": "Layanan yang dihosting tidak dapat mengimpor paket yang berisi gambar atau video. Gunakan .mindatlas, Markdown, OPML, atau FreeMind."
+    },
+    "ui.app.theNotebookWorksWithoutSigning.de5cd82": {
+      "source": "The notebook works without signing in. AI features require Google sign-in and a monthly subscription.",
+      "sourceHash": "a01e87e0660d03b36d8aa83dfacf143c9ac1188486eb8d03b672f9dfb49756ad",
+      "translation": "Notebook berfungsi tanpa masuk. Fitur AI memerlukan masuk dengan Google dan langganan bulanan."
+    },
+    "ui.app.thisLinkContainsTitlesBody.c73dc1e": {
+      "source": "This link contains titles, body text, positions, colors, textures, and tree structure only.",
+      "sourceHash": "8171938e429d5bbb43ab4d3b0391037e227ebdf479e724ae5b58b8acbd12ff3b",
+      "translation": "Tautan ini hanya berisi judul, teks isi, posisi, warna, tekstur, dan struktur pohon."
+    },
+    "ui.app.tool.0042dcc": {
+      "source": "tool:",
+      "sourceHash": "ff0b09a738c2699972c416a7695b22b05e0ce196a2b76f5765461e7e6d200610",
+      "translation": "alat:"
+    },
+    "ui.app.tutorialModeWillEraseThe.4f40f19": {
+      "source": "Tutorial mode will erase the current local atlas and restart the guided first-run flow. Continue?",
+      "sourceHash": "a1d9d1037b8d5f893c6d93befb73d494aa9901f568edb47db38621f642d9a80c",
+      "translation": "Mode tutorial akan menghapus atlas lokal saat ini dan memulai ulang panduan pertama. Lanjutkan?"
+    },
+    "ui.app.unchanged.646983b": {
+      "source": "Unchanged",
+      "sourceHash": "f6577aeeaf74c22f39ba69d5f42b145961bffc480fcd9d942741389ff197a617",
+      "translation": "Tidak berubah"
+    },
+    "ui.app.unreadNotifications.f2695f5": {
+      "source": "Unread notifications",
+      "sourceHash": "c8a41c1aae2ef801502ae249ea40a217e0a4512739b30976639c428ab719be94",
+      "translation": "Notifikasi belum dibaca"
+    },
+    "ui.app.untitled.39af82f": {
+      "source": "Untitled",
+      "sourceHash": "e22e45f484cb6d96602cd6cf86d333641915cd5e61afeaea0c8d8d447c658d2b",
+      "translation": "Tanpa judul"
+    },
+    "ui.app.us10Month.25ec82a": {
+      "source": "US$10 / month",
+      "sourceHash": "fad40ac6aff61c9a193af30c965546e8a770f6d087adf39f83a26dd2f2739e35",
+      "translation": "US$10 / bulan"
+    },
+    "ui.app.usageGuide.1809d14": {
+      "source": "Usage guide",
+      "sourceHash": "3f430d68e0000cf1cd1d1cb08372e58ccce9d317eac8bf0cad666eac261568ea",
+      "translation": "Panduan penggunaan"
+    },
+    "ui.app.voice.2d88d66": {
+      "source": "Voice",
+      "sourceHash": "a49400bcd0481383c9e86ffa0d766076d49680c99bbc8d74975e1d590d4628e4",
+      "translation": "Voice"
+    },
+    "ui.app.voiceSettings.2b60c84": {
+      "source": "Voice settings",
+      "sourceHash": "084a435b245065de31a678d898eb36f75788991d842932a27fca0d0398f5e731",
+      "translation": "Pengaturan Voice"
+    },
+    "ui.app.voiceSettings.ca676ab": {
+      "source": "Voice settings",
+      "sourceHash": "d251afc79d54a71cc7900e2fb164879c0ebff1ac0fe92757b212d8e196c4b130",
+      "translation": "Pengaturan Voice"
+    },
+    "ui.app.workspacePanel.8b247f7": {
+      "source": "Workspace panel",
+      "sourceHash": "df6900be00d5e3dc91c8661138e7faae27a66c9bfa0fc126938e49d634125947",
+      "translation": "Panel ruang kerja"
+    },
+    "ui.commandDock.ai.3b06fd0": {
+      "source": "AI",
+      "sourceHash": "c2405228cbb2b6d59acd637d35e658efa0723b82c83ff10117c1b219007a7d94",
+      "translation": "AI"
+    },
+    "ui.commandDock.aiContextPreview.f27df14": {
+      "source": "AI context preview",
+      "sourceHash": "c687af847eef791e29b89b255618e6bf6bc27bb64cc76994316586de3b869725",
+      "translation": "Pratinjau konteks AI"
+    },
+    "ui.commandDock.aiExecutionMode.ddada7f": {
+      "source": "AI execution mode",
+      "sourceHash": "31eb4ed73625eb6396e4e706e09f9bcd06eda4849c1b193a4dac12deceb6d38c",
+      "translation": "Mode eksekusi AI"
+    },
+    "ui.commandDock.askAiFromThisLocation.945e898": {
+      "source": "Ask AI from this location",
+      "sourceHash": "2264255a678224f773e4aae967aca1d598c3dca49b0b33b05acd8f80c5b0d871",
+      "translation": "Tanya AI dari lokasi ini"
+    },
+    "ui.commandDock.askClaudeCodeFromThis.262b580": {
+      "source": "Ask Claude Code from this location",
+      "sourceHash": "50ae8c2b04fde7dc868ae957485d2c44998bec6ca9b3c51749c0a1c48190f9c5",
+      "translation": "Tanya Claude Code dari lokasi ini"
+    },
+    "ui.commandDock.askCodexFromThisLocation.657b42d": {
+      "source": "Ask Codex from this location",
+      "sourceHash": "b9d513096af71259e45a5ef2face8a71eeca8a3884bec7019173443441416562",
+      "translation": "Tanya Codex dari lokasi ini"
+    },
+    "ui.commandDock.askOpenclawFromThisLocation.25b695e": {
+      "source": "Ask OpenClaw from this location",
+      "sourceHash": "3424b748a8daad8812fec902ee027f0a1d90a7f09739c778ccfa994c5b5707f4",
+      "translation": "Tanya OpenClaw dari lokasi ini"
+    },
+    "ui.commandDock.assistant.4ee61c7": {
+      "source": "Assistant",
+      "sourceHash": "ce1cf18347450fdf08169a745675934633987c3e4c44a7a05a72f608758fb263",
+      "translation": "Asisten"
+    },
+    "ui.commandDock.auto.c9ba5c5": {
+      "source": "auto",
+      "sourceHash": "fcaa353e6e5ed466a432a59350ded4e9aa33e8ab94a7d485bcc7d8040712bf25",
+      "translation": "otomatis"
+    },
+    "ui.commandDock.autoContextPreview.e7193a6": {
+      "source": "Auto context preview",
+      "sourceHash": "9071e8ec768d135f7128cf5f76f3eb6de359f961b484a995979d73abf7c0f3f3",
+      "translation": "Pratinjau konteks otomatis"
+    },
+    "ui.commandDock.autoContinuesOrForksThe.be524d9": {
+      "source": "Auto continues or forks the agent session recorded on this branch. New forces a fresh session for the next run only.",
+      "sourceHash": "2f92d6523bc48d4b46115ceccf77633950ff583d50892a994f256aade196270c",
+      "translation": "Otomatis melanjutkan atau mencabang sesi agen yang tercatat di cabang ini. Baru memaksa sesi baru hanya untuk eksekusi berikutnya."
+    },
+    "ui.commandDock.chatFromThisLocation.03514a3": {
+      "source": "Chat from this location",
+      "sourceHash": "fb329e26c38d6d15565de7255253558eb710136f914c128a370bfb3dcea5127a",
+      "translation": "Chat dari lokasi ini"
+    },
+    "ui.commandDock.chatSettings.cebd934": {
+      "source": "Chat settings",
+      "sourceHash": "a34c5048da63f22ebc3b42d36dea9bedd4c9450fc565d2a4f2d99e09c7924591",
+      "translation": "Pengaturan chat"
+    },
+    "ui.commandDock.chooseTheCodeBackendFor.2b5180b": {
+      "source": "Choose the code backend for this node-anchored run.",
+      "sourceHash": "42fd00723801ba3949da3d605518a5e59aed5cc37aaac218c1068b414db47459",
+      "translation": "Pilih backend kode untuk eksekusi yang terikat node ini."
+    },
+    "ui.commandDock.claudeCode.432aa3f": {
+      "source": "Claude Code",
+      "sourceHash": "24342965eda6ca05594ee7600d4f63411175bac735d287b9f7b79705b64e7c1b",
+      "translation": "Claude Code"
+    },
+    "ui.commandDock.claudeCodeEffortLeaveDefault.8357b80": {
+      "source": "Claude Code --effort. Leave default to let the bridge and CLI decide.",
+      "sourceHash": "6fe5188f25e11a998901dcda88e1b50bf2d8215d6550f5082d901f30584ff01b",
+      "translation": "Claude Code --effort. Biarkan default untuk membiarkan bridge dan CLI memutuskan."
+    },
+    "ui.commandDock.claudeCodePermissionModeThis.83aebfd": {
+      "source": "Claude Code --permission-mode. This is not the same as Codex OS sandboxing.",
+      "sourceHash": "1897c6aeeb6a26ac8c94fa1c45d4f4e8f85a91809d843af4261862999d1bc8a0",
+      "translation": "Claude Code --permission-mode. Ini tidak sama dengan sandboxing OS Codex."
+    },
+    "ui.commandDock.claudeCodeProviderAndModel.01362ae": {
+      "source": "Claude Code provider and model preset",
+      "sourceHash": "ad63c4eb523c42dd99f8cd80e0e411ace9c1977f8dae959de41fa2d2e3d14811",
+      "translation": "Prasetel penyedia dan model Claude Code"
+    },
+    "ui.commandDock.closeContextPreview.eb189c5": {
+      "source": "Close context preview",
+      "sourceHash": "edb607f8ba31e17cb9d584aa65fa9e6945d72fb5bbf44953a0f4a18bba1a8bc4",
+      "translation": "Tutup pratinjau konteks"
+    },
+    "ui.commandDock.code.da19690": {
+      "source": "Code",
+      "sourceHash": "f97170105c675271c1995667f4e842dd057422b6cbfd66fdef0c9b076b106c73",
+      "translation": "Kode"
+    },
+    "ui.commandDock.codeSettings.f6c2cc0": {
+      "source": "Code settings",
+      "sourceHash": "82a73ae81e28f4ccc8983898f19c1633615b9081401a090b102049d629662369",
+      "translation": "Pengaturan kode"
+    },
+    "ui.commandDock.codex.ec3dea3": {
+      "source": "Codex",
+      "sourceHash": "73cf336654877240bbb6248717adbfe859ec6af9bdc6dcdd7d58a5857a42097e",
+      "translation": "Codex"
+    },
+    "ui.commandDock.conversationReplayThisBranch.984299d": {
+      "source": "Conversation replay (this branch)",
+      "sourceHash": "eecccb19bb310a7a7fe6916cfa12b952332adf5ff41dfd41581e7bbb9d6d3794",
+      "translation": "Putar ulang percakapan (cabang ini)"
+    },
+    "ui.commandDock.createAChildNodeHere.89972dc": {
+      "source": "Create a child node here",
+      "sourceHash": "af2cd93433c2391eb4ad79a57b3733cf7aa0c37d59d1512d87f1943ac14f15ba",
+      "translation": "Buat node anak di sini"
+    },
+    "ui.commandDock.custom.f808ea5": {
+      "source": "Custom",
+      "sourceHash": "b20caf694d9a7692c84f5787d5ce3f96d64677a04bbbf519ed6a95a525f420fc",
+      "translation": "Kustom"
+    },
+    "ui.commandDock.effort.5dc27d4": {
+      "source": "Effort",
+      "sourceHash": "31d26b59c532e4f273fd79c52c7612dd69e377a97ec45883528ad6618ec797fc",
+      "translation": "Upaya"
+    },
+    "ui.commandDock.extraHigh.6818406": {
+      "source": "extra high",
+      "sourceHash": "86c8f4e64b1fb896886d9911a8a81d143e1d96e4873a0d58018eff99b21827fa",
+      "translation": "sangat tinggi"
+    },
+    "ui.commandDock.model.11440c3": {
+      "source": "Model",
+      "sourceHash": "7471ab5f783d96ee091b03bc2586793c27bc078c2fd3306477cf690b23c2b25f",
+      "translation": "Model"
+    },
+    "ui.commandDock.new.46a6974": {
+      "source": "new",
+      "sourceHash": "aedb0f96eefd242995db73770ac67a6beda891d45768ec0206065734ca241343",
+      "translation": "baru"
+    },
+    "ui.commandDock.notConfigured.1aab8de": {
+      "source": "(not configured)",
+      "sourceHash": "72cf71dce73fbf460b547336ee49079a6d81b8572c06c79221e3eeb8110a1268",
+      "translation": "(belum dikonfigurasi)"
+    },
+    "ui.commandDock.notebookContext.4fd3df2": {
+      "source": "Notebook context",
+      "sourceHash": "a83b8a205a33979801800a4e1f15b7a9a3d6f5398032fb441b40a85d52e68f71",
+      "translation": "Konteks notebook"
+    },
+    "ui.commandDock.openclawModel.dabd08b": {
+      "source": "OpenClaw model",
+      "sourceHash": "7cf1142c15f9cd9d5685ce2ca67c393f941def65ffc54d3fc046a3f56aba6a7b",
+      "translation": "Model OpenClaw"
+    },
+    "ui.commandDock.openclawSettings.e0316e3": {
+      "source": "OpenClaw settings",
+      "sourceHash": "b867ffe146e274db222a45f9be3fb0e0dea4ec226161b0eafb078b30a13c35cb",
+      "translation": "Pengaturan OpenClaw"
+    },
+    "ui.commandDock.optionalProjectPath.6fcecc8": {
+      "source": "optional project path",
+      "sourceHash": "58d4008624ce51e92319637335c9bddaebc45a1414597be4188017095cf0b24d",
+      "translation": "jalur proyek opsional"
+    },
+    "ui.commandDock.permission.3f423c8": {
+      "source": "Permission",
+      "sourceHash": "5294f94555b318b8b0aa8aef30a986df9b06ee768e28a0ae61ae49120062193b",
+      "translation": "Izin"
+    },
+    "ui.commandDock.preset.a4b55c6": {
+      "source": "Preset",
+      "sourceHash": "162a1b12adf79b0ce33f19a94857ddd9a62ad4fe5fa1dbc56ca8531ab947234a",
+      "translation": "Prasetel"
+    },
+    "ui.commandDock.previewTheAutoAssembledAi.78a3c87": {
+      "source": "Preview the auto-assembled AI context",
+      "sourceHash": "617431c9393c943567d688bbfc6536e28418d86a6d9004fa89fd78f73ded47b8",
+      "translation": "Pratinjau konteks AI yang dirakit otomatis"
+    },
+    "ui.commandDock.readOnly.58c35aa": {
+      "source": "read only",
+      "sourceHash": "360279fa0a53b1901492ee502a28afd04cb3abda8c63747e5114f6654301994e",
+      "translation": "hanya baca"
+    },
+    "ui.commandDock.reInstructionInput.3c3e902": {
+      "source": "Re-instruction input",
+      "sourceHash": "7849cf952f75d33e9ec4d1d48af89d1e50678f9833d091b7280d3c6fd00a9c26",
+      "translation": "Input instruksi ulang"
+    },
+    "ui.commandDock.sandbox.a511d77": {
+      "source": "Sandbox",
+      "sourceHash": "98aa9977b840b1d233e2e33b2e669325773fd3cb9492f766e4ae61b1ae409d26",
+      "translation": "Kotak pasir"
+    },
+    "ui.commandDock.sendInstruction.797c542": {
+      "source": "Send instruction",
+      "sourceHash": "db98bf3ae20baf0e154e33a3218455a789fd63484a6aa794bdb3d87396467923",
+      "translation": "Kirim instruksi"
+    },
+    "ui.commandDock.service.dcdd047": {
+      "source": "Service",
+      "sourceHash": "a41bf75697c599077988b5e3df6acc0eceb50dfe03f2cb00a6a740542dd1ddcd",
+      "translation": "Layanan"
+    },
+    "ui.commandDock.session.a711189": {
+      "source": "Session",
+      "sourceHash": "709d23fefa67c8fe5be95af9de1595ad6e60c73079bef9a0857713545c0ee3ee",
+      "translation": "Sesi"
+    },
+    "ui.commandDock.startDictationOrHoldFor.da4fda2": {
+      "source": "Start dictation or hold for Voice Partner",
+      "sourceHash": "f3e1b76564dafe656a70573284c5c59a58247a28fdb7cfbbdcd182e03ac6c5ed",
+      "translation": "Mulai dikte atau tahan untuk Voice Partner"
+    },
+    "ui.commandDock.stopVoicePartnerResponse.f6b2a64": {
+      "source": "Stop Voice Partner response",
+      "sourceHash": "ef3bd1bac83ee9b8f9a49193e3aba56ac7e3daf5eaefa2ab904ec75f5d521f99",
+      "translation": "Hentikan respons Voice Partner"
+    },
+    "ui.commandDock.trimmedToBudget.c9aeaa4": {
+      "source": "/ trimmed to budget",
+      "sourceHash": "c20cbe8accc864e9480006161487eb526a295cc2eeb0b8c6f49b3069ede1c61f",
+      "translation": "/ dipotong sesuai anggaran"
+    },
+    "ui.commandDock.trusted.e48f61e": {
+      "source": "trusted",
+      "sourceHash": "3ce8ad216d280c1264caa1dd4b641513ade2ad4e1dea6d5c71e784fef776404d",
+      "translation": "tepercaya"
+    },
+    "ui.commandDock.user.761c4c4": {
+      "source": "User",
+      "sourceHash": "b38a2de2c791dd6836e25c1900e4508148bab52a63efc25cb247a550e0ea0aa9",
+      "translation": "Pengguna"
+    },
+    "ui.commandDock.voicePartnerPushToTalk.4a830b4": {
+      "source": "Voice Partner push-to-talk or dictation",
+      "sourceHash": "dad472a134dd765d33c6af0cb512f729d4b02357a6fa82fde339369c400bb5e2",
+      "translation": "Voice Partner push-to-talk atau dikte"
+    },
+    "ui.commandDock.workRoot.4eeba87": {
+      "source": "Work root",
+      "sourceHash": "0e0c2068cebc760fa462bd67401a9df726076f3216465af1cf6a0b3b1137cd65",
+      "translation": "Root kerja"
+    },
+    "ui.commandDock.workspace.27b549c": {
+      "source": "workspace",
+      "sourceHash": "762571f0635ff83967dafbe13040bc4bafde5fe32c008dd8881ca9f2f48ade52",
+      "translation": "ruang kerja"
+    },
+    "ui.commandDock.workspaceFromSelectedNodeOr.f430333": {
+      "source": "workspace: from selected node or bridge",
+      "sourceHash": "c2825ae3d9f0c7892b670e7f3f4a6d1d913f472f86b56f15dd7fd7c7f4b7425a",
+      "translation": "ruang kerja: dari node yang dipilih atau bridge"
+    },
+    "ui.eventStrip.recentEvents.50a6756": {
+      "source": "Recent events",
+      "sourceHash": "f3d40bcc8bb20eb9790c7ae8560ba6c0ecc88fdf18eff92b4f5367ae4736a6d1",
+      "translation": "Kejadian terbaru"
+    },
+    "ui.eventStrip.recentEvents.5a8aca9": {
+      "source": "Recent events",
+      "sourceHash": "2495710f2a4c636dae5bb3b4bfd0ff93f393c5558ce7df77c898786ee19c6caa",
+      "translation": "Kejadian terbaru"
+    },
+    "ui.focusPanel.1d.0a6d11e": {
+      "source": "+1d",
+      "sourceHash": "64084c6eeaf4d7a7582260ceaafc072f46510189a4063380776a3ba30ebe0a02",
+      "translation": "+1h"
+    },
+    "ui.focusPanel.atlasMemo.b78ca47": {
+      "source": "Atlas memo.",
+      "sourceHash": "62a144bae6de281d844888ba5c73f67cee6350eac7dc1537bfaf0f308ec37be3",
+      "translation": "Memo atlas."
+    },
+    "ui.focusPanel.attachFile.56c4761": {
+      "source": "Attach file",
+      "sourceHash": "6350dfce6b59fd8589baa2d94715f0415de732660beb77774aeec11fa8d667df",
+      "translation": "Lampirkan file"
+    },
+    "ui.focusPanel.attachmentPreview.975b51d": {
+      "source": "Attachment preview",
+      "sourceHash": "90a249afb6c5d64b7dd8bd056d8b72471d139301458038940241d38b2c9651a3",
+      "translation": "Pratinjau lampiran"
+    },
+    "ui.focusPanel.bands.2c9011b": {
+      "source": "Bands",
+      "sourceHash": "0c9e8744d5fe7026f841d42aa3a5882b6db2b06a79e124c1c884f33f4fb7786b",
+      "translation": "Pita"
+    },
+    "ui.focusPanel.cell.008b6bc": {
+      "source": "Cell",
+      "sourceHash": "0b56dff456d2ac70271ecd09f8b465cc0ac20e24924c8b43eb3c1f7b01f94436",
+      "translation": "Sel"
+    },
+    "ui.focusPanel.clearReminder.9ed5d2e": {
+      "source": "Clear reminder",
+      "sourceHash": "2c4115baa0ded14404f377000f5dd1473901a65ba39aab3260777aaf29b0d154",
+      "translation": "Hapus pengingat"
+    },
+    "ui.focusPanel.close.f433a4a": {
+      "source": "Close",
+      "sourceHash": "81ac96992f6b4d965b25fdd3c16cbd8f2427a768a4efb096d3d99954606ab5b7",
+      "translation": "Tutup"
+    },
+    "ui.focusPanel.color.18eb1f5": {
+      "source": "Color",
+      "sourceHash": "3a03484633756e1a87936a465cfa0274dcc0d9ebf69afc595dea698abcd38bc7",
+      "translation": "Warna"
+    },
+    "ui.focusPanel.confirmEditing.c59b1e6": {
+      "source": "Confirm editing",
+      "sourceHash": "f670108f5600b040afab9e3b06a3172fe7714e26bee1557460b987179178d1f8",
+      "translation": "Konfirmasi pengeditan"
+    },
+    "ui.focusPanel.craters.7913b70": {
+      "source": "Craters",
+      "sourceHash": "6b837289a3edaaec688427f66c1767c1f8a30cb08209f85be777b146b959f345",
+      "translation": "Kawah"
+    },
+    "ui.focusPanel.current.414194e": {
+      "source": "Current",
+      "sourceHash": "b341499f1a92613a5c0d55b59ddfc595d6332a96a1166aa75ca6fb7159d21e67",
+      "translation": "Saat ini"
+    },
+    "ui.focusPanel.date.5c8a1a4": {
+      "source": "Date",
+      "sourceHash": "a0f90bc73a981920ccbbbc3773fa51ed8e13dbb859f65398430a3f1b8f69123a",
+      "translation": "Tanggal"
+    },
+    "ui.focusPanel.editor.9d99465": {
+      "source": "Editor",
+      "sourceHash": "9e2cd9cb6c4afac7d2b8fd32e8c346b33a2073284d2908a425c96669396895f6",
+      "translation": "Editor"
+    },
+    "ui.focusPanel.f.ad8d3ac": {
+      "source": "F",
+      "sourceHash": "da3608daae49cef03027261e681b3988d1f497d7fcd83ed44eaf1fd47a2ff899",
+      "translation": "F"
+    },
+    "ui.focusPanel.focusedContext.924c0f6": {
+      "source": "Focused context",
+      "sourceHash": "529bd69889a0dca566e7856197c60c7fabd30845ad137b32df7369bd4f801ccc",
+      "translation": "Konteks terfokus"
+    },
+    "ui.focusPanel.freckles.9a5cf56": {
+      "source": "Freckles",
+      "sourceHash": "6e9b9e256e7568a6fcba481b817c6c7ce7479545fbe1bde0d574ac33f95eee54",
+      "translation": "Bintik"
+    },
+    "ui.focusPanel.m.6a73fe5": {
+      "source": "M",
+      "sourceHash": "c72b1956aa895d715398ed0685c610be43cdb53deadcb93c04280ceb68d0e36b",
+      "translation": "M"
+    },
+    "ui.focusPanel.memoDetailsOrContext.0f619ba": {
+      "source": "Memo, details, or context.",
+      "sourceHash": "8a2027a5503c51649d1f2ba06558664fee5e195bba5670e8079f3071e425fb75",
+      "translation": "Memo, detail, atau konteks."
+    },
+    "ui.focusPanel.mist.ec72526": {
+      "source": "Mist",
+      "sourceHash": "76a43224acd35e2256765e7a4fb637a758c653c437449d773e4338899b0efe9d",
+      "translation": "Kabut"
+    },
+    "ui.focusPanel.nextMonth.854600a": {
+      "source": "Next month",
+      "sourceHash": "5ff010c5282e15892343c840df3fcfa862d3a7ebe0d69bbf6d37e2f9ab08f122",
+      "translation": "Bulan depan"
+    },
+    "ui.focusPanel.nodeBody.eeba394": {
+      "source": "Node body",
+      "sourceHash": "7eec41de38a30e13bc0487c4508e2bc4fd97cccc93918441c41179e8b86350b2",
+      "translation": "Isi node"
+    },
+    "ui.focusPanel.nodeColor.411bcba": {
+      "source": "Node color",
+      "sourceHash": "4311be676bbab8235405f3d5fd83c1c08ae97584ec9b01a20e878054f148d130",
+      "translation": "Warna node"
+    },
+    "ui.focusPanel.nodeTexture.85123ea": {
+      "source": "Node texture",
+      "sourceHash": "d437d1922eac882d3daca9590f53f03300ede9ca4a94400189babe6d34e56070",
+      "translation": "Tekstur node"
+    },
+    "ui.focusPanel.nodeTitle.1768f3e": {
+      "source": "Node title",
+      "sourceHash": "b1f8531ae52b6a81dd4a89a164cc1e098e0655119461d5a4168ca613a4ff5afb",
+      "translation": "Judul node"
+    },
+    "ui.focusPanel.nodeTitle.1847702": {
+      "source": "Node title",
+      "sourceHash": "7060db46d894538118dae354e71c70b0d1dad62fa595bc037e1d102d5b9e17b7",
+      "translation": "Judul node"
+    },
+    "ui.focusPanel.noPreview.f4423c3": {
+      "source": "No preview",
+      "sourceHash": "cc9d1b301906992f448c457362c4c9367b717ff97e0d5590b0191684247c8db5",
+      "translation": "Tidak ada pratinjau"
+    },
+    "ui.focusPanel.noReminder.3a15176": {
+      "source": "No reminder",
+      "sourceHash": "3f457eaf04fb664e994a133d56d6fa62e8f10e45422bcb99846f45e71f54c38a",
+      "translation": "Tidak ada pengingat"
+    },
+    "ui.focusPanel.now.95aec20": {
+      "source": "Now",
+      "sourceHash": "2708831e7a799f716c9b2158303d91046e18c5c67de5761d8697e1e21df45a36",
+      "translation": "Sekarang"
+    },
+    "ui.focusPanel.openReminderMenu.1375908": {
+      "source": "Open reminder menu",
+      "sourceHash": "3c493779fdd968737b89c1c7b9ffe528cb231757d59c709ab4caeea8e30918e5",
+      "translation": "Buka menu pengingat"
+    },
+    "ui.focusPanel.openSurfaceMenu.e5bc0cf": {
+      "source": "Open surface menu",
+      "sourceHash": "f3753aef40c8351a513174dba65b2c5691b5487621c33bea60e6d13b119fa25a",
+      "translation": "Buka menu permukaan"
+    },
+    "ui.focusPanel.previousMonth.6aef243": {
+      "source": "Previous month",
+      "sourceHash": "a66573b8637dd60dd3194ce53422a64d5682e840f0dc1a993e70234798e3ba91",
+      "translation": "Bulan sebelumnya"
+    },
+    "ui.focusPanel.quickReminderOffsets.30b5819": {
+      "source": "Quick reminder offsets",
+      "sourceHash": "362363b7e92c280323213c9b79a19e955147964096931844485b9ba975b24877",
+      "translation": "Offset pengingat cepat"
+    },
+    "ui.focusPanel.reminder.f93016d": {
+      "source": "Reminder",
+      "sourceHash": "9fb02efddc55312569d6e786a3b97a1f3664f750ff9e3d05c3ad3fa6152331ec",
+      "translation": "Pengingat"
+    },
+    "ui.focusPanel.reminderCalendar.eb37781": {
+      "source": "Reminder calendar",
+      "sourceHash": "1afc9799f7463ceaf7ff5012dda67f4f75cccbbbea638301ee30a6af0e9fea78",
+      "translation": "Kalender pengingat"
+    },
+    "ui.focusPanel.reminderSettings.55472a2": {
+      "source": "Reminder settings",
+      "sourceHash": "bc4c81a61b8e7e0139ac4ff3ad8883d2a1338310d3d993f8f465c93ea7709b51",
+      "translation": "Pengaturan pengingat"
+    },
+    "ui.focusPanel.reminderTime.964742a": {
+      "source": "Reminder time",
+      "sourceHash": "f56694642a0af885dc7b97d6dffe07d9094945a30ade18d42d8240ad3b338d83",
+      "translation": "Waktu pengingat"
+    },
+    "ui.focusPanel.s.68b3145": {
+      "source": "S",
+      "sourceHash": "cfab589c29f60cbfa1bc06b6b1af412c4686b3b8fdf02f1954428d1a18aa6c59",
+      "translation": "S"
+    },
+    "ui.focusPanel.setReminder.baf3274": {
+      "source": "Set reminder",
+      "sourceHash": "4578381e5a59ce856b8a258d24dc1b253293838957102e838307d1f23c94c602",
+      "translation": "Atur pengingat"
+    },
+    "ui.focusPanel.setReminder.d405db3": {
+      "source": "Set reminder",
+      "sourceHash": "795a8ecf41a481bdd987daaf632125822fe411f719ce4f35b12b808241b40a4d",
+      "translation": "Atur pengingat"
+    },
+    "ui.focusPanel.speckled.476d6ee": {
+      "source": "Speckled",
+      "sourceHash": "82fa5e13bb8e79916d16ee94194e8f20f212206f68f304d3d232e2fbe768400a",
+      "translation": "Bintik"
+    },
+    "ui.focusPanel.storedAsMetadata.0e06182": {
+      "source": "Stored as metadata:",
+      "sourceHash": "9a9fb0bf077deeb82ff2ced324fe42d79a006d9369ff56fce88fb37aecf510a7",
+      "translation": "Disimpan sebagai metadata:"
+    },
+    "ui.focusPanel.t.618eec3": {
+      "source": "T",
+      "sourceHash": "16ff0fb5a037e86089dff81c4b1bc85fef319366317cb4ed1fcd614134ced394",
+      "translation": "R"
+    },
+    "ui.focusPanel.texture.1bcaf49": {
+      "source": "Texture",
+      "sourceHash": "ff3255e3e592ae00bef5deb612c219d07c7b77b3e74a34fb5defc011ca5b5ce1",
+      "translation": "Tekstur"
+    },
+    "ui.focusPanel.w.0ecfe2c": {
+      "source": "W",
+      "sourceHash": "4737a439acac4e21768b2bc11c0a97192bb2dc363d2db2c123b45baaa496b929",
+      "translation": "K"
+    },
+    "ui.minimap.universeMinimap.fb99fc8": {
+      "source": "Universe minimap",
+      "sourceHash": "c33c3abc1c6d0554483a4c877793b7c39e4e6657fa362c085db2990521486cf4",
+      "translation": "Minimap semesta"
+    },
+    "ui.outlineEditor.addChild.eb18105": {
+      "source": "Add child",
+      "sourceHash": "b31379c9b59f37985e3068d8467aed0f7a6bcc9f995a1068efc41648157280e6",
+      "translation": "Tambah anak"
+    },
+    "ui.outlineEditor.addChildNode.9ac1af1": {
+      "source": "Add child node",
+      "sourceHash": "daf6df82b2dc75cbbfb34b25501cbbf4fbdde99ff00767cc6be711ecf7311362",
+      "translation": "Tambah node anak"
+    },
+    "ui.outlineEditor.addSibling.d0210ae": {
+      "source": "Add sibling",
+      "sourceHash": "b5fcddcd751b2698aa2f7eccc4aaaa9534b8f4db85a2db59e0179d181557c236",
+      "translation": "Tambah saudara"
+    },
+    "ui.outlineEditor.addSiblingNode.4b7e5f1": {
+      "source": "Add sibling node",
+      "sourceHash": "7f40a2401c57400261efaa1f8eaa271146d8532cc12ebf11197f7281dfc8345e",
+      "translation": "Tambah node saudara"
+    },
+    "ui.outlineEditor.body.3b37e9a": {
+      "source": "Body",
+      "sourceHash": "acc95eec1d0e2decb22ce69bfa54b9cae4c1bc0a2504626746d88200bfffb3aa",
+      "translation": "Isi"
+    },
+    "ui.outlineEditor.close.b15eba1": {
+      "source": "Close",
+      "sourceHash": "92c37a71d560e25cba1688f8353397c716614fd692859ea6b406ffa418c4caa0",
+      "translation": "Tutup"
+    },
+    "ui.outlineEditor.closeOutline.1c6a641": {
+      "source": "Close outline",
+      "sourceHash": "d86c5d0c605b29ef90988112a17f324399c1e2e92741f5d911f4d4feb48b65c2",
+      "translation": "Tutup kerangka"
+    },
+    "ui.outlineEditor.collapseAll.f5e2a42": {
+      "source": "Collapse all",
+      "sourceHash": "84dbd9cda95720d2d91bed8994fd5b567f027fe7b45a0b87041eff79f5491a1d",
+      "translation": "Ciutkan semua"
+    },
+    "ui.outlineEditor.collapsed.19114ba": {
+      "source": "collapsed",
+      "sourceHash": "2be704065f528f894900fcc6f365fba6a641ab639c20c8dcf437c372d5bfb9d5",
+      "translation": "diciutkan"
+    },
+    "ui.outlineEditor.collapseNode.a715f06": {
+      "source": "Collapse node",
+      "sourceHash": "8f668a133e345c03d8037106b3ced71583b61729d7deaac2e753a725376ec4df",
+      "translation": "Ciutkan node"
+    },
+    "ui.outlineEditor.copy.48a22f3": {
+      "source": "Copy",
+      "sourceHash": "e5208e169004501c27c4d68549e6e68f0ac5c76c126c6503bc7ba7f4deef722d",
+      "translation": "Salin"
+    },
+    "ui.outlineEditor.copyWithContext.b148fa6": {
+      "source": "Copy with context",
+      "sourceHash": "4da08c447a8ac2f8fedc83d9c7f4ab20935eeea0430013ded6f52336991fa29e",
+      "translation": "Salin dengan konteks"
+    },
+    "ui.outlineEditor.deleteNode.1c01e20": {
+      "source": "Delete node",
+      "sourceHash": "6424129019730df768489d995925c1fb041f33660afc64fa549cb3264cc9de03",
+      "translation": "Hapus node"
+    },
+    "ui.outlineEditor.expandAll.01dc620": {
+      "source": "Expand all",
+      "sourceHash": "3836841e75571522865b2384d1adcd3afbfd58d6eb4063e43837c63e327b1d50",
+      "translation": "Perluas semua"
+    },
+    "ui.outlineEditor.expandNode.1352475": {
+      "source": "Expand node",
+      "sourceHash": "4ac806cbcdcf38cb987ef68c863a03d47a8f610080e50a3a3a7e047f45a2225c",
+      "translation": "Perluas node"
+    },
+    "ui.outlineEditor.indentNode.cea22b8": {
+      "source": "Indent node",
+      "sourceHash": "3b8dffd286fd2b49594b16e648437c4b2df2a1e23b89be4232a40321b426fad2",
+      "translation": "Tambah indentasi node"
+    },
+    "ui.outlineEditor.mindAtlasOutlineEditor.9063b07": {
+      "source": "Mind Atlas outline editor",
+      "sourceHash": "030b54a566f531caa59ef7d73a72a1ae80fb2c8e730f39a43b4f26ce2a954ff4",
+      "translation": "Editor kerangka Mind Atlas"
+    },
+    "ui.outlineEditor.moveNodeDown.4e79f57": {
+      "source": "Move node down",
+      "sourceHash": "35d558b0e66ce186bd201e59e472572613e27797657b7cdd10ac7b7523328822",
+      "translation": "Pindahkan node ke bawah"
+    },
+    "ui.outlineEditor.moveNodeUp.3ecda81": {
+      "source": "Move node up",
+      "sourceHash": "00d131bfdcb36f9c436e2bc22fb019ac80f5f12dfa60286649e6aab82767c5d0",
+      "translation": "Pindahkan node ke atas"
+    },
+    "ui.outlineEditor.nodeBody.68bf85f": {
+      "source": "Node body",
+      "sourceHash": "ad46c0f1934cf79249fbdf4813ec6de90b35ed164edf04dfe33d5ad2b25c7bad",
+      "translation": "Tubuh node"
+    },
+    "ui.outlineEditor.nodeTitle.0a17b46": {
+      "source": "Node title",
+      "sourceHash": "299f955381f8400d22e8e129f814f0467332c8644eb484e6907f753acd928f93",
+      "translation": "Judul node"
+    },
+    "ui.outlineEditor.outdentNode.30df0cf": {
+      "source": "Outdent node",
+      "sourceHash": "2b2bc2a07b18dcf1eca3c73e84b1535c8a90d49a4019f5cc6de2be8ce7e670af",
+      "translation": "Kurangi indentasi node"
+    },
+    "ui.outlineEditor.outlineEditControls.a18584b": {
+      "source": "Outline edit controls",
+      "sourceHash": "5cabe11afef09c0fb73c8708a79ce48ccd8e03105bca887d90b67013133b08a8",
+      "translation": "Kontrol edit kerangka"
+    },
+    "ui.outlineEditor.textEditor.7ce32d9": {
+      "source": "Text Editor",
+      "sourceHash": "f258f769274ba609dbfd515775d247cd3f5cddf12563b5eb6793025941624e6e",
+      "translation": "Editor Teks"
+    },
+    "ui.providerUsagePanel.aiProviderUsage.3b4868f": {
+      "source": "AI provider usage",
+      "sourceHash": "5dd89feadabd284cfa4ae87c83bd740fa959bb6abf679c6574df79843918d86e",
+      "translation": "Penggunaan penyedia AI"
+    },
+    "ui.providerUsagePanel.balance.bd9d2f7": {
+      "source": "BALANCE",
+      "sourceHash": "cd601dcbfe699d103d398e8de682648cb32b28356b20e02a56d68f0bd28577ed",
+      "translation": "SALDO"
+    },
+    "ui.providerUsagePanel.nA.5c37d2e": {
+      "source": "N/A",
+      "sourceHash": "0e86e085f99bbe4577c355df9d47476240270aa8b85e894b591e8cfc376c1ac6",
+      "translation": "N/A"
+    },
+    "ui.providerUsagePanel.noMetricsSelected.3a18c33": {
+      "source": "NO METRICS SELECTED",
+      "sourceHash": "302c46a0ea3d6ba8a19e6d2dc3c90a248a0b3ef12d576d3c33887ccf656f96af",
+      "translation": "TIDAK ADA METRIK DIPILIH"
+    },
+    "ui.providerUsagePanel.offline.398a963": {
+      "source": "OFFLINE",
+      "sourceHash": "f2a82464f5ccb17a18e8cdfc4f2602e33051032ff4114db41db6ec73c11db4d4",
+      "translation": "OFFLINE"
+    },
+    "ui.providerUsagePanel.providerUsageMetricSelection.8b11260": {
+      "source": "Provider usage metric selection",
+      "sourceHash": "af9dabc04ce53f7042b8b43dc197ce70c465ecbe96fe74662f831535d95b1df3",
+      "translation": "Pemilihan metrik penggunaan penyedia"
+    },
+    "ui.providerUsagePanel.refreshProviderUsage.1d40174": {
+      "source": "Refresh provider usage",
+      "sourceHash": "1ba108ebb87fbd1ed39cecc5af916d2e6260e24784995e0a332911e962e16cc6",
+      "translation": "Segarkan penggunaan penyedia"
+    },
+    "ui.providerUsagePanel.refreshProviderUsage.6f8e298": {
+      "source": "Refresh provider usage",
+      "sourceHash": "866009e65cc153ecf730d19084eae0fa8e09ccaa814508e0919feaf6090ac054",
+      "translation": "Segarkan penggunaan penyedia"
+    },
+    "ui.providerUsagePanel.reset.d78ee67": {
+      "source": "RESET",
+      "sourceHash": "8e7cacbcab42ca84537cc9d90e864227c1d91b5b639a9e0506fed3d2c2d07a0d",
+      "translation": "RESET"
+    },
+    "ui.providerUsagePanel.selectProviderUsageMetrics.481f1cf": {
+      "source": "Select provider usage metrics",
+      "sourceHash": "1f746b9195bd3e8591bdc84187779edee5cee0e3a0d5b1e5d9b635b566c1eb56",
+      "translation": "Pilih metrik penggunaan penyedia"
+    },
+    "ui.providerUsagePanel.selectProviderUsageMetrics.e40b46d": {
+      "source": "Select provider usage metrics",
+      "sourceHash": "9e525cd8f09f78479c2313c7afef01b8c742511f6486c8b6212ac510b71a621a",
+      "translation": "Pilih metrik penggunaan penyedia"
+    },
+    "ui.providerUsagePanel.sync.f877560": {
+      "source": "SYNC",
+      "sourceHash": "d7b008fcaa04cb360adf7d404cbd0dbe8326149d6b871e57810515573400d5ff",
+      "translation": "SINKRON"
+    },
+    "ui.providerUsagePanel.usage.83f3a8e": {
+      "source": "USAGE",
+      "sourceHash": "3d0e507ed9492aba1d4f5ed13ad09744d9163a90d3e905969882a18f6da8e5ef",
+      "translation": "PENGGUNAAN"
+    },
+    "ui.universeCanvas.copyAsText.51b2b25": {
+      "source": "Copy as text",
+      "sourceHash": "ce311770f29054361d9099494d12fc9ad2e4684e84dcf0e74a05c62e6f2b7b49",
+      "translation": "Salin sebagai teks"
+    },
+    "ui.universeCanvas.copyObject.256054c": {
+      "source": "Copy object",
+      "sourceHash": "21391dd735271792b9e635a3db5b79bc171e5279a3dec1e31efd7888d7130720",
+      "translation": "Salin objek"
+    },
+    "ui.universeCanvas.copyWithContext.720b649": {
+      "source": "Copy with context",
+      "sourceHash": "fcea7c398fe688c73fa58c29bf422488d414449d06d4bd27ad78faa409d941e7",
+      "translation": "Salin dengan konteks"
+    },
+    "ui.universeCanvas.copyWithContext.ac37c56": {
+      "source": "Copy with context",
+      "sourceHash": "8d693889aa740b977427ab0f70b13a1cb0c53b7e1c4aa3264e61cb7affa6971d",
+      "translation": "Salin dengan konteks"
+    },
+    "ui.universeCanvas.cut.1484f11": {
+      "source": "Cut",
+      "sourceHash": "cb4321b774df10f55707777963dcd9deed6dbf6df12941b927e0ca798f2dbb30",
+      "translation": "Potong"
+    },
+    "ui.universeCanvas.delete.cccef11": {
+      "source": "Delete",
+      "sourceHash": "cc914de405cc393633319c7a8d543ec69ed088d45d7cbc6c4ba40f27a5a6e6d6",
+      "translation": "Hapus"
+    },
+    "ui.universeCanvas.mindAtlasObjectPaste.0c3ed8f": {
+      "source": "Mind Atlas object paste",
+      "sourceHash": "4e6773cdfb21f8cbc8e1eaaba5cd8fc44b26f1d734570861c9cd36c4102189f8",
+      "translation": "Tempel objek Mind Atlas"
+    },
+    "ui.universeCanvas.mindAtlasUniverseView.f1af16f": {
+      "source": "Mind Atlas universe view",
+      "sourceHash": "6599a5b25a46143747e4941aac7776b37183cf1ad6140202fc1108d53589d219",
+      "translation": "Tampilan semesta Mind Atlas"
+    },
+    "ui.universeCanvas.moveUpOneLevel.f93496f": {
+      "source": "Move up one level",
+      "sourceHash": "8482ce6289605686021099ec9120c4a4ea1985ee55adbe6b76d4a7391f47d439",
+      "translation": "Naik satu tingkat"
+    },
+    "ui.universeCanvas.moveUpOneLevelTo.ca47798": {
+      "source": "Move up one level to become a sibling of the current parent.",
+      "sourceHash": "7d1e2293fb387f76e8a59ff3792a98d1428289e972d146ed5778ccc6e3b32ac7",
+      "translation": "Naik satu tingkat untuk menjadi saudara dari induk saat ini."
+    },
+    "ui.universeCanvas.node.ff7abe9": {
+      "source": "Node",
+      "sourceHash": "73948d9f218e50de3701813c601698386354bc8910c7b3a07d2ea518a1161c1a",
+      "translation": "Node"
+    },
+    "ui.universeCanvas.nodeActions.56c90fd": {
+      "source": "Node actions",
+      "sourceHash": "16e9197c062aa38deb040667c5c436eb26b6fdf06b235261d9b32f1099ac1567",
+      "translation": "Tindakan node"
+    },
+    "ui.universeCanvas.paste.f06d057": {
+      "source": "Paste",
+      "sourceHash": "cbd7645e5582905d301fd1c138d75699c0f1114653bff1fd6ea7fcef9854151c",
+      "translation": "Tempel"
+    },
+    "ui.universeCanvas.snoozeNotification.316afb2": {
+      "source": "Snooze notification",
+      "sourceHash": "4bc9ec369628d1904eb2ab919235cbaf855e8fcd9554692af3a5b9461cb26137",
+      "translation": "Tunda notifikasi"
+    },
+    "ui.universeCanvas.theClipboardDoesNotContain.00e8362": {
+      "source": "The clipboard does not contain object data that Mind Atlas can import.",
+      "sourceHash": "09fe13aac155837b140c58e232a20d531c33e62a6b179b33fb68b757c8a81c38",
+      "translation": "Papan klip tidak berisi data objek yang dapat diimpor oleh Mind Atlas."
+    },
+    "ui.universeCanvas.thisNodeCannotMoveTo.5e3b780": {
+      "source": "This node cannot move to a higher level.",
+      "sourceHash": "af6fb2e523fa09874718928638620b0fb8aad50870e730e791d3b74529b6f54f",
+      "translation": "Node ini tidak dapat dipindahkan ke tingkat yang lebih tinggi."
+    },
+    "ui.universeCanvas.thisSelectionContainsImageOr.340b24f": {
+      "source": "This selection contains image or video attachments. The clipboard copy includes attachment metadata, not the files themselves.",
+      "sourceHash": "0742c40dcd98abf4ac137551f4483b8c1949b1ffaf62a5c2f0852d32bcaf694c",
+      "translation": "Pilihan ini berisi lampiran gambar atau video. Salinan papan klip menyertakan metadata lampiran, bukan file itu sendiri."
+    },
+    "ui.universeCanvas.tokens.6732ec1": {
+      "source": "tokens)",
+      "sourceHash": "62b1c4be37fe6d94df24209961fc54862f561f6702fc4a3f2f27a67a163b6b31",
+      "translation": "token)"
+    },
+    "workspace.ai": {
+      "source": "AI",
+      "sourceHash": "08718eeea500a45456f22fa676281e5a2030bcae140253d976e076cfbe0d5e34",
+      "translation": "AI"
+    },
+    "workspace.editor": {
+      "source": "Editor",
+      "sourceHash": "9a5611c0c04c7b0bae21367058b5ec632e6f2db8deed502302f66f4aca8669d8",
+      "translation": "Editor"
+    },
+    "workspace.mobile": {
+      "source": "Mobile workspace",
+      "sourceHash": "d555622ea3e5f5bf3d6a8dc27f4da3b247908d4306fd05d2cc508864d4160b6e",
+      "translation": "Ruang kerja seluler"
+    },
+    "workspace.operation": {
+      "source": "Operation",
+      "sourceHash": "f03011c7ca06431c2333582b34dcc84ee75f2b19ce6324c9ee6085620213e6bb",
+      "translation": "Operasi"
+    },
+    "workspace.outline": {
+      "source": "Outline",
+      "sourceHash": "6bf984aefcbffde9820a4a1982f13e2b9c1f4660f2a3b83a1e8ad56eba814498",
+      "translation": "Kerangka"
+    },
+    "workspace.panel": {
+      "source": "Workspace panel",
+      "sourceHash": "a4981439fe464346e72e9f46c2661629341b867b0083e9df3cc6e9ce6b9453ca",
+      "translation": "Panel ruang kerja"
+    }
+  }
+}

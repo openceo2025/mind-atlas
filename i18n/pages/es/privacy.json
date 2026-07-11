@@ -1,0 +1,44 @@
+{
+  "metaDescription": "Política de privacidad de Mind Atlas para el inicio de sesión con Google, los cuadernos en la nube, las funciones de IA alojadas, la facturación y los datos locales.",
+  "title": "Política de privacidad",
+  "lead": "Esta Política de privacidad se aplica al servicio web Mind Atlas, al inicio de sesión con Google, a los cuadernos en la nube, a la facturación, a las funciones de IA y al procesamiento relacionado en el servidor.",
+  "updated": "Última actualización: 2026-07-01",
+  "sections": [
+    { "heading": "1. Operador y contacto", "paragraphs": ["Mind Atlas es operado por el operador de Mind Atlas. Para preguntas sobre privacidad o solicitudes de eliminación de una cuenta o datos personales, escribe a support@mind-atlas.org."] },
+    {
+      "heading": "2. Información que recopilamos",
+      "paragraphs": ["Mind Atlas recopila o procesa la siguiente información según las funciones que utilices."],
+      "items": [
+        "Información básica del perfil de Google: ID de la cuenta de Google, dirección de correo electrónico, nombre visible e imagen de perfil.",
+        "Información de cuenta y sesión: ID de usuario, estado de inicio de sesión, cookie de sesión y estado de la suscripción.",
+        "Información de facturación: ID de cliente de Stripe, ID de suscripción y estado del pago. Los servidores de Mind Atlas no almacenan tu número de tarjeta.",
+        "Información de uso de IA: proveedor y modelo seleccionados, uso estimado, saldo de tokens de Mind Atlas, tiempo de procesamiento e información de errores.",
+        "Contenido enviado a las funciones de IA: texto, audio, consultas de búsqueda y contexto de nodos seleccionado enviado mediante Chat, búsqueda web, dictado, conversación en tiempo real u otras funciones relacionadas.",
+        "Información técnica: dirección IP, información del navegador, hora de acceso y registros necesarios para la seguridad y la investigación de incidentes."
+      ]
+    },
+    { "heading": "3. Datos del cuaderno local", "paragraphs": ["Los cuadernos normales de Mind Atlas se almacenan principalmente en tu navegador. El contenido creado mientras no has iniciado sesión no se envía a los servidores de Mind Atlas, salvo que realices una acción explícita como usar una función de IA, importar, compartir o guardar en la nube."] },
+    {
+      "heading": "4. Cómo usamos la información",
+      "items": [
+        "Autenticar a los usuarios y administrar las cuentas mediante el inicio de sesión con Google.",
+        "Administrar las suscripciones mediante Stripe y determinar la elegibilidad para las funciones de IA.",
+        "Proporcionar funciones de IA como Chat, búsqueda web, dictado y conversación en tiempo real.",
+        "Registrar el saldo de tokens de IA, el uso, los errores y el historial de uso visible para administradores en cada periodo de facturación.",
+        "Responder a abusos, incidentes de seguridad, fallos del servicio y solicitudes de soporte.",
+        "Mejorar la calidad del servicio. No vendemos información para publicidad en una forma que identifique personalmente a los usuarios."
+      ]
+    },
+    { "heading": "5. Datos de usuarios de Google", "paragraphs": ["Mind Atlas utiliza únicamente los datos de Google necesarios para iniciar sesión. Los usos actuales son la autenticación, la identificación de la cuenta mediante la dirección de correo electrónico y la administración del estado de inicio de sesión.", "No vendemos datos de usuarios de Google ni los proporcionamos a terceros para publicidad. El uso de los datos de Google se limita a los fines indicados en esta política."] },
+    {
+      "heading": "6. Servicios externos",
+      "paragraphs": ["Mind Atlas utiliza los siguientes servicios externos para proporcionar el servicio."],
+      "items": ["Google para la autenticación del inicio de sesión.", "Stripe para suscripciones, pagos y administración de facturación.", "Proveedores de IA como OpenAI, Anthropic y DeepSeek para inferencia, reconocimiento de voz, conversación en tiempo real y búsqueda web cuando el usuario lo solicita.", "Proveedores de infraestructura para alojamiento VPS, DNS, monitorización y correo electrónico cuando sea necesario para operar el servicio."],
+      "after": ["Cuando utilizas una función de IA, el contenido introducido, el contexto de los nodos seleccionados, los datos de audio y las consultas de búsqueda pueden enviarse al proveedor de IA seleccionado."]
+    },
+    { "heading": "7. Cookies", "paragraphs": ["Mind Atlas utiliza cookies para mantener las sesiones iniciadas. En el servicio alojado, las cookies de sesión se utilizan para la autenticación, la seguridad y las comprobaciones del estado de la suscripción."] },
+    { "heading": "8. Conservación y eliminación", "paragraphs": ["La información de la cuenta, el estado de facturación y el historial de uso se conservan durante el tiempo necesario para prestar el servicio, cumplir obligaciones contables, proteger la seguridad y resolver disputas. Para solicitar la eliminación de una cuenta o de datos personales, contacta con la dirección de soporte. La información exigida por la ley o necesaria para el procesamiento de pagos o las obligaciones de seguridad puede conservarse durante un periodo limitado."] },
+    { "heading": "9. Seguridad", "paragraphs": ["Mind Atlas mantiene las claves de API de los proveedores en el servidor y no las expone a los navegadores. Utilizamos medidas razonables como comunicaciones cifradas, controles de acceso y gestión de registros. Ningún servicio de Internet puede garantizar una seguridad absoluta."] },
+    { "heading": "10. Cambios", "paragraphs": ["Podemos actualizar esta política cuando cambien el servicio, las leyes o los requisitos de los servicios externos. Los cambios importantes se anunciarán en el servicio o mediante otro método apropiado."] }
+  ]
+}

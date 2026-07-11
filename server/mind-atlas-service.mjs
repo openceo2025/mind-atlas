@@ -265,12 +265,12 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    sendJson(response, 405, { error: "Method not allowed" });
+    sendJson(response, 405, createServiceErrorPayload(new ServiceError(405, "method_not_allowed", "Method not allowed")));
   } catch (error) {
     const status = error instanceof ServiceError ? error.status : 500;
     const message = error instanceof Error ? error.message : "Mind Atlas service failed";
     if (status >= 500) console.error(error);
-    sendJson(response, status, createServiceErrorPayload(status, message));
+    sendJson(response, status, createServiceErrorPayload(error, status, message));
   }
 });
 
@@ -902,7 +902,7 @@ async function handleAudioTranscription(request, response) {
   const formData = await readFormData(request);
   const audio = formData.get("audio");
   if (!audio || typeof audio === "string") throw new ServiceError(400, "audio file is required");
-  if (typeof audio.size === "number" && audio.size > 26 * 1024 * 1024) throw new ServiceError(413, "Audio file is too large for transcription");
+  if (typeof audio.size === "number" && audio.size > 26 * 1024 * 1024) throw new ServiceError(413, "audio_too_large", "Audio file is too large for transcription");
   if (!isAllowedAudioMimeType(audio.type)) throw new ServiceError(415, "Audio file type is not supported");
   const transcriptionCostMicroUsd = estimateTranscriptionMicroUsd(audio);
   const reservation = await reserveUsageCredit({
@@ -1266,7 +1266,7 @@ async function authenticate(request) {
 
 async function requireUser(request) {
   const user = await authenticate(request);
-  if (!user) throw new ServiceError(401, "Google login is required");
+  if (!user) throw new ServiceError(401, "auth_required", "Google login is required");
   return user;
 }
 
@@ -1274,12 +1274,12 @@ async function requireAiEntitlement(request, response = null, options = {}) {
   const user = await requireUser(request);
   enforceUserRateLimit(user.id, "ai", userAiRateLimitMax);
   const { subscription, credit, entitlement } = await buildEntitlement(user);
-  if (!isSubscriptionActive(subscription)) throw new ServiceError(402, "Subscription is required for AI features");
+  if (!isSubscriptionActive(subscription)) throw new ServiceError(402, "subscription_required", "Subscription is required for AI features");
   if (entitlement.reason === "billing_period_unavailable") {
-    throw new ServiceError(409, "Subscription billing period is unavailable");
+    throw new ServiceError(409, "billing_period_unavailable", "Subscription billing period is unavailable");
   }
   if (!entitlement.aiEnabled || Number(credit?.credit_remaining_micro_usd ?? 0) <= 0) {
-    throw new ServiceError(402, "Mind Atlas token for this billing period is exhausted");
+    throw new ServiceError(402, "credit_exhausted", "Mind Atlas token for this billing period is exhausted");
   }
   if (options.attachConcurrency !== false && response) {
     attachReleaseOnResponse(response, enterUserConcurrency(`ai:${user.id}`, userAiConcurrentRequests));
@@ -1361,7 +1361,7 @@ async function resolveProviderModel(provider, requestedModel) {
   const model = stringValue(requestedModel) || modelList.defaultModel;
   if (!model) throw new ServiceError(503, `${provider.label} has no enabled model`);
   if (!modelList.models.includes(model)) {
-    throw new ServiceError(400, `${model} is not enabled for ${provider.label}`);
+    throw new ServiceError(400, "model_not_enabled", `${model} is not enabled for ${provider.label}`, { provider: provider.id, model });
   }
   return model;
 }
@@ -1369,7 +1369,7 @@ async function resolveProviderModel(provider, requestedModel) {
 function resolveRealtimeModel(requestedModel) {
   const model = stringValue(requestedModel) || realtimeModel;
   const allowedModels = parseListEnv("MIND_ATLAS_REALTIME_MODELS", [realtimeModel]);
-  if (!allowedModels.includes(model)) throw new ServiceError(400, `${model} is not enabled for Realtime Talk`);
+  if (!allowedModels.includes(model)) throw new ServiceError(400, "model_not_enabled", `${model} is not enabled for Realtime Talk`, { provider: "openai", model });
   return model;
 }
 
@@ -1815,7 +1815,7 @@ function applyMinimumSettlementUsage(usage, minimumMicroUsd) {
 function enforceChatRequestLimits({ credit, provider, model, payload, outputTokenLimit = maxOutputTokens }) {
   const estimatedChars = estimateChatInputChars(payload);
   if (estimatedChars > chatInputMaxChars) {
-    throw new ServiceError(413, "Chat request is too large for hosted service mode");
+    throw new ServiceError(413, "request_too_large", "Chat request is too large for hosted service mode");
   }
 
   const fable5OnePass = isFable5ChatModel(provider.id, model);
@@ -1940,10 +1940,10 @@ function resolveModelPrice(providerId, model) {
   const exactPrice = resolveExactModelPrice(modelPrices, providerId, model);
   const providerPrice = modelPrices[providerKey];
   if (modelPricePolicy === "require-model" && !exactPrice) {
-    throw new ServiceError(503, `Pricing is not configured for ${providerId}:${model}`);
+    throw new ServiceError(503, "pricing_not_configured", `Pricing is not configured for ${providerId}:${model}`, { provider: providerId, model });
   }
   if ((modelPricePolicy === "require-provider" || modelPricePolicy === "require-model") && !exactPrice && !providerPrice) {
-    throw new ServiceError(503, `Pricing is not configured for ${providerId}`);
+    throw new ServiceError(503, "pricing_not_configured", `Pricing is not configured for ${providerId}`, { provider: providerId });
   }
   const price = exactPrice ?? providerPrice ?? {};
   return {
@@ -2204,12 +2204,24 @@ function isPathWithin(filePath, rootDir) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function createServiceErrorPayload(status, message) {
-  const code = serviceErrorCode(status, message);
-  return {
+function createServiceErrorPayload(error, fallbackStatus, fallbackMessage) {
+  const status = error instanceof ServiceError ? error.status : fallbackStatus;
+  const message = error instanceof Error ? error.message : fallbackMessage;
+  const code = error instanceof ServiceError && error.code ? error.code : serviceErrorCode(status, message);
+  const payload = {
     error: serviceErrorMessage(code, status, message),
     code,
   };
+  const params = error instanceof ServiceError ? safeServiceErrorParams(error.params) : undefined;
+  return params ? { ...payload, params } : payload;
+}
+
+function safeServiceErrorParams(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).filter(([, item]) =>
+    typeof item === "string" || typeof item === "number" || typeof item === "boolean",
+  );
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
 function serviceErrorCode(status, message) {
@@ -2445,7 +2457,7 @@ function normalizeCloudNotebookPayload(payload) {
   const title = safeCloudText(payload.title || root.title || "Mind Atlas", "Mind Atlas", 240);
   const encoded = Buffer.byteLength(JSON.stringify(root), "utf8");
   if (encoded > cloudNotebookMaxBytes) {
-    throw new ServiceError(413, "Cloud notebook is too large to save");
+    throw new ServiceError(413, "cloud_notebook_too_large", "Cloud notebook is too large to save");
   }
   return { root, title, sizeBytes: encoded };
 }
@@ -2580,8 +2592,12 @@ function contentType(filePath) {
 }
 
 class ServiceError extends Error {
-  constructor(status, message) {
+  constructor(status, codeOrMessage, messageOrParams, params) {
+    const explicitCode = typeof messageOrParams === "string" ? codeOrMessage : undefined;
+    const message = typeof messageOrParams === "string" ? messageOrParams : codeOrMessage;
     super(message);
     this.status = status;
+    this.code = explicitCode;
+    this.params = typeof messageOrParams === "string" ? params : messageOrParams;
   }
 }

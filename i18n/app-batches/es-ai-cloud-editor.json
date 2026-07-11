@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "locale": "es",
+  "scope": "ai-cloud-editor",
+  "status": "draft",
+  "messages": {
+    "ui.commandDock.aiContextPreview.f27df14": "Vista previa del contexto de IA",
+    "ui.commandDock.aiExecutionMode.ddada7f": "Modo de ejecución de IA",
+    "ui.commandDock.chatFromThisLocation.03514a3": "Chatear desde esta ubicación",
+    "ui.commandDock.chatSettings.cebd934": "Configuración del chat",
+    "ui.commandDock.createAChildNodeHere.89972dc": "Crear un nodo hijo aquí",
+    "ui.commandDock.model.11440c3": "Modelo",
+    "ui.commandDock.notebookContext.4fd3df2": "Contexto del cuaderno",
+    "ui.commandDock.previewTheAutoAssembledAi.78a3c87": "Vista previa del contexto de IA ensamblado automáticamente",
+    "ui.commandDock.sendInstruction.797c542": "Enviar instrucción",
+    "ui.commandDock.service.dcdd047": "Servicio",
+    "ui.commandDock.session.a711189": "Sesión",
+    "ui.app.cloudStorage.94e0556": "Almacenamiento en la nube",
+    "ui.app.copyShareLink.d2e2a6f": "Copiar enlace para compartir",
+    "ui.app.noCloudFilesYet.17dff2f": "Todavía no hay archivos en la nube.",
+    "ui.app.refreshCloudNotebooks.28e31e2": "Actualizar cuadernos en la nube",
+    "ui.app.renameCloudFile.88036dc": "Cambiar el nombre del archivo en la nube",
+    "ui.app.saveCurrentAs.18cbd57": "Guardar el contenido actual como...",
+    "ui.focusPanel.nodeBody.eeba394": "Cuerpo del nodo",
+    "ui.focusPanel.nodeTitle.1768f3e": "Título del nodo",
+    "ui.outlineEditor.mindAtlasOutlineEditor.9063b07": "Editor de esquemas de Mind Atlas"
+  }
+}

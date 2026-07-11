@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "locale": "fr",
+  "scope": "ai-cloud-editor",
+  "status": "draft",
+  "messages": {
+    "ui.commandDock.aiContextPreview.f27df14": "Aperçu du contexte IA",
+    "ui.commandDock.aiExecutionMode.ddada7f": "Mode d’exécution IA",
+    "ui.commandDock.chatFromThisLocation.03514a3": "Discuter depuis cet emplacement",
+    "ui.commandDock.chatSettings.cebd934": "Réglages du chat",
+    "ui.commandDock.createAChildNodeHere.89972dc": "Créer un nœud enfant ici",
+    "ui.commandDock.model.11440c3": "Modèle",
+    "ui.commandDock.notebookContext.4fd3df2": "Contexte du carnet",
+    "ui.commandDock.previewTheAutoAssembledAi.78a3c87": "Aperçu du contexte IA assemblé automatiquement",
+    "ui.commandDock.sendInstruction.797c542": "Envoyer l’instruction",
+    "ui.commandDock.service.dcdd047": "Service",
+    "ui.commandDock.session.a711189": "Session",
+    "ui.app.cloudStorage.94e0556": "Stockage cloud",
+    "ui.app.copyShareLink.d2e2a6f": "Copier le lien de partage",
+    "ui.app.noCloudFilesYet.17dff2f": "Aucun fichier cloud pour le moment.",
+    "ui.app.refreshCloudNotebooks.28e31e2": "Actualiser les carnets cloud",
+    "ui.app.renameCloudFile.88036dc": "Renommer le fichier cloud",
+    "ui.app.saveCurrentAs.18cbd57": "Enregistrer le contenu actuel sous...",
+    "ui.focusPanel.nodeBody.eeba394": "Corps du nœud",
+    "ui.focusPanel.nodeTitle.1768f3e": "Titre du nœud",
+    "ui.outlineEditor.mindAtlasOutlineEditor.9063b07": "Éditeur de plans Mind Atlas"
+  }
+}

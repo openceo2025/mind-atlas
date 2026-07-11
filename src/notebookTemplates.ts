@@ -1,37 +1,39 @@
+import type { AvailableLocale } from "./i18n/locales";
+import type { MessageId } from "./i18n/messages";
 import type { AtlasNode, PlanetTexture, WorkStatus } from "./types";
 
 export const NOTEBOOK_TEMPLATES = [
   {
     id: "blank",
-    title: "空白のスペース",
-    description: "何もない空間から始めます。",
+    titleMessageId: "template.blank.title",
+    descriptionMessageId: "template.blank.description",
   },
   {
     id: "daily-notes",
-    title: "日常メモのスペース",
-    description: "今日の判断を四つの置き場に分けます。",
+    titleMessageId: "template.daily.title",
+    descriptionMessageId: "template.daily.description",
   },
   {
     id: "novel",
-    title: "小説を書く",
-    description: "世界観、人物、あらすじ、本文を一つの宇宙で育てます。",
+    titleMessageId: "template.novel.title",
+    descriptionMessageId: "template.novel.description",
   },
   {
     id: "swot",
-    title: "SWOT分析をする",
-    description: "強み、弱み、機会、脅威から次の一手を整理します。",
+    titleMessageId: "template.swot.title",
+    descriptionMessageId: "template.swot.description",
   },
   {
     id: "travel",
-    title: "旅行計画を立てる",
-    description: "やりたいこと、日程、持ち物、予約情報をまとめます。",
+    titleMessageId: "template.travel.title",
+    descriptionMessageId: "template.travel.description",
   },
   {
     id: "scamper",
-    title: "アイデアを練る",
-    description: "SCAMPERの問いで、ひとつの着想を広げます。",
+    titleMessageId: "template.scamper.title",
+    descriptionMessageId: "template.scamper.description",
   },
-] as const;
+] as const satisfies readonly { id: string; titleMessageId: MessageId; descriptionMessageId: MessageId }[];
 
 export type NotebookTemplateId = (typeof NOTEBOOK_TEMPLATES)[number]["id"];
 
@@ -47,11 +49,11 @@ type TemplateDraft = {
 const COLORS = ["#d8ba58", "#76badf", "#a783d2", "#72c6a0", "#dc8c70", "#7ca4e8", "#cf7ca2"];
 const TEXTURES: PlanetTexture[] = ["bands", "speckled", "freckles", "cell", "craters", "mist"];
 
-export function createNotebookFromTemplate(templateId: NotebookTemplateId): AtlasNode {
-  return buildTemplateTree(templateId, templateDraft(templateId));
+export function createNotebookFromTemplate(templateId: NotebookTemplateId, locale: AvailableLocale = "en"): AtlasNode {
+  return buildTemplateTree(templateId, locale === "ja" ? templateDraftJa(templateId) : templateDraftEn(templateId));
 }
 
-function templateDraft(templateId: NotebookTemplateId): TemplateDraft {
+function templateDraftJa(templateId: NotebookTemplateId): TemplateDraft {
   switch (templateId) {
     case "daily-notes":
       return root("日常メモのスペース", "今日のことを、次に動く場所へ分けておきます。", [
@@ -125,12 +127,90 @@ function templateDraft(templateId: NotebookTemplateId): TemplateDraft {
   }
 }
 
+function templateDraftEn(templateId: NotebookTemplateId): TemplateDraft {
+  switch (templateId) {
+    case "daily-notes":
+      return root("Daily notes", "Sort today's notes by what should happen next.", [
+        categoryEn("Do now", "Do now 1"),
+        categoryEn("Do later", "Do later 1"),
+        categoryEn("Defer", "Defer 1"),
+        categoryEn("Delegate", "Delegate 1"),
+      ]);
+    case "novel":
+      return root("Write a novel", "A space for developing the material of a story while you write.", [
+        item("World", "Describe the era, place, rules, and atmosphere.", [
+          item("Setting", "Where the story begins and what makes the place distinctive."),
+          item("Rules", "What this world protects and what happens when a rule is broken."),
+        ]),
+        item("Characters", "Collect each character's desire, conflict, and secret.", [
+          item("Protagonist", "What the protagonist wants and the weakness they cannot see yet."),
+          item("Counterpart", "A person who unsettles the protagonist's choices."),
+        ]),
+        item("Plot", "Arrange the opening, middle, and ending as a short sequence of changes.", [
+          item("Opening", "What breaks and makes the protagonist move."),
+          item("Turning point", "The decision that makes it impossible to return."),
+          item("Ending", "The change that remains at the end."),
+        ]),
+        item("Manuscript", "Write the actual prose here.", [
+          item("Chapter 1", "Write the first scene.", [item("Opening lines", "The first lines that lead the reader into the story.")]),
+        ]),
+      ]);
+    case "swot":
+      return root("SWOT analysis", "Use four viewpoints to understand the situation and decide the next move.", [
+        item("Strengths", "Advantages already available to us.", [item("Assets to use", "People, technology, trust, experience, and other assets.")]),
+        item("Weaknesses", "Factors that hold us back in the current state.", [item("What to improve", "A small improvement we can make first.")]),
+        item("Opportunities", "Changes or open spaces that may create a tailwind.", [item("What to test", "An opportunity we can validate on a small scale.")]),
+        item("Threats", "External risks and changes.", [item("What to prepare", "A preventive action to decide in advance.")]),
+      ]);
+    case "travel":
+      return root("Trip plan", "Collect what you want to do and the preparation you need in one map.", [
+        item("Things to do", "What you want to remember from the trip.", [
+          item("Views to see", "Candidate places and the best time of day."),
+          item("Experiences", "Note whether a reservation is required."),
+          item("Food to try", "Candidate restaurants or regional dishes."),
+          item("Things to hear", "Stories or sounds you want to discover locally."),
+        ]),
+        item("Itinerary", "Leave room around each day's movement.", [
+          item("Day 1", "From arrival through the evening.", [item("Schedule", "Travel, breaks, and the first destination.")]),
+          item("Day 2", "A day for the thing you most want to do.", [item("Schedule", "Ideas for morning, afternoon, and evening.")]),
+        ]),
+        item("Packing", "Add anything you do not want to forget.", [
+          item("Essentials", "Identification, payment method, and charger."),
+          item("Weather", "Clothes, umbrella, and comfortable shoes."),
+        ]),
+        item("Reservations and tickets", "Collect confirmation numbers and deadlines.", [
+          item("Transport", "Departure time, seat, and meeting place."),
+          item("Stay and admission", "Booking number, check-in, and cancellation deadline."),
+        ]),
+      ]);
+    case "scamper":
+      return root("Develop an idea", "Use the SCAMPER prompts to see one idea from different angles.", [
+        item("Topic", "Describe the subject or problem in one sentence."),
+        item("Substitute", "What could be replaced?"),
+        item("Combine", "What could be combined to make something new?"),
+        item("Adapt", "Could a mechanism from another context be borrowed?"),
+        item("Modify", "Change the size, order, strength, or presentation."),
+        item("Put to another use", "Could another person use it for another purpose?"),
+        item("Eliminate", "What can be removed without causing a real problem?"),
+        item("Reverse", "Could the order or roles be reversed?"),
+        item("Next experiment", "The first small step to validate the idea.", [item("Experiment note", "What evidence would tell us whether to continue?")]),
+      ]);
+    case "blank":
+    default:
+      return root("Blank space", "Start freely from here.", []);
+  }
+}
+
 function root(title: string, body: string, children: TemplateDraft[]): TemplateDraft {
   return { title, body, children, status: "waiting", color: "#d8ba58", texture: "bands" };
 }
 
 function category(title: string, childTitle: string): TemplateDraft {
   return item(title, "この場所に集めます。", [item(childTitle, "ここに詳細を書く")]);
+}
+
+function categoryEn(title: string, childTitle: string): TemplateDraft {
+  return item(title, "Collect matching notes here.", [item(childTitle, "Write the details here.")]);
 }
 
 function item(title: string, body: string, children: TemplateDraft[] = []): TemplateDraft {

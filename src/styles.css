@@ -17,6 +17,26 @@
   box-sizing: border-box;
 }
 
+html[dir="rtl"] .context-menu button,
+html[dir="rtl"] .context-menu a,
+html[dir="rtl"] .cloud-load-dialog,
+html[dir="rtl"] .voice-log-dialog,
+html[dir="rtl"] .outline-editor-shell {
+  text-align: start;
+}
+
+html[dir="rtl"] .operation-panel,
+html[dir="rtl"] canvas {
+  direction: ltr;
+}
+
+input,
+textarea,
+.space-title-preview,
+.space-body-preview {
+  unicode-bidi: plaintext;
+}
+
 html,
 body,
 #root {
@@ -1275,11 +1295,35 @@ h1 {
 }
 
 .context-menu-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: #9fb5a9;
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
   text-transform: uppercase;
+}
+
+.language-select-label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(110px, auto);
+  align-items: center;
+  gap: 8px;
+  color: #dbe8df;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.language-select-label select {
+  min-width: 0;
+  border: 1px solid rgba(219, 234, 211, 0.18);
+  border-radius: 6px;
+  padding: 7px 26px 7px 8px;
+  background: #0a110d;
+  color: #eef7ea;
+  font: inherit;
+  letter-spacing: 0;
 }
 
 .theme-choice-row {
@@ -1875,17 +1919,17 @@ h1 {
   min-height: 58px;
 }
 
+.start-space-continue-button {
+  border-color: rgba(216, 245, 109, 0.42);
+  background: rgba(216, 245, 109, 0.09);
+}
+
 .start-space-cloud-login {
   align-items: start;
 }
 
 .start-space-cloud-login .secondary-button {
   width: fit-content;
-}
-
-.start-space-actions {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  margin: 0;
 }
 
 .cloud-quota {

@@ -1,0 +1,73 @@
+{
+  "metaDescription": "Mind Atlas privacy policy for Google sign-in, cloud notebooks, hosted AI features, billing, and local-first notebook data.",
+  "title": "Privacy Policy",
+  "lead": "This Privacy Policy applies to the Mind Atlas web service, Google sign-in, cloud notebooks, billing, AI features, and related server processing.",
+  "updated": "Last updated: 2026-07-01",
+  "sections": [
+    {
+      "heading": "1. Operator and contact",
+      "paragraphs": ["Mind Atlas is operated by the Mind Atlas operator. For privacy questions or requests to delete an account or personal data, contact support@mind-atlas.org."]
+    },
+    {
+      "heading": "2. Information we collect",
+      "paragraphs": ["Mind Atlas collects or processes the following information according to the features you use."],
+      "items": [
+        "Basic Google profile information: Google account ID, email address, display name, and profile image.",
+        "Account and session information: user ID, sign-in state, session cookie, and subscription state.",
+        "Billing information: Stripe customer ID, subscription ID, and payment state. Mind Atlas servers do not store your credit card number.",
+        "AI usage information: selected provider and model, estimated usage, Mind Atlas token balance, processing time, and error information.",
+        "Content sent to AI features: text, audio, search queries, and selected node context submitted through Chat, Web search, Dictation, Realtime Talk, or related features.",
+        "Technical information: IP address, browser information, access time, and logs needed for security and incident investigation."
+      ]
+    },
+    {
+      "heading": "3. Local-first notebook data",
+      "paragraphs": ["Normal Mind Atlas notebooks are primarily stored in your browser. Notebook content created while signed out is not sent to Mind Atlas servers unless you take an explicit action such as using an AI feature, importing, sharing, or saving to the cloud."]
+    },
+    {
+      "heading": "4. How we use information",
+      "items": [
+        "Authenticate users and manage accounts through Google sign-in.",
+        "Manage subscriptions through Stripe and determine eligibility for AI features.",
+        "Provide AI features such as Chat, Web search, Dictation, and Realtime Talk.",
+        "Record AI token balance, usage, errors, and administrator-facing usage history for each billing period.",
+        "Respond to abuse, security incidents, service failures, and support requests.",
+        "Improve service quality. We do not sell information for advertising in a personally identifiable form."
+      ]
+    },
+    {
+      "heading": "5. Google user data",
+      "paragraphs": [
+        "Mind Atlas uses only the minimum Google user data needed for sign-in. Current uses are authentication, account identification by email address, and sign-in state management.",
+        "We do not sell Google user data or provide it to third parties for advertising. Use of Google user data is limited to the purposes stated in this policy."
+      ]
+    },
+    {
+      "heading": "6. External services",
+      "paragraphs": ["Mind Atlas uses the following external services to provide the service."],
+      "items": [
+        "Google for sign-in authentication.",
+        "Stripe for subscriptions, payments, and billing management.",
+        "AI providers such as OpenAI, Anthropic, and DeepSeek for inference, speech recognition, Realtime Talk, and Web search when requested by the user.",
+        "Infrastructure providers for VPS hosting, DNS, monitoring, and email as needed to operate the service."
+      ],
+      "after": ["When you use an AI feature, input content, selected node context, audio data, and search queries may be sent to the selected AI provider."]
+    },
+    {
+      "heading": "7. Cookies",
+      "paragraphs": ["Mind Atlas uses cookies to maintain sign-in sessions. In the hosted service, session cookies are used for authentication, security, and subscription-state checks."]
+    },
+    {
+      "heading": "8. Retention and deletion",
+      "paragraphs": ["Account information, billing state, and usage history are retained for as long as needed to provide the service, meet accounting obligations, protect security, and resolve disputes. To request account or personal-data deletion, contact the support address. Information required by law, payment processing, or security obligations may be retained for a limited period."]
+    },
+    {
+      "heading": "9. Security",
+      "paragraphs": ["Mind Atlas keeps provider API keys on the server and does not expose them to browsers. We use reasonable safeguards such as encrypted communications, access controls, and log management. No internet service can guarantee absolute security."]
+    },
+    {
+      "heading": "10. Changes",
+      "paragraphs": ["We may update this policy when the service, laws, or external-service requirements change. Material changes will be announced in the service or through another appropriate method."]
+    }
+  ]
+}

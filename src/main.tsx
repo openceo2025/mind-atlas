@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { MindAtlasI18nProvider } from "./i18n/I18nProvider";
 import "./styles.css";
 
 if ("serviceWorker" in navigator) {
@@ -13,6 +14,8 @@ if ("serviceWorker" in navigator) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <MindAtlasI18nProvider>
+      <App />
+    </MindAtlasI18nProvider>
   </StrictMode>,
 );

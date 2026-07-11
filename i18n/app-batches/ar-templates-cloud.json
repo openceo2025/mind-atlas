@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "locale": "ar",
+  "scope": "templates-and-cloud",
+  "status": "draft",
+  "messages": {
+    "template.blank.title": "مساحة فارغة",
+    "template.blank.description": "ابدأ بمساحة فارغة.",
+    "template.daily.title": "ملاحظات يومية",
+    "template.daily.description": "نظّم قرارات اليوم في أربعة أماكن.",
+    "template.novel.title": "اكتب رواية",
+    "template.novel.description": "طوّر العالم والشخصيات والحبكة والمخطوطة في كون واحد.",
+    "template.swot.title": "إجراء تحليل SWOT",
+    "template.swot.description": "نظّم الخطوة التالية من خلال نقاط القوة والضعف والفرص والتهديدات.",
+    "template.travel.title": "خطط لرحلة",
+    "template.travel.description": "اجمع الأنشطة وخطة الرحلة والأمتعة والحجوزات.",
+    "template.scamper.title": "طوّر فكرة",
+    "template.scamper.description": "وسّع فكرة واحدة باستخدام أسئلة SCAMPER.",
+    "startSpace.title": "اختر طريقة البدء",
+    "startSpace.nextTitle": "اختر المساحة التالية",
+    "startSpace.newTitle": "بدء مساحة جديدة",
+    "startSpace.tutorialDetail": "اختر طريقة المتابعة بعد البرنامج التعليمي.",
+    "startSpace.newDetail": "ابدأ من قالب أو نسخة من دفتر ملاحظات سحابي.",
+    "startSpace.templates": "القوالب",
+    "startSpace.cloudCopies": "البدء من نسخة سحابية",
+    "startSpace.keepTutorial": "المتابعة باستخدام عقد البرنامج التعليمي",
+    "startSpace.googleLogin": "تسجيل الدخول باستخدام Google"
+  }
+}

@@ -169,14 +169,25 @@ try {
     const oldCapabilityCopyCount = await page.getByText(/Chat \/ web search \/ Dictation \/ Realtime Talk/).count();
     if (oldCapabilityCopyCount !== 0) throw new Error("Public AI dialog exposed old capability-list copy.");
 
-    await page.getByRole("button", { name: "Open atlas menu" }).click();
+    await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
     const publicMenu = page.locator(".global-context-menu");
-    await publicMenu.getByText("Cloud save").waitFor();
-    await publicMenu.getByText("Cloud load").waitFor();
+    await publicMenu.getByText("クラウドへ保存").waitFor();
+    await publicMenu.getByText("クラウドから読み込み").waitFor();
+    const publicMenuOrder = await publicMenu.evaluate((menu) => Array.from(menu.children).map((child) => child.textContent?.replace(/\s+/g, " ").trim() ?? ""));
+    if (!publicMenuOrder[0]?.includes("新しく始める") || !publicMenuOrder[0]?.includes("テキストのみエクスポート")) {
+      throw new Error(`New start and export should begin the file section: ${JSON.stringify(publicMenuOrder)}`);
+    }
+    const renderQualityIndex = publicMenuOrder.findIndex((entry) => entry.includes("レンダリング品質"));
+    const mobileSettingsIndex = publicMenuOrder.findIndex((entry) => entry.includes("モバイル設定"));
+    const aboutIndex = publicMenuOrder.findIndex((entry) => entry.includes("Mind Atlasについて"));
+    const sourceIndex = publicMenuOrder.findIndex((entry) => entry.includes("ソースコードと法的情報"));
+    if (renderQualityIndex < 0 || mobileSettingsIndex !== renderQualityIndex + 1 || aboutIndex !== mobileSettingsIndex + 1 || sourceIndex !== aboutIndex + 1) {
+      throw new Error(`Menu footer order is incorrect: ${JSON.stringify(publicMenuOrder)}`);
+    }
     if ((await publicMenu.getByText("Export with files").count()) !== 0) {
       throw new Error("Public hosted mode exposed multimedia package export.");
     }
-    await publicMenu.getByText("Cloud save").click();
+    await publicMenu.getByText("クラウドへ保存").click();
     const cloudDialog = page.getByRole("dialog", { name: "Cloud files" });
     await cloudDialog.waitFor();
     await cloudDialog.getByText("Cloud storage").waitFor();
@@ -187,24 +198,21 @@ try {
     await cloudDialog.getByText("Delete").waitFor();
     await cloudDialog.getByText("Verify cloud notebook").waitFor();
     await page.getByLabel("Close cloud loader").click();
-    await page.getByRole("button", { name: "Open atlas menu" }).click();
-    await publicMenu.getByRole("button", { name: "Initialize" }).click();
-    const startSpaceDialog = page.getByRole("dialog", { name: "Start a space" });
+    await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
+    await publicMenu.getByRole("button", { name: "新しく始める" }).click();
+    const startSpaceDialog = page.getByRole("dialog", { name: "始め方を選ぶ" });
     await startSpaceDialog.waitFor();
     await startSpaceDialog.getByRole("heading", { name: "テンプレート", exact: true }).waitFor();
     await startSpaceDialog.getByRole("button", { name: /日常メモのスペース/ }).click();
-    await startSpaceDialog.getByText("Verify cloud notebook").waitFor();
-    await startSpaceDialog.getByRole("button", { name: "このテンプレートで始める" }).click();
     await startSpaceDialog.waitFor({ state: "detached" });
     await page.getByText("すぐにやること", { exact: true }).first().waitFor();
-    await page.getByRole("button", { name: "Open atlas menu" }).click();
-    await publicMenu.getByRole("button", { name: "Initialize" }).click();
+    await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
+    await publicMenu.getByRole("button", { name: "新しく始める" }).click();
     await startSpaceDialog.waitFor();
     await startSpaceDialog.getByRole("button", { name: /Verify cloud notebook/ }).click();
-    await startSpaceDialog.getByRole("button", { name: "このデータをコピーして始める" }).click();
     await startSpaceDialog.waitFor({ state: "detached" });
     await page.getByText("Verify cloud notebook", { exact: true }).first().waitFor();
-    await page.getByRole("button", { name: "Open atlas menu" }).click();
+    await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).waitFor();
     await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).click();
     await page.waitForURL(/\/about\.html$/);
@@ -297,7 +305,7 @@ try {
     await assertNoForbiddenPublicDeveloperSurface(exhaustedPage, "exhausted public shell");
     const exhaustedButtonText = cleanText(await exhaustedPage.getByRole("button", { name: /AI\u6a5f\u80fd/ }).textContent());
     if (!exhaustedButtonText.includes("0%")) throw new Error(`Exhausted AI feature button did not show 0%: ${exhaustedButtonText}`);
-    await exhaustedPage.getByLabel("Open atlas menu").click();
+    await exhaustedPage.getByLabel("Mind Atlasメニューを開く").click();
     const exhaustedMenu = exhaustedPage.locator(".global-context-menu");
     await exhaustedMenu.getByText("AI Partner log").waitFor();
     if ((await exhaustedMenu.getByText("Voice settings").count()) !== 0) throw new Error("Exhausted public mode exposed Voice settings.");
@@ -316,7 +324,7 @@ try {
     if (!exhaustedLogText.includes("Fable5 reply after depletion")) {
       throw new Error(`Exhausted public mode did not show saved AI Partner log: ${exhaustedLogText}`);
     }
-    if (!exhaustedLogText.includes("read-only")) {
+    if (!/read-only|読み取り専用/.test(exhaustedLogText)) {
       throw new Error(`Exhausted public mode AI Partner log should be read-only: ${exhaustedLogText}`);
     }
     if ((await exhaustedPage.getByLabel("Clear AI Partner log").count()) !== 0) {
@@ -606,9 +614,9 @@ async function seedVoiceLog(page) {
 
 async function launchBrowser() {
   const attempts = [
-    () => chromium.launch({ headless: true }),
-    () => chromium.launch({ channel: "msedge", headless: true }),
-    () => chromium.launch({ channel: "chrome", headless: true }),
+    () => chromium.launch({ headless: true, args: ["--lang=ja-JP"] }),
+    () => chromium.launch({ channel: "msedge", headless: true, args: ["--lang=ja-JP"] }),
+    () => chromium.launch({ channel: "chrome", headless: true, args: ["--lang=ja-JP"] }),
   ];
   let lastError;
   for (const attempt of attempts) {

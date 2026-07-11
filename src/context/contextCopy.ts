@@ -1,5 +1,7 @@
 import type { ContextAssemblyResult, ContextAssemblyStats } from "./contextAssembly";
 import type { AtlasNode } from "../types";
+import { currentAppLocale } from "../i18n/locales";
+import { formatAppMessage } from "../i18n/format";
 
 export type ContextCopyPreset = "node" | "ancestors" | "subtree";
 
@@ -98,9 +100,13 @@ export async function copyContextMarkdown(root: AtlasNode, nodeId: string, prese
 }
 
 export function formatContextCopyStats(result: ContextAssemblyResult | null) {
-  if (!result) return "No context";
-  const truncated = result.stats.truncated ? " / truncated" : "";
-  return `${result.stats.estimatedTokens.toLocaleString()} tokens / ${result.stats.includedNodeCount} nodes${truncated}`;
+  if (!result) return formatAppMessage("dynamic.contextNone");
+  const truncated = result.stats.truncated ? formatAppMessage("dynamic.contextTruncated") : "";
+  return formatAppMessage("dynamic.contextCopyStats", {
+    tokens: result.stats.estimatedTokens.toLocaleString(currentAppLocale()),
+    nodes: result.stats.includedNodeCount,
+    truncated,
+  });
 }
 
 async function writeClipboardText(text: string) {

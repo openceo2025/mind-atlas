@@ -26,6 +26,9 @@ import type {
   CodexSandboxMode,
   OpenClawOptionsResult,
 } from "../types";
+import { I18nText } from "../i18n/I18nProvider";
+import { formatAppMessage } from "../i18n/format";
+import { currentAppLocale } from "../i18n/locales";
 
 type CommandMode = AiExecutionMode | "note";
 type AgentExecutionMode = Extract<AiExecutionMode, "codex" | "claude">;
@@ -348,7 +351,7 @@ export function CommandDock() {
     const trimmed = value.trim();
     if (!trimmed) return;
     if (mode === "codex" && !codexSettings.workspace.trim()) {
-      setVoiceError("Set Codex Work root before sending.");
+      setVoiceError(formatAppMessage("status.realtime.workRootRequired"));
       return;
     }
     setVoiceError("");
@@ -850,11 +853,11 @@ export function CommandDock() {
       : voiceError || (voiceButtonState !== "idle" ? voiceStatusLabel(voiceButtonState) : micLive ? `Voice Partner ${voiceState}` : PUBLIC_SERVICE_MODE ? `AI / ${selectedNode?.status ?? "waiting"}` : `${modeLabel(mode)} / ${selectedNode?.status ?? "waiting"}`);
 
   return (
-    <form className={`command-dock ${PUBLIC_SERVICE_MODE ? "is-public-service" : ""}`} onSubmit={handleSubmit} aria-label="Re-instruction input">
+    <form className={`command-dock ${PUBLIC_SERVICE_MODE ? "is-public-service" : ""}`} onSubmit={handleSubmit} aria-label={formatAppMessage("ui.commandDock.reInstructionInput.3c3e902")}>
       {PUBLIC_SERVICE_MODE ? (
         <div className="panel-role-label ai-panel-role" aria-hidden="true">
           <Bot size={14} />
-          <span>AI</span>
+          <span>{<I18nText id="ui.commandDock.ai.3b06fd0" />}</span>
         </div>
       ) : null}
       <button
@@ -867,7 +870,7 @@ export function CommandDock() {
         onTouchEnd={handleMicTouchEnd}
         onTouchCancel={handleMicTouchCancel}
         onContextMenu={(event) => event.preventDefault()}
-        aria-label={voiceButtonState === "voice_responding" ? "Stop Voice Partner response" : micLive ? "Voice Partner push-to-talk or dictation" : "Start dictation or hold for Voice Partner"}
+        aria-label={voiceButtonState === "voice_responding" ? formatAppMessage("ui.commandDock.stopVoicePartnerResponse.f6b2a64") : micLive ? formatAppMessage("ui.commandDock.voicePartnerPushToTalk.4a830b4") : formatAppMessage("ui.commandDock.startDictationOrHoldFor.da4fda2")}
       >
         {voiceButtonState === "dictation_recording" || voiceButtonState === "voice_responding" ? (
           <Square size={16} />
@@ -879,7 +882,7 @@ export function CommandDock() {
       </button>
       {!PUBLIC_SERVICE_MODE ? (
         <>
-          <div className="mode-switch" aria-label="AI execution mode">
+          <div className="mode-switch" aria-label={formatAppMessage("ui.commandDock.aiExecutionMode.ddada7f")}>
             <ModeButton mode="chat" activeMode={mode} onSelect={setMode} />
             <CodeModeButton activeMode={mode} onSelect={setMode} />
             <ModeButton mode="openclaw" activeMode={mode} onSelect={setMode} />
@@ -890,10 +893,12 @@ export function CommandDock() {
             className="scope-select context-chip"
             onClick={() => setContextPreviewOpen(true)}
             disabled={mode === "note" || !contextPlan}
-            aria-label="Preview the auto-assembled AI context"
-            title={`${contextText}. Click to preview exactly what will be sent.`}
+            aria-label={formatAppMessage("ui.commandDock.previewTheAutoAssembledAi.78a3c87")}
+            title={formatAppMessage("dynamic.contextPreviewTitle", { context: contextText })}
           >
-            {contextPlan ? `~${formatTokenEstimate(contextPlan.stats.estimatedTokens)} tok` : "ctx"}
+            {contextPlan
+              ? formatAppMessage("dynamic.tokenEstimateShort", { count: formatTokenEstimate(contextPlan.stats.estimatedTokens) })
+              : formatAppMessage("dynamic.contextShort")}
           </button>
         </>
       ) : null}
@@ -906,55 +911,61 @@ export function CommandDock() {
           onBlur={() => setCommandInputEditing(false)}
           placeholder={
             mode === "note"
-              ? "Create a child node here"
+              ? formatAppMessage("ui.commandDock.createAChildNodeHere.89972dc")
               : mode === "codex"
-                ? "Ask Codex from this location"
+                ? formatAppMessage("ui.commandDock.askCodexFromThisLocation.657b42d")
                 : mode === "openclaw"
-                  ? "Ask OpenClaw from this location"
+                  ? formatAppMessage("ui.commandDock.askOpenclawFromThisLocation.25b695e")
                   : mode === "claude"
-                    ? "Ask Claude Code from this location"
+                    ? formatAppMessage("ui.commandDock.askClaudeCodeFromThis.262b580")
                     : mode === "chat"
-                      ? "Chat from this location"
-                  : "Ask AI from this location"
+                      ? formatAppMessage("ui.commandDock.chatFromThisLocation.03514a3")
+                  : formatAppMessage("ui.commandDock.askAiFromThisLocation.945e898")
           }
         />
       </label>
-      <button className="send-button" type="submit" aria-label="Send instruction" disabled={!value.trim() || codexWorkRootMissing}>
+      <button className="send-button" type="submit" aria-label={formatAppMessage("ui.commandDock.sendInstruction.797c542")} disabled={!value.trim() || codexWorkRootMissing}>
         <SendHorizonal size={18} />
       </button>
       {contextPreviewOpen && contextPlan ? (
         <div className="context-preview-overlay" onClick={() => setContextPreviewOpen(false)}>
-          <div className="context-preview-panel" role="dialog" aria-label="AI context preview" onClick={(event) => event.stopPropagation()}>
+          <div className="context-preview-panel" role="dialog" aria-label={formatAppMessage("ui.commandDock.aiContextPreview.f27df14")} onClick={(event) => event.stopPropagation()}>
             <div className="context-preview-header">
-              <strong>Auto context preview</strong>
+              <strong>{<I18nText id="ui.commandDock.autoContextPreview.e7193a6" />}</strong>
               <span>
-                {`~${contextPlan.stats.estimatedTokens.toLocaleString()} tokens / ${contextPlan.stats.includedNodeCount} nodes / ${contextPlan.stats.conversationTurnCount} conversation turns${contextPlan.stats.droppedTurnCount ? ` (${contextPlan.stats.droppedTurnCount} summarized)` : ""}${contextPlan.stats.truncated ? " / trimmed to budget" : ""}`}
+                {formatAppMessage("dynamic.contextStats", {
+                  tokens: contextPlan.stats.estimatedTokens.toLocaleString(currentAppLocale()),
+                  nodes: contextPlan.stats.includedNodeCount,
+                  turns: contextPlan.stats.conversationTurnCount,
+                  summary: contextPlan.stats.droppedTurnCount ? formatAppMessage("dynamic.summarized", { count: contextPlan.stats.droppedTurnCount }) : "",
+                  trimmed: contextPlan.stats.truncated ? formatAppMessage("ui.commandDock.trimmedToBudget.c9aeaa4") : "",
+                })}
               </span>
-              <button type="button" className="icon-button ghost" onClick={() => setContextPreviewOpen(false)} aria-label="Close context preview">
+              <button type="button" className="icon-button ghost" onClick={() => setContextPreviewOpen(false)} aria-label={formatAppMessage("ui.commandDock.closeContextPreview.eb189c5")}>
                 ×
               </button>
             </div>
             <div className="context-preview-body">
               {contextPlan.conversation.length ? (
                 <>
-                  <h4>Conversation replay (this branch)</h4>
+                  <h4>{<I18nText id="ui.commandDock.conversationReplayThisBranch.984299d" />}</h4>
                   {contextPlan.conversation.map((message, index) => (
                     <pre key={index} className={`context-preview-turn is-${message.role}`}>
-                      {`${message.role === "user" ? "User" : "Assistant"}:\n${message.content}`}
+                      {`${message.role === "user" ? formatAppMessage("ui.commandDock.user.761c4c4") : formatAppMessage("ui.commandDock.assistant.4ee61c7")}:\n${message.content}`}
                     </pre>
                   ))}
                 </>
               ) : null}
-              <h4>Notebook context</h4>
+              <h4>{<I18nText id="ui.commandDock.notebookContext.4fd3df2" />}</h4>
               <pre>{contextPlan.contextText}</pre>
             </div>
           </div>
         </div>
       ) : null}
       {mode === "chat" ? (
-        <div className="codex-options-row chat-options-row" aria-label="Chat settings">
+        <div className="codex-options-row chat-options-row" aria-label={formatAppMessage("ui.commandDock.chatSettings.cebd934")}>
           <label className="context-option-field">
-            <span>Service</span>
+            <span>{<I18nText id="ui.commandDock.service.dcdd047" />}</span>
             <select
               value={chatSettings.service}
               onFocus={() => setCommandInputEditing(true)}
@@ -969,13 +980,13 @@ export function CommandDock() {
             >
               {chatServiceOptions.map((service) => (
                 <option key={service.id} value={service.id}>
-                  {service.label}{service.configured ? "" : " (not configured)"}
+                  {service.label}{service.configured ? "" : formatAppMessage("ui.commandDock.notConfigured.1aab8de")}
                 </option>
               ))}
             </select>
           </label>
           <label className="context-option-field">
-            <span>Model</span>
+            <span>{<I18nText id="ui.commandDock.model.11440c3" />}</span>
             <select
               value={selectedChatModel?.model ?? chatSettings.model}
               onFocus={() => setCommandInputEditing(true)}
@@ -999,7 +1010,7 @@ export function CommandDock() {
           </label>
           {chatEfforts.length > 1 ? (
             <label className="context-option-field">
-              <span>Effort</span>
+              <span>{<I18nText id="ui.commandDock.effort.5dc27d4" />}</span>
               <select
                 value={chatEfforts.includes(chatSettings.reasoningEffort) ? chatSettings.reasoningEffort : selectedChatModel?.defaultReasoningEffort ?? "default"}
                 onFocus={() => setCommandInputEditing(true)}
@@ -1017,9 +1028,9 @@ export function CommandDock() {
         </div>
       ) : null}
       {isAgentCommandMode(mode) ? (
-        <div className={`codex-options-row code-options-row ${mode === "claude" ? "claude-options-row" : ""}`} aria-label="Code settings">
+        <div className={`codex-options-row code-options-row ${mode === "claude" ? "claude-options-row" : ""}`} aria-label={formatAppMessage("ui.commandDock.codeSettings.f6c2cc0")}>
           <label className="context-option-field">
-            <span>Code</span>
+            <span>{<I18nText id="ui.commandDock.code.da19690" />}</span>
             <select
               value={mode}
               onFocus={() => setCommandInputEditing(true)}
@@ -1028,16 +1039,16 @@ export function CommandDock() {
                 setVoiceError("");
                 setMode(event.target.value as AgentExecutionMode);
               }}
-              title="Choose the code backend for this node-anchored run."
+              title={formatAppMessage("ui.commandDock.chooseTheCodeBackendFor.2b5180b")}
             >
-              <option value="codex">Codex</option>
-              <option value="claude">Claude Code</option>
+              <option value="codex">{<I18nText id="ui.commandDock.codex.ec3dea3" />}</option>
+              <option value="claude">{<I18nText id="ui.commandDock.claudeCode.432aa3f" />}</option>
             </select>
           </label>
           {mode === "codex" ? (
             <>
           <label className="context-option-field">
-            <span>Model</span>
+            <span>{<I18nText id="ui.commandDock.model.11440c3" />}</span>
             <select
               value={codexSettings.model}
               onFocus={() => setCommandInputEditing(true)}
@@ -1060,7 +1071,7 @@ export function CommandDock() {
             </select>
           </label>
           <label className="context-option-field">
-            <span>Effort</span>
+            <span>{<I18nText id="ui.commandDock.effort.5dc27d4" />}</span>
             <select
               value={codexSettings.reasoningEffort}
               onFocus={() => setCommandInputEditing(true)}
@@ -1069,13 +1080,13 @@ export function CommandDock() {
             >
               {codexEfforts.map((effort) => (
                 <option key={effort} value={effort}>
-                  {effort === "xhigh" ? "extra high" : effort}
+                  {effort === "xhigh" ? formatAppMessage("ui.commandDock.extraHigh.6818406") : effort}
                 </option>
               ))}
             </select>
           </label>
           <label className="context-option-field">
-            <span>Sandbox</span>
+            <span>{<I18nText id="ui.commandDock.sandbox.a511d77" />}</span>
             <select
               value={codexSettings.sandbox}
               onFocus={() => setCommandInputEditing(true)}
@@ -1085,13 +1096,13 @@ export function CommandDock() {
                 setCodexSettings({ sandbox, fullAccessApproved: sandbox === "danger-full-access" });
               }}
             >
-              <option value="workspace-write">workspace</option>
-              <option value="read-only">read only</option>
-              <option value="danger-full-access">trusted</option>
+              <option value="workspace-write">{<I18nText id="ui.commandDock.workspace.27b549c" />}</option>
+              <option value="read-only">{<I18nText id="ui.commandDock.readOnly.58c35aa" />}</option>
+              <option value="danger-full-access">{<I18nText id="ui.commandDock.trusted.e48f61e" />}</option>
             </select>
           </label>
           <label className="context-option-field codex-workspace-field">
-            <span>Work root</span>
+            <span>{<I18nText id="ui.commandDock.workRoot.4eeba87" />}</span>
             <input
               value={codexSettings.workspace}
               onFocus={() => setCommandInputEditing(true)}
@@ -1100,7 +1111,7 @@ export function CommandDock() {
                 setVoiceError("");
                 setCodexSettings({ workspace: event.target.value });
               }}
-              placeholder="workspace: from selected node or bridge"
+              placeholder={formatAppMessage("ui.commandDock.workspaceFromSelectedNodeOr.f430333")}
             />
           </label>
           <AgentSessionControl
@@ -1113,7 +1124,7 @@ export function CommandDock() {
           ) : (
             <>
           <label className="context-option-field">
-            <span>Preset</span>
+            <span>{<I18nText id="ui.commandDock.preset.a4b55c6" />}</span>
             <select
               value={selectedClaudePreset}
               onFocus={() => setCommandInputEditing(true)}
@@ -1122,24 +1133,24 @@ export function CommandDock() {
                 const preset = CLAUDE_MODEL_PRESETS.find((item) => item.id === event.target.value);
                 if (preset) setClaudeSettings({ model: preset.model, baseUrl: preset.baseUrl });
               }}
-              title="Claude Code provider and model preset"
+              title={formatAppMessage("ui.commandDock.claudeCodeProviderAndModel.01362ae")}
             >
               {CLAUDE_MODEL_PRESETS.map((preset) => (
                 <option key={preset.id} value={preset.id}>
                   {preset.label}
                 </option>
               ))}
-              <option value="custom">Custom</option>
+              <option value="custom">{<I18nText id="ui.commandDock.custom.f808ea5" />}</option>
             </select>
           </label>
           <label className="context-option-field">
-            <span>Effort</span>
+            <span>{<I18nText id="ui.commandDock.effort.5dc27d4" />}</span>
             <select
               value={claudeSettings.reasoningEffort}
               onFocus={() => setCommandInputEditing(true)}
               onBlur={() => setCommandInputEditing(false)}
               onChange={(event) => setClaudeSettings({ reasoningEffort: event.target.value as ClaudeReasoningEffort })}
-              title="Claude Code --effort. Leave default to let the bridge and CLI decide."
+              title={formatAppMessage("ui.commandDock.claudeCodeEffortLeaveDefault.8357b80")}
             >
               {CLAUDE_REASONING_EFFORTS.map((effort) => (
                 <option key={effort} value={effort}>
@@ -1149,13 +1160,13 @@ export function CommandDock() {
             </select>
           </label>
           <label className="context-option-field">
-            <span>Permission</span>
+            <span>{<I18nText id="ui.commandDock.permission.3f423c8" />}</span>
             <select
               value={claudeSettings.permissionMode}
               onFocus={() => setCommandInputEditing(true)}
               onBlur={() => setCommandInputEditing(false)}
               onChange={(event) => setClaudeSettings({ permissionMode: event.target.value as ClaudePermissionMode })}
-              title="Claude Code --permission-mode. This is not the same as Codex OS sandboxing."
+              title={formatAppMessage("ui.commandDock.claudeCodePermissionModeThis.83aebfd")}
             >
               {CLAUDE_PERMISSION_MODES.map((permissionMode) => (
                 <option key={permissionMode} value={permissionMode}>
@@ -1165,13 +1176,13 @@ export function CommandDock() {
             </select>
           </label>
           <label className="context-option-field codex-workspace-field">
-            <span>Work root</span>
+            <span>{<I18nText id="ui.commandDock.workRoot.4eeba87" />}</span>
             <input
               value={claudeSettings.workspace}
               onFocus={() => setCommandInputEditing(true)}
               onBlur={() => setCommandInputEditing(false)}
               onChange={(event) => setClaudeSettings({ workspace: event.target.value })}
-              placeholder="optional project path"
+              placeholder={formatAppMessage("ui.commandDock.optionalProjectPath.6fcecc8")}
             />
           </label>
           <AgentSessionControl
@@ -1195,11 +1206,11 @@ export function CommandDock() {
         </div>
       ) : null}
       {mode === "openclaw" ? (
-        <div className="codex-options-row openclaw-options-row" aria-label="OpenClaw settings">
+        <div className="codex-options-row openclaw-options-row" aria-label={formatAppMessage("ui.commandDock.openclawSettings.e0316e3")}>
           <label className="context-option-field">
-            <span>Model</span>
+            <span>{<I18nText id="ui.commandDock.model.11440c3" />}</span>
             <select
-              aria-label="OpenClaw model"
+              aria-label={formatAppMessage("ui.commandDock.openclawModel.dabd08b")}
               value={openClawSettings.model}
               onFocus={() => setCommandInputEditing(true)}
               onBlur={() => setCommandInputEditing(false)}
@@ -1287,16 +1298,16 @@ function AgentSessionControl({
 }) {
   return (
     <label className="context-option-field">
-      <span>Session</span>
+      <span>{<I18nText id="ui.commandDock.session.a711189" />}</span>
       <select
         value={forceNew ? "new" : "auto"}
         onFocus={onFocus}
         onBlur={onBlur}
         onChange={(event) => onChange(event.target.value === "new")}
-        title="Auto continues or forks the agent session recorded on this branch. New forces a fresh session for the next run only."
+        title={formatAppMessage("ui.commandDock.autoContinuesOrForksThe.be524d9")}
       >
-        <option value="auto">auto</option>
-        <option value="new">new</option>
+        <option value="auto">{<I18nText id="ui.commandDock.auto.c9ba5c5" />}</option>
+        <option value="new">{<I18nText id="ui.commandDock.new.46a6974" />}</option>
       </select>
     </label>
   );
@@ -1364,17 +1375,17 @@ function stopRecorder(recorder: MediaRecorder, chunks: Blob[]) {
 function voiceStatusLabel(state: VoiceButtonState) {
   switch (state) {
     case "dictation_recording":
-      return "Dictation recording";
+      return formatAppMessage("label.voice.recording");
     case "dictation_transcribing":
-      return "Transcribing";
+      return formatAppMessage("label.voice.transcribing");
     case "voice_connecting":
-      return "Voice Partner connecting";
+      return formatAppMessage("label.voice.connecting");
     case "voice_ptt":
-      return "Voice Partner listening";
+      return formatAppMessage("label.voice.listening");
     case "voice_responding":
-      return "Voice Partner responding";
+      return formatAppMessage("label.voice.responding");
     case "idle":
-      return "Voice ready";
+      return formatAppMessage("label.voice.ready");
   }
 }
 
@@ -1422,7 +1433,7 @@ function CodeModeButton({
       title={label}
     >
       <Code2 size={14} />
-      <span>Code</span>
+      <span>{<I18nText id="ui.commandDock.code.da19690" />}</span>
     </button>
   );
 }
@@ -1430,19 +1441,19 @@ function CodeModeButton({
 function modeLabel(mode: CommandMode) {
   switch (mode) {
     case "chat":
-      return "Chat";
+      return formatAppMessage("label.mode.chat");
     case "openai":
-      return "OpenAI";
+      return formatAppMessage("label.mode.openAi");
     case "local":
-      return "Local";
+      return formatAppMessage("label.mode.local");
     case "codex":
-      return "Codex";
+      return formatAppMessage("label.mode.codex");
     case "openclaw":
-      return "OpenClaw";
+      return formatAppMessage("label.mode.openClaw");
     case "claude":
-      return "Claude Code";
+      return formatAppMessage("label.mode.claudeCode");
     case "note":
-      return "Note";
+      return formatAppMessage("label.mode.note");
   }
 }
 
@@ -1549,32 +1560,32 @@ function fallbackChatModelOptions(model: string): ChatOptionsResult["services"][
 }
 
 function chatEffortLabel(effort: ChatReasoningEffort) {
-  if (effort === "default") return "provider default";
-  if (effort === "none") return "none";
-  if (effort === "xhigh") return "extra high";
+  if (effort === "default") return formatAppMessage("label.effort.providerDefault");
+  if (effort === "none") return formatAppMessage("label.effort.none");
+  if (effort === "xhigh") return formatAppMessage("label.effort.extraHigh");
   return effort;
 }
 
 function claudeEffortLabel(effort: ClaudeReasoningEffort) {
-  if (effort === "default") return "default";
-  if (effort === "xhigh") return "extra high";
+  if (effort === "default") return formatAppMessage("label.effort.default");
+  if (effort === "xhigh") return formatAppMessage("label.effort.extraHigh");
   return effort;
 }
 
 function claudePermissionLabel(permissionMode: ClaudePermissionMode) {
   switch (permissionMode) {
     case "default":
-      return "default";
+      return formatAppMessage("label.effort.default");
     case "acceptEdits":
-      return "accept edits";
+      return formatAppMessage("label.permission.acceptEdits");
     case "plan":
-      return "plan";
+      return formatAppMessage("label.permission.plan");
     case "auto":
-      return "auto";
+      return formatAppMessage("label.permission.auto");
     case "dontAsk":
-      return "don't ask";
+      return formatAppMessage("label.permission.dontAsk");
     case "bypassPermissions":
-      return "trusted";
+      return formatAppMessage("label.permission.trusted");
   }
 }
 

@@ -1,5 +1,5 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CloudDownload, CloudUpload, CreditCard, Download, FileText, GitBranch, Github, GraduationCap, History, Info, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CloudDownload, CloudUpload, CreditCard, Download, FileText, GitBranch, Github, GraduationCap, History, Info, Languages, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
 import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { createAboutDemoNotebook, getAboutDemoAttachmentPreviewUrls, getAboutDemoLayoutMode, getAboutDemoNotification, getAboutDemoOverviewFocusRequest, getAboutDemoSelectedNodeId, readAboutDemoConfig } from "./aboutDemo";
@@ -20,6 +20,8 @@ import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
 import type { OutlineNodeInput } from "./outline/atlasOutline";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
 import { getAtlasLayoutModeLabel, isAtlasLayoutMode, type AtlasLayoutMode } from "./layout/atlasLayout";
+import { I18nText, useMessage, useMindAtlasLocale } from "./i18n/I18nProvider";
+import { AVAILABLE_LOCALES, LOCALE_LABELS, currentAppLocale, type LocalePreference } from "./i18n/locales";
 import {
   deleteHostedCloudNotebook,
   fetchHostedServiceSession,
@@ -40,6 +42,7 @@ import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
 import type { AtlasNode, CloudNotebookEntry, CloudNotebookListResult, HostedServiceSession, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
 import type { NotebookPersistenceStatus, NotebookSnapshot } from "./notebookPersistence";
+import { formatAppMessage } from "./i18n/format";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const WORKSPACE_PANEL_EXIT_MS = 960;
@@ -99,6 +102,8 @@ interface MergePreviewState {
 }
 
 export default function App() {
+  const t = useMessage();
+  const { locale, preference: localePreference, setPreference: setLocalePreference } = useMindAtlasLocale();
   const aboutDemoConfig = useMemo(() => readAboutDemoConfig(), []);
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
@@ -465,7 +470,7 @@ export default function App() {
     } finally {
       setHostedSessionLoading(false);
     }
-  }, [publicServiceMode]);
+  }, [publicServiceMode, t]);
 
   useVisualViewportHeight(commandInputEditing);
   useMobileBackButtonGuard({ closeOverlays: closeMobileBackOverlays });
@@ -504,7 +509,7 @@ export default function App() {
           .catch((error) => {
             if (cancelled) return;
             console.error("Failed to read hosted Mind Atlas share URL", error);
-            window.alert(importErrorMessage("Shared Mind Atlas link could not be read.", error));
+            window.alert(importErrorMessage(t("error.sharedLinkRead"), error));
             removeSharedNotebookHash();
           });
         return () => {
@@ -518,7 +523,7 @@ export default function App() {
       if (sharedRoot) setSharedNotebookRoot(publicServiceMode ? createTextOnlyNotebookRoot(sharedRoot) : sharedRoot);
     } catch (error) {
       console.error("Failed to read shared Mind Atlas URL", error);
-      window.alert(importErrorMessage("Shared Mind Atlas link could not be read.", error));
+      window.alert(importErrorMessage(t("error.sharedLinkRead"), error));
       removeSharedNotebookHash();
     }
     return () => {
@@ -569,8 +574,8 @@ export default function App() {
     let timeout: number | null = null;
     const handleBirthUnavailable = (event: Event) => {
       const mode = (event as CustomEvent<{ layoutMode?: unknown }>).detail?.layoutMode;
-      const label = isAtlasLayoutMode(mode) ? getAtlasLayoutModeLabel(mode) : "This layout";
-      setLayoutBirthUnavailableMessage(`${label}では長押しでノードを作成できません。Mind Atlasモードで作成できます。`);
+      const label = isAtlasLayoutMode(mode) ? getAtlasLayoutModeLabel(mode) : t("label.layout.this");
+      setLayoutBirthUnavailableMessage(t("status.layoutBirthUnavailable", { mode: label }));
       if (timeout !== null) window.clearTimeout(timeout);
       timeout = window.setTimeout(() => {
         timeout = null;
@@ -582,7 +587,7 @@ export default function App() {
       if (timeout !== null) window.clearTimeout(timeout);
       window.removeEventListener(UNIVERSE_BACKGROUND_BIRTH_UNAVAILABLE_EVENT, handleBirthUnavailable);
     };
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     const saveUiState = () => persistUiStatePatch(latestUiStateRef.current);
@@ -777,7 +782,7 @@ export default function App() {
       downloadBlob(blob, `${datasetFileName(atlasRoot.title)}.mindatlas`);
       setMenuOpen(false);
     } catch (error) {
-      const message = exportErrorMessage("Light export failed.", error);
+      const message = exportErrorMessage(t("error.lightExport"), error);
       console.error(message, error);
       window.alert(message);
     }
@@ -789,7 +794,7 @@ export default function App() {
       await saveNotebookNow();
       result = await createNotebookPackage(atlasRoot, attachmentPreviewUrls);
     } catch (error) {
-      const fallback = confirmJsonOnlyPackageFallback(atlasRoot, "Package export failed.", error);
+      const fallback = confirmJsonOnlyPackageFallback(atlasRoot, t("error.packageExport"), error);
       if (!fallback) return;
       result = fallback;
     }
@@ -802,7 +807,7 @@ export default function App() {
     const root = createTextOnlyNotebookRoot(atlasRoot);
     const sizeBytes = textOnlyNotebookSizeBytes(root);
     if (sizeBytes > CLOUD_NOTEBOOK_MAX_BYTES) {
-      throw new Error("容量が大きすぎてクラウドへ保存できません。テキスト量を減らしてください。");
+      throw new Error(t("dialog.cloud.tooLarge"));
     }
     return { root, sizeBytes };
   };
@@ -810,7 +815,7 @@ export default function App() {
   const handleSaveToCloud = async () => {
     try {
       setCloudError("");
-      setCloudStatus("Saving to cloud...");
+      setCloudStatus(t("status.cloud.saving"));
       await saveNotebookNow();
       if (publicServiceMode) {
         if (!hostedAuthenticated) {
@@ -820,9 +825,9 @@ export default function App() {
         }
         const { root } = prepareHostedCloudNotebook();
         const saved = await saveHostedCloudNotebook(root, root.title || atlasRoot.title || "Mind Atlas");
-        const prunedText = saved.prunedCount ? ` Old saves deleted: ${saved.prunedCount}.` : "";
-        setCloudStatus(`Saved: ${saved.title || saved.name}.${prunedText}`);
-        window.alert(`クラウドへ保存しました。\n\n${saved.title || saved.name}${prunedText ? `\n${prunedText}` : ""}`);
+        const prunedText = saved.prunedCount ? t("dialog.cloud.oldSavesDeleted", { count: saved.prunedCount }) : "";
+        setCloudStatus(t("status.cloud.savedPruned", { name: saved.title || saved.name, detail: prunedText }));
+        window.alert(t("dialog.cloud.saved", { name: saved.title || saved.name, detail: prunedText ? `\n${prunedText}` : "" }));
         setMenuOpen(false);
         return;
       }
@@ -830,21 +835,23 @@ export default function App() {
       try {
         result = await createNotebookPackage(atlasRoot, attachmentPreviewUrls);
       } catch (packageError) {
-        const fallback = confirmJsonOnlyPackageFallback(atlasRoot, "Cloud save package creation failed.", packageError);
+        const fallback = confirmJsonOnlyPackageFallback(atlasRoot, t("error.cloudPackageCreation"), packageError);
         if (!fallback) {
-          setCloudError(exportErrorMessage("Cloud save failed before upload completed.", packageError));
+          setCloudError(exportErrorMessage(t("error.cloudBeforeUpload"), packageError));
           setCloudStatus("");
           return;
         }
         result = fallback;
       }
       const saved = await saveCloudNotebookPackage(result.blob, `${datasetFileName(atlasRoot.title)}.mindatlaspkg`);
-      setCloudStatus(`Saved: ${saved.name}${result.packageKind === "json" ? " (JSON-only)" : ""}`);
-      window.alert(`クラウドへの保存が完了しました。\n\n保存ファイル: ${saved.name}`);
+      setCloudStatus(result.packageKind === "json"
+        ? t("status.cloud.savedJsonOnly", { name: saved.name })
+        : t("status.cloud.saved", { name: saved.name }));
+      window.alert(t("dialog.cloud.localSaved", { name: saved.name }));
       showPackageResultNotice(result);
       setMenuOpen(false);
     } catch (error) {
-      const message = exportErrorMessage("Cloud save failed.", error);
+      const message = exportErrorMessage(t("error.cloudSave"), error);
       setCloudError(message);
       setCloudStatus("");
       window.alert(message);
@@ -858,7 +865,7 @@ export default function App() {
       if (publicServiceMode) {
         if (!hostedAuthenticated) {
           setCloudNotebooks([]);
-          setCloudDirectory("Google login required");
+      setCloudDirectory(t("menu.googleLoginRequired"));
           return;
         }
         const result = await listHostedCloudNotebooks();
@@ -901,18 +908,18 @@ export default function App() {
       setShareBusy(true);
       if (publicServiceMode) {
         if (!hostedAuthenticated) {
-          setContextCopyStatus("Google login is required for cloud share.");
+      setContextCopyStatus(t("status.cloud.loginRequired"));
           startHostedGoogleLogin();
           return;
         }
         setCloudLoadOpen(true);
         setMenuOpen(false);
         void refreshCloudNotebooks();
-        setCloudStatus("Select a cloud file to share, or save current as a new cloud file first.");
-        setContextCopyStatus("Select a cloud file to share.");
+        setCloudStatus(t("status.cloud.selectToShare"));
+        setContextCopyStatus(t("status.cloud.selectFile"));
         return;
       }
-      setContextCopyStatus("Preparing share image...");
+      setContextCopyStatus(t("status.share.preparingImage"));
       const target = universeShareTargetRef.current;
       if (!target) throw new Error("The universe view is not ready.");
       const shareTitle = atlasRoot.title || "Mind Atlas";
@@ -921,7 +928,7 @@ export default function App() {
       if (navigator.share && navigator.canShare?.({ files: [image] })) {
         try {
           await navigator.share(shareData);
-          setContextCopyStatus("Share sheet opened.");
+          setContextCopyStatus(t("status.share.sheetOpened"));
           window.setTimeout(() => {
             setContextCopyStatus((current) => (current === "Share sheet opened." ? "" : current));
           }, 5000);
@@ -935,9 +942,9 @@ export default function App() {
         }
       }
       downloadBlob(image, image.name);
-      setContextCopyStatus("Share image downloaded.");
+      setContextCopyStatus(t("status.share.imageDownloaded"));
     } catch (error) {
-      const message = exportErrorMessage("Image share failed.", error);
+      const message = exportErrorMessage(t("error.imageShare"), error);
       console.error(message, error);
       setContextCopyStatus("");
       window.alert(message);
@@ -951,13 +958,16 @@ export default function App() {
     setMenuOpen(false);
     try {
       setShareBusy(true);
-      setContextCopyStatus("Creating embedded-data URL...");
+      setContextCopyStatus(t("status.share.creatingEmbeddedUrl"));
       await saveNotebookNow();
       const share = await createSharedNotebookLink(atlasRoot);
       await copyTextToClipboard(share.url);
-      setContextCopyStatus(`Embedded-data URL copied. ${share.encodedLength.toLocaleString()} URL chars / ${share.nodeCount.toLocaleString()} nodes.`);
+      setContextCopyStatus(t("status.share.embeddedUrlCopied", {
+        characters: share.encodedLength.toLocaleString(locale),
+        nodes: share.nodeCount,
+      }));
     } catch (error) {
-      const message = exportErrorMessage("Embedded-data URL creation failed.", error);
+      const message = exportErrorMessage(t("error.embeddedUrl"), error);
       console.error(message, error);
       setContextCopyStatus("");
       window.alert(message);
@@ -976,7 +986,7 @@ export default function App() {
       setSharedNotebookRoot(null);
     } catch (error) {
       console.error("Shared Mind Atlas import failed", error);
-      window.alert(importErrorMessage("Shared Mind Atlas import failed.", error));
+      window.alert(importErrorMessage(t("error.sharedImport"), error));
     } finally {
       setSharedNotebookImporting(false);
     }
@@ -1020,16 +1030,16 @@ export default function App() {
 
   const handleHostedSaveCloudAs = async () => {
     if (!publicServiceMode) return;
-    const title = window.prompt("Save current atlas as", atlasRoot.title || "Mind Atlas");
+    const title = window.prompt(formatAppMessage("ui.app.saveCurrentAtlasAs.999bb1c"), atlasRoot.title || "Mind Atlas");
     if (!title?.trim()) return;
     try {
       setCloudLoading(true);
       setCloudError("");
-      setCloudStatus("Saving...");
+      setCloudStatus(t("status.cloud.savingShort"));
       await saveNotebookNow();
       const { root } = prepareHostedCloudNotebook();
       const saved = await saveHostedCloudNotebook(root, title.trim());
-      setCloudStatus(`Saved: ${saved.title || saved.name}`);
+      setCloudStatus(t("status.cloud.saved", { name: saved.title || saved.name }));
       await refreshCloudNotebooks();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Cloud save failed.";
@@ -1043,16 +1053,16 @@ export default function App() {
 
   const handleHostedOverwriteCloudNotebook = async (entry: CloudNotebookEntry) => {
     if (!publicServiceMode || !entry.id) return;
-    const confirmed = window.confirm(`Overwrite "${entry.title || entry.name}" with the current atlas?`);
+    const confirmed = window.confirm(t("dialog.cloud.overwriteConfirm", { name: entry.title || entry.name }));
     if (!confirmed) return;
     try {
       setCloudLoading(true);
       setCloudError("");
-      setCloudStatus("Overwriting...");
+      setCloudStatus(t("status.cloud.overwriting"));
       await saveNotebookNow();
       const { root } = prepareHostedCloudNotebook();
       const saved = await updateHostedCloudNotebook(entry.id, root, entry.title || root.title || atlasRoot.title || "Mind Atlas");
-      setCloudStatus(`Overwritten: ${saved.title || saved.name}`);
+      setCloudStatus(t("status.cloud.overwritten", { name: saved.title || saved.name }));
       await refreshCloudNotebooks();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Cloud overwrite failed.";
@@ -1066,13 +1076,13 @@ export default function App() {
 
   const handleHostedRenameCloudNotebook = async (entry: CloudNotebookEntry) => {
     if (!publicServiceMode || !entry.id) return;
-    const title = window.prompt("Rename cloud file", entry.title || entry.name.replace(/\.mindatlas$/i, ""));
+    const title = window.prompt(formatAppMessage("ui.app.renameCloudFile.88036dc"), entry.title || entry.name.replace(/\.mindatlas$/i, ""));
     if (!title?.trim()) return;
     try {
       setCloudLoading(true);
       setCloudError("");
       const renamed = await renameHostedCloudNotebook(entry.id, title.trim());
-      setCloudStatus(`Renamed: ${renamed.title || renamed.name}`);
+      setCloudStatus(t("status.cloud.renamed", { name: renamed.title || renamed.name }));
       await refreshCloudNotebooks();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Cloud rename failed.";
@@ -1085,13 +1095,13 @@ export default function App() {
 
   const handleHostedDeleteCloudNotebook = async (entry: CloudNotebookEntry) => {
     if (!publicServiceMode || !entry.id) return;
-    const confirmed = window.confirm(`Delete "${entry.title || entry.name}" from cloud storage?`);
+    const confirmed = window.confirm(t("dialog.cloud.deleteConfirm", { name: entry.title || entry.name }));
     if (!confirmed) return;
     try {
       setCloudLoading(true);
       setCloudError("");
       await deleteHostedCloudNotebook(entry.id);
-      setCloudStatus(`Deleted: ${entry.title || entry.name}`);
+      setCloudStatus(t("status.cloud.deleted", { name: entry.title || entry.name }));
       await refreshCloudNotebooks();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Cloud delete failed.";
@@ -1109,8 +1119,8 @@ export default function App() {
       setCloudError("");
       const share = await shareHostedCloudNotebook(entry.id);
       await copyTextToClipboard(share.url);
-      setCloudStatus(`Share link copied: ${share.entry.title || share.entry.name}`);
-      setContextCopyStatus("Public Mind Atlas link copied.");
+      setCloudStatus(t("status.cloud.shareCopied", { name: share.entry.title || share.entry.name }));
+      setContextCopyStatus(t("status.cloud.publicCopied"));
       window.setTimeout(() => {
         setContextCopyStatus((current) => (current === "Public Mind Atlas link copied." ? "" : current));
       }, 7000);
@@ -1129,7 +1139,7 @@ export default function App() {
     const lowerName = file.name.toLowerCase();
     if (lowerName.endsWith(".mindatlaspkg")) {
       if (publicServiceMode) {
-        window.alert("公開サービスでは画像・動画を含むパッケージは読み込めません。.mindatlas、Markdown、OPML、FreeMind を使ってください。");
+        window.alert(formatAppMessage("ui.app.theHostedServiceCannotImport.a105a9c"));
         return;
       }
       try {
@@ -1139,7 +1149,7 @@ export default function App() {
         setMenuOpen(false);
       } catch (error) {
         console.error("Notebook package import failed", error);
-        window.alert(importErrorMessage("Package import failed.", error));
+        window.alert(importErrorMessage(t("error.packageImport"), error));
       }
       return;
     }
@@ -1154,7 +1164,7 @@ export default function App() {
         setMenuOpen(false);
       } catch (error) {
         console.error(`${externalFormat} import failed`, error);
-        window.alert(importErrorMessage(`${externalFormatLabel(externalFormat)} import failed.`, error));
+        window.alert(importErrorMessage(t("error.externalImport", { format: externalFormatLabel(externalFormat) }), error));
       }
       return;
     }
@@ -1167,7 +1177,7 @@ export default function App() {
       setMenuOpen(false);
     } catch (error) {
       console.error("Notebook import failed", error);
-      window.alert(importErrorMessage("Notebook import failed.", error));
+      window.alert(importErrorMessage(t("error.notebookImport"), error));
     }
   };
 
@@ -1190,7 +1200,7 @@ export default function App() {
       setMenuOpen(false);
     } catch (error) {
       console.error("Replace active node body failed", error);
-      window.alert(importErrorMessage("Replace active node body failed.", error));
+      window.alert(importErrorMessage(t("error.replaceBody"), error));
     }
   };
 
@@ -1203,7 +1213,7 @@ export default function App() {
       setMenuOpen(false);
     } catch (error) {
       console.error("Replace active subtree failed", error);
-      window.alert(importErrorMessage("Replace active subtree failed.", error));
+      window.alert(importErrorMessage(t("error.replaceSubtree"), error));
     }
   };
 
@@ -1230,7 +1240,7 @@ export default function App() {
       setMenuOpen(false);
     } catch (error) {
       console.error("Append as children failed", error);
-      window.alert(importErrorMessage("Append as children failed.", error));
+      window.alert(importErrorMessage(t("error.appendChildren"), error));
     }
   };
 
@@ -1240,7 +1250,7 @@ export default function App() {
       setMergePreview(createMergePreviewState(selectedNode, importedRoot));
     } catch (error) {
       console.error("Preview merge failed", error);
-      window.alert(importErrorMessage("Preview merge failed.", error));
+      window.alert(importErrorMessage(t("error.previewMerge"), error));
     }
   };
 
@@ -1290,7 +1300,7 @@ export default function App() {
     try {
       setCloudLoading(true);
       setCloudError("");
-      const root = createNotebookFromTemplate(templateId);
+      const root = createNotebookFromTemplate(templateId, locale === "ja" ? "ja" : "en");
       await replaceStoredAttachmentBlobs(root, {});
       importNotebook(root, root.title, {});
       setStartSpaceOpen(false);
@@ -1336,7 +1346,7 @@ export default function App() {
   };
 
   const handleTutorialModeClick = () => {
-    const confirmed = window.confirm("Tutorial mode will erase the current local atlas and restart the guided first-run flow. Continue?");
+    const confirmed = window.confirm(formatAppMessage("ui.app.tutorialModeWillEraseThe.4f40f19"));
     if (!confirmed) return;
     resetNotebook();
     const nextUiState = { ...latestUiStateRef.current, layoutMode: "phyllotaxis" as const };
@@ -1374,7 +1384,7 @@ export default function App() {
         event.preventDefault();
         void copyContextMarkdown(atlasRoot, selectedNodeId, "ancestors")
           .then((result) => {
-            setContextCopyStatus(`Copied ${formatContextCopyStats(result)}`);
+            setContextCopyStatus(t("status.copy.copied", { stats: formatContextCopyStats(result) }));
             window.setTimeout(() => setContextCopyStatus(""), 2400);
           })
           .catch((error) => {
@@ -1430,19 +1440,19 @@ export default function App() {
   const handleToggleMobileNotifications = async () => {
     setMobileNotificationMessage("");
     if (!isMobileNotificationTarget()) {
-      setMobileNotificationMessage("Mobile only on this device");
+      setMobileNotificationMessage(t("status.mobile.only"));
       setMobileNotificationPermission(getMobileNotificationPermission());
       return;
     }
     if (!isNotificationSupported()) {
-      setMobileNotificationMessage("Notifications unsupported");
+      setMobileNotificationMessage(t("status.mobile.notificationsUnsupported"));
       setMobileNotificationPermission("unsupported");
       return;
     }
     if (mobileNotificationsEnabled) {
       persistMobileNotificationPreference(false);
       setMobileNotificationsEnabled(false);
-      setMobileNotificationMessage("Off");
+      setMobileNotificationMessage(t("common.off"));
       return;
     }
     const permission =
@@ -1468,11 +1478,11 @@ export default function App() {
     setVrModeMessage("");
     if (vrModeEnabled) {
       setVrModeEnabled(false);
-      setVrModeMessage("Off");
+      setVrModeMessage(t("common.off"));
       return;
     }
     if (!isDeviceOrientationSupported()) {
-      setVrModeMessage("Unsupported on this device");
+      setVrModeMessage(t("status.device.unsupported"));
       return;
     }
     const permission = await requestDeviceOrientationAccess();
@@ -1482,7 +1492,7 @@ export default function App() {
       return;
     }
     setVrModeEnabled(true);
-    setVrModeMessage("On");
+      setVrModeMessage(t("common.on"));
   };
 
   const handleRenderQualityChange = (quality: RenderQuality) => {
@@ -1552,17 +1562,17 @@ export default function App() {
       {dragImportActive ? (
         <div className="import-drop-overlay" role="status" aria-live="polite">
           <Upload size={28} />
-          <span>Drop Markdown, OPML, FreeMind, or Mind Atlas file</span>
+          <span>{<I18nText id="ui.app.dropMarkdownOpmlFreemindOr.6670d93" />}</span>
         </div>
       ) : null}
 
-      <header className="top-bar" aria-label="Mind Atlas status">
+      <header className="top-bar" aria-label={formatAppMessage("ui.app.mindAtlasStatus.36acaea")}>
         <div className="top-title-stack">
           <AtlasBreadcrumb path={onboarding.showLogoOnly ? [atlasRoot] : selectedPath} mobilePortrait={mobilePortraitBreadcrumb} onFocus={focusNode} />
           {onboarding.showLogoOnly ? (
             <button className="tutorial-skip-button" type="button" onClick={handleSkipTutorial}>
               <ArrowRight size={14} />
-              チュートリアルをスキップ
+              {t("app.tutorial.skip")}
             </button>
           ) : null}
           {onboarding.showMainChrome ? (
@@ -1585,17 +1595,17 @@ export default function App() {
       </header>
 
       {onboarding.showMainChrome ? (
-      <div ref={globalMenuRef} className="global-menu" aria-label="Atlas actions">
+      <div ref={globalMenuRef} className="global-menu" aria-label={formatAppMessage("ui.app.atlasActions.8babf3a")}>
         {publicServiceMode ? (
           <button
             className={`ai-feature-button ${aiFeaturesUnlocked ? "is-active" : ""}`}
             type="button"
             onClick={() => setAiFeatureDialogOpen(true)}
-            aria-label="AI機能"
-            title="AI機能"
+            aria-label={t("app.aiFeatures")}
+            title={t("app.aiFeatures")}
           >
             <Sparkles size={16} />
-            <span>AI機能</span>
+            <span>{t("app.aiFeatures")}</span>
             <small>{aiFeatureButtonBadge(hostedSession, hostedSessionLoading, hostedSessionError)}</small>
           </button>
         ) : null}
@@ -1604,18 +1614,103 @@ export default function App() {
           type="button"
           onClick={handleShareNotebookImage}
           disabled={shareBusy}
-          aria-label={publicServiceMode ? "Create public Mind Atlas cloud link" : "Share atlas image"}
-          title={publicServiceMode ? "Create public Mind Atlas cloud link" : "Share atlas image"}
+          aria-label={publicServiceMode ? t("app.shareCloud") : t("app.shareImage")}
+          title={publicServiceMode ? t("app.shareCloud") : t("app.shareImage")}
         >
           <Share2 size={18} />
         </button>
-        <button className="icon-button" type="button" onClick={() => setMenuOpen((open) => !open)} aria-label="Open atlas menu">
+        <button className="icon-button" type="button" onClick={() => setMenuOpen((open) => !open)} aria-label={t("app.openMenu")}>
           <MoreHorizontal size={19} />
         </button>
         {menuOpen ? (
           <div className="context-menu global-context-menu">
-            <div className="context-menu-section" aria-label="Background mode">
-              <span className="context-menu-section-title">Background</span>
+            <div className="context-menu-section" aria-label={t("menu.files.label")}>
+              <span className="context-menu-section-title">{t("menu.files")}</span>
+              <button type="button" onClick={handleInitialize}>
+                <RotateCcw size={15} /> {t("menu.newSpace")}
+              </button>
+              <button type="button" onClick={handleExportLight}>
+                <Download size={15} />
+                <span>
+                  {t("menu.exportText")}
+                  <small>{t("menu.exportText.detail")}</small>
+                </span>
+              </button>
+              {!publicServiceMode ? (
+                <button type="button" onClick={handleExportPackage}>
+                  <Download size={15} />
+                  <span>
+                    {t("menu.exportFiles")}
+                    <small>{t("menu.exportFiles.detail")}</small>
+                  </span>
+                </button>
+              ) : null}
+              {!publicServiceMode ? (
+                <button type="button" onClick={handleCreateSharedNotebookLink} disabled={shareBusy}>
+                  <Share2 size={15} />
+                  <span>
+                    {t("menu.embeddedUrl")}
+                    <small>{t("menu.embeddedUrl.detail")}</small>
+                  </span>
+                </button>
+              ) : null}
+              <button type="button" onClick={handleOpenRestoreHistory}>
+                <History size={15} />
+                <span>
+                  {t("menu.restore")}
+                  <small>{notebookHistoryStatusLabel(notebookPersistenceStatus, notebookSnapshots.length, durableNotebookStorage, notebookPersistenceError)}</small>
+                </span>
+              </button>
+              {publicServiceMode ? (
+                <>
+                  <button type="button" onClick={handleOpenCloudLoad}>
+                    <CloudUpload size={15} />
+                    <span>
+                      {t("menu.cloudSave")}
+                      <small>{cloudStatus || (hostedAuthenticated ? t("menu.cloudSave.detail") : t("menu.googleLoginRequired"))}</small>
+                    </span>
+                  </button>
+                  <button type="button" onClick={handleOpenCloudLoad}>
+                    <CloudDownload size={15} />
+                    <span>
+                      {t("menu.cloudLoad")}
+                      <small>{cloudError || (hostedAuthenticated ? t("menu.cloudLoad.detail") : t("menu.googleLoginRequired"))}</small>
+                    </span>
+                  </button>
+                </>
+              ) : null}
+              {aiFeaturesUnlocked && !publicServiceMode ? (
+                <>
+                  <button type="button" onClick={handleSaveToCloud}>
+                    <CloudUpload size={15} />
+                    <span>
+                      {t("menu.cloudSave")}
+                      <small>{cloudStatus || formatAppMessage("ui.app.mindatlaspkgServerFolder.fd2c869")}</small>
+                    </span>
+                  </button>
+                  <button type="button" onClick={handleOpenCloudLoad}>
+                    <CloudDownload size={15} />
+                    <span>
+                      {t("menu.cloudLoad")}
+                      <small>{cloudError || formatAppMessage("ui.app.chooseAServerPackage.23147b3")}</small>
+                    </span>
+                  </button>
+                </>
+              ) : null}
+              <label>
+                <Upload size={15} /> {t("menu.import")}
+                <input type="file" accept={publicServiceMode ? HOSTED_IMPORT_ACCEPT_TYPES : IMPORT_ACCEPT_TYPES} onChange={handleImport} />
+              </label>
+              <button type="button" onClick={() => { setTextImportOpen(true); setMenuOpen(false); }}>
+                <FileText size={15} />
+                <span>
+                  {t("menu.importOutline")}
+                  <small>{t("menu.importOutline.detail")}</small>
+                </span>
+              </button>
+            </div>
+            <div className="context-menu-section" aria-label={t("menu.background")}>
+              <span className="context-menu-section-title">{t("menu.background")}</span>
               <div className="theme-choice-row">
                 <button
                   className={theme === "dark" ? "is-active" : ""}
@@ -1623,7 +1718,7 @@ export default function App() {
                   onClick={() => setTheme("dark")}
                   aria-pressed={theme === "dark"}
                 >
-                  <Moon size={15} /> Black
+                  <Moon size={15} /> {t("menu.background.black")}
                 </button>
                 <button
                   className={theme === "light" ? "is-active" : ""}
@@ -1631,12 +1726,12 @@ export default function App() {
                   onClick={() => setTheme("light")}
                   aria-pressed={theme === "light"}
                 >
-                  <Sun size={15} /> White
+                  <Sun size={15} /> {t("menu.background.white")}
                 </button>
               </div>
             </div>
-            <div className="context-menu-section" aria-label="Mode">
-              <span className="context-menu-section-title">Mode</span>
+            <div className="context-menu-section" aria-label={t("menu.mode")}>
+              <span className="context-menu-section-title">{t("menu.mode")}</span>
               <div className="theme-choice-row mode-choice-row">
                 {MODE_OPTIONS.map((option) => (
                   <button
@@ -1656,26 +1751,26 @@ export default function App() {
                   type="button"
                   onClick={handleOpenOutlineEditor}
                   aria-pressed={outlineEditorOpen}
-                  title="TextEditor"
+                  title={t("menu.textEditor")}
                 >
                   <PenLine size={15} />
-                  TextEditor
+                  {t("menu.textEditor")}
                 </button>
               </div>
             </div>
-            <div className="undo-redo-row" aria-label="History actions">
-              <button type="button" onClick={handleUndo} disabled={!canUndo} aria-keyshortcuts="Control+Z" title="Undo (Ctrl+Z)">
-                <Undo2 size={15} /> Undo
+            <div className="undo-redo-row" aria-label={t("menu.history")}>
+              <button type="button" onClick={handleUndo} disabled={!canUndo} aria-keyshortcuts="Control+Z" title={`${t("menu.undo")} (Ctrl+Z)`}>
+                <Undo2 size={15} /> {t("menu.undo")}
               </button>
-              <button type="button" onClick={handleRedo} disabled={!canRedo} aria-keyshortcuts="Control+Y" title="Redo (Ctrl+Y)">
-                <Redo2 size={15} /> Redo
+              <button type="button" onClick={handleRedo} disabled={!canRedo} aria-keyshortcuts="Control+Y" title={formatAppMessage("ui.app.redoCtrlY.d812f8d")}>
+                <Redo2 size={15} /> {t("menu.redo")}
               </button>
             </div>
             {voiceLogReadable ? (
               <button type="button" onClick={handleOpenVoiceLog}>
                 <MessageSquareText size={15} />
                 <span>
-                  AI Partner log
+                  {t("menu.aiLog")}
                   <small>{voiceLogUnreadLabel(unreadPartnerEntries.length, voiceLogEntries.length)}</small>
                 </span>
               </button>
@@ -1685,146 +1780,19 @@ export default function App() {
                 <button type="button" onClick={handleRestartRealtime}>
                   <Radio size={15} />
                   <span>
-                    Restart Realtime
-                    <small>reset voice context</small>
+                    {t("menu.realtime.restart")}
+                    <small>{t("menu.realtime.restart.detail")}</small>
                   </span>
                 </button>
                 <button type="button" onClick={handleOpenVoiceSettings}>
                   <Settings2 size={15} />
                   <span>
-                    Voice settings
+                    {t("menu.voiceSettings")}
                     <small>{voicePartnerSettings.realtimeVoice} / {voicePartnerSettings.realtimeModel}</small>
                   </span>
                 </button>
               </>
             ) : null}
-            <button type="button" onClick={handleToggleMobileNotifications}>
-              {mobileNotificationsEnabled ? <Bell size={15} /> : <BellOff size={15} />}
-              <span>
-                Mobile notifications
-                <small>{mobileNotificationStatusLabel(mobileNotificationsEnabled, mobileNotificationPermission, mobileNotificationMessage)}</small>
-              </span>
-            </button>
-            <button type="button" onClick={handleEnterFullscreen} disabled={!fullscreenSupported}>
-              <Maximize2 size={15} />
-              <span>
-                Enter fullscreen
-                <small>hide browser bars</small>
-              </span>
-            </button>
-            <button
-              className={vrModeEnabled ? "is-active" : ""}
-              type="button"
-              onClick={handleToggleVrMode}
-              aria-pressed={vrModeEnabled}
-              disabled={!vrModeEnabled && !isDeviceOrientationSupported()}
-            >
-              <Smartphone size={15} />
-              <span>
-                VR mode
-                <small>{vrModeStatusLabel(vrModeEnabled, vrModeMessage)}</small>
-              </span>
-            </button>
-            <div className="context-menu-section" aria-label="Render quality">
-              <span className="context-menu-section-title">Render quality</span>
-              <div className="theme-choice-row">
-                <button
-                  className={renderQuality === "high" ? "is-active" : ""}
-                  type="button"
-                  onClick={() => handleRenderQualityChange("high")}
-                  aria-pressed={renderQuality === "high"}
-                >
-                  High
-                </button>
-                <button
-                  className={renderQuality === "low" ? "is-active" : ""}
-                  type="button"
-                  onClick={() => handleRenderQualityChange("low")}
-                  aria-pressed={renderQuality === "low"}
-                >
-                  Low
-                </button>
-              </div>
-            </div>
-            <button type="button" onClick={handleExportLight}>
-              <Download size={15} />
-              <span>
-                Export text only
-                <small>.mindatlas / text and metadata</small>
-              </span>
-            </button>
-            {!publicServiceMode ? (
-              <button type="button" onClick={handleExportPackage}>
-                <Download size={15} />
-                <span>
-                  Export with files
-                  <small>.mindatlaspkg / includes images and video</small>
-                </span>
-              </button>
-            ) : null}
-            {!publicServiceMode ? (
-              <button type="button" onClick={handleCreateSharedNotebookLink} disabled={shareBusy}>
-                <Share2 size={15} />
-                <span>
-                  Create embedded-data URL
-                  <small>copy atlas data inside a link</small>
-                </span>
-              </button>
-            ) : null}
-            <button type="button" onClick={handleOpenRestoreHistory}>
-              <History size={15} />
-              <span>
-                Restore from history
-                <small>{notebookHistoryStatusLabel(notebookPersistenceStatus, notebookSnapshots.length, durableNotebookStorage, notebookPersistenceError)}</small>
-              </span>
-            </button>
-            {publicServiceMode ? (
-              <>
-                <button type="button" onClick={handleOpenCloudLoad}>
-                  <CloudUpload size={15} />
-                  <span>
-                    Cloud save
-                    <small>{cloudStatus || (hostedAuthenticated ? "save as or overwrite" : "Google login required")}</small>
-                  </span>
-                </button>
-                <button type="button" onClick={handleOpenCloudLoad}>
-                  <CloudDownload size={15} />
-                  <span>
-                    Cloud load
-                    <small>{cloudError || (hostedAuthenticated ? "read from your Google account" : "Google login required")}</small>
-                  </span>
-                </button>
-              </>
-            ) : null}
-            {aiFeaturesUnlocked && !publicServiceMode ? (
-              <>
-                <button type="button" onClick={handleSaveToCloud}>
-                  <CloudUpload size={15} />
-                  <span>
-                    クラウドへ保存
-                    <small>{cloudStatus || ".mindatlaspkg / server folder"}</small>
-                  </span>
-                </button>
-                <button type="button" onClick={handleOpenCloudLoad}>
-                  <CloudDownload size={15} />
-                  <span>
-                    クラウドから読み込み
-                    <small>{cloudError || "choose a server package"}</small>
-                  </span>
-                </button>
-              </>
-            ) : null}
-            <label>
-              <Upload size={15} /> Import
-              <input type="file" accept={publicServiceMode ? HOSTED_IMPORT_ACCEPT_TYPES : IMPORT_ACCEPT_TYPES} onChange={handleImport} />
-            </label>
-            <button type="button" onClick={() => { setTextImportOpen(true); setMenuOpen(false); }}>
-              <FileText size={15} />
-              <span>
-                Import text outline
-                <small>Markdown headings and lists</small>
-              </span>
-            </button>
             <button
               className="tutorial-mode-button"
               type="button"
@@ -1832,18 +1800,82 @@ export default function App() {
             >
               <GraduationCap size={15} />
               <span>
-                Tutorial mode
-                <small>restart the first-run guide</small>
+                {t("menu.tutorial")}
+                <small>{t("menu.tutorial.detail")}</small>
               </span>
             </button>
-            <button type="button" onClick={handleInitialize}>
-              <RotateCcw size={15} /> Initialize
-            </button>
-            <a className="context-menu-link" href={MIND_ATLAS_ABOUT_URL} aria-label="Mind Atlas overview and AI plan">
+            <div className="context-menu-section language-menu-section" aria-label={t("language.section")}>
+              <span className="context-menu-section-title"><Languages size={14} /> {t("language.section")}</span>
+              <label className="language-select-label">
+                <span>{t("language.current")}</span>
+                <select
+                  value={localePreference}
+                  onChange={(event) => setLocalePreference(event.target.value as LocalePreference)}
+                  aria-label={t("language.current")}
+                >
+                  <option value="auto">{t("common.auto")}</option>
+                  {AVAILABLE_LOCALES.map((availableLocale) => (
+                    <option key={availableLocale} value={availableLocale}>{LOCALE_LABELS[availableLocale]}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="context-menu-section" aria-label={t("menu.renderQuality")}>
+              <span className="context-menu-section-title">{t("menu.renderQuality")}</span>
+              <div className="theme-choice-row">
+                <button
+                  className={renderQuality === "high" ? "is-active" : ""}
+                  type="button"
+                  onClick={() => handleRenderQualityChange("high")}
+                  aria-pressed={renderQuality === "high"}
+                >
+                  {t("menu.renderQuality.high")}
+                </button>
+                <button
+                  className={renderQuality === "low" ? "is-active" : ""}
+                  type="button"
+                  onClick={() => handleRenderQualityChange("low")}
+                  aria-pressed={renderQuality === "low"}
+                >
+                  {t("menu.renderQuality.low")}
+                </button>
+              </div>
+            </div>
+            <div className="context-menu-section" aria-label={t("menu.mobileSettings")}>
+              <span className="context-menu-section-title">{t("menu.mobileSettings")}</span>
+              <button type="button" onClick={handleToggleMobileNotifications}>
+                {mobileNotificationsEnabled ? <Bell size={15} /> : <BellOff size={15} />}
+                <span>
+                  {t("menu.mobileNotifications")}
+                  <small>{mobileNotificationStatusLabel(mobileNotificationsEnabled, mobileNotificationPermission, mobileNotificationMessage)}</small>
+                </span>
+              </button>
+              <button type="button" onClick={handleEnterFullscreen} disabled={!fullscreenSupported}>
+                <Maximize2 size={15} />
+                <span>
+                  {t("menu.fullscreen")}
+                  <small>{t("menu.fullscreen.detail")}</small>
+                </span>
+              </button>
+              <button
+                className={vrModeEnabled ? "is-active" : ""}
+                type="button"
+                onClick={handleToggleVrMode}
+                aria-pressed={vrModeEnabled}
+                disabled={!vrModeEnabled && !isDeviceOrientationSupported()}
+              >
+                <Smartphone size={15} />
+                <span>
+                  {t("menu.vrMode")}
+                  <small>{vrModeStatusLabel(vrModeEnabled, vrModeMessage)}</small>
+                </span>
+              </button>
+            </div>
+            <a className="context-menu-link" href={MIND_ATLAS_ABOUT_URL} aria-label={formatAppMessage("ui.app.mindAtlasOverviewAndAi.b1eb8a4")}>
               <Info size={15} />
               <span>
-                About Mind Atlas
-                <small>philosophy, features, and AI plan</small>
+                {t("menu.about")}
+                <small>{t("menu.about.detail")}</small>
               </span>
             </a>
             <a
@@ -1851,12 +1883,12 @@ export default function App() {
               href={MIND_ATLAS_SOURCE_URL}
               target="_blank"
               rel="noreferrer"
-              aria-label="Source code and license"
+              aria-label={formatAppMessage("ui.app.sourceCodeAndLicense.ba82518")}
             >
               <Github size={15} />
               <span>
-                Source code & legal
-                <small>© 2026 · AGPL-3.0-only · redistribution / no warranty</small>
+                {t("menu.source")}
+                <small>{t("menu.source.detail")}</small>
               </span>
             </a>
           </div>
@@ -1870,9 +1902,9 @@ export default function App() {
         <section
           className={`mobile-workspace-panel ${showWorkspacePanel ? "is-open" : "is-closing"}`}
           data-active-tab={effectiveMobilePanelTab}
-          aria-label="Mobile workspace"
+          aria-label={formatAppMessage("ui.app.mobileWorkspace.35daa52")}
         >
-          <div className="mobile-workspace-tabs" role="tablist" aria-label="Workspace panel">
+          <div className="mobile-workspace-tabs" role="tablist" aria-label={formatAppMessage("ui.app.workspacePanel.8b247f7")}>
             {showCommandDock ? (
               <button
                 className={effectiveMobilePanelTab === "command" ? "is-active" : ""}
@@ -1882,7 +1914,7 @@ export default function App() {
                 onClick={() => setMobilePanelTab("command")}
               >
                 <MessageSquareText size={15} />
-                <span>AI</span>
+                <span>{<I18nText id="ui.app.ai.c7cd197" />}</span>
               </button>
             ) : null}
             <button
@@ -1893,7 +1925,7 @@ export default function App() {
               onClick={() => setMobilePanelTab("editor")}
             >
               <PenLine size={15} />
-              <span>Editor</span>
+              <span>{<I18nText id="ui.app.editor.127052c" />}</span>
             </button>
             {mobileOperationPanelTabAvailable ? (
               <button
@@ -1904,7 +1936,7 @@ export default function App() {
                 onClick={() => setMobilePanelTab("operation")}
               >
                 <Settings2 size={15} />
-                <span>Operation</span>
+                <span>{<I18nText id="ui.app.operation.c7a1622" />}</span>
               </button>
             ) : null}
             {outlineEditorOpen ? (
@@ -1916,7 +1948,7 @@ export default function App() {
                 onClick={() => setMobilePanelTab("outline")}
               >
                 <ListTree size={15} />
-                <span>TextEditor</span>
+                <span>{<I18nText id="ui.app.texteditor.0e3c5aa" />}</span>
               </button>
             ) : null}
           </div>
@@ -2096,53 +2128,47 @@ function AiFeatureDialog({
   const handleRefresh = () => runAction("refresh", onRefresh);
 
   return (
-    <section className="ai-feature-dialog" role="dialog" aria-modal="true" aria-label="AI機能" onMouseDown={(event) => event.stopPropagation()}>
+    <section className="ai-feature-dialog" role="dialog" aria-modal="true" aria-label={formatAppMessage("ui.app.aiFeatures.e64941b")} onMouseDown={(event) => event.stopPropagation()}>
       <header className="voice-log-header">
         <div>
-          <h2>AI機能</h2>
+          <h2>{<I18nText id="ui.app.aiFeatures.8149424" />}</h2>
           <p>{aiFeatureStatusLabel(session, loading, error)}</p>
         </div>
-        <button className="icon-button" type="button" onClick={onClose} aria-label="Close AI settings">
+        <button className="icon-button" type="button" onClick={onClose} aria-label={formatAppMessage("ui.app.closeAiSettings.2147ae4")}>
           <X size={16} />
         </button>
       </header>
       <div className="ai-feature-body">
         {error ? <p className="ai-feature-error">{error}</p> : null}
         {!authenticated ? (
-          <p className="ai-feature-copy">Notebookはログインなしで使えます。AI機能はGoogleログインと月額登録で利用できます。</p>
+          <p className="ai-feature-copy">{<I18nText id="ui.app.theNotebookWorksWithoutSigning.de5cd82" />}</p>
         ) : null}
         {aiEnabled ? (
           <div className="ai-plan-card ai-usage-guide-card">
             <div className="ai-plan-card-header">
-              <span>AIリクエスト</span>
-              <strong>利用ガイド</strong>
+              <span>{<I18nText id="ui.app.aiRequest.752b5a1" />}</span>
+              <strong>{<I18nText id="ui.app.usageGuide.1809d14" />}</strong>
             </div>
             <p>
-              右矢印のSENDボタンは、入力内容を選択中のAIへ送ります。AI利用トークンを消費します。
-              任意のノードを選択して送ると、そのノードの情報もAIに渡され、返答は子ノードとして追加されます。
-              何も選ばずに送ると、返答はAI Partner logへ戻ります。
-            </p>
+              {<I18nText id="ui.app.theArrowShapedSendButton.74bf26f" />}</p>
             <p>
-              マイクを一度押して止めると、音声認識でテキストを書き起こします。消費は小さめです。
-              マイクを長押しするとリアルタイムAI会話モードになり、赤くなります。話す間は押し続け、AIの返答は音声で返ります。
-              リアルタイム会話は消費が大きめです。音声はサブメニューのVoice settingsから変更できます。
-            </p>
+              {<I18nText id="ui.app.pressTheMicrophoneOnceAnd.980ef6c" />}</p>
           </div>
         ) : (
           <div className="ai-plan-card">
             <div className="ai-plan-card-header">
-              <span>Mind Atlas Pro</span>
-              <strong>US$10 / month</strong>
+              <span>{<I18nText id="ui.app.mindAtlasPro.cd0a834" />}</span>
+              <strong>{<I18nText id="ui.app.us10Month.25ec82a" />}</strong>
             </div>
-            <p>ChatGPTやClaude等のAIに質問や編集指示ができます。Mind Atlasを見ながらリアルタイムでAIと会話することもできます。</p>
+            <p>{<I18nText id="ui.app.askAiServicesSuchAs.a8a8a7f" />}</p>
             <dl>
               <div>
-                <dt>AI利用トークン</dt>
-                <dd>請求期間ごとに100%付与</dd>
+                <dt>{<I18nText id="ui.app.aiTokenBalance.016ef19" />}</dt>
+                <dd>{<I18nText id="ui.app.100GrantedEachBillingPeriod.753b157" />}</dd>
               </div>
               <div>
-                <dt>更新</dt>
-                <dd>{nextCreditRenewalLabel ? `次回更新日: ${nextCreditRenewalLabel}` : "Stripeの請求日に自動更新"}</dd>
+                <dt>{<I18nText id="ui.app.refresh.ca09751" />}</dt>
+                <dd>{nextCreditRenewalLabel ? formatAppMessage("dynamic.nextRenewal", { date: nextCreditRenewalLabel }) : formatAppMessage("ui.app.automaticallyRenewsOnTheStripe.0be8f92")}</dd>
               </div>
             </dl>
           </div>
@@ -2159,43 +2185,39 @@ function AiFeatureDialog({
         {showCredit ? (
           <div className={creditCardClass}>
             <div>
-              <span>AI利用トークン</span>
+              <span>{<I18nText id="ui.app.aiTokenBalance.016ef19" />}</span>
               <strong>{roundedCreditPercent}%</strong>
             </div>
             <div className="ai-credit-track" aria-hidden="true">
               <span style={{ width: `${creditPercent}%` }} />
             </div>
-            {nextCreditRenewalLabel ? <small className="ai-credit-renewal">次回更新日: {nextCreditRenewalLabel}</small> : null}
+            {nextCreditRenewalLabel ? <small className="ai-credit-renewal">{<I18nText id="ui.app.nextRenewal.04e732d" />}{nextCreditRenewalLabel}</small> : null}
           </div>
         ) : null}
         <div className="ai-feature-actions">
           {!authenticated ? (
             <button className="secondary-button" type="button" onClick={() => void runAction("login", startHostedGoogleLogin)} disabled={loading || Boolean(actionBusy)}>
               <LogIn size={15} />
-              Googleでログイン
-            </button>
+              {<I18nText id="ui.app.signInWithGoogle.adee61b" />}</button>
           ) : null}
           {checkoutAvailable ? (
             <button className="secondary-button is-wide" type="button" onClick={() => void runAction("checkout", startHostedBillingCheckout)} disabled={loading || Boolean(actionBusy)}>
               <CreditCard size={15} />
-              月額US$10で登録
-            </button>
+              {<I18nText id="ui.app.subscribeForUs10Per.ec14079" />}</button>
           ) : null}
           {portalAvailable ? (
             <button className="secondary-button" type="button" onClick={() => void runAction("portal", openHostedBillingPortal)} disabled={loading || Boolean(actionBusy)}>
               <CreditCard size={15} />
-              {session?.subscription?.status === "past_due" ? "支払いを確認" : "支払いを管理"}
+              {session?.subscription?.status === "past_due" ? formatAppMessage("ui.app.reviewPayment.03db055") : formatAppMessage("ui.app.managePayment.7caea5a")}
             </button>
           ) : null}
           <button className="secondary-button" type="button" onClick={() => void handleRefresh()} disabled={loading || Boolean(actionBusy)}>
             <RefreshCw size={15} />
-            更新
-          </button>
+            {<I18nText id="ui.app.refresh.ca09751" />}</button>
           {authenticated ? (
             <button className="secondary-button" type="button" onClick={() => void handleLogout()} disabled={loading || Boolean(actionBusy)}>
               <LogOut size={15} />
-              ログアウト
-            </button>
+              {<I18nText id="ui.app.logOut.b7f5cb2" />}</button>
           ) : null}
         </div>
       </div>
@@ -2204,24 +2226,24 @@ function AiFeatureDialog({
 }
 
 function aiFeatureButtonBadge(session: HostedServiceSession | null, loading: boolean, error: string) {
-  if (loading) return "確認中";
-  if (error) return "要確認";
-  if (!session?.authenticated) return "未ログイン";
+  if (loading) return formatAppMessage("label.ai.checkingShort");
+  if (error) return formatAppMessage("label.ai.attentionShort");
+  if (!session?.authenticated) return formatAppMessage("label.ai.signedOutShort");
   if (session.credit) return `${Math.round(Math.max(0, Math.min(100, session.credit.remainingPercent)))}%`;
-  if (session.entitlement.reason === "billing_period_unavailable") return "同期中";
-  return "未登録";
+  if (session.entitlement.reason === "billing_period_unavailable") return formatAppMessage("label.ai.syncingShort");
+  return formatAppMessage("label.ai.notSubscribedShort");
 }
 
 function aiFeatureStatusLabel(session: HostedServiceSession | null, loading: boolean, error: string) {
-  if (loading) return "AI利用状況を確認しています";
-  if (error) return "サービス状況を確認できません";
-  if (!session?.authenticated) return "Notebookは無料で使えます。AIはログイン後に登録できます。";
-  if (session.entitlement.aiEnabled) return "AI機能を利用できます";
-  if (session.entitlement.reason === "billing_period_unavailable") return "AI利用トークンの次回更新日を確認中です";
-  if (session.entitlement.reason === "credit_exhausted") return "この請求期間のAI利用トークンは0%です";
-  if (session.subscription?.status === "past_due") return "支払い確認が必要です";
-  if (session.subscription?.status === "canceled") return "サブスクリプションは停止しています";
-  return "AI機能は未登録です";
+  if (loading) return formatAppMessage("label.ai.checking");
+  if (error) return formatAppMessage("label.ai.unavailable");
+  if (!session?.authenticated) return formatAppMessage("label.ai.freeNotebook");
+  if (session.entitlement.aiEnabled) return formatAppMessage("label.ai.available");
+  if (session.entitlement.reason === "billing_period_unavailable") return formatAppMessage("label.ai.renewalSync");
+  if (session.entitlement.reason === "credit_exhausted") return formatAppMessage("label.ai.exhausted");
+  if (session.subscription?.status === "past_due") return formatAppMessage("label.ai.paymentRequired");
+  if (session.subscription?.status === "canceled") return formatAppMessage("label.ai.subscriptionStopped");
+  return formatAppMessage("label.ai.notSubscribed");
 }
 
 function formatHostedDate(value?: string) {
@@ -2254,28 +2276,28 @@ function TextImportModal({
   const canImport = value.trim().length > 0;
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="notebook-history-dialog text-import-dialog" role="dialog" aria-modal="true" aria-label="Import text outline" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="notebook-history-dialog text-import-dialog" role="dialog" aria-modal="true" aria-label={formatAppMessage("ui.app.importTextOutline.c78f631")} onMouseDown={(event) => event.stopPropagation()}>
         <header>
           <div>
-            <strong>Import text outline</strong>
-            <span>Paste Markdown from ChatGPT, then choose how to apply it to the active node.</span>
+            <strong>{<I18nText id="ui.app.importTextOutline.a5e5e7e" />}</strong>
+            <span>{<I18nText id="ui.app.pasteMarkdownFromChatgptThen.e85c67c" />}</span>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close text import">
+          <button type="button" onClick={onClose} aria-label={formatAppMessage("ui.app.closeTextImport.6ba6ae0")}>
             <X size={16} />
           </button>
         </header>
         <textarea
-          aria-label="Markdown outline text"
+          aria-label={formatAppMessage("ui.app.markdownOutlineText.4f4c059")}
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          placeholder={"# Book\n\n## Chapter 1\n\n- Scene 1\n- Scene 2"}
+          placeholder={formatAppMessage("ui.app.bookChapter1Scene1.c445ab3")}
         />
         <footer>
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="button" onClick={onReplaceBody} disabled={!canImport}>Replace active node body</button>
-          <button type="button" onClick={onReplaceSubtree} disabled={!canImport}>Replace active subtree</button>
-          <button type="button" onClick={onAppendChildren} disabled={!canImport}>Append as children</button>
-          <button type="button" onClick={onPreviewMerge} disabled={!canImport}>Preview merge</button>
+          <button type="button" onClick={onClose}>{<I18nText id="ui.app.cancel.6a25e9e" />}</button>
+          <button type="button" onClick={onReplaceBody} disabled={!canImport}>{<I18nText id="ui.app.replaceActiveNodeBody.33d9b7d" />}</button>
+          <button type="button" onClick={onReplaceSubtree} disabled={!canImport}>{<I18nText id="ui.app.replaceActiveSubtree.7e1046b" />}</button>
+          <button type="button" onClick={onAppendChildren} disabled={!canImport}>{<I18nText id="ui.app.appendAsChildren.a7c96eb" />}</button>
+          <button type="button" onClick={onPreviewMerge} disabled={!canImport}>{<I18nText id="ui.app.previewMerge.23e68fc" />}</button>
         </footer>
       </section>
     </div>
@@ -2293,25 +2315,23 @@ function SharedNotebookDialog({
 }) {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="notebook-history-dialog shared-notebook-dialog" role="dialog" aria-modal="true" aria-label="Shared Mind Atlas" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="notebook-history-dialog shared-notebook-dialog" role="dialog" aria-modal="true" aria-label={formatAppMessage("ui.app.sharedMindAtlas.5a0a271")} onMouseDown={(event) => event.stopPropagation()}>
         <header>
           <div>
-            <strong>Shared Mind Atlas</strong>
-            <span>This link contains titles, body text, positions, colors, textures, and tree structure only.</span>
+            <strong>{<I18nText id="ui.app.sharedMindAtlas.feaf518" />}</strong>
+            <span>{<I18nText id="ui.app.thisLinkContainsTitlesBody.c73dc1e" />}</span>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close shared atlas import">
+          <button type="button" onClick={onClose} aria-label={formatAppMessage("ui.app.closeSharedAtlasImport.dc949d9")}>
             <X size={16} />
           </button>
         </header>
         <p>
-          Importing will replace the current universe in this browser. Node IDs and metadata are regenerated on import.
-        </p>
+          {<I18nText id="ui.app.importingWillReplaceTheCurrent.4aa2bfe" />}</p>
         <div className="shared-notebook-actions">
           <button type="button" onClick={onClose}>
-            Cancel
-          </button>
+            {<I18nText id="ui.app.cancel.6a25e9e" />}</button>
           <button className="primary-button" type="button" onClick={onImport} disabled={importing}>
-            {importing ? "Importing..." : "Import shared atlas"}
+            {importing ? formatAppMessage("ui.app.importing.59067a7") : formatAppMessage("ui.app.importSharedAtlas.82f80a3")}
           </button>
         </div>
       </section>
@@ -2333,13 +2353,13 @@ function MergePreviewDialog({
   const updateChoice = (key: string, choice: MergeChoice) => onChange({ root: updateMergeChoice(state.root, key, choice) });
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="notebook-history-dialog merge-preview-dialog" role="dialog" aria-modal="true" aria-label="Preview merge" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="notebook-history-dialog merge-preview-dialog" role="dialog" aria-modal="true" aria-label={formatAppMessage("ui.app.previewMerge.113d7f4")} onMouseDown={(event) => event.stopPropagation()}>
         <header>
           <div>
-            <strong>Preview merge</strong>
-            <span>Choose current or incoming text per node block before applying.</span>
+            <strong>{<I18nText id="ui.app.previewMerge.23e68fc" />}</strong>
+            <span>{<I18nText id="ui.app.chooseCurrentOrIncomingText.42a85bc" />}</span>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close merge preview">
+          <button type="button" onClick={onClose} aria-label={formatAppMessage("ui.app.closeMergePreview.3c2fdef")}>
             <X size={16} />
           </button>
         </header>
@@ -2347,8 +2367,8 @@ function MergePreviewDialog({
           <MergePreviewBlockView block={state.root} onChoice={updateChoice} />
         </div>
         <footer>
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="button" onClick={onApply}>Apply merge</button>
+          <button type="button" onClick={onClose}>{<I18nText id="ui.app.cancel.6a25e9e" />}</button>
+          <button type="button" onClick={onApply}>{<I18nText id="ui.app.applyMerge.6308788" />}</button>
         </footer>
       </section>
     </div>
@@ -2362,22 +2382,22 @@ function MergePreviewBlockView({ block, onChoice }: { block: MergePreviewBlock; 
       <header>
         <div>
           <strong>{block.path}</strong>
-          <span>{changed ? "Changed" : "Unchanged"}</span>
+          <span>{changed ? formatAppMessage("ui.app.changed.77cca84") : formatAppMessage("ui.app.unchanged.646983b")}</span>
         </div>
-        <div className="merge-choice-buttons" role="group" aria-label={`Merge choice for ${block.path}`}>
-          <button type="button" className={block.choice === "current" ? "is-active" : ""} onClick={() => onChoice(block.key, "current")}>Keep current</button>
-          <button type="button" className={block.choice === "incoming" ? "is-active" : ""} onClick={() => onChoice(block.key, "incoming")}>Accept incoming</button>
+        <div className="merge-choice-buttons" role="group" aria-label={formatAppMessage("dynamic.mergeChoice", { path: block.path })}>
+          <button type="button" className={block.choice === "current" ? "is-active" : ""} onClick={() => onChoice(block.key, "current")}>{<I18nText id="ui.app.keepCurrent.bcc3ff7" />}</button>
+          <button type="button" className={block.choice === "incoming" ? "is-active" : ""} onClick={() => onChoice(block.key, "incoming")}>{<I18nText id="ui.app.acceptIncoming.b506f76" />}</button>
         </div>
       </header>
       <div className="merge-columns">
         <article>
-          <span>Current</span>
-          <strong>{block.currentTitle || "Untitled"}</strong>
+          <span>{<I18nText id="ui.app.current.51d469d" />}</span>
+          <strong>{block.currentTitle || formatAppMessage("ui.app.untitled.39af82f")}</strong>
           <pre>{block.currentBody || "(empty)"}</pre>
         </article>
         <article>
-          <span>Incoming</span>
-          <strong>{block.incomingTitle || "Untitled"}</strong>
+          <span>{<I18nText id="ui.app.incoming.7d163fb" />}</span>
+          <strong>{block.incomingTitle || formatAppMessage("ui.app.untitled.39af82f")}</strong>
           <pre>{block.incomingBody || "(empty)"}</pre>
         </article>
       </div>
@@ -2447,14 +2467,14 @@ function CloudLoadDialog({
         <header className="voice-log-header">
           <div>
             <h2>{dialogTitle}</h2>
-            <p>{directory || "Server notebook folder"}</p>
-            {quotaText ? <p className="cloud-quota">Cloud storage {quotaText}</p> : null}
+            <p>{directory || formatAppMessage("ui.app.serverNotebookFolder.b9a7320")}</p>
+            {quotaText ? <p className="cloud-quota">{<I18nText id="ui.app.cloudStorage.94e0556" />}{quotaText}</p> : null}
           </div>
           <div className="voice-log-actions">
-            <button className="icon-button" type="button" onClick={onRefresh} aria-label="Refresh cloud notebooks" disabled={loading}>
+            <button className="icon-button" type="button" onClick={onRefresh} aria-label={formatAppMessage("ui.app.refreshCloudNotebooks.28e31e2")} disabled={loading}>
               <RefreshCw size={16} />
             </button>
-            <button className="icon-button" type="button" onClick={onClose} aria-label="Close cloud loader">
+            <button className="icon-button" type="button" onClick={onClose} aria-label={formatAppMessage("ui.app.closeCloudLoader.e2381d8")}>
               <X size={17} />
             </button>
           </div>
@@ -2463,35 +2483,35 @@ function CloudLoadDialog({
           {error ? <p className="cloud-dialog-status is-error">{error}</p> : null}
           {status ? <p className="cloud-dialog-status is-ok">{status}</p> : null}
           {hosted ? (
-            <div className="cloud-manager-actions" aria-label="Cloud file actions">
+            <div className="cloud-manager-actions" aria-label={formatAppMessage("ui.app.cloudFileActions.72433a6")}>
               <button type="button" onClick={onSaveAs} disabled={loading || !onSaveAs}>
                 <CloudUpload size={15} />
-                <span>Save current as...</span>
+                <span>{<I18nText id="ui.app.saveCurrentAs.18cbd57" />}</span>
               </button>
               <button type="button" onClick={() => selectedEntry && onLoad(selectedEntry)} disabled={selectedDisabled}>
                 <CloudDownload size={15} />
-                <span>Load</span>
+                <span>{<I18nText id="ui.app.load.872c7f9" />}</span>
               </button>
               <button type="button" onClick={() => selectedEntry && onOverwrite?.(selectedEntry)} disabled={selectedDisabled || !onOverwrite}>
                 <FileText size={15} />
-                <span>Overwrite</span>
+                <span>{<I18nText id="ui.app.overwrite.d7bec6b" />}</span>
               </button>
               <button type="button" onClick={() => selectedEntry && onRename?.(selectedEntry)} disabled={selectedDisabled || !onRename}>
                 <PenLine size={15} />
-                <span>Rename</span>
+                <span>{<I18nText id="ui.app.rename.974d17f" />}</span>
               </button>
               <button type="button" onClick={() => selectedEntry && onShare?.(selectedEntry)} disabled={selectedDisabled || !onShare}>
                 <Share2 size={15} />
-                <span>Copy share link</span>
+                <span>{<I18nText id="ui.app.copyShareLink.d2e2a6f" />}</span>
               </button>
               <button className="danger-button" type="button" onClick={() => selectedEntry && onDelete?.(selectedEntry)} disabled={selectedDisabled || !onDelete}>
                 <Trash2 size={15} />
-                <span>Delete</span>
+                <span>{<I18nText id="ui.app.delete.c859ed3" />}</span>
               </button>
             </div>
           ) : null}
-          {loading ? <p className="cloud-dialog-status">Loading...</p> : null}
-          {!loading && !notebooks.length ? <p className="cloud-dialog-status">{hosted ? "No cloud files yet." : "No cloud packages found."}</p> : null}
+          {loading ? <p className="cloud-dialog-status">{<I18nText id="ui.app.loading.f82b023" />}</p> : null}
+          {!loading && !notebooks.length ? <p className="cloud-dialog-status">{hosted ? formatAppMessage("ui.app.noCloudFilesYet.17dff2f") : formatAppMessage("ui.app.noCloudPackagesFound.85d460d")}</p> : null}
           {notebooks.map((entry) => {
             const entryKey = cloudNotebookKey(entry);
             const selected = hosted && selectedEntry ? cloudNotebookKey(selectedEntry) === entryKey : false;
@@ -2508,7 +2528,7 @@ function CloudLoadDialog({
                   <strong>{entry.title || entry.name}</strong>
                   <small>
                     {formatBytes(entry.size)} / {formatVoiceLogTime(entry.updatedAt)}
-                    {entry.visibility === "public" ? " / shared" : ""}
+                    {entry.visibility === "public" ? formatAppMessage("ui.app.shared.f6ca971") : ""}
                   </small>
                 </span>
                 {hosted ? <FileText size={16} /> : <CloudDownload size={16} />}
@@ -2548,91 +2568,74 @@ function StartSpaceDialog({
   onContinueWithoutTemplate: () => void;
   onLogin: () => void;
 }) {
-  const defaultChoice = `template:${NOTEBOOK_TEMPLATES[0].id}`;
-  const [selectedChoice, setSelectedChoice] = useState(defaultChoice);
-  const selectedTemplateId = NOTEBOOK_TEMPLATES.find((template) => `template:${template.id}` === selectedChoice)?.id;
-  const selectedCloudEntry = notebooks.find((entry) => `cloud:${cloudNotebookKey(entry)}` === selectedChoice) ?? null;
-  const selectedTemplate = selectedTemplateId ? NOTEBOOK_TEMPLATES.find((template) => template.id === selectedTemplateId) : null;
-  const selectedLabel = selectedTemplate?.title ?? selectedCloudEntry?.title ?? selectedCloudEntry?.name ?? "";
-
-  useEffect(() => {
-    if (selectedTemplateId || selectedCloudEntry) return;
-    setSelectedChoice(defaultChoice);
-  }, [defaultChoice, selectedCloudEntry, selectedTemplateId]);
-
-  const handleStart = () => {
-    if (selectedTemplateId) {
-      onStartTemplate(selectedTemplateId);
-      return;
-    }
-    if (selectedCloudEntry) onStartFromCloud(selectedCloudEntry);
-  };
-
+  const t = useMessage();
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="cloud-load-dialog start-space-dialog" role="dialog" aria-modal="true" aria-label="Start a space" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="cloud-load-dialog start-space-dialog" role="dialog" aria-modal="true" aria-label={t("startSpace.title")} onMouseDown={(event) => event.stopPropagation()}>
         <header className="voice-log-header">
           <div>
-            <h2>{source === "tutorial" ? "次のスペースを選ぶ" : "新しいスペースを始める"}</h2>
-            <p>{source === "tutorial" ? "チュートリアルの続き方を選べます。" : "テンプレートまたはクラウドのコピーから始めます。"}</p>
+            <h2>{source === "tutorial" ? t("startSpace.nextTitle") : t("startSpace.newTitle")}</h2>
+            <p>{source === "tutorial" ? t("startSpace.tutorialDetail") : t("startSpace.newDetail")}</p>
           </div>
           <div className="voice-log-actions">
             {cloudAvailable ? (
-              <button className="icon-button" type="button" onClick={onRefresh} aria-label="Refresh start space choices" disabled={loading}>
+              <button className="icon-button" type="button" onClick={onRefresh} aria-label={t("startSpace.refresh")} disabled={loading}>
                 <RefreshCw size={16} />
               </button>
             ) : null}
-            <button className="icon-button" type="button" onClick={onClose} aria-label="Close start space choices">
+            <button className="icon-button" type="button" onClick={onClose} aria-label={t("startSpace.close")}>
               <X size={17} />
             </button>
           </div>
         </header>
         <div className="cloud-package-list start-space-list">
-          {error ? <p className="cloud-dialog-status is-error">{hosted ? error : "クラウドのデータはローカルブリッジを起動すると表示されます。"}</p> : null}
-          <section className="start-space-section" aria-label="Notebook templates">
-            <h3>テンプレート</h3>
-            {NOTEBOOK_TEMPLATES.map((template) => {
-              const selected = selectedChoice === `template:${template.id}`;
-              return (
-                <button
-                  key={template.id}
-                  className={`cloud-package-button start-space-choice${selected ? " is-selected" : ""}`}
-                  type="button"
-                  onClick={() => setSelectedChoice(`template:${template.id}`)}
-                  aria-pressed={selected}
-                  disabled={loading}
-                >
-                  <span>
-                    <strong>{template.title}</strong>
-                    <small>{template.description}</small>
-                  </span>
-                  <FileText size={16} />
-                </button>
-              );
-            })}
+          {error ? <p className="cloud-dialog-status is-error">{hosted ? error : t("startSpace.cloudBridgeRequired")}</p> : null}
+          {source === "tutorial" ? (
+            <button className="cloud-package-button start-space-continue-button" type="button" onClick={onContinueWithoutTemplate} disabled={loading}>
+              <span>
+                <strong>{t("startSpace.keepTutorial")}</strong>
+                <small>{t("startSpace.keepTutorial.detail")}</small>
+              </span>
+              <ArrowRight size={16} />
+            </button>
+          ) : null}
+          <section className="start-space-section" aria-label={formatAppMessage("ui.app.notebookTemplates.b6a2c8e")}>
+            <h3>{t("startSpace.templates")}</h3>
+            {NOTEBOOK_TEMPLATES.map((template) => (
+              <button
+                key={template.id}
+                className="cloud-package-button start-space-choice"
+                type="button"
+                onClick={() => onStartTemplate(template.id)}
+                disabled={loading}
+              >
+                <span>
+                  <strong>{t(template.titleMessageId)}</strong>
+                  <small>{t(template.descriptionMessageId)}</small>
+                </span>
+                <FileText size={16} />
+              </button>
+            ))}
           </section>
           {cloudAvailable ? (
-            <section className="start-space-section" aria-label="Cloud notebook copies">
-              <h3>クラウドのデータをコピーして始める</h3>
-              {loading ? <p className="cloud-dialog-status">Loading...</p> : null}
-              {!loading && !notebooks.length ? <p className="cloud-dialog-status">まだクラウドファイルはありません。</p> : null}
+            <section className="start-space-section" aria-label={formatAppMessage("ui.app.cloudNotebookCopies.1f91ff1")}>
+              <h3>{t("startSpace.cloudCopies")}</h3>
+              {loading ? <p className="cloud-dialog-status">{<I18nText id="ui.app.loading.f82b023" />}</p> : null}
+              {!loading && !notebooks.length ? <p className="cloud-dialog-status">{t("startSpace.cloudEmpty")}</p> : null}
               {notebooks.map((entry) => {
-                const choice = `cloud:${cloudNotebookKey(entry)}`;
-                const selected = selectedChoice === choice;
                 return (
                   <button
-                    key={choice}
-                    className={`cloud-package-button start-space-choice${selected ? " is-selected" : ""}`}
+                    key={cloudNotebookKey(entry)}
+                    className="cloud-package-button start-space-choice"
                     type="button"
-                    onClick={() => setSelectedChoice(choice)}
-                    aria-pressed={selected}
+                    onClick={() => onStartFromCloud(entry)}
                     disabled={loading}
                   >
                     <span>
                       <strong>{entry.title || entry.name}</strong>
                       <small>
                         {formatBytes(entry.size)} / {formatVoiceLogTime(entry.updatedAt)}
-                        {entry.visibility === "public" ? " / shared" : ""}
+                        {entry.visibility === "public" ? formatAppMessage("ui.app.shared.f6ca971") : ""}
                       </small>
                     </span>
                     <CloudDownload size={16} />
@@ -2641,27 +2644,14 @@ function StartSpaceDialog({
               })}
             </section>
           ) : hosted ? (
-            <section className="start-space-section start-space-cloud-login" aria-label="Cloud notebook copies">
-              <h3>クラウドのデータをコピーして始める</h3>
-              <p className="cloud-dialog-status">Googleログインすると、自分のクラウドファイルもここから選べます。</p>
+            <section className="start-space-section start-space-cloud-login" aria-label={formatAppMessage("ui.app.cloudNotebookCopies.1f91ff1")}>
+              <h3>{t("startSpace.cloudCopies")}</h3>
+              <p className="cloud-dialog-status">{t("startSpace.cloudLoginDetail")}</p>
               <button className="secondary-button" type="button" onClick={onLogin}>
-                <LogIn size={15} /> Googleでログイン
+                <LogIn size={15} /> {t("startSpace.googleLogin")}
               </button>
             </section>
           ) : null}
-          <div className="cloud-manager-actions start-space-actions" aria-label="Start space actions">
-            <button type="button" onClick={handleStart} disabled={loading || (!selectedTemplateId && !selectedCloudEntry)}>
-              {selectedTemplateId ? <Plus size={15} /> : <CloudDownload size={15} />}
-              <span>{selectedTemplateId ? "このテンプレートで始める" : "このデータをコピーして始める"}</span>
-            </button>
-            {source === "tutorial" ? (
-              <button type="button" onClick={onContinueWithoutTemplate} disabled={loading}>
-                <ArrowRight size={15} />
-                <span>テンプレートを使わない</span>
-              </button>
-            ) : null}
-          </div>
-          {selectedLabel ? <p className="cloud-dialog-status is-ok">選択中: {selectedLabel}</p> : null}
         </div>
       </section>
     </div>
@@ -2705,29 +2695,29 @@ function VoiceSettingsDialog({
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="voice-settings-dialog" role="dialog" aria-modal="true" aria-label="Voice settings" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="voice-settings-dialog" role="dialog" aria-modal="true" aria-label={formatAppMessage("ui.app.voiceSettings.2b60c84")} onMouseDown={(event) => event.stopPropagation()}>
         <header className="voice-log-header">
           <div>
-            <h2>Voice settings</h2>
+            <h2>{<I18nText id="ui.app.voiceSettings.ca676ab" />}</h2>
             <p>{draft.realtimeVoice} / {draft.realtimeModel}</p>
           </div>
           <div className="voice-log-actions">
-            <button className="icon-button" type="button" onClick={onClose} aria-label="Close Voice settings">
+            <button className="icon-button" type="button" onClick={onClose} aria-label={formatAppMessage("ui.app.closeVoiceSettings.7277b7c")}>
               <X size={17} />
             </button>
           </div>
         </header>
         <div className="voice-settings-form">
           <label className="voice-settings-field">
-            <span>Realtime model</span>
+            <span>{<I18nText id="ui.app.realtimeModel.dc77751" />}</span>
             <input
               value={draft.realtimeModel}
               onChange={(event) => setDraft((current) => ({ ...current, realtimeModel: event.target.value }))}
-              placeholder="gpt-realtime-2"
+              placeholder={formatAppMessage("ui.app.gptRealtime2.d780270")}
             />
           </label>
           <label className="voice-settings-field">
-            <span>Voice</span>
+            <span>{<I18nText id="ui.app.voice.2d88d66" />}</span>
             <select
               value={VOICE_OPTION_IDS.includes(draft.realtimeVoice) ? draft.realtimeVoice : VOICE_OPTION_IDS[0]}
               onChange={(event) => setDraft((current) => ({ ...current, realtimeVoice: event.target.value }))}
@@ -2742,11 +2732,9 @@ function VoiceSettingsDialog({
         </div>
         <footer className="voice-settings-actions">
           <button className="secondary-button" type="button" onClick={handleSave}>
-            <Volume2 size={15} /> Save
-          </button>
+            <Volume2 size={15} /> {<I18nText id="ui.app.save.d5d1067" />}</button>
           <button className="secondary-button" type="button" onClick={handleRestart}>
-            <RefreshCw size={15} /> Save and restart
-          </button>
+            <RefreshCw size={15} /> {<I18nText id="ui.app.saveAndRestart.76f0768" />}</button>
         </footer>
       </section>
     </div>
@@ -2766,7 +2754,7 @@ function LayoutModeIcon({ icon }: { icon: "orbit" | "tree" | "mind" }) {
 
 function OperationPanel({ actions, variant }: { actions: OperationAction[]; variant: "desktop" | "mobile" }) {
   return (
-    <nav className={`operation-panel operation-panel-${variant}`} aria-label="Node operations">
+    <nav className={`operation-panel operation-panel-${variant}`} aria-label={formatAppMessage("ui.app.nodeOperations.563b68e")}>
       {actions.map((action) => (
         <button
           key={action.id}
@@ -2823,35 +2811,35 @@ function VoiceLogDialog({
   const approvalCount = entries.filter((entry) => entry.status === "approval_required").length;
 
   const handleClear = () => {
-    const confirmed = window.confirm("Clear the local AI Partner log?");
+    const confirmed = window.confirm(formatAppMessage("ui.app.clearTheLocalAiPartner.74ecd9c"));
     if (!confirmed) return;
     onClear();
   };
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="voice-log-dialog" role="dialog" aria-modal="true" aria-label="AI Partner log" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="voice-log-dialog" role="dialog" aria-modal="true" aria-label={formatAppMessage("ui.app.aiPartnerLog.c126089")} onMouseDown={(event) => event.stopPropagation()}>
         <header className="voice-log-header voice-log-header-with-clear">
           {readOnly ? (
             <span className="voice-log-header-spacer" aria-hidden="true" />
           ) : (
-            <button className="icon-button" type="button" onClick={handleClear} aria-label="Clear AI Partner log" disabled={entries.length === 0}>
+            <button className="icon-button" type="button" onClick={handleClear} aria-label={formatAppMessage("ui.app.clearAiPartnerLog.566017c")} disabled={entries.length === 0}>
               <Trash2 size={16} />
             </button>
           )}
           <div>
-            <h2>AI Partner log</h2>
-            <p>{entries.length} entries{approvalCount ? ` / ${approvalCount} approval pending` : ""}{readOnly ? " / read-only" : ""}</p>
+            <h2>{<I18nText id="ui.app.aiPartnerLog.593b3bf" />}</h2>
+            <p>{formatAppMessage("dynamic.logSummary", { entries: entries.length, approvals: approvalCount, readOnly: readOnly ? "yes" : "no" })}</p>
           </div>
           <div className="voice-log-actions">
-            <button className="icon-button" type="button" onClick={onClose} aria-label="Close AI Partner log">
+            <button className="icon-button" type="button" onClick={onClose} aria-label={formatAppMessage("ui.app.closeAiPartnerLog.889d998")}>
               <X size={17} />
             </button>
           </div>
         </header>
         {summary ? (
           <article className="voice-log-summary">
-            <strong>Latest summary</strong>
+            <strong>{<I18nText id="ui.app.latestSummary.9f2db38" />}</strong>
             <time>{formatVoiceLogTime(summary.createdAt)}</time>
             <p>{summary.text}</p>
           </article>
@@ -2867,15 +2855,14 @@ function VoiceLogDialog({
                 <p>{entry.text}</p>
                 {entry.status === "approval_required" ? (
                   <div className="voice-log-approval" role="status">
-                    Human approval required. This tool request was logged but not executed.
-                  </div>
+                    {<I18nText id="ui.app.humanApprovalRequiredThisTool.bb2ed5d" />}</div>
                 ) : null}
-                {entry.toolName ? <small>tool: {entry.toolName}</small> : null}
+                {entry.toolName ? <small>{<I18nText id="ui.app.tool.0042dcc" />}{entry.toolName}</small> : null}
                 {entry.metadata ? <small>{formatVoiceLogMetadata(entry.metadata)}</small> : null}
               </article>
             ))
           ) : (
-            <p className="voice-log-empty">No AI Partner log entries yet.</p>
+            <p className="voice-log-empty">{<I18nText id="ui.app.noAiPartnerLogEntries.6435b46" />}</p>
           )}
         </div>
       </section>
@@ -2901,7 +2888,7 @@ function NotebookHistoryDialog({
   const [restoringId, setRestoringId] = useState("");
 
   const handleRestore = async (snapshot: NotebookSnapshot) => {
-    const confirmed = window.confirm(`Restore "${snapshot.title}" from ${formatFullDateTime(snapshot.createdAt)}? The current notebook will be saved in history first.`);
+    const confirmed = window.confirm(formatAppMessage("dialog.history.restoreConfirm", { title: snapshot.title, date: formatFullDateTime(snapshot.createdAt) }));
     if (!confirmed) return;
     try {
       setRestoringId(snapshot.id);
@@ -2917,17 +2904,17 @@ function NotebookHistoryDialog({
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="notebook-history-dialog" role="dialog" aria-modal="true" aria-label="Restore from history" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="notebook-history-dialog" role="dialog" aria-modal="true" aria-label={formatAppMessage("ui.app.restoreFromHistory.6e67ff4")} onMouseDown={(event) => event.stopPropagation()}>
         <header className="voice-log-header">
           <div>
-            <h2>Restore from history</h2>
+            <h2>{<I18nText id="ui.app.restoreFromHistory.8ed4723" />}</h2>
             <p>{notebookHistoryDialogStatus(status, snapshots.length, error)}</p>
           </div>
           <div className="voice-log-actions">
-            <button className="icon-button" type="button" onClick={() => void onRefresh()} aria-label="Refresh notebook history">
+            <button className="icon-button" type="button" onClick={() => void onRefresh()} aria-label={formatAppMessage("ui.app.refreshNotebookHistory.f80e50c")}>
               <RefreshCw size={16} />
             </button>
-            <button className="icon-button" type="button" onClick={onClose} aria-label="Close notebook history">
+            <button className="icon-button" type="button" onClick={onClose} aria-label={formatAppMessage("ui.app.closeNotebookHistory.84b445f")}>
               <X size={17} />
             </button>
           </div>
@@ -2940,19 +2927,19 @@ function NotebookHistoryDialog({
                 <div>
                   <strong>{snapshot.title}</strong>
                   <span>
-                    Generation {snapshot.generation} / {formatFullDateTime(snapshot.createdAt)}
+                    {<I18nText id="ui.app.generation.4d2e8b5" />}{snapshot.generation} / {formatFullDateTime(snapshot.createdAt)}
                   </span>
                   <small>
-                    {snapshot.nodeCount} nodes / {formatBytes(snapshot.sizeBytes)}
+                    {snapshot.nodeCount} {<I18nText id="ui.app.nodes.af90a82" />}{formatBytes(snapshot.sizeBytes)}
                   </small>
                 </div>
                 <button className="secondary-button" type="button" disabled={Boolean(restoringId)} onClick={() => void handleRestore(snapshot)}>
-                  {restoringId === snapshot.id ? "Restoring..." : "Restore"}
+                  {restoringId === snapshot.id ? formatAppMessage("ui.app.restoring.f27168d") : formatAppMessage("ui.app.restore.eb5d724")}
                 </button>
               </article>
             ))
           ) : (
-            <p className="voice-log-empty">No notebook snapshots yet. Make an edit and Mind Atlas will save history automatically.</p>
+            <p className="voice-log-empty">{<I18nText id="ui.app.noNotebookSnapshotsYetMake.790ea77" />}</p>
           )}
         </div>
       </section>
@@ -2966,31 +2953,31 @@ function notebookHistoryStatusLabel(
   durable: boolean,
   error: string,
 ) {
-  if (error) return "save error";
-  if (status === "loading") return "loading snapshots";
-  return `${snapshotCount} snapshots${durable ? " / durable" : ""}`;
+  if (error) return formatAppMessage("label.history.saveError");
+  if (status === "loading") return formatAppMessage("label.history.loading");
+  return formatAppMessage("label.history.snapshotSummary", { count: snapshotCount, durable: durable ? "yes" : "no" });
 }
 
 function notebookHistoryDialogStatus(status: NotebookPersistenceStatus, snapshotCount: number, error: string) {
-  if (error) return "Notebook persistence needs attention";
-  if (status === "loading") return "Loading local notebook history";
-  return `${snapshotCount} retained snapshots`;
+  if (error) return formatAppMessage("label.history.needsAttention");
+  if (status === "loading") return formatAppMessage("label.history.loadingLocal");
+  return formatAppMessage("label.history.retainedSnapshots", { count: snapshotCount });
 }
 
 function voiceRoleLabel(role: string) {
   switch (role) {
     case "user":
-      return "User";
+      return formatAppMessage("label.role.user");
     case "assistant":
-      return "Voice Partner";
+      return formatAppMessage("label.role.voicePartner");
     case "tool":
-      return "Tool";
+      return formatAppMessage("label.role.tool");
     case "summary":
-      return "Summary";
+      return formatAppMessage("label.role.summary");
     case "error":
-      return "Error";
+      return formatAppMessage("label.role.error");
     default:
-      return "System";
+      return formatAppMessage("label.role.system");
   }
 }
 
@@ -3046,7 +3033,7 @@ function summarizeMetadataArgValue(value: unknown) {
 function formatVoiceLogTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString([], {
+  return date.toLocaleString(currentAppLocale(), {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -3057,7 +3044,7 @@ function formatVoiceLogTime(value: string) {
 function formatFullDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString([], {
+  return date.toLocaleString(currentAppLocale(), {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -3185,19 +3172,19 @@ function truncateNotificationText(value: string, maxLength: number) {
 function notificationKindLabel(kind: NotificationPulse["kind"]) {
   switch (kind) {
     case "error":
-      return "Error notification";
+      return formatAppMessage("label.notification.error");
     case "codex":
-      return "Codex notification";
+      return formatAppMessage("label.notification.codex");
     case "openclaw":
-      return "OpenClaw notification";
+      return formatAppMessage("label.notification.openClaw");
     case "claude":
-      return "Claude Code notification";
+      return formatAppMessage("label.notification.claudeCode");
     case "cost":
-      return "Cost notification";
+      return formatAppMessage("label.notification.cost");
     case "done":
-      return "Completed notification";
+      return formatAppMessage("label.notification.completed");
     case "needs_review":
-      return "Review notification";
+      return formatAppMessage("label.notification.review");
   }
 }
 
@@ -3265,12 +3252,12 @@ function mobileNotificationStatusLabel(
   message: string,
 ) {
   if (message) return message;
-  if (!isMobileNotificationTarget()) return "mobile only";
-  if (permission === "unsupported") return "unsupported";
-  if (permission === "denied") return "blocked";
-  if (enabled && permission === "granted") return "on";
-  if (permission === "granted") return "off";
-  return "tap to enable";
+  if (!isMobileNotificationTarget()) return formatAppMessage("label.mobile.only");
+  if (permission === "unsupported") return formatAppMessage("label.mobile.unsupported");
+  if (permission === "denied") return formatAppMessage("label.mobile.blocked");
+  if (enabled && permission === "granted") return formatAppMessage("common.on");
+  if (permission === "granted") return formatAppMessage("common.off");
+  return formatAppMessage("label.mobile.tapToEnable");
 }
 
 function isDeviceOrientationSupported() {
@@ -3296,8 +3283,8 @@ async function requestDeviceOrientationAccess(): Promise<DeviceOrientationPermis
 
 function vrModeStatusLabel(enabled: boolean, message: string) {
   if (message) return message;
-  if (!isDeviceOrientationSupported()) return "unsupported";
-  return enabled ? "on / tilt to pan" : "off";
+  if (!isDeviceOrientationSupported()) return formatAppMessage("label.mobile.unsupported");
+  return enabled ? formatAppMessage("label.vr.tilt") : formatAppMessage("common.off");
 }
 
 function useMobileBackButtonGuard({ closeOverlays }: { closeOverlays: () => void }) {
@@ -3836,7 +3823,7 @@ function DatasetTitleInput({
         setDraftTitle(nextTitle);
         onChange(nextTitle);
       }}
-      aria-label="Dataset name"
+      aria-label={formatAppMessage("ui.app.datasetName.4133ac0")}
     />
   );
 }
@@ -3980,10 +3967,9 @@ function AtlasBreadcrumb({ path, mobilePortrait, onFocus }: { path: AtlasNode[];
   };
 
   return (
-    <nav className={`atlas-breadcrumb ${mobilePortrait ? "is-mobile-portrait" : ""}`} aria-label="Atlas path">
+    <nav className={`atlas-breadcrumb ${mobilePortrait ? "is-mobile-portrait" : ""}`} aria-label={formatAppMessage("ui.app.atlasPath.c522500")}>
       <button className="atlas-logo-crumb" type="button" onClick={handleLogoClick}>
-        MindAtlas
-      </button>
+        {<I18nText id="ui.app.mindatlas.94ba7f6" />}</button>
       {crumbs.map((crumb, index) =>
         crumb === "ellipsis" ? (
           <span key={`ellipsis-${index}`} className="breadcrumb-ellipsis">
@@ -4023,16 +4009,16 @@ function UnreadNotificationLinks({
   if (!items.length && !voiceLogEntry) return null;
 
   return (
-    <nav className="unread-notification-links" aria-label="Unread notifications">
+    <nav className="unread-notification-links" aria-label={formatAppMessage("ui.app.unreadNotifications.f2695f5")}>
       {voiceLogEntry ? (
         <button
           className={`unread-notification-link is-voice-log ${voiceLogEntry.role === "error" ? "is-error" : ""}`}
           type="button"
           onClick={onOpenVoiceLog}
-          title={voiceLogEntry.title || "AI Partner reply"}
+          title={voiceLogEntry.title || formatAppMessage("ui.app.aiPartnerReply.9a33fab")}
         >
           <MessageSquareText size={12} />
-          <span>{voiceLogUnreadCount > 1 ? `${voiceLogUnreadCount} AI Partner replies` : shortNotificationTitle(voiceLogEntry.title || "AI Partner reply")}</span>
+          <span>{voiceLogUnreadCount > 1 ? formatAppMessage("dynamic.aiPartnerReplies", { count: voiceLogUnreadCount }) : shortNotificationTitle(voiceLogEntry.title || formatAppMessage("ui.app.aiPartnerReply.9a33fab"))}</span>
         </button>
       ) : null}
       {items.map(({ notification, node }) => (
@@ -4041,7 +4027,7 @@ function UnreadNotificationLinks({
           className={`unread-notification-link is-${notification.kind}`}
           type="button"
           onClick={() => onFocus(notification.nodeId)}
-          title={`${notification.title}: ${node.title || "Untitled"}`}
+          title={`${notification.title}: ${node.title || formatAppMessage("ui.app.untitled.39af82f")}`}
         >
           <Bell size={12} />
           <span>{shortNotificationTitle(node.title || notification.title)}</span>
@@ -4216,7 +4202,7 @@ async function copyTextToClipboard(text: string) {
   textarea.select();
   const copied = document.execCommand("copy");
   textarea.remove();
-  if (!copied) throw new Error("Clipboard write is not available in this browser.");
+  if (!copied) throw new Error(formatAppMessage("error.clipboardUnavailable"));
 }
 
 function exportErrorMessage(prefix: string, error: unknown) {
@@ -4225,14 +4211,7 @@ function exportErrorMessage(prefix: string, error: unknown) {
 }
 
 function confirmJsonOnlyPackageFallback(atlasRoot: AtlasNode, prefix: string, error: unknown) {
-  const message = [
-    exportErrorMessage(prefix, error),
-    "",
-    "A JSON-only Mind Atlas package can still preserve the notebook text and structure.",
-    "Attachment files will not be embedded in that fallback package.",
-    "",
-    "Create the JSON-only package instead?",
-  ].join("\n");
+  const message = formatAppMessage("dialog.packageFallback", { error: exportErrorMessage(prefix, error) });
   if (!window.confirm(message)) return null;
   return createNotebookJsonPackage(atlasRoot);
 }
@@ -4240,10 +4219,10 @@ function confirmJsonOnlyPackageFallback(atlasRoot: AtlasNode, prefix: string, er
 function showPackageResultNotice(result: NotebookPackageResult) {
   const messages: string[] = [];
   if (result.packageKind === "json") {
-    messages.push("Created a JSON-only Mind Atlas package. Notebook text is preserved, but attachment files are not embedded.");
+    messages.push(formatAppMessage("dialog.packageJsonOnly"));
   }
   if (result.missingCount > 0) {
-    messages.push(`${result.missingCount} attachment(s) could not be included because this browser session only has metadata for them.`);
+    messages.push(formatAppMessage("dialog.packageMissingAttachments", { count: result.missingCount }));
   }
   if (messages.length) window.alert(messages.join("\n\n"));
 }
