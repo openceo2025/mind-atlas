@@ -465,7 +465,7 @@
         if (!demoFrames().some((frame) => frame.contentWindow === event.source)) return;
         const deltaY = Number(event.data.deltaY);
         if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.5) return;
-        window.scrollBy({ top: deltaY, left: 0, behavior: "auto" });
+        window.scrollBy(0, deltaY);
       });
     </script>
   </body>

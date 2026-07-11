@@ -83,7 +83,8 @@ button {
 
 .app-shell.is-about-demo,
 .app-shell.is-about-demo .universe-shell.is-embed-interaction-locked,
-.app-shell.is-about-demo .universe-shell.is-embed-interaction-locked canvas {
+.app-shell.is-about-demo .universe-shell.is-embed-interaction-locked canvas,
+.app-shell.is-about-demo .node-text-card {
   touch-action: pan-y !important;
   overscroll-behavior: auto;
 }

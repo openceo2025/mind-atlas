@@ -3620,11 +3620,16 @@ function DatasetTitleInput({
 
 function usePreventBrowserViewportGestures(bridgeAboutDemoScroll = false) {
   const aboutDemoTouchYRef = useRef<number | null>(null);
+  const aboutDemoPointerRef = useRef<{ pointerId: number; y: number } | null>(null);
 
   useEffect(() => {
     const preventDefault = (event: Event) => event.preventDefault();
     const preventViewportTouchMove = (event: TouchEvent) => {
       if (bridgeAboutDemoScroll && shouldBridgeAboutDemoScroll(event.target)) {
+        if (aboutDemoPointerRef.current) {
+          event.preventDefault();
+          return;
+        }
         const centerY = getTouchCenterY(event.touches);
         const previousY = aboutDemoTouchYRef.current;
         if (previousY !== null && centerY !== null) {
@@ -3645,8 +3650,27 @@ function usePreventBrowserViewportGestures(bridgeAboutDemoScroll = false) {
       }
       if (event.ctrlKey) event.preventDefault();
     };
+    const rememberAboutDemoPointerStart = (event: PointerEvent) => {
+      if (!bridgeAboutDemoScroll || !isTouchLikePointer(event) || !shouldBridgeAboutDemoScroll(event.target)) return;
+      aboutDemoPointerRef.current = { pointerId: event.pointerId, y: event.clientY };
+      aboutDemoTouchYRef.current = null;
+    };
+    const bridgeAboutDemoPointerMove = (event: PointerEvent) => {
+      const current = aboutDemoPointerRef.current;
+      if (!bridgeAboutDemoScroll || !current || current.pointerId !== event.pointerId) return;
+      const deltaY = current.y - event.clientY;
+      current.y = event.clientY;
+      postAboutDemoParentScroll(deltaY);
+      if (event.cancelable) event.preventDefault();
+    };
+    const clearAboutDemoPointer = (event: PointerEvent) => {
+      const current = aboutDemoPointerRef.current;
+      if (!current || current.pointerId !== event.pointerId) return;
+      aboutDemoPointerRef.current = null;
+    };
     const rememberAboutDemoTouchStart = (event: TouchEvent) => {
       if (!bridgeAboutDemoScroll || !shouldBridgeAboutDemoScroll(event.target)) return;
+      if (aboutDemoPointerRef.current) return;
       aboutDemoTouchYRef.current = getTouchCenterY(event.touches);
     };
     const clearAboutDemoTouch = () => {
@@ -3656,6 +3680,10 @@ function usePreventBrowserViewportGestures(bridgeAboutDemoScroll = false) {
     document.addEventListener("gesturestart", preventDefault, { passive: false, capture: true });
     document.addEventListener("gesturechange", preventDefault, { passive: false, capture: true });
     document.addEventListener("gestureend", preventDefault, { passive: false, capture: true });
+    document.addEventListener("pointerdown", rememberAboutDemoPointerStart, { passive: true, capture: true });
+    document.addEventListener("pointermove", bridgeAboutDemoPointerMove, { passive: false, capture: true });
+    document.addEventListener("pointerup", clearAboutDemoPointer, { capture: true });
+    document.addEventListener("pointercancel", clearAboutDemoPointer, { capture: true });
     document.addEventListener("touchstart", rememberAboutDemoTouchStart, { passive: true, capture: true });
     document.addEventListener("touchmove", preventViewportTouchMove, { passive: false, capture: true });
     document.addEventListener("touchend", clearAboutDemoTouch, { capture: true });
@@ -3665,6 +3693,10 @@ function usePreventBrowserViewportGestures(bridgeAboutDemoScroll = false) {
       document.removeEventListener("gesturestart", preventDefault, { capture: true });
       document.removeEventListener("gesturechange", preventDefault, { capture: true });
       document.removeEventListener("gestureend", preventDefault, { capture: true });
+      document.removeEventListener("pointerdown", rememberAboutDemoPointerStart, { capture: true });
+      document.removeEventListener("pointermove", bridgeAboutDemoPointerMove, { capture: true });
+      document.removeEventListener("pointerup", clearAboutDemoPointer, { capture: true });
+      document.removeEventListener("pointercancel", clearAboutDemoPointer, { capture: true });
       document.removeEventListener("touchstart", rememberAboutDemoTouchStart, { capture: true });
       document.removeEventListener("touchmove", preventViewportTouchMove, { capture: true });
       document.removeEventListener("touchend", clearAboutDemoTouch, { capture: true });
@@ -3672,6 +3704,10 @@ function usePreventBrowserViewportGestures(bridgeAboutDemoScroll = false) {
       window.removeEventListener("wheel", preventCtrlWheelZoom, { capture: true });
     };
   }, [bridgeAboutDemoScroll]);
+}
+
+function isTouchLikePointer(event: PointerEvent) {
+  return event.pointerType === "touch" || event.pointerType === "pen";
 }
 
 function shouldAllowNativeTouchScroll(target: EventTarget | null) {
@@ -3697,6 +3733,14 @@ function getTouchCenterY(touches: TouchList) {
 function postAboutDemoParentScroll(deltaY: number) {
   if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.5) return;
   if (window.parent === window) return;
+  try {
+    if (window.parent.location.origin === window.location.origin) {
+      window.parent.scrollBy(0, deltaY);
+      return;
+    }
+  } catch {
+    // Cross-origin or opaque origins fall back to postMessage below.
+  }
   const targetOrigin = window.location.origin === "null" ? "*" : window.location.origin;
   window.parent.postMessage({ type: "mind-atlas-about-scroll", deltaY }, targetOrigin);
 }

@@ -246,6 +246,7 @@ try {
     if (aboutLoginControlCount !== 0) throw new Error(`About page should not expose login/sign-in controls: ${aboutLoginControlCount}`);
     await page.getByRole("link", { name: /MindAtlasに飛び込もう|Mind Atlasを使ってみる/ }).first().click();
     await page.waitForURL((nextUrl) => !nextUrl.pathname.endsWith("/about.html"));
+    const aboutTouchScrollState = await verifyAboutEmbeddedTouchScroll(browser);
     /*
     await page.getByRole("heading", { name: /考えを、動かせる宇宙にする/ }).waitFor();
     if ((await page.locator(".sample-tab").count()) !== 3) throw new Error("About page should expose three touchable examples.");
@@ -313,13 +314,69 @@ try {
     }
 
     console.log("Hosted public UI verification passed");
-    console.log(JSON.stringify({ aiButtonText, exhaustedButtonText, modeButtonCount, scopeSelectCount, serviceOptions, requestedPaths: Array.from(new Set(requestedPaths)) }, null, 2));
+    console.log(JSON.stringify({ aiButtonText, exhaustedButtonText, modeButtonCount, scopeSelectCount, serviceOptions, aboutTouchScrollState, requestedPaths: Array.from(new Set(requestedPaths)) }, null, 2));
   } finally {
     await browser.close();
   }
 } finally {
   stopChild(vite);
   await closeServer(mockService);
+}
+
+async function verifyAboutEmbeddedTouchScroll(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    ignoreHTTPSErrors: true,
+    isMobile: true,
+    hasTouch: true,
+  });
+  try {
+    const page = await context.newPage();
+    await page.goto(`${appUrl}/about.html`, { waitUntil: "networkidle" });
+    await page.getByRole("heading", { name: "小説を書く", exact: true }).scrollIntoViewIfNeeded();
+    await page.frameLocator("#novel-frame").locator("canvas").waitFor();
+    const before = await page.evaluate(() => window.scrollY);
+    const pointerState = await page.frameLocator("#novel-frame").locator("canvas").evaluate(async (canvas) => {
+      const dispatch = (type, y) => {
+        const event = new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 44,
+          pointerType: "touch",
+          isPrimary: true,
+          clientX: 180,
+          clientY: y,
+          screenX: 180,
+          screenY: y,
+        });
+        canvas.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      dispatch("pointerdown", 520);
+      const prevented = [];
+      for (const y of [480, 440, 400, 360]) {
+        prevented.push(dispatch("pointermove", y));
+        await new Promise((resolve) => setTimeout(resolve, 24));
+      }
+      dispatch("pointerup", 360);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      return {
+        appShell: document.querySelector(".app-shell")?.getAttribute("data-about-demo") ?? "",
+        prevented,
+      };
+    });
+    await page.waitForTimeout(180);
+    const after = await page.evaluate(() => window.scrollY);
+    if (after <= before + 60) {
+      throw new Error(`About embedded touch scroll did not move the parent page enough: ${JSON.stringify({ before, after, pointerState })}`);
+    }
+    if (!pointerState.prevented.some(Boolean)) {
+      throw new Error(`About embedded touch scroll did not prevent iframe gesture defaults: ${JSON.stringify(pointerState)}`);
+    }
+    return { before, after, delta: after - before, pointerState };
+  } finally {
+    await context.close();
+  }
 }
 
 function createMockSession() {
