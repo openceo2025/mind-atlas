@@ -313,11 +313,11 @@ export default function App() {
   const aboutDemoAppliedRef = useRef("");
   useEffect(() => {
     if (!aboutDemoConfig) return;
-    const key = `${aboutDemoConfig.kind}:${aboutDemoConfig.view}`;
+    const key = `${aboutDemoConfig.kind}:${aboutDemoConfig.view}:${locale}`;
     if (aboutDemoAppliedRef.current === key) return;
     aboutDemoAppliedRef.current = key;
 
-    const demoRoot = createAboutDemoNotebook(aboutDemoConfig.kind);
+    const demoRoot = createAboutDemoNotebook(aboutDemoConfig.kind, locale);
     const selectedDemoNodeId = getAboutDemoSelectedNodeId(aboutDemoConfig);
     importNotebook(demoRoot, demoRoot.title, getAboutDemoAttachmentPreviewUrls(aboutDemoConfig));
     setLayoutMode(getAboutDemoLayoutMode(aboutDemoConfig));
@@ -358,7 +358,7 @@ export default function App() {
         : {}),
     }));
 
-    const notification = getAboutDemoNotification(aboutDemoConfig);
+    const notification = getAboutDemoNotification(aboutDemoConfig, locale);
     if (notification) {
       const now = performance.now();
       useAtlasStore.setState((state) => ({
@@ -384,7 +384,7 @@ export default function App() {
         ],
       }));
     }
-  }, [aboutDemoConfig, focusNode, importNotebook, setLayoutMode]);
+  }, [aboutDemoConfig, focusNode, importNotebook, locale, setLayoutMode]);
   const appClassName = [
     "app-shell",
     onboarding.showLogoOnly ? "is-onboarding-logo-only" : "",

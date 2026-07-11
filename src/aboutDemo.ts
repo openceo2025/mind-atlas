@@ -1,3 +1,5 @@
+import { aboutDemoCopy, type AboutDemoCopy, type AboutDemoTextKey } from "./aboutDemoContent";
+import type { AppLocale } from "./i18n/locales";
 import { deriveAtlasLayoutFrame, type AtlasLayoutMode } from "./layout/atlasLayout";
 import type { AtlasNode, ChatOptionsResult, ChatReasoningEffort, ChatServiceId, ChatServiceOption, NotificationPulseKind, ProviderUsageResult } from "./types";
 
@@ -35,10 +37,7 @@ export function readAboutDemoConfig(): AboutDemoConfig | null {
   const params = new URLSearchParams(window.location.search);
   const kind = normalizeAboutDemoKind(params.get(DEMO_PARAM));
   if (!kind) return null;
-  return {
-    kind,
-    view: normalizeAboutDemoView(params.get(VIEW_PARAM)),
-  };
+  return { kind, view: normalizeAboutDemoView(params.get(VIEW_PARAM)) };
 }
 
 export function isAboutDemoMode() {
@@ -57,20 +56,14 @@ export function getAboutDemoSelectedNodeId(config: AboutDemoConfig) {
   return "about-novel-root";
 }
 
-export function getAboutDemoNotification(config: AboutDemoConfig): AboutDemoNotification | null {
+export function getAboutDemoNotification(config: AboutDemoConfig, locale: AppLocale): AboutDemoNotification | null {
   if (config.kind !== "travel") return null;
-  return {
-    nodeId: "about-travel-ticket-pass",
-    kind: "needs_review",
-    title: "Reminder: チケットを確認",
-  };
+  const copy = aboutDemoCopy(locale);
+  return { nodeId: "about-travel-ticket-pass", kind: "needs_review", title: copy.reminder };
 }
 
 export function getAboutDemoAttachmentPreviewUrls(config: AboutDemoConfig): Record<string, string> {
-  if (config.kind !== "travel") return {};
-  return {
-    [TRAVEL_TICKET_ATTACHMENT_ID]: TRAVEL_TICKET_ASSET_PATH,
-  };
+  return config.kind === "travel" ? { [TRAVEL_TICKET_ATTACHMENT_ID]: TRAVEL_TICKET_ASSET_PATH } : {};
 }
 
 export function getAboutDemoOverviewFocusRequest(root: AtlasNode, config: AboutDemoConfig): AboutDemoFocusRequest | null {
@@ -87,355 +80,107 @@ export function getAboutDemoOverviewFocusRequest(root: AtlasNode, config: AboutD
   };
 }
 
-export function createAboutDemoNotebook(kind: AboutDemoKind): AtlasNode {
-  switch (kind) {
-    case "travel":
-      return travelNotebook();
-    case "app":
-      return appNotebook();
-    case "novel":
-    default:
-      return novelNotebook();
-  }
+// Landing-page samples deliberately use their own compact content catalog.
+// They stay stable while the normal notebook templates continue to evolve.
+export function createAboutDemoNotebook(kind: AboutDemoKind, locale: AppLocale): AtlasNode {
+  const copy = aboutDemoCopy(locale);
+  if (kind === "travel") return travelNotebook(copy);
+  if (kind === "app") return appNotebook(copy);
+  return novelNotebook(copy);
 }
 
-export function getAboutDemoChatOptions(): ChatOptionsResult {
+export function getAboutDemoChatOptions(locale: AppLocale): ChatOptionsResult {
+  const copy = aboutDemoCopy(locale);
   return {
     defaultService: "openai",
     services: [
-      chatService("openai", "OpenAI", "gpt-5.5", [
-        ["gpt-5.5", "GPT-5.5"],
-        ["gpt-4o", "GPT-4o"],
-      ]),
-      chatService("anthropic", "Claude", "claude-fable-5", [
-        ["claude-fable-5", "Fable 5"],
-        ["claude-opus-4-8", "Opus 4.8"],
-      ]),
-      chatService("deepseek", "DeepSeek", "deepseek-v4-pro", [
-        ["deepseek-v4-pro", "V4 Pro"],
-        ["deepseek-v4-flash", "V4 Flash"],
-      ]),
-      chatService("glm", "GLM", "glm-4.5", [
-        ["glm-4.5", "GLM 4.5"],
-        ["glm-4.5-air", "GLM 4.5 Air"],
-        ["glm-z1-air", "GLM Z1 Air"],
-      ]),
-      chatService("gemini", "Gemini", "gemini-2.5-pro", [
-        ["gemini-2.5-pro", "Gemini 2.5 Pro"],
-        ["gemini-2.5-flash", "Gemini 2.5 Flash"],
-        ["gemini-2.0-flash", "Gemini 2.0 Flash"],
-      ]),
-      chatService("grok", "Grok", "grok-4", [
-        ["grok-4", "Grok 4"],
-        ["grok-3", "Grok 3"],
-        ["grok-3-mini", "Grok 3 Mini"],
-      ]),
-      chatService("qwen", "Qwen", "qwen-max", [
-        ["qwen-max", "Qwen Max"],
-        ["qwen-plus", "Qwen Plus"],
-        ["qwen3-coder", "Qwen3 Coder"],
-      ]),
-      chatService("kimi", "Kimi", "kimi-k2", [
-        ["kimi-k2", "Kimi K2"],
-        ["kimi-latest", "Kimi Latest"],
-      ]),
-      chatService("minimax", "MiniMax", "minimax-m1", [
-        ["minimax-m1", "MiniMax M1"],
-        ["minimax-text-01", "MiniMax Text-01"],
-      ]),
-      chatService("composer", "Composer", "composer-pro", [
-        ["composer-pro", "Composer Pro"],
-        ["composer-fast", "Composer Fast"],
-      ]),
-      chatService("mimo", "Mimo", "mimo-pro", [
-        ["mimo-pro", "Mimo Pro"],
-        ["mimo-flash", "Mimo Flash"],
-      ]),
+      chatService("openai", "OpenAI", "gpt-5.5", [["gpt-5.5", "GPT-5.5"], ["gpt-4o", "GPT-4o"]], copy.chatDemoDetail),
+      chatService("anthropic", "Claude", "claude-fable-5", [["claude-fable-5", "Fable 5"], ["claude-opus-4-8", "Opus 4.8"]], copy.chatDemoDetail),
+      chatService("deepseek", "DeepSeek", "deepseek-v4-pro", [["deepseek-v4-pro", "V4 Pro"], ["deepseek-v4-flash", "V4 Flash"]], copy.chatDemoDetail),
+      chatService("glm", "GLM", "glm-4.5", [["glm-4.5", "GLM 4.5"], ["glm-4.5-air", "GLM 4.5 Air"]], copy.chatDemoDetail),
+      chatService("gemini", "Gemini", "gemini-2.5-pro", [["gemini-2.5-pro", "Gemini 2.5 Pro"], ["gemini-2.5-flash", "Gemini 2.5 Flash"]], copy.chatDemoDetail),
+      chatService("grok", "Grok", "grok-4", [["grok-4", "Grok 4"], ["grok-3", "Grok 3"]], copy.chatDemoDetail),
+      chatService("qwen", "Qwen", "qwen-max", [["qwen-max", "Qwen Max"], ["qwen-plus", "Qwen Plus"]], copy.chatDemoDetail),
+      chatService("kimi", "Kimi", "kimi-k2", [["kimi-k2", "Kimi K2"], ["kimi-latest", "Kimi Latest"]], copy.chatDemoDetail),
+      chatService("minimax", "MiniMax", "minimax-m1", [["minimax-m1", "MiniMax M1"], ["minimax-text-01", "MiniMax Text-01"]], copy.chatDemoDetail),
+      chatService("composer", "Composer", "composer-pro", [["composer-pro", "Composer Pro"], ["composer-fast", "Composer Fast"]], copy.chatDemoDetail),
+      chatService("mimo", "Mimo", "mimo-pro", [["mimo-pro", "Mimo Pro"], ["mimo-flash", "Mimo Flash"]], copy.chatDemoDetail),
     ],
   };
 }
 
-export function getAboutDemoProviderUsage(): ProviderUsageResult {
+export function getAboutDemoProviderUsage(locale: AppLocale): ProviderUsageResult {
+  const copy = aboutDemoCopy(locale);
   return {
     fetchedAt: DEMO_DATE,
-    metrics: [
-      {
-        id: "about-demo-ai-token",
-        vendor: "mind-atlas",
-        vendorLabel: "Mind Atlas Pro",
-        kind: "balance",
-        label: "AIトークン残高",
-        available: true,
-        displayValue: "68%",
-        value: 68,
-        unit: "percent",
-        barPercent: 68,
-        detail: "Googleアカウント登録と月$10のMind Atlas ProプランでAI機能が解放されます。",
-        source: "demo",
-        defaultVisible: true,
-      },
-    ],
+    metrics: [{
+      id: "about-demo-ai-token", vendor: "mind-atlas", vendorLabel: "Mind Atlas Pro", kind: "balance", label: copy.aiTokenLabel,
+      available: true, displayValue: "68%", value: 68, unit: "percent", barPercent: 68, detail: copy.aiTokenDetail, source: "demo", defaultVisible: true,
+    }],
   };
 }
 
 function normalizeAboutDemoKind(value: string | null): AboutDemoKind | null {
-  if (value === "novel" || value === "travel" || value === "app") return value;
-  return null;
+  return value === "novel" || value === "travel" || value === "app" ? value : null;
 }
 
 function normalizeAboutDemoView(value: string | null): AboutDemoView {
-  if (value === "mind-map" || value === "tree" || value === "editor") return value;
-  return "atlas";
+  return value === "mind-map" || value === "tree" || value === "editor" ? value : "atlas";
 }
 
-function novelNotebook() {
-  return rootNode("about-novel-root", "夜明けの古書店", "閉店後にだけ開く古書店を舞台に、登場人物、章、伏線を同じ宇宙で見渡す小説ノートです。", "#d9cc72", [
-    node("about-novel-cast", "登場人物", "人物の目的、秘密、関係性を枝として残します。", {
-      color: "#8bbdd8",
-      texture: "mist",
-      children: [
-        node("about-novel-hero", "主人公", "未来の日付が入った日記を最初に見つける新人店員。", {
-          color: "#79b8df",
-          texture: "speckled",
-          children: [
-            node("about-novel-hero-goal", "目的", "日記の最後の空白ページを埋める方法を探す。", { color: "#8fcff0" }),
-            node("about-novel-hero-fear", "弱点", "過去の失敗を思い出す場所には近づけない。", { color: "#6fa7c8", texture: "freckles" }),
-          ],
-        }),
-        node("about-novel-owner", "店主", "同じ日記を一度だけ読んだことがある。", {
-          color: "#a887d5",
-          texture: "freckles",
-          children: [
-            node("about-novel-owner-secret", "隠していること", "本棚の奥に一冊だけ売れない本を残している。", { color: "#8b6ec8" }),
-          ],
-        }),
-        node("about-novel-visitor", "謎の客", "未来の日付で予約を入れてくる常連客。", { color: "#da846d", texture: "craters" }),
-      ],
-    }),
-    node("about-novel-act1", "第1章", "日記の発見から、閉店後の古書店が別の時間につながっていると気づくまで。", {
-      color: "#d1b34d",
-      texture: "bands",
-      children: [
-        node("about-novel-scene-open", "開店準備", "棚卸し中に、まだ起きていない出来事が書かれた日記を見つける。", { color: "#c8a742" }),
-        node("about-novel-scene-bell", "閉店のベル", "ベルが鳴った瞬間、外の時計だけが朝に戻る。", { color: "#b89035" }),
-      ],
-    }),
-    node("about-novel-act2", "第2章", "日記が予言ではなく、選ばなかった可能性の記録だと分かる。", {
-      color: "#75c7a1",
-      texture: "cell",
-      children: [
-        node("about-novel-scene-clock", "時を戻す針", "古い懐中時計が、日記のページ数と同じ回数だけ逆回転する。", { color: "#64b790" }),
-        node("about-novel-scene-map", "街の地図", "古書店の周囲だけ、地図にない路地が増えている。", { color: "#55a983" }),
-      ],
-    }),
-    node("about-novel-ending", "結末", "本を開くか閉じるかで、主人公が守る未来が変わる。", {
-      color: "#e98775",
-      texture: "craters",
-      status: "needs_review",
-      children: [
-        node("about-novel-ending-a", "余韻", "最後のページに読者の今日の日付だけが残る。", { color: "#ef9c89" }),
-      ],
-    }),
+function novelNotebook(copy: AboutDemoCopy) {
+  return root("about-novel-root", "novel.root", copy.novelBody, "#d9cc72", copy, [
+    note("about-novel-characters", "novel.characters", copy, { color: "#8bbdd8", texture: "mist", children: [
+      note("about-novel-protagonist", "novel.protagonist", copy, { color: "#79b8df", children: [note("about-novel-goal", "novel.goal", copy, { color: "#8fcff0" })] }),
+    ] }),
+    note("about-novel-chapter1", "novel.chapter1", copy, { color: "#d1b34d", texture: "bands", children: [note("about-novel-opening", "novel.opening", copy, { color: "#c8a742" })] }),
+    note("about-novel-chapter2", "novel.chapter2", copy, { color: "#75c7a1", texture: "cell", children: [note("about-novel-turning", "novel.turning", copy, { color: "#64b790" })] }),
   ]);
 }
 
-function travelNotebook() {
+function travelNotebook(copy: AboutDemoCopy) {
   const reminderAt = new Date(Date.now() - 60_000).toISOString();
-  return rootNode("about-travel-root", "旅行計画", "やりたいこと、チケット、当日の流れをまとめて見渡す旅行ノートです。", "#87c9e6", [
-    node("about-travel-wants", "やりたいこと", "旅先で試したいことを先に浮かせます。", {
-      color: "#78b8ef",
-      texture: "mist",
-      children: [
-        node("about-travel-view", "景色を見る", "朝と夕方で候補を分けておく。", {
-          color: "#78c6ef",
-          children: [
-            node("about-travel-view-morning", "朝の散歩", "混む前に歩ける場所を選ぶ。", { color: "#a5d9f5" }),
-            node("about-travel-view-night", "夜の眺め", "帰り道から無理なく寄れる場所にする。", { color: "#6faed8" }),
-          ],
-        }),
-        node("about-travel-food", "食事", "予約が必要な店と、気軽に入る店を分ける。", { color: "#e0bd65", texture: "bands" }),
-        node("about-travel-shopping", "買い物", "お土産と自分用を別ノードにする。", { color: "#bf96dc", texture: "freckles" }),
-      ],
-    }),
-    node("about-travel-tickets", "チケット類", "移動、宿泊、入場予約を一か所で確認します。", {
-      color: "#e0bd65",
-      texture: "bands",
-      children: [
-        node("about-travel-ticket-pass", "交通チケット", "出発前にQRコードと座席を確認する。", {
-          color: "#e8cc78",
-          texture: "bands",
-          status: "needs_review",
-          nextDecision: "出発前にチケットを確認する。",
-          reminderAt,
-          reminderFiredAt: new Date().toISOString(),
-          attachments: [travelTicketAttachment()],
-        }),
-        node("about-travel-hotel", "宿泊予約", "チェックイン時間と荷物預けをメモする。", { color: "#d7b35b" }),
-        node("about-travel-entry", "入場予約", "時間指定がある予定だけ通知対象にする。", { color: "#f0d990" }),
-      ],
-    }),
-    node("about-travel-plan", "計画", "1日目と2日目を分けて、予定の詰めすぎを避けます。", {
-      color: "#88d7a8",
-      texture: "speckled",
-      children: [
-        node("about-travel-day1", "1日目", "到着から夕食までの流れ。", {
-          color: "#82cfa3",
-          texture: "cell",
-          children: [
-            node("about-travel-day1-am", "午前", "移動と荷物預け。", { color: "#9addb4" }),
-            node("about-travel-day1-pm", "午後", "散歩とカフェ。", { color: "#7cc896" }),
-            node("about-travel-day1-night", "夜", "夕食後は近場だけにする。", { color: "#64b47f" }),
-          ],
-        }),
-        node("about-travel-day2", "2日目", "帰る前に残したい予定を少なめに置く。", {
-          color: "#79c997",
-          texture: "cell",
-          children: [
-            node("about-travel-day2-am", "午前", "景色を見る。", { color: "#97dcb1" }),
-            node("about-travel-day2-pm", "午後", "買い物と帰路。", { color: "#6fbc89" }),
-          ],
-        }),
-      ],
-    }),
+  return root("about-travel-root", "travel.root", copy.travelBody, "#87c9e6", copy, [
+    note("about-travel-activities", "travel.activities", copy, { color: "#78b8ef", texture: "mist", children: [
+      note("about-travel-scenery", "travel.scenery", copy, { color: "#78c6ef", children: [note("about-travel-morning", "travel.morningView", copy, { color: "#a5d9f5" })] }),
+    ] }),
+    note("about-travel-tickets", "travel.tickets", copy, { color: "#e0bd65", texture: "bands", children: [
+      note("about-travel-ticket-pass", "travel.travelPass", copy, { color: "#e8cc78", texture: "bands", status: "needs_review", nextDecision: copy.ticketDecision, reminderAt, reminderFiredAt: new Date().toISOString(), attachments: [travelTicketAttachment(copy)] }),
+    ] }),
+    note("about-travel-itinerary", "travel.itinerary", copy, { color: "#88d7a8", texture: "speckled", children: [
+      note("about-travel-day1", "travel.day1", copy, { color: "#82cfa3", texture: "cell", children: [note("about-travel-day1-schedule", "travel.schedule", copy, { color: "#9addb4" })] }),
+      note("about-travel-day2", "travel.day2", copy, { color: "#79c997", texture: "cell", children: [note("about-travel-day2-schedule", "travel.schedule", copy, { color: "#97dcb1" })] }),
+    ] }),
   ]);
 }
 
-function appNotebook() {
-  return rootNode("about-app-root", "個人アプリ開発", "小さなアプリを企画し、設計、実装、テスト、リリースまで進めるための作業ノートです。", "#9fd8ff", [
-    node("about-app-plan", "企画", "誰のどんな困りごとを解くのかを短く定義します。", {
-      color: "#80d2a6",
-      texture: "speckled",
-      status: "done",
-      children: [
-        node("about-app-plan-user", "ユーザー像", "最初に使ってほしい人を一人に絞って書き出す。", { color: "#93dfb7", status: "done" }),
-        node("about-app-plan-value", "提供価値", "使った直後に何が楽になるのかを一文で決める。", { color: "#6dc796", status: "done" }),
-        node("about-app-plan-scope", "MVP範囲", "初回リリースに必要な機能だけを残す。", { color: "#72d4a3" }),
-      ],
-    }),
-    node("about-app-design", "設計", "画面、データ、状態遷移を先に整理して実装の迷いを減らします。", {
-      color: "#e4c565",
-      texture: "bands",
-      status: "done",
-      children: [
-        node("about-app-design-screen", "画面設計", "ホーム、作成画面、設定画面の役割を分ける。", { color: "#ecd27e", status: "done" }),
-        node("about-app-design-data", "データ設計", "保存する項目、同期の要否、削除時の扱いを決める。", { color: "#d7b64b" }),
-        node("about-app-design-flow", "操作フロー", "初回起動から目的達成までの手順を短くする。", { color: "#f0d98a" }),
-      ],
-    }),
-    node("about-app-ai", "AI相談", "Chatで設計を相談し、返答をこの宇宙のノードとして残します。", {
-      color: "#b5a0ff",
-      texture: "freckles",
-      status: "running",
-      children: [
-        node("about-app-ai-stack", "技術選定", "Webアプリ、モバイルアプリ、PWAのどれで始めるか相談する。", { color: "#c1adff" }),
-        node("about-app-ai-copy", "文言作成", "ボタン名、空状態、エラー文を自然な言葉に直す。", { color: "#a691ed" }),
-        node("about-app-ai-debug", "バグ調査", "再現手順とログを渡して原因候補を整理する。", { color: "#9a84dd" }),
-      ],
-    }),
-    node("about-app-build", "開発", "画面ごとに小さく作って、動く状態を保ちながら進めます。", {
-      color: "#83bdf7",
-      texture: "mist",
-      status: "waiting",
-      children: [
-        node("about-app-build-core", "コア機能", "入力、保存、一覧表示を先に完成させる。", { color: "#9ccdf8", status: "running" }),
-        node("about-app-build-settings", "設定", "通知、テーマ、エクスポートなどを後から足す。", { color: "#7bb2e8" }),
-        node("about-app-build-polish", "操作感", "余計な確認や待ち時間を減らして使いやすくする。", { color: "#6aa3dc" }),
-      ],
-    }),
-    node("about-app-release", "テストとリリース", "実機で確認し、初期ユーザーに配れる形へ整えます。", {
-      color: "#ef9c89",
-      texture: "craters",
-      status: "waiting",
-      children: [
-        node("about-app-release-test", "動作確認", "スマホ、PC、低速回線で主要操作を試す。", { color: "#f2ad9c" }),
-        node("about-app-release-page", "公開ページ", "何ができるアプリか、最初の画面で伝える。", { color: "#e98f7a" }),
-        node("about-app-release-feedback", "フィードバック", "最初の利用者から詰まった場所を聞いて直す。", { color: "#d97866" }),
-      ],
-    }),
+function appNotebook(copy: AboutDemoCopy) {
+  return root("about-app-root", "app.root", copy.appBody, "#9fd8ff", copy, [
+    note("about-app-plan", "app.plan", copy, { color: "#80d2a6", texture: "speckled", status: "done", children: [
+      note("about-app-users", "app.users", copy, { color: "#93dfb7", status: "done", children: [note("about-app-needs", "app.needs", copy, { color: "#6dc796" })] }),
+    ] }),
+    note("about-app-design", "app.design", copy, { color: "#e4c565", texture: "bands", status: "done", children: [note("about-app-screen", "app.screen", copy, { color: "#ecd27e", status: "done" })] }),
+    note("about-app-build", "app.build", copy, { color: "#83bdf7", texture: "mist", children: [note("about-app-core", "app.core", copy, { color: "#9ccdf8", status: "running" })] }),
+    note("about-app-release", "app.release", copy, { color: "#ef9c89", texture: "craters", children: [note("about-app-test", "app.test", copy, { color: "#f2ad9c" })] }),
   ]);
 }
 
-function chatService(id: ChatServiceId, label: string, defaultModel: string, models: Array<[string, string]>): ChatServiceOption {
-  const defaultEfforts: ChatReasoningEffort[] = ["default"];
-  return {
-    id,
-    label,
-    configured: true,
-    defaultModel,
-    defaultReasoningEffort: "default",
-    supportedReasoningEfforts: defaultEfforts,
-    models: models.map(([model, displayName]) => ({
-      model,
-      displayName,
-      defaultReasoningEffort: "default",
-      supportedReasoningEfforts: [...defaultEfforts],
-    })),
-    detail: "Landing page demo",
-  };
+function chatService(id: ChatServiceId, label: string, defaultModel: string, models: Array<[string, string]>, detail: string): ChatServiceOption {
+  const efforts: ChatReasoningEffort[] = ["default"];
+  return { id, label, configured: true, defaultModel, defaultReasoningEffort: "default", supportedReasoningEfforts: efforts, detail, models: models.map(([model, displayName]) => ({ model, displayName, defaultReasoningEffort: "default", supportedReasoningEfforts: [...efforts] })) };
 }
 
-function rootNode(id: string, title: string, body: string, color: string, children: AtlasNode[]): AtlasNode {
-  return {
-    id,
-    kind: "root",
-    nodeType: "note",
-    title,
-    subtitle: title,
-    body,
-    author: "human",
-    status: "waiting",
-    color,
-    texture: "mist",
-    radius: 62,
-    summary: body,
-    nextDecision: "Mind Atlasを開いて、自分の宇宙を作り始める。",
-    tags: ["about-demo"],
-    attachments: [],
-    createdAt: DEMO_DATE,
-    updatedAt: DEMO_DATE,
-    children,
-  };
+function root(id: string, key: AboutDemoTextKey, body: string, color: string, copy: AboutDemoCopy, children: AtlasNode[]): AtlasNode {
+  const title = copy.titles[key];
+  return { id, kind: "root", nodeType: "note", title, subtitle: title, body, author: "human", status: "waiting", color, texture: "mist", radius: 62, summary: body, nextDecision: copy.nextDecision, tags: ["about-demo"], attachments: [], createdAt: DEMO_DATE, updatedAt: DEMO_DATE, children };
 }
 
-function node(
-  id: string,
-  title: string,
-  body: string,
-  options: Partial<Pick<AtlasNode, "color" | "texture" | "status" | "summary" | "nextDecision" | "reminderAt" | "reminderFiredAt" | "attachments" | "children">> = {},
-): AtlasNode {
-  return {
-    id,
-    kind: "thread",
-    nodeType: "note",
-    title,
-    subtitle: title,
-    body,
-    author: "human",
-    status: options.status ?? "waiting",
-    color: options.color ?? "#d8f56d",
-    texture: options.texture ?? "speckled",
-    radius: options.children?.length ? 34 : 24,
-    summary: options.summary ?? body.slice(0, 120),
-    nextDecision: options.nextDecision ?? "",
-    tags: ["about-demo"],
-    attachments: options.attachments ?? [],
-    createdAt: DEMO_DATE,
-    updatedAt: DEMO_DATE,
-    reminderAt: options.reminderAt,
-    reminderFiredAt: options.reminderFiredAt,
-    children: options.children ?? [],
-  };
+function note(id: string, key: AboutDemoTextKey, copy: AboutDemoCopy, options: Partial<Pick<AtlasNode, "color" | "texture" | "status" | "summary" | "nextDecision" | "reminderAt" | "reminderFiredAt" | "attachments" | "children">> = {}): AtlasNode {
+  const title = copy.titles[key];
+  const body = copy.nodeBody;
+  return { id, kind: "thread", nodeType: "note", title, subtitle: title, body, author: "human", status: options.status ?? "waiting", color: options.color ?? "#d8f56d", texture: options.texture ?? "speckled", radius: options.children?.length ? 34 : 24, summary: options.summary ?? body, nextDecision: options.nextDecision ?? copy.nextDecision, tags: ["about-demo"], attachments: options.attachments ?? [], createdAt: DEMO_DATE, updatedAt: DEMO_DATE, reminderAt: options.reminderAt, reminderFiredAt: options.reminderFiredAt, children: options.children ?? [] };
 }
 
-function travelTicketAttachment(): AtlasNode["attachments"][number] {
-  return {
-    id: TRAVEL_TICKET_ATTACHMENT_ID,
-    name: "travel-pass-qr.svg",
-    kind: "image",
-    mimeType: "image/svg+xml",
-    size: TRAVEL_TICKET_ATTACHMENT_SIZE,
-    path: TRAVEL_TICKET_ASSET_PATH,
-    assetPath: TRAVEL_TICKET_ASSET_PATH,
-    createdAt: DEMO_DATE,
-  };
+function travelTicketAttachment(copy: AboutDemoCopy): AtlasNode["attachments"][number] {
+  return { id: TRAVEL_TICKET_ATTACHMENT_ID, name: "travel-pass-qr.svg", kind: "image", mimeType: "image/svg+xml", size: TRAVEL_TICKET_ATTACHMENT_SIZE, path: TRAVEL_TICKET_ASSET_PATH, assetPath: TRAVEL_TICKET_ASSET_PATH, createdAt: DEMO_DATE };
 }

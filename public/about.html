@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja">
+<html lang="ja" data-demo-locale="ja">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -380,7 +380,7 @@
             <iframe
               id="novel-frame"
               title="Mind Atlas novel example"
-              src="/?aboutDemo=novel&amp;aboutView=atlas"
+              src="/?aboutDemo=novel&amp;aboutView=atlas&amp;locale=ja"
               allow="fullscreen"
             ></iframe>
           </div>
@@ -392,7 +392,7 @@
             <span class="demo-label">notification demo</span>
             <iframe
               title="Mind Atlas travel planning example"
-              src="/?aboutDemo=travel&amp;aboutView=atlas"
+              src="/?aboutDemo=travel&amp;aboutView=atlas&amp;locale=ja"
               loading="lazy"
               allow="fullscreen"
             ></iframe>
@@ -406,7 +406,7 @@
             <span class="demo-label">AI window demo</span>
             <iframe
               title="Mind Atlas app development AI example"
-              src="/?aboutDemo=app&amp;aboutView=atlas"
+              src="/?aboutDemo=app&amp;aboutView=atlas&amp;locale=ja"
               loading="lazy"
               allow="fullscreen"
             ></iframe>
@@ -457,13 +457,14 @@
 
     <script>
       const novelFrame = document.getElementById("novel-frame");
+      const demoLocale = document.documentElement.dataset.demoLocale || "ja";
       const viewButtons = Array.from(document.querySelectorAll("[data-demo-view]"));
       const demoFrames = () => Array.from(document.querySelectorAll(".demo-window iframe"));
       viewButtons.forEach((button) => {
         button.addEventListener("click", () => {
           const view = button.getAttribute("data-demo-view") || "atlas";
           viewButtons.forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
-          novelFrame.src = `/?aboutDemo=novel&aboutView=${encodeURIComponent(view)}`;
+          novelFrame.src = `/?aboutDemo=novel&aboutView=${encodeURIComponent(view)}&locale=${encodeURIComponent(demoLocale)}`;
         });
       });
       window.addEventListener("message", (event) => {

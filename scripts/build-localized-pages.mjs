@@ -43,6 +43,14 @@ function buildAbout(locale) {
 
   setAttribute(findElement(document, "html"), "lang", locale);
   setAttribute(findElement(document, "html"), "dir", pageDirection(locale));
+  setAttribute(findElement(document, "html"), "data-demo-locale", locale);
+  forEachElement(document, "iframe", (frame) => {
+    const source = attribute(frame, "src");
+    if (!source?.includes("aboutDemo=")) return;
+    const url = new URL(source.replaceAll("&amp;", "&"), "https://mind-atlas.org");
+    url.searchParams.set("locale", locale);
+    setAttribute(frame, "src", `${url.pathname}${url.search}`);
+  });
   const description = findElement(document, "meta", (node) => attribute(node, "name") === "description");
   if (description) setAttribute(description, "content", targetCatalog.metaDescription);
   addAlternateLinks(document, "about.html");
@@ -137,6 +145,11 @@ function findElement(root, tagName, predicate = () => true) {
     if (found) return found;
   }
   return null;
+}
+
+function forEachElement(root, tagName, visit) {
+  if (root.tagName === tagName) visit(root);
+  for (const child of root.childNodes ?? []) forEachElement(child, tagName, visit);
 }
 
 function appendChild(parent, child) {

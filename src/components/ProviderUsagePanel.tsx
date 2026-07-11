@@ -3,15 +3,16 @@ import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { getProviderUsage } from "../ai/bridgeClient";
 import { getAboutDemoProviderUsage, readAboutDemoConfig } from "../aboutDemo";
 import type { ProviderUsageMetric, ProviderUsageResult } from "../types";
-import { I18nText } from "../i18n/I18nProvider";
+import { I18nText, useMindAtlasLocale } from "../i18n/I18nProvider";
 import { formatAppMessage } from "../i18n/format";
 import { currentAppLocale } from "../i18n/locales";
 
 const PROVIDER_USAGE_SELECTION_KEY = "mind-atlas-provider-usage-selection-v1";
 
 export function ProviderUsagePanel() {
+  const { locale } = useMindAtlasLocale();
   const aboutDemoConfig = useMemo(() => readAboutDemoConfig(), []);
-  const aboutDemoUsage = useMemo(() => (aboutDemoConfig?.kind === "app" ? getAboutDemoProviderUsage() : null), [aboutDemoConfig]);
+  const aboutDemoUsage = useMemo(() => (aboutDemoConfig?.kind === "app" ? getAboutDemoProviderUsage(locale) : null), [aboutDemoConfig, locale]);
   const [result, setResult] = useState<ProviderUsageResult | null>(aboutDemoUsage);
   const [selectedIds, setSelectedIds] = useState<string[] | null>(() => aboutDemoUsage?.metrics.map((metric) => metric.id) ?? loadProviderUsageSelection());
   const [configuring, setConfiguring] = useState(false);
@@ -41,7 +42,7 @@ export function ProviderUsagePanel() {
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [aboutDemoUsage]);
 
   useEffect(() => {
     if (!aboutDemoUsage && selectedIds) persistProviderUsageSelection(selectedIds);

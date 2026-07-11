@@ -26,7 +26,7 @@ import type {
   CodexSandboxMode,
   OpenClawOptionsResult,
 } from "../types";
-import { I18nText } from "../i18n/I18nProvider";
+import { I18nText, useMindAtlasLocale } from "../i18n/I18nProvider";
 import { formatAppMessage } from "../i18n/format";
 import { currentAppLocale } from "../i18n/locales";
 
@@ -51,8 +51,9 @@ const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = ["default", "acceptEdits
 const PUBLIC_SERVICE_MODE = isHostedServiceMode();
 
 export function CommandDock() {
+  const { locale } = useMindAtlasLocale();
   const aboutDemoConfig = useMemo(() => readAboutDemoConfig(), []);
-  const aboutDemoChatOptions = useMemo(() => (aboutDemoConfig?.kind === "app" ? getAboutDemoChatOptions() : null), [aboutDemoConfig]);
+  const aboutDemoChatOptions = useMemo(() => (aboutDemoConfig?.kind === "app" ? getAboutDemoChatOptions(locale) : null), [aboutDemoConfig, locale]);
   const [persistedCommandDraft] = useState(() => loadPersistedUiState()?.commandDraft ?? null);
   const [value, setValue] = useState(() => persistedCommandDraft?.value ?? "");
   const [mode, setMode] = useState<CommandMode>(() => initialCommandMode(persistedCommandDraft?.mode));
