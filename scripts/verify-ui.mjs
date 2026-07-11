@@ -2129,9 +2129,19 @@ async function verifyTutorialModeMenuActions(browser) {
     const root = JSON.parse(notebookRaw);
     return progress.rootNodeCreated === true && (root.children?.length ?? 0) >= 1;
   });
+  await clickPage.getByRole("button", { name: "チュートリアルをスキップ" }).click();
+  const startSpaceDialog = clickPage.getByRole("dialog", { name: "Start a space" });
+  await startSpaceDialog.waitFor();
+  await startSpaceDialog.getByRole("heading", { name: "テンプレート", exact: true }).waitFor();
+  await startSpaceDialog.getByRole("button", { name: "テンプレートを使わない" }).click();
+  await startSpaceDialog.waitFor({ state: "detached" });
+  const preservedTutorialNodeCount = await readPersistedNodeCount(clickPage);
+  if (preservedTutorialNodeCount < 2) {
+    throw new Error(`Tutorial no-template continuation should preserve created nodes, got ${preservedTutorialNodeCount}.`);
+  }
   await clickContext.close();
 
-  return { tutorialResetConfirmed: true };
+  return { tutorialResetConfirmed: true, noTemplateContinuationConfirmed: true };
 }
 
 async function addTutorialVerificationChild(page) {

@@ -1340,6 +1340,10 @@ h1 {
   backdrop-filter: blur(18px);
 }
 
+.start-space-dialog {
+  max-height: min(760px, calc(100vh - 32px));
+}
+
 .voice-settings-dialog {
   display: grid;
   grid-template-rows: auto auto auto;
@@ -1843,6 +1847,45 @@ h1 {
   min-height: 0;
   overflow: auto;
   padding: 12px 16px 16px;
+}
+
+.start-space-list {
+  gap: 14px;
+}
+
+.start-space-section {
+  display: grid;
+  gap: 8px;
+}
+
+.start-space-section + .start-space-section {
+  border-top: 1px solid rgba(219, 234, 211, 0.12);
+  padding-top: 14px;
+}
+
+.start-space-section h3 {
+  margin: 0 0 2px;
+  color: #d8f56d;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.start-space-choice {
+  min-height: 58px;
+}
+
+.start-space-cloud-login {
+  align-items: start;
+}
+
+.start-space-cloud-login .secondary-button {
+  width: fit-content;
+}
+
+.start-space-actions {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin: 0;
 }
 
 .cloud-quota {

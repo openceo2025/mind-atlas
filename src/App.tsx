@@ -15,6 +15,7 @@ import { createAtlasImageShareData, createAtlasShareImage } from "./notebookImag
 import { createNotebookJsonPackage, createNotebookPackage, importNotebookPackage, type NotebookPackageResult } from "./notebookPackage";
 import { createSharedNotebookLink, readHostedShareTokenFromUrl, readSharedNotebookFromUrl, removeSharedNotebookHash } from "./notebookShare";
 import { createTextOnlyNotebookRoot, textOnlyNotebookSizeBytes } from "./notebookTextOnly";
+import { createNotebookFromTemplate, NOTEBOOK_TEMPLATES, type NotebookTemplateId } from "./notebookTemplates";
 import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
 import type { OutlineNodeInput } from "./outline/atlasOutline";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
@@ -51,6 +52,7 @@ const MIND_ATLAS_SOURCE_URL = "https://github.com/openceo2025/mind-atlas";
 const IMPORT_ACCEPT_TYPES = ".mindatlas,.mindatlaspkg,.md,.markdown,.opml,.mm,application/mindatlas+json,application/x-mindatlas-package,text/markdown,text/plain,text/xml,application/xml";
 const HOSTED_IMPORT_ACCEPT_TYPES = ".mindatlas,.md,.markdown,.opml,.mm,application/mindatlas+json,text/markdown,text/plain,text/xml,application/xml";
 const CLOUD_NOTEBOOK_MAX_BYTES = 10 * 1024 * 1024;
+type StartSpaceSource = "initialize" | "tutorial";
 const MODE_OPTIONS: Array<{ mode: AtlasLayoutMode; icon: "orbit" | "tree" | "mind" }> = [
   { mode: "phyllotaxis", icon: "orbit" },
   { mode: "tree", icon: "tree" },
@@ -151,6 +153,9 @@ export default function App() {
   const [outlineEditorOpen, setOutlineEditorOpen] = useState(false);
   const [outlineEditorRootId, setOutlineEditorRootId] = useState<string | null>(null);
   const [cloudLoadOpen, setCloudLoadOpen] = useState(false);
+  const [startSpaceOpen, setStartSpaceOpen] = useState(false);
+  const [startSpaceSource, setStartSpaceSource] = useState<StartSpaceSource>("initialize");
+  const tutorialCompletionRef = useRef({ initialized: false, awaitingCompletion: false });
   const publicServiceMode = isHostedServiceMode();
   const [aiFeatureDialogOpen, setAiFeatureDialogOpen] = useState(false);
   const [hostedSession, setHostedSession] = useState<HostedServiceSession | null>(null);
@@ -982,7 +987,7 @@ export default function App() {
     setSharedNotebookRoot(null);
   };
 
-  const handleLoadCloudNotebook = async (entry: CloudNotebookEntry) => {
+  const loadCloudNotebook = async (entry: CloudNotebookEntry) => {
     try {
       setCloudLoading(true);
       setCloudError("");
@@ -990,21 +995,27 @@ export default function App() {
         if (!entry.id) throw new Error("Cloud notebook id is missing.");
         const result = await loadHostedCloudNotebook(entry.id);
         importNotebook(createTextOnlyNotebookRoot(result.root), result.entry.title || entry.title || entry.name || "Cloud Mind Atlas", {});
-        setCloudLoadOpen(false);
-        return;
+        return true;
       }
       const blob = await downloadCloudNotebookPackage(entry.name);
       const file = new File([blob], entry.name, { type: "application/x-mindatlas-package" });
       const { root, attachmentPreviewUrls, attachmentBlobs } = await importNotebookPackage(file);
       await replaceStoredAttachmentBlobs(root, attachmentBlobs);
       importNotebook(root, undefined, attachmentPreviewUrls);
-      setCloudLoadOpen(false);
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Cloud notebook load failed.";
       setCloudError(message);
+      return false;
     } finally {
       setCloudLoading(false);
     }
+  };
+
+  const handleLoadCloudNotebook = (entry: CloudNotebookEntry) => {
+    void loadCloudNotebook(entry).then((loaded) => {
+      if (loaded) setCloudLoadOpen(false);
+    });
   };
 
   const handleHostedSaveCloudAs = async () => {
@@ -1268,11 +1279,60 @@ export default function App() {
     if (file) void handleImportFile(file);
   };
 
-  const handleInitialize = () => {
-    const confirmed = window.confirm("Initialize this atlas and remove all local notebook changes?");
-    if (!confirmed) return;
-    resetNotebook();
+  const openStartSpaceDialog = (source: StartSpaceSource) => {
+    setStartSpaceSource(source);
+    setStartSpaceOpen(true);
     setMenuOpen(false);
+    if (cloudNotebooksAvailable) void refreshCloudNotebooks();
+  };
+
+  const handleStartWithTemplate = async (templateId: NotebookTemplateId) => {
+    try {
+      setCloudLoading(true);
+      setCloudError("");
+      const root = createNotebookFromTemplate(templateId);
+      await replaceStoredAttachmentBlobs(root, {});
+      importNotebook(root, root.title, {});
+      setStartSpaceOpen(false);
+      setOutlineEditorOpen(false);
+      setOutlineEditorRootId(null);
+      setMobileWorkspacePanelRevealed(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not start this template.";
+      setCloudError(message);
+      window.alert(message);
+    } finally {
+      setCloudLoading(false);
+    }
+  };
+
+  const handleStartWithCloudNotebook = async (entry: CloudNotebookEntry) => {
+    const loaded = await loadCloudNotebook(entry);
+    if (!loaded) return;
+    setStartSpaceOpen(false);
+    setOutlineEditorOpen(false);
+    setOutlineEditorRootId(null);
+    setMobileWorkspacePanelRevealed(false);
+  };
+
+  useEffect(() => {
+    const tutorialState = tutorialCompletionRef.current;
+    if (!tutorialState.initialized) {
+      tutorialState.initialized = true;
+      tutorialState.awaitingCompletion = !onboarding.showMainChrome;
+      return;
+    }
+    if (!onboarding.showMainChrome) {
+      tutorialState.awaitingCompletion = true;
+      return;
+    }
+    if (!tutorialState.awaitingCompletion) return;
+    tutorialState.awaitingCompletion = false;
+    openStartSpaceDialog("tutorial");
+  }, [onboarding.showMainChrome, openStartSpaceDialog]);
+
+  const handleInitialize = () => {
+    openStartSpaceDialog("initialize");
   };
 
   const handleTutorialModeClick = () => {
@@ -1950,6 +2010,22 @@ export default function App() {
           onDelete={handleHostedDeleteCloudNotebook}
         />
       ) : null}
+      {startSpaceOpen ? (
+        <StartSpaceDialog
+          source={startSpaceSource}
+          notebooks={cloudNotebooks}
+          cloudAvailable={cloudNotebooksAvailable}
+          hosted={publicServiceMode}
+          loading={cloudLoading}
+          error={cloudError}
+          onClose={() => setStartSpaceOpen(false)}
+          onRefresh={refreshCloudNotebooks}
+          onStartTemplate={handleStartWithTemplate}
+          onStartFromCloud={handleStartWithCloudNotebook}
+          onContinueWithoutTemplate={() => setStartSpaceOpen(false)}
+          onLogin={startHostedGoogleLogin}
+        />
+      ) : null}
       {publicServiceMode && aiFeatureDialogOpen ? (
         <AiFeatureDialog
           session={hostedSession}
@@ -2439,6 +2515,153 @@ function CloudLoadDialog({
               </button>
             );
           })}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function StartSpaceDialog({
+  source,
+  notebooks,
+  cloudAvailable,
+  hosted,
+  loading,
+  error,
+  onClose,
+  onRefresh,
+  onStartTemplate,
+  onStartFromCloud,
+  onContinueWithoutTemplate,
+  onLogin,
+}: {
+  source: StartSpaceSource;
+  notebooks: CloudNotebookEntry[];
+  cloudAvailable: boolean;
+  hosted: boolean;
+  loading: boolean;
+  error: string;
+  onClose: () => void;
+  onRefresh: () => void;
+  onStartTemplate: (templateId: NotebookTemplateId) => void;
+  onStartFromCloud: (entry: CloudNotebookEntry) => void;
+  onContinueWithoutTemplate: () => void;
+  onLogin: () => void;
+}) {
+  const defaultChoice = `template:${NOTEBOOK_TEMPLATES[0].id}`;
+  const [selectedChoice, setSelectedChoice] = useState(defaultChoice);
+  const selectedTemplateId = NOTEBOOK_TEMPLATES.find((template) => `template:${template.id}` === selectedChoice)?.id;
+  const selectedCloudEntry = notebooks.find((entry) => `cloud:${cloudNotebookKey(entry)}` === selectedChoice) ?? null;
+  const selectedTemplate = selectedTemplateId ? NOTEBOOK_TEMPLATES.find((template) => template.id === selectedTemplateId) : null;
+  const selectedLabel = selectedTemplate?.title ?? selectedCloudEntry?.title ?? selectedCloudEntry?.name ?? "";
+
+  useEffect(() => {
+    if (selectedTemplateId || selectedCloudEntry) return;
+    setSelectedChoice(defaultChoice);
+  }, [defaultChoice, selectedCloudEntry, selectedTemplateId]);
+
+  const handleStart = () => {
+    if (selectedTemplateId) {
+      onStartTemplate(selectedTemplateId);
+      return;
+    }
+    if (selectedCloudEntry) onStartFromCloud(selectedCloudEntry);
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="cloud-load-dialog start-space-dialog" role="dialog" aria-modal="true" aria-label="Start a space" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="voice-log-header">
+          <div>
+            <h2>{source === "tutorial" ? "次のスペースを選ぶ" : "新しいスペースを始める"}</h2>
+            <p>{source === "tutorial" ? "チュートリアルの続き方を選べます。" : "テンプレートまたはクラウドのコピーから始めます。"}</p>
+          </div>
+          <div className="voice-log-actions">
+            {cloudAvailable ? (
+              <button className="icon-button" type="button" onClick={onRefresh} aria-label="Refresh start space choices" disabled={loading}>
+                <RefreshCw size={16} />
+              </button>
+            ) : null}
+            <button className="icon-button" type="button" onClick={onClose} aria-label="Close start space choices">
+              <X size={17} />
+            </button>
+          </div>
+        </header>
+        <div className="cloud-package-list start-space-list">
+          {error ? <p className="cloud-dialog-status is-error">{hosted ? error : "クラウドのデータはローカルブリッジを起動すると表示されます。"}</p> : null}
+          <section className="start-space-section" aria-label="Notebook templates">
+            <h3>テンプレート</h3>
+            {NOTEBOOK_TEMPLATES.map((template) => {
+              const selected = selectedChoice === `template:${template.id}`;
+              return (
+                <button
+                  key={template.id}
+                  className={`cloud-package-button start-space-choice${selected ? " is-selected" : ""}`}
+                  type="button"
+                  onClick={() => setSelectedChoice(`template:${template.id}`)}
+                  aria-pressed={selected}
+                  disabled={loading}
+                >
+                  <span>
+                    <strong>{template.title}</strong>
+                    <small>{template.description}</small>
+                  </span>
+                  <FileText size={16} />
+                </button>
+              );
+            })}
+          </section>
+          {cloudAvailable ? (
+            <section className="start-space-section" aria-label="Cloud notebook copies">
+              <h3>クラウドのデータをコピーして始める</h3>
+              {loading ? <p className="cloud-dialog-status">Loading...</p> : null}
+              {!loading && !notebooks.length ? <p className="cloud-dialog-status">まだクラウドファイルはありません。</p> : null}
+              {notebooks.map((entry) => {
+                const choice = `cloud:${cloudNotebookKey(entry)}`;
+                const selected = selectedChoice === choice;
+                return (
+                  <button
+                    key={choice}
+                    className={`cloud-package-button start-space-choice${selected ? " is-selected" : ""}`}
+                    type="button"
+                    onClick={() => setSelectedChoice(choice)}
+                    aria-pressed={selected}
+                    disabled={loading}
+                  >
+                    <span>
+                      <strong>{entry.title || entry.name}</strong>
+                      <small>
+                        {formatBytes(entry.size)} / {formatVoiceLogTime(entry.updatedAt)}
+                        {entry.visibility === "public" ? " / shared" : ""}
+                      </small>
+                    </span>
+                    <CloudDownload size={16} />
+                  </button>
+                );
+              })}
+            </section>
+          ) : hosted ? (
+            <section className="start-space-section start-space-cloud-login" aria-label="Cloud notebook copies">
+              <h3>クラウドのデータをコピーして始める</h3>
+              <p className="cloud-dialog-status">Googleログインすると、自分のクラウドファイルもここから選べます。</p>
+              <button className="secondary-button" type="button" onClick={onLogin}>
+                <LogIn size={15} /> Googleでログイン
+              </button>
+            </section>
+          ) : null}
+          <div className="cloud-manager-actions start-space-actions" aria-label="Start space actions">
+            <button type="button" onClick={handleStart} disabled={loading || (!selectedTemplateId && !selectedCloudEntry)}>
+              {selectedTemplateId ? <Plus size={15} /> : <CloudDownload size={15} />}
+              <span>{selectedTemplateId ? "このテンプレートで始める" : "このデータをコピーして始める"}</span>
+            </button>
+            {source === "tutorial" ? (
+              <button type="button" onClick={onContinueWithoutTemplate} disabled={loading}>
+                <ArrowRight size={15} />
+                <span>テンプレートを使わない</span>
+              </button>
+            ) : null}
+          </div>
+          {selectedLabel ? <p className="cloud-dialog-status is-ok">選択中: {selectedLabel}</p> : null}
         </div>
       </section>
     </div>
