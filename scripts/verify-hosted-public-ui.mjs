@@ -213,9 +213,13 @@ try {
     await startSpaceDialog.waitFor({ state: "detached" });
     await page.getByText("Verify cloud notebook", { exact: true }).first().waitFor();
     await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
-    await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).waitFor();
-    await page.getByRole("link", { name: "Mind Atlas overview and AI plan" }).click();
-    await page.waitForURL(/\/about\.html$/);
+    const aboutLink = page.getByRole("link", { name: "Mind Atlas overview and AI plan" });
+    await aboutLink.waitFor();
+    if (await aboutLink.getAttribute("href") !== "/ja/about.html") {
+      throw new Error(`Public app should link to the Japanese introduction page: ${await aboutLink.getAttribute("href")}`);
+    }
+    // Vite serves the source fallback locally; production follows the checked localized href above.
+    await page.goto(`${appUrl}/about.html`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Mind Atlas", exact: true }).waitFor();
     await page.getByRole("heading", { name: "小説を書く", exact: true }).waitFor();
     if ((await page.locator(".demo-window iframe").count()) !== 3) throw new Error("About page should expose three embedded Mind Atlas examples.");

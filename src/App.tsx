@@ -50,7 +50,6 @@ const LAYOUT_BIRTH_UNAVAILABLE_NOTICE_MS = 3600;
 const RENDER_QUALITY_STORAGE_KEY = "mind-atlas-render-quality";
 const ROOT_COMMAND_MAX_ZOOM = 1.08;
 const DEFAULT_DATASET_TITLE = "Mind Atlas";
-const MIND_ATLAS_ABOUT_URL = "/about.html";
 const MIND_ATLAS_SOURCE_URL = "https://github.com/openceo2025/mind-atlas";
 const IMPORT_ACCEPT_TYPES = ".mindatlas,.mindatlaspkg,.md,.markdown,.opml,.mm,application/mindatlas+json,application/x-mindatlas-package,text/markdown,text/plain,text/xml,application/xml";
 const HOSTED_IMPORT_ACCEPT_TYPES = ".mindatlas,.md,.markdown,.opml,.mm,application/mindatlas+json,text/markdown,text/plain,text/xml,application/xml";
@@ -66,6 +65,11 @@ const UNIVERSE_TITLE_PLACEHOLDER_ALIASES = [
   "この宇宙に名前をつけてみましょう",
   "この宇宙に名前を付けてみましょう",
 ];
+
+function localizedAboutUrl(locale: string) {
+  const publicLocale = locale === "en-XA" ? "en" : locale === "ar-XB" ? "ar" : locale;
+  return `/${encodeURIComponent(publicLocale)}/about.html`;
+}
 const KEYBOARD_OVERLAY_INPUT_SELECTOR =
   ".command-dock input, .command-dock textarea, .command-dock select, .node-body-input, .space-title-editor, .space-body-editor";
 const SPACE_LABEL_KEYBOARD_SELECTOR = ".space-title-editor, .space-body-editor";
@@ -1871,7 +1875,7 @@ export default function App() {
                 </span>
               </button>
             </div>
-            <a className="context-menu-link" href={MIND_ATLAS_ABOUT_URL} aria-label={formatAppMessage("ui.app.mindAtlasOverviewAndAi.b1eb8a4")}>
+            <a className="context-menu-link" href={localizedAboutUrl(locale)} aria-label={formatAppMessage("ui.app.mindAtlasOverviewAndAi.b1eb8a4")}>
               <Info size={15} />
               <span>
                 {t("menu.about")}

@@ -44,6 +44,9 @@ function buildAbout(locale) {
   setAttribute(findElement(document, "html"), "lang", locale);
   setAttribute(findElement(document, "html"), "dir", pageDirection(locale));
   setAttribute(findElement(document, "html"), "data-demo-locale", locale);
+  forEachElement(document, "a", (link) => {
+    if (attribute(link, "href") === "/") setAttribute(link, "href", `/?locale=${encodeURIComponent(locale)}`);
+  });
   forEachElement(document, "iframe", (frame) => {
     const source = attribute(frame, "src");
     if (!source?.includes("aboutDemo=")) return;

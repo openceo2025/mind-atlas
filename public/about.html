@@ -11,10 +11,23 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Mind Atlas</title>
     <script>
-      if (location.pathname === "/about.html" && !new URLSearchParams(location.search).has("locale")) {
-        const languages = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language];
-        if (!languages.some((language) => String(language || "").toLowerCase().startsWith("ja"))) location.replace("/en/about.html");
-      }
+      (() => {
+        if (location.pathname !== "/about.html") return;
+        const isLocalDevelopment = /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(location.hostname);
+        if (isLocalDevelopment) return;
+        const aliases = { pt: "pt-BR", "pt-pt": "pt-BR", zh: "zh-Hans", "zh-cn": "zh-Hans", "zh-sg": "zh-Hans", "zh-tw": "zh-Hant", "zh-hk": "zh-Hant", "zh-mo": "zh-Hant" };
+        const supported = new Set(["en", "ja", "es", "pt-BR", "fr", "de", "ko", "zh-Hans", "zh-Hant", "id", "hi", "ar"]);
+        const requested = new URLSearchParams(location.search).get("locale");
+        const candidates = requested ? [requested] : (navigator.languages?.length ? navigator.languages : [navigator.language]);
+        let locale = "en";
+        for (const candidate of candidates) {
+          const normalized = String(candidate || "").replaceAll("_", "-");
+          const lower = normalized.toLowerCase();
+          const resolved = aliases[lower] || Array.from(supported).find((item) => item.toLowerCase() === lower) || Array.from(supported).find((item) => item.toLowerCase() === lower.split("-")[0]);
+          if (resolved) { locale = resolved; break; }
+        }
+        location.replace(`/${locale}/about.html${location.hash}`);
+      })();
     </script>
     <style>
       :root {
