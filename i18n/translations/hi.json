@@ -1,4 +1,9 @@
 {
+  "analytics.consent.label": "विश्लेषण प्राथमिकता",
+  "analytics.consent.message": "गोपनीयता-सुरक्षित अनाम उपयोग विश्लेषण से Mind Atlas को बेहतर बनाने में मदद करें। नोटबुक पाठ, AI प्रॉम्प्ट, ईमेल और IP पते उत्पाद विश्लेषण में संग्रहीत नहीं होते।",
+  "analytics.consent.privacy": "गोपनीयता नीति",
+  "analytics.consent.decline": "नहीं, धन्यवाद",
+  "analytics.consent.accept": "विश्लेषण की अनुमति दें",
   "app.aiFeatures": "AI सुविधाएँ",
   "app.openMenu": "Atlas मेनू खोलें",
   "app.shareCloud": "सार्वजनिक Mind Atlas क्लाउड लिंक बनाएँ",

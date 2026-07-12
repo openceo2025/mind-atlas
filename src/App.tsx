@@ -5,6 +5,8 @@ import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNoteb
 import { createAboutDemoNotebook, getAboutDemoAttachmentPreviewUrls, getAboutDemoLayoutMode, getAboutDemoNotification, getAboutDemoOverviewFocusRequest, getAboutDemoSelectedNodeId, readAboutDemoConfig } from "./aboutDemo";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
 import { CommandDock } from "./components/CommandDock";
+import { AnalyticsConsentBanner } from "./components/AnalyticsConsentBanner";
+import { trackProductEvent } from "./analytics/productAnalytics";
 import { copyContextMarkdown, formatContextCopyStats } from "./context/contextCopy";
 import { Minimap } from "./components/Minimap";
 import { OutlineEditor } from "./components/OutlineEditor";
@@ -78,6 +80,20 @@ const MOBILE_KEYBOARD_PREPARE_MS = 1200;
 const MOBILE_KEYBOARD_CLOSING_MS = 320;
 const MOBILE_KEYBOARD_SETTLE_DELAYS_MS = [80, 180, 360, 700, 1100, 1500] as const;
 const MOBILE_KEYBOARD_PROFILE_EVENT = "mind-atlas-mobile-keyboard-profile";
+
+function notebookAnalyticsMetrics(root: AtlasNode) {
+  let nodeCount = 0;
+  let maxDepth = 0;
+  let textSize = 0;
+  const visit = (node: AtlasNode, depth: number) => {
+    if (depth > 0) nodeCount += 1;
+    maxDepth = Math.max(maxDepth, depth);
+    textSize += (node.title?.length ?? 0) + (node.body?.length ?? 0);
+    for (const child of node.children) visit(child, depth + 1);
+  };
+  visit(root, 0);
+  return { rootId: root.id, nodeCount, maxDepth, textSize };
+}
 type MobilePanelTab = "command" | "editor" | "operation" | "outline";
 type MergeChoice = "current" | "incoming";
 
@@ -165,6 +181,11 @@ export default function App() {
   const [startSpaceOpen, setStartSpaceOpen] = useState(false);
   const [startSpaceSource, setStartSpaceSource] = useState<StartSpaceSource>("initialize");
   const tutorialCompletionRef = useRef({ initialized: false, awaitingCompletion: false });
+  const analyticsNotebookRef = useRef<{ rootId: string; nodeCount: number; maxDepth: number; textSize: number } | null>(null);
+  const analyticsIgnoreNextNotebookRef = useRef(false);
+  const analyticsLastMeaningfulAtRef = useRef(0);
+  const analyticsLastUserInputAtRef = useRef(0);
+  const analyticsTutorialStartedRef = useRef(false);
   const publicServiceMode = isHostedServiceMode();
   const [aiFeatureDialogOpen, setAiFeatureDialogOpen] = useState(false);
   const [hostedSession, setHostedSession] = useState<HostedServiceSession | null>(null);
@@ -824,6 +845,7 @@ export default function App() {
       if (publicServiceMode) {
         if (!hostedAuthenticated) {
           setCloudStatus("");
+          trackProductEvent("google_login_started", {}, { immediate: true });
           startHostedGoogleLogin();
           return;
         }
@@ -892,6 +914,7 @@ export default function App() {
 
   const handleOpenCloudLoad = () => {
     if (publicServiceMode && !hostedAuthenticated) {
+      trackProductEvent("google_login_started", {}, { immediate: true });
       startHostedGoogleLogin();
       return;
     }
@@ -913,6 +936,7 @@ export default function App() {
       if (publicServiceMode) {
         if (!hostedAuthenticated) {
       setContextCopyStatus(t("status.cloud.loginRequired"));
+          trackProductEvent("google_login_started", {}, { immediate: true });
           startHostedGoogleLogin();
           return;
         }
@@ -985,7 +1009,9 @@ export default function App() {
     try {
       setSharedNotebookImporting(true);
       const root = publicServiceMode ? createTextOnlyNotebookRoot(sharedNotebookRoot) : sharedNotebookRoot;
+      analyticsIgnoreNextNotebookRef.current = true;
       importNotebook(root, root.title || "Shared Mind Atlas", {});
+      trackProductEvent("shared_atlas_imported", {}, { immediate: true });
       removeSharedNotebookHash();
       setSharedNotebookRoot(null);
     } catch (error) {
@@ -1306,7 +1332,9 @@ export default function App() {
       setCloudError("");
       const root = createNotebookFromTemplate(templateId, locale === "ja" ? "ja" : "en");
       await replaceStoredAttachmentBlobs(root, {});
+      analyticsIgnoreNextNotebookRef.current = true;
       importNotebook(root, root.title, {});
+      trackProductEvent("template_selected", { template_id: templateId }, { immediate: true });
       setStartSpaceOpen(false);
       setOutlineEditorOpen(false);
       setOutlineEditorRootId(null);
@@ -1342,8 +1370,60 @@ export default function App() {
     }
     if (!tutorialState.awaitingCompletion) return;
     tutorialState.awaitingCompletion = false;
+    trackProductEvent("tutorial_completed", {}, { immediate: true });
     openStartSpaceDialog("tutorial");
   }, [onboarding.showMainChrome, openStartSpaceDialog]);
+
+  useEffect(() => {
+    const mark = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(".command-dock, .ai-feature-dialog, .voice-log-dialog")) return;
+      if (event.isTrusted) analyticsLastUserInputAtRef.current = Date.now();
+    };
+    window.addEventListener("pointerdown", mark, true);
+    window.addEventListener("keydown", mark, true);
+    window.addEventListener("input", mark, true);
+    return () => {
+      window.removeEventListener("pointerdown", mark, true);
+      window.removeEventListener("keydown", mark, true);
+      window.removeEventListener("input", mark, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    const metrics = notebookAnalyticsMetrics(atlasRoot);
+    const previous = analyticsNotebookRef.current;
+    analyticsNotebookRef.current = metrics;
+    if (!previous || previous.rootId !== metrics.rootId) {
+      analyticsIgnoreNextNotebookRef.current = false;
+      return;
+    }
+    if (analyticsIgnoreNextNotebookRef.current) {
+      analyticsIgnoreNextNotebookRef.current = false;
+      return;
+    }
+    const nodeCreated = metrics.nodeCount > previous.nodeCount;
+    const textChanged = Math.abs(metrics.textSize - previous.textSize) >= 3;
+    if (!nodeCreated && !textChanged) return;
+    const now = Date.now();
+    if (now - analyticsLastUserInputAtRef.current > 5_000) return;
+    if (nodeCreated && previous.nodeCount === 0) {
+      trackProductEvent("first_node_created", { method: "canvas", node_count: metrics.nodeCount, max_depth: metrics.maxDepth });
+    }
+    if (now - analyticsLastMeaningfulAtRef.current >= 30_000) {
+      analyticsLastMeaningfulAtRef.current = now;
+      trackProductEvent("meaningful_edit", {
+        kind: nodeCreated ? "node_created" : "text_edited",
+        node_count: metrics.nodeCount,
+        max_depth: metrics.maxDepth,
+      });
+    }
+    const activationKey = `mind-atlas-analytics-activation:${metrics.rootId}`;
+    if (metrics.nodeCount >= 5 && metrics.maxDepth >= 2 && window.localStorage.getItem(activationKey) !== "1") {
+      window.localStorage.setItem(activationKey, "1");
+      trackProductEvent("activation_reached", { node_count: metrics.nodeCount, max_depth: metrics.maxDepth }, { immediate: true });
+    }
+  }, [atlasRoot]);
 
   const handleInitialize = () => {
     openStartSpaceDialog("initialize");
@@ -1365,8 +1445,15 @@ export default function App() {
   };
 
   const handleSkipTutorial = () => {
+    trackProductEvent("tutorial_skipped", {}, { immediate: true });
     onboarding.completeTutorial();
   };
+
+  useEffect(() => {
+    if (onboarding.showMainChrome || analyticsTutorialStartedRef.current) return;
+    analyticsTutorialStartedRef.current = true;
+    trackProductEvent("tutorial_started");
+  }, [onboarding.showMainChrome]);
 
   const handleUndo = () => {
     undo();
@@ -1569,6 +1656,7 @@ export default function App() {
           <span>{<I18nText id="ui.app.dropMarkdownOpmlFreemindOr.6670d93" />}</span>
         </div>
       ) : null}
+      {publicServiceMode && !aboutDemoConfig ? <AnalyticsConsentBanner /> : null}
 
       <header className="top-bar" aria-label={formatAppMessage("ui.app.mindAtlasStatus.36acaea")}>
         <div className="top-title-stack">
@@ -2059,7 +2147,10 @@ export default function App() {
           onStartTemplate={handleStartWithTemplate}
           onStartFromCloud={handleStartWithCloudNotebook}
           onContinueWithoutTemplate={() => setStartSpaceOpen(false)}
-          onLogin={startHostedGoogleLogin}
+          onLogin={() => {
+            trackProductEvent("google_login_started", {}, { immediate: true });
+            startHostedGoogleLogin();
+          }}
         />
       ) : null}
       {publicServiceMode && aiFeatureDialogOpen ? (
@@ -2200,12 +2291,18 @@ function AiFeatureDialog({
         ) : null}
         <div className="ai-feature-actions">
           {!authenticated ? (
-            <button className="secondary-button" type="button" onClick={() => void runAction("login", startHostedGoogleLogin)} disabled={loading || Boolean(actionBusy)}>
+            <button className="secondary-button" type="button" onClick={() => void runAction("login", () => {
+              trackProductEvent("google_login_started", {}, { immediate: true });
+              startHostedGoogleLogin();
+            })} disabled={loading || Boolean(actionBusy)}>
               <LogIn size={15} />
               {<I18nText id="ui.app.signInWithGoogle.adee61b" />}</button>
           ) : null}
           {checkoutAvailable ? (
-            <button className="secondary-button is-wide" type="button" onClick={() => void runAction("checkout", startHostedBillingCheckout)} disabled={loading || Boolean(actionBusy)}>
+            <button className="secondary-button is-wide" type="button" onClick={() => void runAction("checkout", () => {
+              trackProductEvent("checkout_started", {}, { immediate: true });
+              return startHostedBillingCheckout();
+            })} disabled={loading || Boolean(actionBusy)}>
               <CreditCard size={15} />
               {<I18nText id="ui.app.subscribeForUs10Per.ec14079" />}</button>
           ) : null}

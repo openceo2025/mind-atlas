@@ -1,0 +1,17 @@
+[Unit]
+Description=Mind Atlas daily privacy-preserving analytics aggregation
+After=network.target postgresql.service nginx.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/mind-atlas
+EnvironmentFile=/opt/mind-atlas/.env.service
+ExecStart=/usr/bin/npm run service:admin -- analytics-daily
+User=www-data
+Group=www-data
+SupplementaryGroups=adm
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/opt/mind-atlas

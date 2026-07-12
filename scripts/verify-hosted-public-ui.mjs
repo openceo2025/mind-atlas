@@ -34,6 +34,17 @@ const mockService = http.createServer((request, response) => {
     sendJson(response, 200, createMockSession());
     return;
   }
+  if (url.pathname === "/api/analytics/config") {
+    sendJson(response, 200, { enabled: true });
+    return;
+  }
+  if (url.pathname === "/api/analytics/events" && request.method === "POST") {
+    collectRequestJson(request).then((body) => {
+      if (!Array.isArray(body?.events) || !body.events.length) return sendJson(response, 400, { error: "events missing" });
+      sendJson(response, 200, { inserted: body.events.length, duplicates: 0 });
+    }).catch(() => sendJson(response, 400, { error: "invalid analytics JSON" }));
+    return;
+  }
   if (url.pathname === "/api/chat/options") {
     sendJson(response, 200, createMockChatOptions());
     return;
@@ -140,11 +151,15 @@ try {
     await seedCompletedOnboarding(page);
     await page.goto(appUrl, { waitUntil: "networkidle" });
     await page.waitForSelector("canvas");
+    await page.locator(".analytics-consent").waitFor();
+    await page.getByRole("button", { name: "計測を許可" }).click();
+    await page.waitForFunction(() => Boolean(localStorage.getItem("mind-atlas-analytics-actor-v1")));
     await page.getByRole("button", { name: /AI\u6a5f\u80fd/ }).waitFor();
+    await page.waitForFunction(() => document.querySelector(".ai-feature-button")?.textContent?.includes("87%"), null, { timeout: 15_000 }).catch(() => {});
     await assertNoForbiddenPublicDeveloperSurface(page, "initial public shell");
 
     const aiButtonText = cleanText(await page.getByRole("button", { name: /AI\u6a5f\u80fd/ }).textContent());
-    if (!aiButtonText.includes("87%")) throw new Error(`AI feature button did not show credit percent: ${aiButtonText}`);
+    if (!aiButtonText.includes("87%")) throw new Error(`AI feature button did not show credit percent: ${aiButtonText}; requests=${JSON.stringify(requestedPaths)}`);
 
     await page.locator(".ai-panel-role").getByText("AI").waitFor();
     const modeButtonCount = await page.locator(".mode-switch button").count();

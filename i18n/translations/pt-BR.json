@@ -1,4 +1,9 @@
 {
+  "analytics.consent.label": "Preferência de análise",
+  "analytics.consent.message": "Ajude a melhorar o Mind Atlas com análises anônimas e focadas em privacidade. Textos de cadernos, prompts de IA, e-mails e endereços IP não são armazenados na análise do produto.",
+  "analytics.consent.privacy": "Política de privacidade",
+  "analytics.consent.decline": "Agora não",
+  "analytics.consent.accept": "Permitir análise",
   "app.aiFeatures": "Recursos de IA",
   "app.openMenu": "Abrir menu do atlas",
   "app.shareCloud": "Criar link público do Mind Atlas na nuvem",

@@ -15,6 +15,7 @@ const envExample = read(".env.example");
 const serviceEnv = read("deploy/conoha/env.service.example");
 const conohaNginx = read("deploy/conoha/nginx.conf");
 const conohaRateLimits = read("deploy/conoha/nginx-rate-limits.conf");
+const conohaAnalytics = read("deploy/conoha/nginx-analytics.conf");
 const stagingEnv = read("deploy/staging/env.service.docker.example");
 const docs = read("docs/vps-service.md");
 const stagingDocs = read("docs/staging-service.md");
@@ -34,6 +35,10 @@ for (const filePath of [
   "deploy/conoha/mind-atlas.service",
   "deploy/conoha/nginx.conf",
   "deploy/conoha/nginx-rate-limits.conf",
+  "deploy/conoha/nginx-analytics.conf",
+  "deploy/conoha/mind-atlas-analytics.service",
+  "deploy/conoha/mind-atlas-analytics.timer",
+  "deploy/conoha/mind-atlas-analytics.logrotate",
   "deploy/conoha/env.service.example",
   "docs/vps-service.md",
   "docs/staging-service.md",
@@ -88,6 +93,7 @@ for (const scriptName of [
 
 for (const route of [
   "/api/service/session",
+  "/api/analytics/events",
   "/api/auth/google/start",
   "/api/auth/google/callback",
   "/api/billing/checkout",
@@ -184,7 +190,7 @@ for (const providerEnv of [
   assert.ok(stagingLocalEnv.includes(`${providerEnv}=`), `local staging env template should include ${providerEnv}`);
 }
 
-for (const adminCommand of ["doctor", "usage", "grant-credit", "grant-admin", "set-credit", "sync-stripe-periods", "reap-stale-reservations", "cleanup-sessions"]) {
+for (const adminCommand of ["doctor", "usage", "grant-credit", "grant-admin", "set-credit", "sync-stripe-periods", "reap-stale-reservations", "cleanup-sessions", "growth-report", "analytics-cleanup", "analytics-daily"]) {
   assert.ok(admin.includes(commandNeedle(adminCommand)), `admin CUI should expose ${adminCommand}`);
   assert.ok(docs.includes(`service:admin -- ${adminCommand}`), `docs should mention ${adminCommand}`);
 }
@@ -230,6 +236,11 @@ assert.ok(conohaNginx.includes("Strict-Transport-Security"), "ConoHa nginx shoul
 assert.ok(conohaNginx.includes("limit_req zone=mind_atlas_api"), "ConoHa nginx should rate-limit API routes");
 assert.ok(conohaNginx.includes("limit_req zone=mind_atlas_auth"), "ConoHa nginx should rate-limit auth routes");
 assert.ok(conohaRateLimits.includes("limit_req_zone"), "ConoHa nginx rate-limit zones should be documented");
+assert.ok(conohaAnalytics.includes("log_format mind_atlas_analytics escape=json"), "ConoHa should use JSON analytics logs");
+assert.ok(conohaAnalytics.includes("$uri"), "analytics logs should store path without the query string");
+assert.equal(conohaAnalytics.includes("$request_uri"), false, "analytics logs must not store complete URLs or share tokens");
+assert.ok(serviceDb.includes("create table if not exists product_events"), "service DB should store privacy-filtered product events");
+assert.ok(serviceDb.includes("create table if not exists traffic_daily"), "service DB should store cookieless daily traffic aggregates");
 assert.ok(serviceDb.includes("export async function reserveCredit"), "service DB should expose atomic credit reservation");
 assert.ok(serviceDb.includes("export async function settleCreditReservation"), "service DB should expose reservation settlement");
 assert.ok(serviceDb.includes("create table if not exists stripe_events"), "service DB should store Stripe webhook event ids");

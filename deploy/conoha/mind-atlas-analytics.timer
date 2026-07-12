@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Mind Atlas analytics aggregation at 00:15 server local time daily
+
+[Timer]
+OnCalendar=*-*-* 00:15:00
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

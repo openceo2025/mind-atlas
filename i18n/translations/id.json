@@ -1,4 +1,9 @@
 {
+  "analytics.consent.label": "Preferensi analitik",
+  "analytics.consent.message": "Bantu tingkatkan Mind Atlas dengan analitik penggunaan anonim yang menjaga privasi. Teks notebook, prompt AI, email, dan alamat IP tidak disimpan dalam analitik produk.",
+  "analytics.consent.privacy": "Kebijakan privasi",
+  "analytics.consent.decline": "Tidak, terima kasih",
+  "analytics.consent.accept": "Izinkan analitik",
   "app.aiFeatures": "Fitur AI",
   "app.openMenu": "Buka menu atlas",
   "app.shareCloud": "Buat tautan publik Mind Atlas di cloud",

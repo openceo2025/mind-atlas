@@ -2,7 +2,7 @@
   "metaDescription": "Mind Atlas privacy policy for Google sign-in, cloud notebooks, hosted AI features, billing, and local-first notebook data.",
   "title": "Privacy Policy",
   "lead": "This Privacy Policy applies to the Mind Atlas web service, Google sign-in, cloud notebooks, billing, AI features, and related server processing.",
-  "updated": "Last updated: 2026-07-01",
+  "updated": "Last updated: 2026-07-12",
   "sections": [
     {
       "heading": "1. Operator and contact",
@@ -55,7 +55,7 @@
     },
     {
       "heading": "7. Cookies",
-      "paragraphs": ["Mind Atlas uses cookies to maintain sign-in sessions. In the hosted service, session cookies are used for authentication, security, and subscription-state checks."]
+      "paragraphs": ["Mind Atlas uses cookies to maintain sign-in sessions. In the hosted service, session cookies are used for authentication, security, and subscription-state checks. Optional product analytics starts only after consent and stores a random anonymous identifier in the browser. Product analytics does not store notebook text, AI prompts, email addresses, Google account IDs, share tokens, IP addresses, or complete URLs. Raw nginx analytics logs are retained for 14 days; after that, only irreversible daily aggregates are retained."]
     },
     {
       "heading": "8. Retention and deletion",

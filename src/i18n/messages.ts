@@ -11,6 +11,11 @@ const coreSourceMessages = {
   "common.on": "On",
   "common.save": "Save",
   "common.unknown": "Unknown",
+  "analytics.consent.label": "Analytics preference",
+  "analytics.consent.message": "Help improve Mind Atlas with privacy-preserving anonymous usage analytics. Notebook text, AI prompts, email addresses, and IP addresses are not stored in product analytics.",
+  "analytics.consent.privacy": "Privacy policy",
+  "analytics.consent.decline": "No thanks",
+  "analytics.consent.accept": "Allow analytics",
   "language.section": "Language",
   "language.current": "Interface language",
   "app.aiFeatures": "AI features",
@@ -282,6 +287,11 @@ const coreSourceMessages = {
 type CoreMessageId = keyof typeof coreSourceMessages;
 
 const coreJapaneseMessages: Partial<Record<CoreMessageId, string>> = {
+  "analytics.consent.label": "アクセス解析の設定",
+  "analytics.consent.message": "匿名の利用状況を計測し、Mind Atlasの改善に役立てます。ノート本文、AIプロンプト、メールアドレス、IPアドレスはプロダクト分析には保存しません。",
+  "analytics.consent.privacy": "プライバシーポリシー",
+  "analytics.consent.decline": "許可しない",
+  "analytics.consent.accept": "計測を許可",
   "common.auto": "端末の言語を使う",
   "common.cancel": "キャンセル",
   "common.close": "閉じる",

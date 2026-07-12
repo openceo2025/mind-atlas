@@ -1,4 +1,9 @@
 {
+  "analytics.consent.label": "分析设置",
+  "analytics.consent.message": "通过保护隐私的匿名使用分析帮助改进 Mind Atlas。笔记正文、AI 提示词、电子邮件和 IP 地址不会存入产品分析数据。",
+  "analytics.consent.privacy": "隐私政策",
+  "analytics.consent.decline": "暂不允许",
+  "analytics.consent.accept": "允许分析",
   "app.aiFeatures": "AI 功能",
   "app.openMenu": "打开 Atlas 菜单",
   "app.shareCloud": "创建公开 Mind Atlas 云端链接",

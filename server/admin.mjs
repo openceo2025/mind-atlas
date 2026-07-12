@@ -125,6 +125,36 @@ try {
     if (!Number.isFinite(idleDays) || idleDays < 1) throw new Error("idleDays must be a positive number");
     const deleted = await db.deleteExpiredSessions(idleDays);
     console.log(`Deleted expired sessions: ${deleted}`);
+  } else if (command === "growth-report") {
+    const db = await getDb();
+    await db.migrateDatabase();
+    const options = parseOptions(args);
+    const days = positiveInteger(options.days ?? 30, "days", 730);
+    const { buildGrowthReport } = await import("./analytics-report.mjs");
+    const report = await buildGrowthReport({ days });
+    if (options.json) console.log(JSON.stringify(report, null, 2));
+    else printGrowthReport(report);
+  } else if (command === "analytics-cleanup") {
+    const db = await getDb();
+    await db.migrateDatabase();
+    const result = await db.cleanupAnalyticsData();
+    console.log(JSON.stringify(result, null, 2));
+  } else if (command === "analytics-daily") {
+    const db = await getDb();
+    await db.migrateDatabase();
+    const options = parseOptions(args);
+    const { aggregateNginxTraffic } = await import("./traffic-analytics.mjs");
+    const { buildGrowthReport } = await import("./analytics-report.mjs");
+    const day = typeof options.date === "string" ? options.date : localDateOffset(-1);
+    const traffic = await aggregateNginxTraffic({
+      day,
+      logDir: getEnv("MIND_ATLAS_ANALYTICS_LOG_DIR", "/var/log/nginx"),
+      logPrefix: getEnv("MIND_ATLAS_ANALYTICS_LOG_PREFIX", "mind-atlas-analytics.log"),
+    });
+    const report = await buildGrowthReport({ days: 30 });
+    await db.saveAnalyticsSnapshot(day, report);
+    const cleanup = await db.cleanupAnalyticsData();
+    console.log(JSON.stringify({ traffic, cleanup, snapshotDay: day }, null, 2));
   } else {
     throw new Error(`Unknown command: ${command}`);
   }
@@ -231,6 +261,7 @@ async function runDoctor() {
   const mockProviders = enabledEnv("MIND_ATLAS_STAGING_MOCK_PROVIDERS");
   const modelPricePolicy = getEnv("MIND_ATLAS_MODEL_PRICE_POLICY", "allow-default").toLowerCase();
   const productionOrigin = isProductionOrigin(publicOrigin);
+  const analyticsEnabled = enabledEnv("MIND_ATLAS_ANALYTICS_ENABLED");
   const modelPrices = mergeModelPrices(parseJsonEnv("MIND_ATLAS_MODEL_PRICES_JSON", {}));
   const missingProviderPrices = configuredProviders
     .filter((provider) => !modelPrices[`${provider.id}:*`])
@@ -259,6 +290,11 @@ async function runDoctor() {
     envIntInRange("MIND_ATLAS_REALTIME_MAX_OUTPUT_TOKENS", 512, 1, 4096)
       && envIntInRange("MIND_ATLAS_REALTIME_MAX_SESSION_SECONDS", 300, 30, 1800),
     `maxOutput=${getEnv("MIND_ATLAS_REALTIME_MAX_OUTPUT_TOKENS", "512")} maxSeconds=${getEnv("MIND_ATLAS_REALTIME_MAX_SESSION_SECONDS", "300")}`,
+  );
+  add(
+    "privacy analytics",
+    !analyticsEnabled || getEnv("MIND_ATLAS_ANALYTICS_HMAC_KEY").length >= 32,
+    analyticsEnabled ? "enabled with HMAC key" : "client events disabled; cookieless traffic aggregation may still run",
   );
   add(
     "provider price coverage",
@@ -326,7 +362,90 @@ Usage:
   npm run service:admin -- sync-stripe-periods [email]
   npm run service:admin -- reap-stale-reservations [minutes]
   npm run service:admin -- cleanup-sessions [idleDays]
+  npm run service:admin -- growth-report --days 30 [--json]
+  npm run service:admin -- analytics-cleanup
+  npm run service:admin -- analytics-daily [--date YYYY-MM-DD]
 `);
+}
+
+function parseOptions(args) {
+  const result = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const item = args[index];
+    if (!item?.startsWith("--")) continue;
+    const key = item.slice(2);
+    if (key === "json") result.json = true;
+    else result[key] = args[index + 1] ?? "";
+    if (key !== "json") index += 1;
+  }
+  return result;
+}
+
+function positiveInteger(value, label, max) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) throw new Error(`${label} must be an integer from 1 to ${max}`);
+  return parsed;
+}
+
+function printGrowthReport(report) {
+  const value = (rate) => rate?.value == null ? "n/a" : `${(rate.value * 100).toFixed(1)}%${rate.referenceOnly ? " (reference)" : ""}`;
+  console.log(`Mind Atlas growth report: ${report.period.start} through ${report.period.end} / last ${report.days} days`);
+  console.log(`North Star (Meaningful Active Users): ${report.northStar.meaningfulActiveUsers}`);
+  console.table([{
+    pv: report.overview.humanPageViews,
+    estimatedUU: report.overview.estimatedUniqueVisitors,
+    googleRegistrations: report.overview.googleUsersCreated,
+    cloudFiles: report.overview.cloudFilesCreated,
+    activeSubscriptions: report.billing.activeSubscriptions,
+    mrrUsd: (report.billing.mrr.amountMinor / 100).toFixed(2),
+    aiCostUsd: (report.aiEconomics.estimatedCostMicroUsd / 1_000_000).toFixed(4),
+  }]);
+  console.log("Funnel");
+  console.table(report.funnel.map((step) => ({ event: step.event, actors: step.actors, fromPrevious: value(step.fromPrevious) })));
+  console.log("Retention");
+  console.table([{
+    cohort: report.retention.cohort,
+    d1: value(report.retention.d1),
+    d7: value(report.retention.d7),
+    d30: value(report.retention.d30),
+    rolling7: value(report.retention.rolling7),
+    rolling30: value(report.retention.rolling30),
+  }]);
+  console.log("Acquisition");
+  console.table(report.acquisition.sources);
+  console.log("Sharing");
+  console.table([{
+    shares: report.sharing.shares,
+    opens: report.sharing.opens,
+    imports: report.sharing.imports,
+    opensPerShare: value(report.sharing.viewersPerShare),
+    openToImport: value(report.sharing.openToImport),
+  }]);
+  console.log("AI economics");
+  console.table(report.aiEconomics.models.map((row) => ({
+    provider: row.provider,
+    model: row.model,
+    requests: row.requests,
+    users: row.users,
+    costUsd: (row.costMicroUsd / 1_000_000).toFixed(4),
+    p50Ms: row.p50Ms,
+    p95Ms: row.p95Ms,
+  })));
+  console.log("Data quality");
+  console.table([{
+    botRatio: value(report.dataQuality.botRatio),
+    consentRate: value(report.dataQuality.analyticsConsentRate),
+    clientEvents: report.dataQuality.clientEvents,
+    incompleteEvents: report.dataQuality.incompleteEvents,
+    http4xx: report.dataQuality.http4xx,
+    http5xx: report.dataQuality.http5xx,
+  }]);
+}
+
+function localDateOffset(offsetDays) {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function hasEnv(name) {

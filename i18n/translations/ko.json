@@ -1,4 +1,9 @@
 {
+  "analytics.consent.label": "분석 설정",
+  "analytics.consent.message": "개인정보를 보호하는 익명 사용 분석으로 Mind Atlas 개선에 도움을 주세요. 노트 본문, AI 프롬프트, 이메일 및 IP 주소는 제품 분석에 저장되지 않습니다.",
+  "analytics.consent.privacy": "개인정보 처리방침",
+  "analytics.consent.decline": "허용 안 함",
+  "analytics.consent.accept": "분석 허용",
   "app.aiFeatures": "AI 기능",
   "app.openMenu": "Atlas 메뉴 열기",
   "app.shareCloud": "공개 Mind Atlas 클라우드 링크 만들기",

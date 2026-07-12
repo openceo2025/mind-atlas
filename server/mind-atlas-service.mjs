@@ -13,6 +13,8 @@ import {
   getCloudNotebookByShareToken,
   getSessionUser,
   getUserSubscription,
+  insertProductEvents,
+  linkAnalyticsActorToUser,
   listCloudNotebooks,
   renameCloudNotebook,
   forgetStripeEvent,
@@ -22,6 +24,7 @@ import {
   migrateDatabase,
   MONTHLY_CREDIT_MICRO_USD,
   recordUsageEvent,
+  recordAnalyticsIngestStats,
   reserveCredit,
   refundStaleCreditReservations,
   settleCreditReservation,
@@ -36,6 +39,13 @@ import {
 import { getEnv, parseJsonEnv, parseListEnv, readIntEnv, serviceRootDir } from "./service-config.mjs";
 import { hasModelPrice, mergeModelPrices, resolveExactModelPrice } from "./model-pricing.mjs";
 import { stripePatchFromStripeSubscription } from "./stripe-subscription.mjs";
+import {
+  AnalyticsValidationError,
+  analyticsEnabled,
+  hmacIdentifier,
+  normalizeClientAnalyticsBatch,
+  recordServerAnalyticsEventSafe,
+} from "./analytics.mjs";
 
 const serviceHost = getEnv("MIND_ATLAS_SERVICE_HOST", "127.0.0.1");
 const servicePort = readIntEnv("MIND_ATLAS_SERVICE_PORT", 8788);
@@ -44,6 +54,8 @@ const distDir = path.resolve(serviceRootDir, getEnv("MIND_ATLAS_DIST_DIR", "dist
 const sessionCookieName = "ma_session";
 const oauthStateCookieName = "ma_oauth_state";
 const oauthReturnCookieName = "ma_oauth_return";
+const analyticsLinkCookieName = "ma_analytics_link";
+const adminTrafficCookieName = "ma_admin_traffic";
 const cookieSecure = getEnv("MIND_ATLAS_COOKIE_SECURE", publicOrigin.startsWith("https://") ? "1" : "0") !== "0";
 const googleClientId = getEnv("GOOGLE_CLIENT_ID");
 const googleClientSecret = getEnv("GOOGLE_CLIENT_SECRET");
@@ -94,6 +106,9 @@ const sessionIdleDays = readIntEnv("MIND_ATLAS_SESSION_IDLE_DAYS", 7);
 const staleReservationMinutes = readIntEnv("MIND_ATLAS_STALE_RESERVATION_MINUTES", 30);
 const maintenanceIntervalMs = readIntEnv("MIND_ATLAS_MAINTENANCE_INTERVAL_MS", 5 * 60 * 1000);
 const cloudNotebookMaxNodes = readIntEnv("MIND_ATLAS_CLOUD_NOTEBOOK_MAX_NODES", 5000);
+const analyticsEventMaxBytes = readIntEnv("MIND_ATLAS_ANALYTICS_EVENT_MAX_BYTES", 32 * 1024);
+const analyticsIpMax = readIntEnv("MIND_ATLAS_ANALYTICS_IP_MAX", 60);
+const analyticsHmacKey = getEnv("MIND_ATLAS_ANALYTICS_HMAC_KEY");
 const stagingMockAuth = readBoolEnv("MIND_ATLAS_STAGING_MOCK_AUTH", false);
 const stagingMockBilling = readBoolEnv("MIND_ATLAS_STAGING_MOCK_BILLING", false);
 const stagingMockProviders = readBoolEnv("MIND_ATLAS_STAGING_MOCK_PROVIDERS", false);
@@ -151,13 +166,27 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/service/session") {
-      const session = await createSessionResponse(await authenticate(request));
+      const user = await authenticate(request);
+      const session = await createSessionResponse(user);
+      setCookie(response, adminTrafficCookieName, user?.role === "admin" ? "1" : "", {
+        maxAge: user?.role === "admin" ? 30 * 24 * 60 * 60 : 0,
+      });
       sendJson(response, 200, session);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/analytics/events") {
+      await handleAnalyticsEvents(request, response);
       return;
     }
 
     if (request.method === "GET" && url.pathname === "/api/chat/options") {
       sendJson(response, 200, await createChatOptionsResponse());
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/analytics/config") {
+      sendJson(response, 200, { enabled: analyticsEnabled() });
       return;
     }
 
@@ -175,6 +204,7 @@ const server = http.createServer(async (request, response) => {
       const token = parseCookies(request.headers.cookie)[sessionCookieName];
       await deleteSession(token);
       setCookie(response, sessionCookieName, "", { maxAge: 0 });
+      setCookie(response, adminTrafficCookieName, "", { maxAge: 0 });
       sendJson(response, 200, { ok: true });
       return;
     }
@@ -236,7 +266,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname.startsWith("/api/share/notebooks/")) {
-      await handleCloudNotebookPublicLoad(response, url.pathname.slice("/api/share/notebooks/".length));
+      await handleCloudNotebookPublicLoad(request, response, url.pathname.slice("/api/share/notebooks/".length));
       return;
     }
 
@@ -293,6 +323,9 @@ function assertSafeProductionConfig() {
     throw new Error(`Refusing to start production service with staging mocks enabled: ${enabledMocks.join(", ")}`);
   }
   if (!cookieSecure) throw new Error("Refusing to start production service without secure cookies");
+  if (analyticsEnabled() && analyticsHmacKey.length < 32) {
+    throw new Error("MIND_ATLAS_ANALYTICS_HMAC_KEY must contain at least 32 characters when analytics is enabled");
+  }
   if (modelPricePolicy !== "require-model") {
     throw new Error("Refusing to start production service unless MIND_ATLAS_MODEL_PRICE_POLICY=require-model");
   }
@@ -362,6 +395,27 @@ function consumeRateLimit(key, maxRequests, windowMs) {
 function requestClientIp(request) {
   const forwardedFor = stringValue(request.headers["x-forwarded-for"]).split(",")[0]?.trim();
   return forwardedFor || stringValue(request.headers["x-real-ip"]) || request.socket?.remoteAddress || "unknown";
+}
+
+function signAnalyticsLinkCookie(actorHash) {
+  if (!analyticsHmacKey || !/^[a-f0-9]{64}$/.test(actorHash)) return "";
+  const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60;
+  const value = `${actorHash}.${expiresAt}`;
+  const signature = crypto.createHmac("sha256", analyticsHmacKey).update(`oauth-link:${value}`).digest("base64url");
+  return `${value}.${signature}`;
+}
+
+function verifyAnalyticsLinkCookie(cookieValue) {
+  if (!analyticsHmacKey || typeof cookieValue !== "string") return "";
+  const [actorHash, expiresAtRaw, signature] = cookieValue.split(".");
+  if (!/^[a-f0-9]{64}$/.test(actorHash ?? "") || !/^\d{10}$/.test(expiresAtRaw ?? "") || !signature) return "";
+  if (Number(expiresAtRaw) < Math.floor(Date.now() / 1000)) return "";
+  const value = `${actorHash}.${expiresAtRaw}`;
+  const expected = crypto.createHmac("sha256", analyticsHmacKey).update(`oauth-link:${value}`).digest("base64url");
+  const left = Buffer.from(signature);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length || !crypto.timingSafeEqual(left, right)) return "";
+  return actorHash;
 }
 
 function enterUserConcurrency(key, limit) {
@@ -471,11 +525,20 @@ async function handleGoogleCallback(request, response, url) {
     name: stringValue(profile.name),
     picture: stringValue(profile.picture),
   });
+  const analyticsActorHash = verifyAnalyticsLinkCookie(cookies[analyticsLinkCookieName]);
+  if (analyticsActorHash) await linkAnalyticsActorToUser(analyticsActorHash, user.id);
+  await recordServerAnalyticsEventSafe("google_login_completed", {
+    eventId: `google-login:${receivedState}`,
+    userId: user.id,
+    actorHash: analyticsActorHash || null,
+    pageGroup: "app",
+  });
   const sessionToken = await createSession(user.id);
   setCookie(response, sessionCookieName, sessionToken, { maxAge: 30 * 24 * 60 * 60 });
   setCookie(response, oauthStateCookieName, "", { maxAge: 0 });
   const returnTo = safeReturnPath(cookies[oauthReturnCookieName] || "/");
   setCookie(response, oauthReturnCookieName, "", { maxAge: 0 });
+  setCookie(response, analyticsLinkCookieName, "", { maxAge: 0 });
   redirectResponse(response, `${publicOrigin}${returnTo}`);
 }
 
@@ -490,6 +553,36 @@ async function handleMockGoogleLogin(response, url) {
   const sessionToken = await createSession(user.id);
   setCookie(response, sessionCookieName, sessionToken, { maxAge: 30 * 24 * 60 * 60 });
   redirectResponse(response, `${publicOrigin}${returnTo}`);
+}
+
+async function handleAnalyticsEvents(request, response) {
+  if (!analyticsEnabled()) {
+    response.writeHead(204).end();
+    return;
+  }
+  const ip = requestClientIp(request);
+  consumeRateLimit(`analytics:${ip}`, analyticsIpMax, ipRateLimitWindowMs);
+  const payload = await readJson(request, analyticsEventMaxBytes);
+  const user = await authenticate(request);
+  let events;
+  try {
+    events = normalizeClientAnalyticsBatch(payload, { userId: user?.role === "admin" ? null : user?.id ?? null });
+  } catch (error) {
+    if (error instanceof AnalyticsValidationError) {
+      await recordAnalyticsIngestStats({ rejected: Array.isArray(payload?.events) ? Math.max(1, Math.min(20, payload.events.length)) : 1 });
+      throw new ServiceError(400, "analytics_event_rejected", error.message);
+    }
+    throw error;
+  }
+  if (user?.role === "admin") {
+    response.writeHead(204).end();
+    return;
+  }
+  const result = await insertProductEvents(events);
+  await recordAnalyticsIngestStats({ accepted: result.inserted, duplicates: result.duplicates });
+  const actorHash = events[0]?.actorHash;
+  if (actorHash) setCookie(response, analyticsLinkCookieName, signAnalyticsLinkCookie(actorHash), { maxAge: 60 * 60 });
+  sendJson(response, 200, result);
 }
 
 async function handleBillingCheckout(request, response) {
@@ -596,6 +689,12 @@ async function handleCloudNotebookSave(request, response) {
     visibility: "private",
     quotaBytes: cloudNotebookMaxBytes,
   });
+  await recordServerAnalyticsEventSafe("cloud_save_completed", {
+    eventId: `cloud-save:${result.notebook.id}:${new Date(result.notebook.updated_at).getTime()}`,
+    userId: user.id,
+    pageGroup: "app",
+    properties: { notebook_id: result.notebook.id, operation: "create", size_bytes: sizeBytes },
+  });
   sendJson(response, 200, {
     ...formatCloudNotebookEntry(result.notebook),
     directory: "Mind Atlas cloud text storage",
@@ -634,6 +733,12 @@ async function handleCloudNotebookUpdate(request, response, id) {
       quotaBytes: cloudNotebookMaxBytes,
     });
     if (!result) throw new ServiceError(404, "Cloud notebook was not found");
+    await recordServerAnalyticsEventSafe("cloud_save_completed", {
+      eventId: `cloud-save:${result.notebook.id}:${new Date(result.notebook.updated_at).getTime()}`,
+      userId: user.id,
+      pageGroup: "app",
+      properties: { notebook_id: result.notebook.id, operation: "overwrite", size_bytes: sizeBytes },
+    });
     sendJson(response, 200, {
       ...formatCloudNotebookEntry(result.notebook),
       directory: "Mind Atlas cloud text storage",
@@ -687,6 +792,12 @@ async function handleCloudNotebookShare(request, response) {
     shareToken: token,
     quotaBytes: cloudNotebookMaxBytes,
   });
+  await recordServerAnalyticsEventSafe("share_link_created", {
+    eventId: `share-create:${result.notebook.id}`,
+    userId: user.id,
+    pageGroup: "app",
+    properties: { notebook_id: result.notebook.id, new_share: true },
+  });
   sendJson(response, 200, {
     url: `${publicOrigin}/#s=${token}`,
     token,
@@ -711,6 +822,12 @@ async function handleCloudNotebookShareExisting(request, response, id) {
   const entry = formatCloudNotebookEntry(result.notebook);
   const token = entry.shareToken;
   if (!token) throw new ServiceError(500, "Cloud notebook share token could not be created");
+  await recordServerAnalyticsEventSafe("share_link_created", {
+    eventId: `share-existing:${result.notebook.id}:${new Date(result.notebook.updated_at).getTime()}`,
+    userId: user.id,
+    pageGroup: "app",
+    properties: { notebook_id: result.notebook.id, new_share: true },
+  });
   sendJson(response, 200, {
     url: `${publicOrigin}/#s=${token}`,
     token,
@@ -719,11 +836,19 @@ async function handleCloudNotebookShareExisting(request, response, id) {
   });
 }
 
-async function handleCloudNotebookPublicLoad(response, tokenSegment) {
+async function handleCloudNotebookPublicLoad(request, response, tokenSegment) {
   const token = decodeURIComponent(tokenSegment || "");
   if (!isShareToken(token)) throw new ServiceError(400, "Invalid share token");
   const notebook = await getCloudNotebookByShareToken(token);
   if (!notebook) throw new ServiceError(404, "Shared Mind Atlas link was not found");
+  await recordServerAnalyticsEventSafe("share_link_opened", {
+    actorHash: analyticsHmacKey
+      ? hmacIdentifier(analyticsHmacKey, `share-viewer:${new Date().toISOString().slice(0, 10)}`, `${requestClientIp(request)}:${stringValue(request.headers["user-agent"])}`)
+      : null,
+    userId: null,
+    pageGroup: "share",
+    properties: { notebook_id: notebook.id, owner_user_id: notebook.user_id },
+  });
   sendJson(response, 200, {
     entry: formatCloudNotebookEntry(notebook),
     root: notebook.data,
@@ -1873,6 +1998,12 @@ async function reserveUsageCredit({ user, subscription, requestId, provider, mod
     metadata: { provider, model, reservedMicroUsd, ...metadata },
   });
   if (!account) throw new ServiceError(402, "Mind Atlas token for this billing period is too low for this request");
+  await recordServerAnalyticsEventSafe("ai_request_started", {
+    eventId: `ai-start:${requestId}`,
+    userId: user.id,
+    pageGroup: "app",
+    properties: { feature: metadata.kind ?? "ai", provider, model },
+  });
   return { requestId, reservedMicroUsd, provider, model, metadata };
 }
 
@@ -1892,6 +2023,12 @@ async function refundUsageReservation({ user, subscription, reservation, provide
         refundReason: reason,
         ...reservation.metadata,
       },
+    });
+    await recordServerAnalyticsEventSafe("ai_request_failed", {
+      eventId: `ai-failed:${reservation.requestId}`,
+      userId: user.id,
+      pageGroup: "app",
+      properties: { feature: reservation.metadata?.kind ?? "ai", provider, model, error_code: reason },
     });
   } catch (error) {
     console.error("Failed to refund Mind Atlas credit reservation", error);
@@ -1924,6 +2061,18 @@ async function meterReservedUsage({ user, subscription, requestId, provider, mod
     estimatedCostMicroUsd,
     creditSpentMicroUsd: estimatedCostMicroUsd,
     durationMs: usage.durationMs ?? null,
+  });
+  await recordServerAnalyticsEventSafe("ai_request_succeeded", {
+    eventId: `ai-success:${requestId}`,
+    userId: user.id,
+    pageGroup: "app",
+    properties: {
+      feature: metadata.kind ?? reservation.metadata?.kind ?? "ai",
+      provider,
+      model,
+      duration_ms: usage.durationMs ?? 0,
+      cost_micro_usd: estimatedCostMicroUsd,
+    },
   });
   return account;
 }
@@ -2017,18 +2166,43 @@ function creditPercent(account) {
 
 async function applyStripeEvent(event) {
   const object = event?.data?.object ?? {};
+  const stripeEventId = stringValue(event?.id) || crypto.randomUUID();
   if (event.type === "checkout.session.completed") {
     const userId = stringValue(object.client_reference_id) || stringValue(object.metadata?.mind_atlas_user_id);
     if (!userId) return;
     const subscriptionId = stringValue(object.subscription);
     const subscription = subscriptionId ? await stripeGet(`/v1/subscriptions/${subscriptionId}`) : null;
-    await upsertSubscriptionByUserId(userId, stripePatchFromStripeSubscription(subscription, object.customer, stripePriceId));
+    const patch = stripePatchFromStripeSubscription(subscription, object.customer, stripePriceId);
+    await upsertSubscriptionByUserId(userId, patch);
+    await recordServerAnalyticsEventSafe("checkout_completed", {
+      eventId: `stripe:${stripeEventId}:checkout`,
+      userId,
+      pageGroup: "app",
+      properties: { currency: patch.currency, amount_minor: patch.unitAmountMinor ?? 0 },
+    });
     return;
   }
   if (event.type?.startsWith("customer.subscription.")) {
     const customerId = stringValue(object.customer);
     const userId = stringValue(object.metadata?.mind_atlas_user_id);
-    await upsertStripeSubscription(customerId, stripePatchFromStripeSubscription(object, customerId, stripePriceId), userId);
+    const patch = stripePatchFromStripeSubscription(object, customerId, stripePriceId);
+    const updated = await upsertStripeSubscription(customerId, patch, userId);
+    if (event.type === "customer.subscription.created" && patch.status === "active") {
+      await recordServerAnalyticsEventSafe("subscription_activated", {
+        eventId: `stripe:${stripeEventId}:activated`,
+        userId: updated?.user_id ?? userId,
+        pageGroup: "app",
+        properties: { currency: patch.currency, amount_minor: patch.unitAmountMinor ?? 0, billing_interval: patch.billingInterval },
+      });
+    }
+    if (event.type === "customer.subscription.deleted" || patch.status === "canceled") {
+      await recordServerAnalyticsEventSafe("subscription_cancelled", {
+        eventId: `stripe:${stripeEventId}:cancelled`,
+        userId: updated?.user_id ?? userId,
+        pageGroup: "app",
+        properties: { cancel_at_period_end: patch.cancelAtPeriodEnd === true },
+      });
+    }
     return;
   }
   if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
@@ -2038,7 +2212,32 @@ async function applyStripeEvent(event) {
     const userId = stringValue(subscription?.metadata?.mind_atlas_user_id)
       || stringValue(object.subscription_details?.metadata?.mind_atlas_user_id)
       || stringValue(object.metadata?.mind_atlas_user_id);
-    await upsertStripeSubscription(customerId, stripePatchFromStripeSubscription(subscription, customerId, stripePriceId), userId);
+    const patch = stripePatchFromStripeSubscription(subscription, customerId, stripePriceId);
+    const updated = await upsertStripeSubscription(customerId, patch, userId);
+    await recordServerAnalyticsEventSafe("invoice_paid", {
+      eventId: `stripe:${stripeEventId}:paid`,
+      userId: updated?.user_id ?? userId,
+      pageGroup: "app",
+      properties: {
+        currency: stringValue(object.currency) || patch.currency,
+        amount_minor: Number(object.amount_paid ?? patch.unitAmountMinor ?? 0),
+      },
+    });
+    return;
+  }
+  if (event.type === "invoice.payment_failed") {
+    const customerId = stringValue(object.customer);
+    const updated = customerId ? await upsertSubscriptionByStripeCustomer(customerId, { status: "past_due" }) : null;
+    await recordServerAnalyticsEventSafe("payment_failed", {
+      eventId: `stripe:${stripeEventId}:failed`,
+      userId: updated?.user_id ?? null,
+      pageGroup: "app",
+      properties: {
+        currency: stringValue(object.currency) || "usd",
+        amount_minor: Number(object.amount_due ?? 0),
+        failure_code: stringValue(object.last_finalization_error?.code) || "payment_failed",
+      },
+    });
   }
 }
 

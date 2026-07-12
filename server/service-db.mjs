@@ -53,6 +53,12 @@ export async function migrateDatabase() {
       updated_at timestamptz not null default now()
     );
 
+    alter table subscriptions add column if not exists unit_amount_minor integer;
+    alter table subscriptions add column if not exists currency text not null default 'usd';
+    alter table subscriptions add column if not exists billing_interval text not null default 'month';
+    alter table subscriptions add column if not exists activated_at timestamptz;
+    alter table subscriptions add column if not exists cancelled_at timestamptz;
+
     create table if not exists credit_accounts (
       user_id text not null references users(id) on delete cascade,
       period_key text not null,
@@ -118,6 +124,84 @@ export async function migrateDatabase() {
     create index if not exists cloud_notebooks_user_updated_idx on cloud_notebooks(user_id, updated_at desc);
     create index if not exists cloud_notebooks_user_created_idx on cloud_notebooks(user_id, created_at asc);
     create index if not exists cloud_notebooks_share_token_idx on cloud_notebooks(share_token) where share_token is not null;
+
+    create table if not exists product_events (
+      id text primary key,
+      event_id text not null unique,
+      event_name text not null,
+      source text not null default 'client',
+      actor_hash text,
+      session_hash text,
+      user_id text references users(id) on delete set null,
+      occurred_at timestamptz not null,
+      locale text not null default 'unknown',
+      page_group text not null default 'unknown',
+      referrer_host text not null default '',
+      utm_source text not null default '',
+      utm_medium text not null default '',
+      utm_campaign text not null default '',
+      utm_content text not null default '',
+      utm_term text not null default '',
+      first_referrer_host text not null default '',
+      first_utm_source text not null default '',
+      first_utm_medium text not null default '',
+      first_utm_campaign text not null default '',
+      first_utm_content text not null default '',
+      first_utm_term text not null default '',
+      device_class text not null default 'unknown',
+      experiment_id text not null default '',
+      variant text not null default '',
+      properties jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now()
+    );
+
+    create index if not exists product_events_name_occurred_idx on product_events(event_name, occurred_at desc);
+    create index if not exists product_events_actor_occurred_idx on product_events(actor_hash, occurred_at desc) where actor_hash is not null;
+    create index if not exists product_events_user_occurred_idx on product_events(user_id, occurred_at desc) where user_id is not null;
+    alter table product_events add column if not exists first_referrer_host text not null default '';
+    alter table product_events add column if not exists first_utm_source text not null default '';
+    alter table product_events add column if not exists first_utm_medium text not null default '';
+    alter table product_events add column if not exists first_utm_campaign text not null default '';
+    alter table product_events add column if not exists first_utm_content text not null default '';
+    alter table product_events add column if not exists first_utm_term text not null default '';
+
+    create table if not exists traffic_daily (
+      day date not null,
+      page_group text not null default 'unknown',
+      landing_page text not null default 'unknown',
+      referrer_host text not null default '',
+      utm_source text not null default '',
+      utm_medium text not null default '',
+      utm_campaign text not null default '',
+      locale text not null default 'unknown',
+      device_class text not null default 'unknown',
+      pv integer not null default 0,
+      unique_visitors integer not null default 0,
+      bot_pv integer not null default 0,
+      error_4xx integer not null default 0,
+      error_5xx integer not null default 0,
+      response_ms_total bigint not null default 0,
+      response_count integer not null default 0,
+      updated_at timestamptz not null default now(),
+      primary key (day, page_group, landing_page, referrer_host, utm_source, utm_medium, utm_campaign, locale, device_class)
+    );
+
+    create index if not exists traffic_daily_day_idx on traffic_daily(day desc);
+
+    create table if not exists analytics_daily_snapshots (
+      day date primary key,
+      report jsonb not null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    create table if not exists analytics_ingest_daily (
+      day date primary key,
+      accepted integer not null default 0,
+      rejected integer not null default 0,
+      duplicates integer not null default 0,
+      updated_at timestamptz not null default now()
+    );
   `);
 }
 
@@ -209,9 +293,17 @@ export async function upsertSubscriptionByUserId(userId, patch) {
         current_period_start,
         current_period_end,
         cancel_at_period_end,
+        unit_amount_minor,
+        currency,
+        billing_interval,
+        activated_at,
+        cancelled_at,
         updated_at
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, now())
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+        case when $4 = 'active' then now() else null end,
+        case when $4 = 'canceled' then now() else null end,
+        now())
       on conflict (user_id) do update set
         stripe_customer_id = coalesce(excluded.stripe_customer_id, subscriptions.stripe_customer_id),
         stripe_subscription_id = coalesce(excluded.stripe_subscription_id, subscriptions.stripe_subscription_id),
@@ -220,6 +312,17 @@ export async function upsertSubscriptionByUserId(userId, patch) {
         current_period_start = coalesce(excluded.current_period_start, subscriptions.current_period_start),
         current_period_end = coalesce(excluded.current_period_end, subscriptions.current_period_end),
         cancel_at_period_end = excluded.cancel_at_period_end,
+        unit_amount_minor = coalesce(excluded.unit_amount_minor, subscriptions.unit_amount_minor),
+        currency = coalesce(nullif(excluded.currency, ''), subscriptions.currency),
+        billing_interval = coalesce(nullif(excluded.billing_interval, ''), subscriptions.billing_interval),
+        activated_at = case
+          when excluded.status = 'active' and subscriptions.status <> 'active' then now()
+          else subscriptions.activated_at
+        end,
+        cancelled_at = case
+          when excluded.status = 'canceled' and subscriptions.status <> 'canceled' then now()
+          else subscriptions.cancelled_at
+        end,
         updated_at = now()
       returning *
     `,
@@ -232,6 +335,9 @@ export async function upsertSubscriptionByUserId(userId, patch) {
       patch.currentPeriodStart ?? null,
       patch.currentPeriodEnd ?? null,
       patch.cancelAtPeriodEnd === true,
+      Number.isFinite(Number(patch.unitAmountMinor)) ? Math.max(0, Math.round(Number(patch.unitAmountMinor))) : null,
+      patch.currency ?? "usd",
+      patch.billingInterval ?? "month",
     ],
   );
   return result.rows[0];
@@ -558,6 +664,165 @@ export async function recordUsageEvent(event) {
   );
 }
 
+export async function insertProductEvents(events) {
+  if (!Array.isArray(events) || events.length === 0) return { inserted: 0, duplicates: 0 };
+  const client = await pool.connect();
+  let inserted = 0;
+  try {
+    await client.query("begin");
+    for (const event of events) {
+      const result = await client.query(
+        `
+          insert into product_events (
+            id, event_id, event_name, source, actor_hash, session_hash, user_id, occurred_at,
+            locale, page_group, referrer_host, utm_source, utm_medium, utm_campaign,
+            utm_content, utm_term, first_referrer_host, first_utm_source, first_utm_medium,
+            first_utm_campaign, first_utm_content, first_utm_term,
+            device_class, experiment_id, variant, properties
+          ) values (
+            $1, $2, $3, $4, $5, $6, $7, $8,
+            $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+            $21, $22, $23, $24, $25, $26::jsonb
+          )
+          on conflict (event_id) do nothing
+        `,
+        [
+          `evt_${crypto.randomUUID()}`,
+          event.eventId,
+          event.eventName,
+          event.source ?? "client",
+          event.actorHash ?? null,
+          event.sessionHash ?? null,
+          event.userId ?? null,
+          event.occurredAt ?? new Date().toISOString(),
+          event.locale ?? "unknown",
+          event.pageGroup ?? "unknown",
+          event.referrerHost ?? "",
+          event.utmSource ?? "",
+          event.utmMedium ?? "",
+          event.utmCampaign ?? "",
+          event.utmContent ?? "",
+          event.utmTerm ?? "",
+          event.firstReferrerHost ?? "",
+          event.firstUtmSource ?? "",
+          event.firstUtmMedium ?? "",
+          event.firstUtmCampaign ?? "",
+          event.firstUtmContent ?? "",
+          event.firstUtmTerm ?? "",
+          event.deviceClass ?? "unknown",
+          event.experimentId ?? "",
+          event.variant ?? "",
+          JSON.stringify(event.properties ?? {}),
+        ],
+      );
+      inserted += result.rowCount ?? 0;
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  return { inserted, duplicates: events.length - inserted };
+}
+
+export async function linkAnalyticsActorToUser(actorHash, userId) {
+  if (!actorHash || !userId) return 0;
+  const result = await pool.query(
+    `
+      update product_events
+      set user_id = $2
+      where actor_hash = $1
+        and user_id is null
+        and occurred_at >= now() - interval '90 days'
+    `,
+    [actorHash, userId],
+  );
+  return result.rowCount ?? 0;
+}
+
+export async function recordAnalyticsIngestStats({ accepted = 0, rejected = 0, duplicates = 0 } = {}) {
+  await pool.query(
+    `
+      insert into analytics_ingest_daily (day, accepted, rejected, duplicates)
+      values (current_date, $1, $2, $3)
+      on conflict (day) do update set
+        accepted = analytics_ingest_daily.accepted + excluded.accepted,
+        rejected = analytics_ingest_daily.rejected + excluded.rejected,
+        duplicates = analytics_ingest_daily.duplicates + excluded.duplicates,
+        updated_at = now()
+    `,
+    [accepted, rejected, duplicates],
+  );
+}
+
+export async function replaceTrafficDaily(day, rows) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await client.query("delete from traffic_daily where day = $1::date", [day]);
+    for (const row of rows) {
+      await client.query(
+        `
+          insert into traffic_daily (
+            day, page_group, landing_page, referrer_host, utm_source, utm_medium,
+            utm_campaign, locale, device_class, pv, unique_visitors, bot_pv,
+            error_4xx, error_5xx, response_ms_total, response_count
+          ) values ($1::date, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        `,
+        [
+          day,
+          row.pageGroup,
+          row.landingPage,
+          row.referrerHost,
+          row.utmSource,
+          row.utmMedium,
+          row.utmCampaign,
+          row.locale,
+          row.deviceClass,
+          row.pv,
+          row.uniqueVisitors,
+          row.botPv,
+          row.error4xx,
+          row.error5xx,
+          row.responseMsTotal,
+          row.responseCount,
+        ],
+      );
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  return rows.length;
+}
+
+export async function cleanupAnalyticsData({ eventDays = 730, trafficDays = 730, snapshotDays = 730 } = {}) {
+  const events = await pool.query("delete from product_events where occurred_at < now() - ($1 || ' days')::interval", [eventDays]);
+  const traffic = await pool.query("delete from traffic_daily where day < current_date - $1::integer", [trafficDays]);
+  const snapshots = await pool.query("delete from analytics_daily_snapshots where day < current_date - $1::integer", [snapshotDays]);
+  return {
+    productEvents: events.rowCount ?? 0,
+    trafficDays: traffic.rowCount ?? 0,
+    snapshots: snapshots.rowCount ?? 0,
+  };
+}
+
+export async function saveAnalyticsSnapshot(day, report) {
+  await pool.query(
+    `
+      insert into analytics_daily_snapshots (day, report)
+      values ($1::date, $2::jsonb)
+      on conflict (day) do update set report = excluded.report, updated_at = now()
+    `,
+    [day, JSON.stringify(report)],
+  );
+}
+
 export async function buildEntitlement(user) {
   if (!user) return { subscription: null, credit: null, entitlement: { aiEnabled: false, reason: "anonymous" } };
   const subscription = await getUserSubscription(user.id);
@@ -746,7 +1011,7 @@ export async function getCloudNotebookByShareToken(shareToken) {
         set last_accessed_at = now()
         where share_token = $1
           and visibility = 'public'
-        returning id, visibility, share_token, title, data, size_bytes, created_at, updated_at
+        returning id, user_id, visibility, share_token, title, data, size_bytes, created_at, updated_at
       `,
       [shareToken],
     );

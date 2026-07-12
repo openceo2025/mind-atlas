@@ -1,4 +1,9 @@
 {
+  "analytics.consent.label": "分析設定",
+  "analytics.consent.message": "透過保護隱私的匿名使用分析協助改善 Mind Atlas。筆記本文、AI 提示詞、電子郵件和 IP 位址不會儲存在產品分析資料中。",
+  "analytics.consent.privacy": "隱私權政策",
+  "analytics.consent.decline": "暫不允許",
+  "analytics.consent.accept": "允許分析",
   "app.aiFeatures": "AI 功能",
   "app.openMenu": "開啟 Atlas 選單",
   "app.shareCloud": "建立公開 Mind Atlas 雲端連結",

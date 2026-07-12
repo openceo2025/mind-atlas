@@ -8,6 +8,9 @@ export function stripePatchFromStripeSubscription(subscription, customerIdFallba
     currentPeriodStart: stripeTimestamp(item?.current_period_start) || stripeTimestamp(subscription?.current_period_start),
     currentPeriodEnd: stripeTimestamp(item?.current_period_end) || stripeTimestamp(subscription?.current_period_end),
     cancelAtPeriodEnd: subscription?.cancel_at_period_end === true,
+    unitAmountMinor: numberValue(item?.price?.unit_amount) ?? numberValue(subscription?.items?.data?.[0]?.price?.unit_amount),
+    currency: stringValue(item?.price?.currency) || stringValue(subscription?.items?.data?.[0]?.price?.currency) || "usd",
+    billingInterval: stringValue(item?.price?.recurring?.interval) || stringValue(subscription?.items?.data?.[0]?.price?.recurring?.interval) || "month",
   };
 }
 

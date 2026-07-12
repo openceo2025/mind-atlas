@@ -377,7 +377,9 @@ Install the included nginx template:
 
 ```bash
 sudo cp deploy/conoha/nginx-rate-limits.conf /etc/nginx/conf.d/mind-atlas-rate-limits.conf
+sudo cp deploy/conoha/nginx-analytics.conf /etc/nginx/conf.d/mind-atlas-analytics.conf
 sudo cp deploy/conoha/nginx.conf /etc/nginx/sites-available/mind-atlas
+sudo cp deploy/conoha/mind-atlas-analytics.logrotate /etc/logrotate.d/mind-atlas-analytics
 ```
 
 Enable it:
@@ -417,6 +419,10 @@ npm run service:admin -- set-credit user@example.com 0
 npm run service:admin -- sync-stripe-periods [user@example.com]
 npm run service:admin -- reap-stale-reservations [minutes]
 npm run service:admin -- cleanup-sessions [idleDays]
+npm run service:admin -- growth-report --days 30
+npm run service:admin -- growth-report --days 30 --json
+npm run service:admin -- analytics-cleanup
+npm run service:admin -- analytics-daily [--date YYYY-MM-DD]
 ```
 
 `doctor` checks the built `dist` directory, Google OAuth, Stripe, OpenAI,
@@ -446,6 +452,49 @@ startup and periodically.
 
 `cleanup-sessions` deletes expired sessions and sessions idle longer than
 `MIND_ATLAS_SESSION_IDLE_DAYS`.
+
+`growth-report` returns the promotion KPI report without exposing a public
+admin API. The JSON form has a fixed schema for Codex analysis. Its North Star
+is the last seven days of Meaningful Active Users even when the surrounding
+report period is 30 days. Rates with fewer than 20 observations are marked as
+reference-only and retain their numerator and denominator.
+
+`analytics-daily` reads the previous day's privacy-preserving nginx JSON log,
+replaces that day's `traffic_daily` aggregates, stores a 30-day KPI snapshot,
+and deletes expired analytics rows. Raw nginx analytics logs rotate after 14
+days; daily aggregates and snapshots are retained for 24 months. Product
+events never contain notebook titles/bodies, AI prompts, email addresses,
+Google sub values, share tokens, IP addresses, or complete URLs.
+
+Install the daily timer after deploying the templates:
+
+```bash
+sudo cp deploy/conoha/mind-atlas-analytics.service /etc/systemd/system/
+sudo cp deploy/conoha/mind-atlas-analytics.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mind-atlas-analytics.timer
+systemctl list-timers mind-atlas-analytics.timer
+```
+
+Generate `MIND_ATLAS_ANALYTICS_HMAC_KEY` locally and store it only in the VPS
+`.env.service`. Do not commit it:
+
+```bash
+openssl rand -base64 48
+```
+
+From the Windows workspace, the read-only SSH wrapper is:
+
+```powershell
+$env:MIND_ATLAS_VPS_HOST = "mind-atlas.org"
+$env:MIND_ATLAS_VPS_USER = "root"
+$env:MIND_ATLAS_VPS_KEY_PATH = "$env:USERPROFILE\.ssh\mind-atlas-api-key-01.pem"
+npm run ops:kpi -- --days 30
+npm run ops:kpi -- --days 30 --json
+```
+
+The wrapper invokes only `growth-report` under `/opt/mind-atlas`. It does not
+open a web dashboard or expose a management HTTP endpoint.
 
 ## Local Staging Before ConoHa
 

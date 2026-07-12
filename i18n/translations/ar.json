@@ -1,4 +1,9 @@
 {
+  "analytics.consent.label": "تفضيل التحليلات",
+  "analytics.consent.message": "ساعد في تحسين Mind Atlas عبر تحليلات استخدام مجهولة تراعي الخصوصية. لا تُخزَّن نصوص الدفاتر أو مطالبات الذكاء الاصطناعي أو البريد الإلكتروني أو عناوين IP في تحليلات المنتج.",
+  "analytics.consent.privacy": "سياسة الخصوصية",
+  "analytics.consent.decline": "لا شكرًا",
+  "analytics.consent.accept": "السماح بالتحليلات",
   "app.aiFeatures": "ميزات الذكاء الاصطناعي",
   "app.openMenu": "فتح قائمة الأطلس",
   "app.shareCloud": "إنشاء رابط Mind Atlas عام في السحابة",

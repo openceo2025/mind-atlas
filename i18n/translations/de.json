@@ -1,4 +1,9 @@
 {
+  "analytics.consent.label": "Analyse-Einstellung",
+  "analytics.consent.message": "Hilf, Mind Atlas mit anonymen, datenschutzfreundlichen Nutzungsanalysen zu verbessern. Notiztexte, KI-Prompts, E-Mails und IP-Adressen werden nicht in der Produktanalyse gespeichert.",
+  "analytics.consent.privacy": "Datenschutzerklärung",
+  "analytics.consent.decline": "Nein danke",
+  "analytics.consent.accept": "Analyse erlauben",
   "app.aiFeatures": "KI-Funktionen",
   "app.openMenu": "Atlasmenü öffnen",
   "app.shareCloud": "Öffentlichen Mind-Atlas-Cloudlink erstellen",
