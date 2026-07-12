@@ -466,6 +466,13 @@ days; daily aggregates and snapshots are retained for 24 months. Product
 events never contain notebook titles/bodies, AI prompts, email addresses,
 Google sub values, share tokens, IP addresses, or complete URLs.
 
+For the staged rollout, set `MIND_ATLAS_ANALYTICS_ENABLED=1` and
+`MIND_ATLAS_CLIENT_ANALYTICS_ENABLED=0` first. This records only
+server-authoritative Google, cloud, sharing, Stripe, and AI events while the
+nginx daily aggregator is checked. After 24 hours of internal validation, set
+`MIND_ATLAS_CLIENT_ANALYTICS_ENABLED=1` and restart `mind-atlas`; only then does
+the consent prompt appear and consented browser events begin.
+
 Install the daily timer after deploying the templates:
 
 ```bash

@@ -42,6 +42,7 @@ import { stripePatchFromStripeSubscription } from "./stripe-subscription.mjs";
 import {
   AnalyticsValidationError,
   analyticsEnabled,
+  clientAnalyticsEnabled,
   hmacIdentifier,
   normalizeClientAnalyticsBatch,
   recordServerAnalyticsEventSafe,
@@ -186,7 +187,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/analytics/config") {
-      sendJson(response, 200, { enabled: analyticsEnabled() });
+      sendJson(response, 200, { enabled: clientAnalyticsEnabled() });
       return;
     }
 
@@ -323,7 +324,7 @@ function assertSafeProductionConfig() {
     throw new Error(`Refusing to start production service with staging mocks enabled: ${enabledMocks.join(", ")}`);
   }
   if (!cookieSecure) throw new Error("Refusing to start production service without secure cookies");
-  if (analyticsEnabled() && analyticsHmacKey.length < 32) {
+  if ((analyticsEnabled() || clientAnalyticsEnabled()) && analyticsHmacKey.length < 32) {
     throw new Error("MIND_ATLAS_ANALYTICS_HMAC_KEY must contain at least 32 characters when analytics is enabled");
   }
   if (modelPricePolicy !== "require-model") {
@@ -556,7 +557,7 @@ async function handleMockGoogleLogin(response, url) {
 }
 
 async function handleAnalyticsEvents(request, response) {
-  if (!analyticsEnabled()) {
+  if (!clientAnalyticsEnabled()) {
     response.writeHead(204).end();
     return;
   }

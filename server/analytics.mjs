@@ -62,6 +62,10 @@ export function analyticsEnabled() {
   return getEnv("MIND_ATLAS_ANALYTICS_ENABLED", "0") === "1";
 }
 
+export function clientAnalyticsEnabled() {
+  return analyticsEnabled() && getEnv("MIND_ATLAS_CLIENT_ANALYTICS_ENABLED", "0") === "1";
+}
+
 export function normalizeClientAnalyticsBatch(payload, { userId = null } = {}) {
   if (!payload || typeof payload !== "object" || !Array.isArray(payload.events)) {
     throw new AnalyticsValidationError("events must be an array");

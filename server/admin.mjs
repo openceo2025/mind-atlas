@@ -262,6 +262,7 @@ async function runDoctor() {
   const modelPricePolicy = getEnv("MIND_ATLAS_MODEL_PRICE_POLICY", "allow-default").toLowerCase();
   const productionOrigin = isProductionOrigin(publicOrigin);
   const analyticsEnabled = enabledEnv("MIND_ATLAS_ANALYTICS_ENABLED");
+  const clientAnalyticsEnabled = enabledEnv("MIND_ATLAS_CLIENT_ANALYTICS_ENABLED");
   const modelPrices = mergeModelPrices(parseJsonEnv("MIND_ATLAS_MODEL_PRICES_JSON", {}));
   const missingProviderPrices = configuredProviders
     .filter((provider) => !modelPrices[`${provider.id}:*`])
@@ -294,7 +295,7 @@ async function runDoctor() {
   add(
     "privacy analytics",
     !analyticsEnabled || getEnv("MIND_ATLAS_ANALYTICS_HMAC_KEY").length >= 32,
-    analyticsEnabled ? "enabled with HMAC key" : "client events disabled; cookieless traffic aggregation may still run",
+    analyticsEnabled ? `server enabled; client events ${clientAnalyticsEnabled ? "enabled" : "disabled"}` : "server and client events disabled; cookieless traffic aggregation may still run",
   );
   add(
     "provider price coverage",

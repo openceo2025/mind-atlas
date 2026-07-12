@@ -77,5 +77,6 @@ assert.ok(app.includes("metrics.nodeCount >= 5 && metrics.maxDepth >= 2"), "acti
 assert.ok(app.includes("analyticsIgnoreNextNotebookRef"), "template/import changes should not directly activate users");
 assert.ok(server.includes("analyticsEventMaxBytes"), "analytics endpoint should have a dedicated body cap");
 assert.ok(server.includes("analyticsIpMax"), "analytics endpoint should have a dedicated IP rate limit");
+assert.ok(server.includes("clientAnalyticsEnabled()"), "client analytics should have an independent rollout gate");
 
 console.log("Analytics verification passed.");
