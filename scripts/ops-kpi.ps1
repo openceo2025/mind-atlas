@@ -9,7 +9,7 @@ if ($Days -lt 1 -or $Days -gt 730) {
   throw "Days must be from 1 to 730."
 }
 
-$hostName = if ($env:MIND_ATLAS_VPS_HOST) { $env:MIND_ATLAS_VPS_HOST } else { "mind-atlas.org" }
+$hostName = if ($env:MIND_ATLAS_VPS_HOST) { $env:MIND_ATLAS_VPS_HOST } else { "160.251.141.158" }
 $sshUser = if ($env:MIND_ATLAS_VPS_USER) { $env:MIND_ATLAS_VPS_USER } else { "root" }
 $keyPath = if ($env:MIND_ATLAS_VPS_KEY_PATH) { $env:MIND_ATLAS_VPS_KEY_PATH } else { Join-Path $HOME ".ssh\mind-atlas-api-key-01.pem" }
 $appPath = if ($env:MIND_ATLAS_VPS_APP_PATH) { $env:MIND_ATLAS_VPS_APP_PATH } else { "/opt/mind-atlas" }

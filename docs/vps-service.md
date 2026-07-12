@@ -486,7 +486,7 @@ openssl rand -base64 48
 From the Windows workspace, the read-only SSH wrapper is:
 
 ```powershell
-$env:MIND_ATLAS_VPS_HOST = "mind-atlas.org"
+$env:MIND_ATLAS_VPS_HOST = "160.251.141.158"
 $env:MIND_ATLAS_VPS_USER = "root"
 $env:MIND_ATLAS_VPS_KEY_PATH = "$env:USERPROFILE\.ssh\mind-atlas-api-key-01.pem"
 npm run ops:kpi -- --days 30
