@@ -1939,6 +1939,17 @@ h1 {
   font-weight: 800;
 }
 
+.cloud-current-summary {
+  margin: 7px 0 0;
+  color: #b9e5d2;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cloud-current-summary.is-dirty {
+  color: #ffd56f;
+}
+
 .cloud-manager-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2005,6 +2016,10 @@ h1 {
   background: rgba(216, 245, 109, 0.12);
 }
 
+.cloud-package-button.is-current {
+  box-shadow: inset 3px 0 0 #8df5cf;
+}
+
 .cloud-package-button span {
   display: grid;
   gap: 4px;
@@ -2012,12 +2027,93 @@ h1 {
 }
 
 .cloud-package-button strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
   overflow: hidden;
   color: #fff4c5;
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cloud-current-badge {
+  flex: 0 0 auto;
+  border: 1px solid rgba(141, 245, 207, 0.32);
+  border-radius: 999px;
+  padding: 2px 6px;
+  color: #8df5cf;
+  font-size: 9px;
+  font-style: normal;
+  line-height: 1.2;
+}
+
+.cloud-current-badge.is-dirty {
+  border-color: rgba(255, 213, 111, 0.36);
+  color: #ffd56f;
+}
+
+.cloud-switch-backdrop {
+  z-index: 120;
+}
+
+.cloud-switch-dialog {
+  width: min(440px, calc(100vw - 28px));
+  border: 1px solid rgba(255, 213, 111, 0.34);
+  border-radius: 8px;
+  padding: 18px;
+  background: #07100d;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.68);
+}
+
+.cloud-switch-dialog h2 {
+  margin: 0;
+  color: #fff4c5;
+  font-size: 18px;
+}
+
+.cloud-switch-dialog p {
+  margin: 10px 0 0;
+  color: #b8c9c0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.cloud-switch-dialog footer {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.cloud-switch-dialog button {
+  min-height: 40px;
+  border: 1px solid rgba(219, 234, 211, 0.18);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(14, 34, 28, 0.74);
+  color: #f5f7d7;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.cloud-switch-dialog .primary-button {
+  border-color: rgba(216, 245, 109, 0.48);
+  background: #d8f56d;
+  color: #08110d;
+}
+
+.cloud-switch-dialog .danger-button {
+  color: #ffb1a2;
+}
+
+@media (max-width: 560px) {
+  .cloud-switch-dialog footer {
+    grid-template-columns: 1fr;
+  }
 }
 
 .cloud-package-button small,

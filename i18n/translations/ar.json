@@ -1,4 +1,13 @@
 {
+  "cloud.files": "ملفات السحابة",
+  "cloud.openNow": "مفتوح الآن",
+  "cloud.unsaved": "تغييرات غير محفوظة",
+  "cloud.currentSummary": "الملف المفتوح: {name}",
+  "cloud.overwriteCurrentOnly": "لا يمكن الاستبدال إلا للملف السحابي المفتوح حاليًا.",
+  "cloud.unsavedSwitchTitle": "هل تريد حفظ التغييرات قبل فتح ملف سحابي آخر؟",
+  "cloud.unsavedSwitchBody": "يحتوي \"{current}\" على تغييرات غير محفوظة. سيؤدي فتح \"{next}\" إلى استبدال مساحة العمل الحالية.",
+  "cloud.saveAndOpen": "حفظ وفتح",
+  "cloud.discardAndOpen": "تجاهل وفتح",
   "analytics.consent.label": "تفضيل التحليلات",
   "analytics.consent.message": "ساعد في تحسين Mind Atlas عبر تحليلات استخدام مجهولة تراعي الخصوصية. لا تُخزَّن نصوص الدفاتر أو مطالبات الذكاء الاصطناعي أو البريد الإلكتروني أو عناوين IP في تحليلات المنتج.",
   "analytics.consent.privacy": "سياسة الخصوصية",

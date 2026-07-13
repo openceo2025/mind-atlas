@@ -22,6 +22,7 @@ import {
   getShellRadius,
   getStoredPositionForWorldDirection,
   looksLikeLegacyWorldDirection,
+  stabilizePhyllotaxisPositions,
   type Vec3,
   type AtlasLayoutMode,
 } from "../layout/atlasLayout";
@@ -926,14 +927,14 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       },
     );
     set((state) => {
-      const atlasRoot = updateNodeById(state.atlasRoot, parentId, (node) => ({
+      const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(state.atlasRoot, parentId, (node) => ({
         ...node,
         children:
           typeof options.insertIndex === "number"
             ? insertAt(node.children, options.insertIndex, child)
             : [...node.children, child],
         updatedAt: new Date().toISOString(),
-      }));
+      })));
       if (options.persist !== false) {
         persistNotebook(atlasRoot);
       }
@@ -985,11 +986,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const ids = children.map((child) => child.id);
 
     set((current) => {
-      const atlasRoot = updateNodeById(current.atlasRoot, parentId, (node) => ({
+      const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(current.atlasRoot, parentId, (node) => ({
         ...node,
         children: [...node.children, ...children],
         updatedAt: new Date().toISOString(),
-      }));
+      })));
       persistNotebook(atlasRoot);
       return {
         ...pushHistory(current),
@@ -1072,11 +1073,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const completedAt = new Date().toISOString();
 
     set((current) => {
-      const atlasRoot = updateNodeById(current.atlasRoot, parentNodeId, (node) => ({
+      const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(current.atlasRoot, parentNodeId, (node) => ({
         ...node,
         children: [...node.children, archivedRequestNode],
         updatedAt: completedAt,
-      }));
+      })));
       const notificationKind: NotificationPulseKind = archive.status === "error" ? "error" : "needs_review";
       const notificationTitle = archive.status === "error" ? `${label} failed` : `${label} result ready`;
       persistNotebook(atlasRoot);
@@ -1156,11 +1157,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const birthStartedAt = performance.now();
 
     set((current) => {
-      const atlasRoot = updateNodeById(current.atlasRoot, parent.id, (node) => ({
+      const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(current.atlasRoot, parent.id, (node) => ({
         ...node,
         children: [...node.children, pastedRoot],
         updatedAt: now,
-      }));
+      })));
       persistNotebook(atlasRoot);
       return {
         ...pushHistory(current),
@@ -1192,11 +1193,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       usedNodeIds,
     });
     set((current) => {
-      const atlasRoot = updateNodeById(current.atlasRoot, parent.id, (node) => ({
+      const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(current.atlasRoot, parent.id, (node) => ({
         ...node,
         children: [...node.children, sibling],
         updatedAt: new Date().toISOString(),
-      }));
+      })));
       persistNotebook(atlasRoot);
       return {
         ...pushHistory(current),
@@ -1259,7 +1260,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const parentNode = path[path.length - 2];
     const deletedNodeIds = collectNodeIds(deletedNode);
     const deletedAttachmentIds = collectAttachmentIds(deletedNode);
-    const nextRoot = clearResolvedPropagatedErrors(removeNodeById(state.atlasRoot, id));
+    const stableRoot = stabilizePhyllotaxisPositions(state.atlasRoot);
+    const nextRoot = clearResolvedPropagatedErrors(removeNodeById(stableRoot, id));
     const parentLocation = findNodeWithWorldPosition(nextRoot, parentNode.id, state.layoutMode, parentNode.id);
     const nextSelectedNode = parentLocation?.node ?? nextRoot;
     const nextPosition = parentLocation?.position ?? [0, 0, 0];
@@ -1474,19 +1476,20 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (repair.repairedIds.length) {
       console.warn(`Mind Atlas repaired ${repair.repairedIds.length} duplicate node id(s) after outline edit.`);
     }
-    persistNotebook(repair.root);
+    const stableRoot = stabilizePhyllotaxisPositions(repair.root);
+    persistNotebook(stableRoot);
     const requestedFocusId = options.focusKey ? nodeIdByClientKey.get(options.focusKey) : undefined;
-    const selectedNode = (requestedFocusId ? findNode(repair.root, requestedFocusId) : null) ?? findNode(repair.root, state.selectedNodeId) ?? findNode(repair.root, nextSubtree.id) ?? repair.root;
+    const selectedNode = (requestedFocusId ? findNode(stableRoot, requestedFocusId) : null) ?? findNode(stableRoot, state.selectedNodeId) ?? findNode(stableRoot, nextSubtree.id) ?? stableRoot;
     set((current) => ({
       ...pushHistory(current),
-      atlasRoot: repair.root,
+      atlasRoot: stableRoot,
       selected: selectionFromNode(selectedNode),
       selectedNodeId: selectedNode.id,
-      multiSelectedNodeIds: current.multiSelectedNodeIds.filter((nodeId) => Boolean(findNode(repair.root, nodeId))),
+      multiSelectedNodeIds: current.multiSelectedNodeIds.filter((nodeId) => Boolean(findNode(stableRoot, nodeId))),
       cameraFocusNodeId: null,
       historyFuture: [],
-      attachmentPreviewUrls: filterAttachmentPreviewUrls(current.attachmentPreviewUrls, repair.root),
-      unreadNotifications: restoreUnreadNotifications(repair.root, current.unreadNotifications),
+      attachmentPreviewUrls: filterAttachmentPreviewUrls(current.attachmentPreviewUrls, stableRoot),
+      unreadNotifications: restoreUnreadNotifications(stableRoot, current.unreadNotifications),
     }));
   },
 
@@ -1771,13 +1774,13 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     let activeRun = initialRun;
 
     set((current) => {
-      const atlasRoot = updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
+      const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
         ...node,
         status: "running",
         nextDecision: `${modeLabel(mode)} is reading this node and preparing a child result.`,
         updatedAt: new Date().toISOString(),
         children: [...node.children, requestNode],
-      }));
+      })));
       persistNotebook(atlasRoot);
       return {
         ...pushHistory(current),
@@ -1929,7 +1932,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         };
         const pulseTargets = getCodexPulseTargetIds(children);
         const resultNotificationKind = aiResultNotificationKind(mode);
-        const atlasRoot = updateNodeById(
+        const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(
           updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
             ...node,
             status: result.output.suggestedStatus === "done" ? "needs_review" : result.output.suggestedStatus,
@@ -1950,7 +1953,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           claudeSessionId: result.claudeSessionId ?? node.claudeSessionId,
           children: [...node.children, ...children],
           }),
-        );
+        ));
         persistNotebook(atlasRoot);
         return {
           ...pushHistory(current),
@@ -2010,7 +2013,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           claudeLogPath: requestNode.claudeLogPath,
           usedNodeIds,
         });
-        const atlasRoot = updateNodeById(
+        const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(
           updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
             ...node,
             status: "error",
@@ -2027,7 +2030,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           updatedAt: completedAt,
           children: [...node.children, errorNode],
           }),
-        );
+        ));
         persistNotebook(atlasRoot);
         return {
           ...pushHistory(current),
@@ -2282,7 +2285,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
               }),
             ];
         const pulseTargets = getCodexPulseTargetIds(children);
-        const atlasRoot = updateNodeById(current.atlasRoot, retryParentId, (node) => ({
+        const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(current.atlasRoot, retryParentId, (node) => ({
             ...node,
             status: "needs_review",
             nextDecision: "Review the Full access Codex retry output.",
@@ -2290,7 +2293,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             codexThreadId: result.codexThreadId ?? node.codexThreadId,
             codexLogPath: result.codexLogPath ?? node.codexLogPath,
             children: [...removeCodexRetryResultChildren(node.children), ...children],
-        }));
+        })));
         persistNotebook(atlasRoot);
         return {
           ...pushHistory(current),
@@ -2333,13 +2336,13 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           codexLogPath: parent?.codexLogPath,
           usedNodeIds,
         });
-        const atlasRoot = updateNodeById(current.atlasRoot, retryParentId, (node) => ({
+        const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(current.atlasRoot, retryParentId, (node) => ({
           ...node,
           status: "error",
           nextDecision: message,
           updatedAt: completedAt,
           children: [...removeCodexRetryResultChildren(node.children), errorNode],
-        }));
+        })));
         persistNotebook(atlasRoot);
         return {
           ...pushHistory(current),
@@ -2421,7 +2424,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
                 updatedAt: completedAt,
               }))
             : current.atlasRoot;
-          const atlasRoot = updateNodeById(withSourceUpdated, requestNode.id, (node) => ({
+          const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(withSourceUpdated, requestNode.id, (node) => ({
             ...node,
             status: recoveredResult.output.suggestedStatus === "done" ? "needs_review" : recoveredResult.output.suggestedStatus,
             nextDecision: "Recovered completed Codex result from the local run log.",
@@ -2429,7 +2432,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             codexThreadId: recoveredResult.codexThreadId ?? node.codexThreadId,
             codexLogPath: recoveredResult.codexLogPath ?? recovery.logPath ?? node.codexLogPath,
             children: [...node.children, ...children],
-          }));
+          })));
           persistNotebook(atlasRoot);
           return {
             ...pushHistory(current),
@@ -4636,7 +4639,7 @@ function withoutUndefined<T extends Record<string, unknown>>(value: T) {
 }
 
 function ensureNotebookNode(node: AtlasNode): AtlasNode {
-  return ensureNotebookTree(node, [], 1);
+  return stabilizePhyllotaxisPositions(ensureNotebookTree(node, [], 1));
 }
 
 function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCount: number): AtlasNode {

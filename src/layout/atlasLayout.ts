@@ -195,6 +195,25 @@ export function collectPositionOverrides(tree: AtlasNode): Map<string, Vec3> {
   return overrides;
 }
 
+export function stabilizePhyllotaxisPositions(tree: AtlasNode): AtlasNode {
+  const worldPositions = derivePhyllotaxisLayout(tree, collectPositionOverrides(tree));
+
+  const visit = (node: AtlasNode, path: AtlasNode[]): AtlasNode => {
+    const siblingCount = node.children.length;
+    const children = node.children.map((child) => {
+      const worldPosition = worldPositions.get(child.id);
+      const position = child.position ?? (worldPosition
+        ? getStoredPositionForWorldDirection(path, worldPosition, path.length, siblingCount)
+        : undefined);
+      const stableChild = !child.position && position ? { ...child, position } : child;
+      return visit(stableChild, [...path, stableChild]);
+    });
+    return children.some((child, index) => child !== node.children[index]) ? { ...node, children } : node;
+  };
+
+  return visit(tree, [tree]);
+}
+
 export function getNodeWorldPositionFromPath(path: AtlasNode[], overrides: AtlasPositionOverrides = collectPositionOverrides(path[0])): Vec3 {
   if (path.length <= 1) return [0, 0, 0];
 
@@ -551,7 +570,7 @@ function directionFromStoredChildPosition(parentDirection: Vec3, storedPosition:
   const limit = getManualChildSpreadLimit(depth, siblingCount);
   const local = looksLikeLegacyWorldDirection(storedPosition)
     ? localOffsetFromDirections(parentDirection, storedPosition, limit)
-    : clampLocalOffset(storedPosition, limit);
+    : [storedPosition[0], storedPosition[1], 0] as Vec3;
   const { tangentA, tangentB } = tangentBasis(parentDirection);
   const amount = Math.hypot(local[0], local[1]);
   if (amount <= 0.0001) return normalize(parentDirection);

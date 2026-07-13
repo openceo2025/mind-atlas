@@ -1,4 +1,13 @@
 {
+  "cloud.files": "Arquivos na nuvem",
+  "cloud.openNow": "Aberto agora",
+  "cloud.unsaved": "Alterações não salvas",
+  "cloud.currentSummary": "Arquivo aberto: {name}",
+  "cloud.overwriteCurrentOnly": "Somente o arquivo na nuvem aberto atualmente pode ser sobrescrito.",
+  "cloud.unsavedSwitchTitle": "Salvar as alterações antes de abrir outro arquivo na nuvem?",
+  "cloud.unsavedSwitchBody": "\"{current}\" tem alterações não salvas. Abrir \"{next}\" substituirá o espaço de trabalho atual.",
+  "cloud.saveAndOpen": "Salvar e abrir",
+  "cloud.discardAndOpen": "Descartar e abrir",
   "analytics.consent.label": "Preferência de análise",
   "analytics.consent.message": "Ajude a melhorar o Mind Atlas com análises anônimas e focadas em privacidade. Textos de cadernos, prompts de IA, e-mails e endereços IP não são armazenados na análise do produto.",
   "analytics.consent.privacy": "Política de privacidade",

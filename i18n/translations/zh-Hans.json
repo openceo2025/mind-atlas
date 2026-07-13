@@ -1,4 +1,13 @@
 {
+  "cloud.files": "云文件",
+  "cloud.openNow": "当前已打开",
+  "cloud.unsaved": "未保存的更改",
+  "cloud.currentSummary": "当前打开的文件：{name}",
+  "cloud.overwriteCurrentOnly": "只能覆盖当前打开的云文件。",
+  "cloud.unsavedSwitchTitle": "打开另一个云文件前保存更改吗？",
+  "cloud.unsavedSwitchBody": "“{current}”有未保存的更改。打开“{next}”将替换当前工作区。",
+  "cloud.saveAndOpen": "保存并打开",
+  "cloud.discardAndOpen": "不保存并打开",
   "analytics.consent.label": "分析设置",
   "analytics.consent.message": "通过保护隐私的匿名使用分析帮助改进 Mind Atlas。笔记正文、AI 提示词、电子邮件和 IP 地址不会存入产品分析数据。",
   "analytics.consent.privacy": "隐私政策",

@@ -1,4 +1,13 @@
 {
+  "cloud.files": "क्लाउड फ़ाइलें",
+  "cloud.openNow": "अभी खुली है",
+  "cloud.unsaved": "सहेजे नहीं गए बदलाव",
+  "cloud.currentSummary": "अभी खुली फ़ाइल: {name}",
+  "cloud.overwriteCurrentOnly": "केवल वर्तमान में खुली क्लाउड फ़ाइल को ओवरराइट किया जा सकता है।",
+  "cloud.unsavedSwitchTitle": "दूसरी क्लाउड फ़ाइल खोलने से पहले बदलाव सहेजें?",
+  "cloud.unsavedSwitchBody": "\"{current}\" में सहेजे नहीं गए बदलाव हैं। \"{next}\" खोलने पर वर्तमान कार्यक्षेत्र बदल जाएगा।",
+  "cloud.saveAndOpen": "सहेजें और खोलें",
+  "cloud.discardAndOpen": "बिना सहेजे खोलें",
   "analytics.consent.label": "विश्लेषण प्राथमिकता",
   "analytics.consent.message": "गोपनीयता-सुरक्षित अनाम उपयोग विश्लेषण से Mind Atlas को बेहतर बनाने में मदद करें। नोटबुक पाठ, AI प्रॉम्प्ट, ईमेल और IP पते उत्पाद विश्लेषण में संग्रहीत नहीं होते।",
   "analytics.consent.privacy": "गोपनीयता नीति",

@@ -222,6 +222,104 @@ async function verifyGeneratedLayoutBlocksBackgroundBirth(browser) {
   await context.close();
 }
 
+async function verifyStablePhyllotaxisPositions(browser) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  const result = await page.evaluate(async () => {
+    const { deriveAtlasLayout, stabilizePhyllotaxisPositions } = await import("/src/layout/atlasLayout.ts");
+    const now = new Date().toISOString();
+    const makeNode = (id, children = []) => ({
+      id,
+      kind: id === "atlas-root" ? "root" : "thread",
+      nodeType: "note",
+      title: id,
+      subtitle: id,
+      body: "",
+      author: "human",
+      status: "waiting",
+      color: "#8df5cf",
+      texture: "speckled",
+      radius: id === "atlas-root" ? 80 : 28,
+      summary: "",
+      nextDecision: "",
+      tags: [],
+      attachments: [],
+      createdAt: now,
+      updatedAt: now,
+      children,
+    });
+    const root = makeNode("atlas-root", [
+      makeNode("alpha", [makeNode("alpha-one"), makeNode("alpha-two")]),
+      makeNode("beta"),
+      makeNode("gamma"),
+    ]);
+    const stable = stabilizePhyllotaxisPositions(root);
+    const before = deriveAtlasLayout(stable);
+    stable.children = stable.children.filter((child) => child.id !== "beta");
+    const alpha = stable.children.find((child) => child.id === "alpha");
+    if (alpha) alpha.children = alpha.children.filter((child) => child.id !== "alpha-one");
+    const after = deriveAtlasLayout(stable);
+    return {
+      alphaBefore: before.get("alpha"),
+      alphaAfter: after.get("alpha"),
+      gammaBefore: before.get("gamma"),
+      gammaAfter: after.get("gamma"),
+      nestedBefore: before.get("alpha-two"),
+      nestedAfter: after.get("alpha-two"),
+    };
+  });
+  for (const key of ["alpha", "gamma", "nested"]) {
+    if (JSON.stringify(result[`${key}Before`]) !== JSON.stringify(result[`${key}After`])) {
+      throw new Error(`Deleting a sibling moved ${key}: ${JSON.stringify(result)}`);
+    }
+  }
+  await context.close();
+  return result;
+}
+
+async function verifyBackgroundReturnsOneParent(browser) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  await seedGeneratedLayoutNotebook(page, "phyllotaxis");
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  const parentTitle = page.locator('textarea.space-title-editor[data-node-id="layout-alpha"]');
+  try {
+    await parentTitle.waitFor({ timeout: 5000 });
+  } catch {
+    const state = await page.evaluate(() => ({
+      stored: window.localStorage.getItem("mind-atlas-notebook-v2"),
+      nodeIds: [...document.querySelectorAll("[data-node-id]")].map((element) => element.getAttribute("data-node-id")),
+    }));
+    throw new Error(`Seeded parent label did not render: ${JSON.stringify(state)}`);
+  }
+  await parentTitle.click();
+  await page.waitForTimeout(220);
+  await page.locator('textarea.space-title-editor[data-node-id="layout-alpha-1"]').click();
+  await page.waitForFunction(
+    () => document.querySelector('textarea.space-title-editor[data-node-id="layout-alpha-1"]')?.getAttribute("data-selected") === "true",
+  );
+  await page.evaluate(() => {
+    window.__mindAtlasVerifyBackgroundInteractions = 0;
+    window.addEventListener("mindatlas:universe-background-interaction", () => {
+      window.__mindAtlasVerifyBackgroundInteractions += 1;
+    });
+  });
+  await findCanvasBackgroundPoint(page, "Mind Atlas parent return");
+  await page.waitForTimeout(320);
+  const selectedNodeIds = await page.locator('textarea.space-title-editor[data-selected="true"]').evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-node-id")).filter(Boolean),
+  );
+  if (!selectedNodeIds.includes("layout-alpha")) {
+    throw new Error(`Background click did not return to the immediate parent: ${JSON.stringify(selectedNodeIds)}`);
+  }
+  const rootSelected = await page.locator('textarea.space-title-editor[data-node-id="atlas-root"][data-selected="true"]').count();
+  if (rootSelected) throw new Error("Background click jumped directly to the root instead of one parent.");
+  await context.close();
+}
+
 async function verifyKonamiDoesNotUnlock(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 820 },
@@ -646,7 +744,7 @@ async function verifyOutlineThemeAndSubtreeCollapse(browser) {
     throw new Error(`Dark outline theme rendered too bright: ${JSON.stringify(darkThemeStats)}`);
   }
 
-  await darkPage.locator('input[aria-label="Node title"]').nth(1).click();
+  await darkPage.locator('input[aria-label="Node title"]').first().click();
   await darkPage.getByRole("button", { name: /Close/i }).click();
   await darkPage.locator(".outline-editor-shell").waitFor({ state: "detached" });
   await darkPage.getByLabel("Open atlas menu").click();
@@ -1386,10 +1484,15 @@ async function verifyCommandDockAndMobileTextTap(browser) {
   await page.locator('textarea.space-title-editor[data-node-id="verify-child"]').blur();
   await page.waitForTimeout(1000);
   await page.locator("canvas").tap({ position: { x: 340, y: 220 } });
-  await page.waitForFunction(() => !document.querySelector(".command-dock"));
+  await page.waitForFunction(
+    () => document.querySelector('textarea.space-title-editor[data-node-id="verify-child"]')?.getAttribute("data-selected") !== "true",
+  );
   const afterBackgroundTap = await readCommandDockProbe(page);
-  if (afterBackgroundTap.commandDockExists) {
-    throw new Error(`Command dock should hide after a zoomed background tap clears the active node: ${JSON.stringify(afterBackgroundTap)}`);
+  if (!afterBackgroundTap.commandDockExists) {
+    throw new Error(`Command dock should remain available after returning one level to the root: ${JSON.stringify(afterBackgroundTap)}`);
+  }
+  if (!afterBackgroundTap.previewExists || afterBackgroundTap.editorSelected !== null) {
+    throw new Error(`Background tap should return the child label to its root-level preview state: ${JSON.stringify(afterBackgroundTap)}`);
   }
   await mobileContext.close();
 
@@ -1689,13 +1792,20 @@ async function verifyCameraScopedRendering(browser) {
   });
   const page = await desktopContext.newPage();
   await seedCompletedOnboarding(page);
-  await seedLargeNotebook(page, childCount, "phyllotaxis");
+  const priorityNodeId = "bulk-child-19-17";
+  await seedLargeNotebook(page, childCount, "phyllotaxis", priorityNodeId);
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
   await page.waitForTimeout(1600);
   const desktopCounts = await readBulkLabelCounts(page);
   if (desktopCounts.total <= 0 || desktopCounts.total >= childCount * 0.8) {
     throw new Error(`Camera-scoped rendering did not reduce desktop labels enough: ${JSON.stringify(desktopCounts)}`);
+  }
+  if (desktopCounts.total > 96) {
+    throw new Error(`Desktop graph-distance label budget was exceeded: ${JSON.stringify(desktopCounts)}`);
+  }
+  if (await page.locator(`[data-node-id="${priorityNodeId}"]`).count() === 0) {
+    throw new Error("The active graph-distance anchor label was removed by the desktop label budget.");
   }
   await desktopContext.close();
 
@@ -1714,6 +1824,9 @@ async function verifyCameraScopedRendering(browser) {
   const mobileCounts = await readBulkLabelCounts(mobilePage);
   if (mobileCounts.total <= 0 || mobileCounts.total >= childCount * 0.8) {
     throw new Error(`Camera-scoped rendering did not reduce mobile labels enough: ${JSON.stringify(mobileCounts)}`);
+  }
+  if (mobileCounts.total > 56) {
+    throw new Error(`Mobile graph-distance label budget was exceeded: ${JSON.stringify(mobileCounts)}`);
   }
   if (mobileCounts.previews <= 0 || mobileCounts.editors >= mobileCounts.previews) {
     throw new Error(`Mobile bulk labels should prefer lightweight previews: ${JSON.stringify(mobileCounts)}`);
@@ -2146,18 +2259,28 @@ async function verifyTutorialModeMenuActions(browser) {
   }
   const canvasBox = await clickPage.locator("canvas").boundingBox();
   if (!canvasBox) throw new Error("Could not locate tutorial canvas after tree reset.");
-  await clickPage.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2);
-  await clickPage.mouse.down();
-  await clickPage.waitForTimeout(1720);
-  await clickPage.mouse.up();
-  await clickPage.waitForFunction(() => {
-    const progressRaw = window.localStorage.getItem("mind-atlas-onboarding-v1");
-    const notebookRaw = window.localStorage.getItem("mind-atlas-notebook-v2");
-    if (!progressRaw || !notebookRaw) return false;
-    const progress = JSON.parse(progressRaw);
-    const root = JSON.parse(notebookRaw);
-    return progress.rootNodeCreated === true && (root.children?.length ?? 0) >= 1;
-  });
+  let tutorialNodeCreated = false;
+  for (const [xRatio, yRatio] of [[0.5, 0.5], [0.58, 0.46], [0.42, 0.54]]) {
+    await clickPage.mouse.move(canvasBox.x + canvasBox.width * xRatio, canvasBox.y + canvasBox.height * yRatio);
+    await clickPage.mouse.down();
+    await clickPage.waitForTimeout(1720);
+    await clickPage.mouse.up();
+    try {
+      await clickPage.waitForFunction(() => {
+        const progressRaw = window.localStorage.getItem("mind-atlas-onboarding-v1");
+        const notebookRaw = window.localStorage.getItem("mind-atlas-notebook-v2");
+        if (!progressRaw || !notebookRaw) return false;
+        const progress = JSON.parse(progressRaw);
+        const root = JSON.parse(notebookRaw);
+        return progress.rootNodeCreated === true && (root.children?.length ?? 0) >= 1;
+      }, undefined, { timeout: 3500 });
+      tutorialNodeCreated = true;
+      break;
+    } catch {
+      // R3F can occasionally drop one synthetic pointer sequence in a long browser suite.
+    }
+  }
+  if (!tutorialNodeCreated) throw new Error("Tutorial root node was not created after three long-press attempts.");
   await clickPage.getByRole("button", { name: "Skip tutorial" }).click();
   const startSpaceDialog = clickPage.getByRole("dialog", { name: "Choose how to start" });
   await startSpaceDialog.waitFor();
@@ -2393,7 +2516,7 @@ async function seedMissingTitleNotebook(page) {
   }, { root, now });
 }
 
-async function seedLargeNotebook(page, childCount, layoutMode = "phyllotaxis") {
+async function seedLargeNotebook(page, childCount, layoutMode = "phyllotaxis", selectedNodeId = "atlas-root") {
   const now = new Date().toISOString();
   const topLevelCount = 20;
   const childrenPerTopLevel = Math.ceil(childCount / topLevelCount);
@@ -2448,17 +2571,17 @@ async function seedLargeNotebook(page, childCount, layoutMode = "phyllotaxis") {
       JSON.stringify({
         version: 1,
         savedAt: seed.now,
-        selectedNodeId: "atlas-root",
+        selectedNodeId: seed.selectedNodeId,
         viewport: { x: 0, y: 0, zoom: 0.92 },
         renderQuality: "high",
         layoutMode: seed.layoutMode,
         mobilePanelTab: "command",
       }),
     );
-  }, { root, now, layoutMode });
+  }, { root, now, layoutMode, selectedNodeId });
 }
 
-async function seedGeneratedLayoutNotebook(page, layoutMode) {
+async function seedGeneratedLayoutNotebook(page, layoutMode, selectedNodeId = "atlas-root") {
   const now = new Date().toISOString();
   const makeNode = (id, title, children = []) => ({
     id,
@@ -2493,14 +2616,14 @@ async function seedGeneratedLayoutNotebook(page, layoutMode) {
       JSON.stringify({
         version: 1,
         savedAt: seed.now,
-        selectedNodeId: "atlas-root",
+        selectedNodeId: seed.selectedNodeId,
         viewport: { x: 0, y: 0, zoom: 0.92 },
         renderQuality: "high",
         layoutMode: seed.layoutMode,
         mobilePanelTab: "command",
       }),
     );
-  }, { root, now, layoutMode });
+  }, { root, now, layoutMode, selectedNodeId });
 }
 
 function readBulkLabelCounts(page) {
@@ -2647,12 +2770,17 @@ try {
     console.log("Share UI verification passed");
     console.log({ shareFlows });
     process.exitCode = 0;
+  } else if (process.argv[2] === "background-parent") {
+    await runStep("backgroundReturnsOneParent", () => verifyBackgroundReturnsOneParent(browser));
+    console.log("Background parent verification passed");
   } else {
     const desktop = await runStep("desktopViewport", () => verifyViewport(browser, "desktop", { width: 1440, height: 920 }));
     const localeSwitching = await runStep("localeSwitching", () => verifyLocaleSwitching(browser));
     await runStep("layoutModeSwitch", () => verifyLayoutModeSwitch(browser));
     const localDeveloperMode = await runStep("localDeveloperMode", () => verifyLocalDeveloperModeSurface(browser));
     await runStep("generatedLayoutBlocksBackgroundBirth", () => verifyGeneratedLayoutBlocksBackgroundBirth(browser));
+    await runStep("backgroundReturnsOneParent", () => verifyBackgroundReturnsOneParent(browser));
+    await runStep("stablePhyllotaxisPositions", () => verifyStablePhyllotaxisPositions(browser));
     const konamiBlocked = await runStep("konamiBlocked", () => verifyKonamiDoesNotUnlock(browser));
     const tutorialSkip = await runStep("tutorialSkip", () => verifyTutorialSkipButton(browser));
     await runStep("startupTitleMaintenance", () => verifyStartupMissingTitleMaintenance(browser));

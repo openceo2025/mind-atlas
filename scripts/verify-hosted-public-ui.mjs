@@ -52,7 +52,10 @@ const mockService = http.createServer((request, response) => {
   if (url.pathname === "/api/cloud/notebooks" && request.method === "GET") {
     sendJson(response, 200, {
       directory: "Mind Atlas cloud text storage",
-      notebooks: [createMockCloudEntry("cld_verify_private", "Verify cloud notebook")],
+      notebooks: [
+        createMockCloudEntry("cld_verify_private", "Verify cloud notebook"),
+        createMockCloudEntry("cld_verify_second", "Second cloud notebook"),
+      ],
       quota: { usedBytes: 512, limitBytes: 10485760 },
     });
     return;
@@ -92,9 +95,11 @@ const mockService = http.createServer((request, response) => {
     return;
   }
   if (url.pathname.startsWith("/api/cloud/notebooks/") && request.method === "GET") {
+    const cloudId = decodeURIComponent(url.pathname.slice("/api/cloud/notebooks/".length));
+    const title = cloudId === "cld_verify_second" ? "Second cloud notebook" : "Verify cloud notebook";
     sendJson(response, 200, {
-      entry: createMockCloudEntry("cld_verify_private", "Verify cloud notebook"),
-      root: createMockCloudNotebookRoot(),
+      entry: createMockCloudEntry(cloudId, title),
+      root: createMockCloudNotebookRoot(title),
     });
     return;
   }
@@ -203,7 +208,7 @@ try {
       throw new Error("Public hosted mode exposed multimedia package export.");
     }
     await publicMenu.getByText("クラウドへ保存").click();
-    const cloudDialog = page.getByRole("dialog", { name: "Cloud files" });
+    const cloudDialog = page.getByRole("dialog", { name: "クラウドファイル" });
     await cloudDialog.waitFor();
     await cloudDialog.getByText("Cloud storage").waitFor();
     await cloudDialog.getByText("Save current as...").waitFor();
@@ -212,7 +217,28 @@ try {
     await cloudDialog.getByText("Copy share link").waitFor();
     await cloudDialog.getByText("Delete").waitFor();
     await cloudDialog.getByText("Verify cloud notebook").waitFor();
-    await page.getByLabel("Close cloud loader").click();
+    const overwriteButton = cloudDialog.getByRole("button", { name: "Overwrite" });
+    if (!(await overwriteButton.isDisabled())) throw new Error("Cloud overwrite should be disabled before a cloud file is loaded.");
+    await cloudDialog.getByText("Verify cloud notebook", { exact: true }).click();
+    await cloudDialog.getByRole("button", { name: "Load", exact: true }).click();
+    await cloudDialog.waitFor({ state: "detached" });
+    await page.locator(".node-body-input").fill("Unsaved hosted cloud edit");
+    await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
+    await publicMenu.getByText("クラウドへ保存").click();
+    await cloudDialog.waitFor();
+    await cloudDialog.getByText("未保存の変更", { exact: true }).first().waitFor();
+    if (await overwriteButton.isDisabled()) throw new Error("The currently open cloud file should allow overwrite.");
+    await cloudDialog.getByText("Second cloud notebook", { exact: true }).click();
+    if (!(await overwriteButton.isDisabled())) throw new Error("A different cloud file must not allow overwrite.");
+    await cloudDialog.getByRole("button", { name: "Load", exact: true }).click();
+    const unsavedDialog = page.getByRole("alertdialog", { name: "別のクラウドファイルを開く前に変更を保存しますか？" });
+    await unsavedDialog.waitFor();
+    await unsavedDialog.getByRole("button", { name: "保存せず開く" }).click();
+    await unsavedDialog.waitFor({ state: "detached" });
+    await cloudDialog.waitFor({ state: "detached" });
+    if (!requestedPaths.includes("/api/cloud/notebooks/cld_verify_second")) {
+      throw new Error(`Discard-and-open did not load the selected cloud file: ${JSON.stringify(requestedPaths)}`);
+    }
     await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
     await publicMenu.getByRole("button", { name: "新しく始める" }).click();
     const startSpaceDialog = page.getByRole("dialog", { name: "始め方を選ぶ" });
@@ -226,7 +252,7 @@ try {
     await startSpaceDialog.waitFor();
     await startSpaceDialog.getByRole("button", { name: /Verify cloud notebook/ }).click();
     await startSpaceDialog.waitFor({ state: "detached" });
-    await page.getByText("Verify cloud notebook", { exact: true }).first().waitFor();
+    await page.getByText("Verify cloud notebook note", { exact: true }).first().waitFor();
     await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
     const aboutLink = page.getByRole("link", { name: "Mind Atlas overview and AI plan" });
     await aboutLink.waitFor();
@@ -234,7 +260,7 @@ try {
       throw new Error(`Public app should link to the Japanese introduction page: ${await aboutLink.getAttribute("href")}`);
     }
     // Vite serves the source fallback locally; production follows the checked localized href above.
-    await page.goto(`${appUrl}/about.html`, { waitUntil: "networkidle" });
+    await page.goto(`${appUrl}/about.html`, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "Mind Atlas", exact: true }).waitFor();
     await page.getByRole("heading", { name: "小説を書く", exact: true }).waitFor();
     if ((await page.locator(".demo-window iframe").count()) !== 3) throw new Error("About page should expose three embedded Mind Atlas examples.");
@@ -376,7 +402,7 @@ async function verifyAboutEmbeddedTouchScroll(browser) {
   });
   try {
     const page = await context.newPage();
-    await page.goto(`${appUrl}/about.html`, { waitUntil: "networkidle" });
+    await page.goto(`${appUrl}/about.html`, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "小説を書く", exact: true }).scrollIntoViewIfNeeded();
     await page.frameLocator("#novel-frame").locator("canvas").waitFor();
     const before = await page.evaluate(() => window.scrollY);
@@ -504,14 +530,15 @@ function createMockCloudEntry(id, title, visibility = "private") {
   };
 }
 
-function createMockCloudNotebookRoot() {
+function createMockCloudNotebookRoot(title = "Verify cloud notebook") {
   const now = new Date().toISOString();
+  const childId = title === "Second cloud notebook" ? "verify-cloud-second-child" : "verify-cloud-child";
   return {
     id: "atlas-root",
     kind: "root",
     nodeType: "note",
-    title: "Verify cloud notebook",
-    subtitle: "Verify cloud notebook",
+    title,
+    subtitle: title,
     body: "",
     author: "human",
     status: "waiting",
@@ -525,7 +552,26 @@ function createMockCloudNotebookRoot() {
     createdAt: now,
     updatedAt: now,
     position: [0, 0, 0],
-    children: [],
+    children: [{
+      id: childId,
+      kind: "thread",
+      nodeType: "note",
+      title: `${title} note`,
+      subtitle: `${title} note`,
+      body: "Cloud note body",
+      author: "human",
+      status: "waiting",
+      color: "#8df5cf",
+      texture: "speckled",
+      radius: 28,
+      summary: "Cloud note body",
+      nextDecision: "",
+      tags: [],
+      attachments: [],
+      createdAt: now,
+      updatedAt: now,
+      children: [],
+    }],
   };
 }
 

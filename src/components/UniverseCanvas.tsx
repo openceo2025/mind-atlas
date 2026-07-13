@@ -101,6 +101,9 @@ const CAMERA_CULL_CHECK_MS = 120;
 const CAMERA_CULL_HOLD_MS = 900;
 const CAMERA_CULL_MARGIN_NDC = 1.72;
 const CAMERA_CULL_MOBILE_MARGIN_NDC = 2.24;
+const DESKTOP_LABEL_BUDGET = 96;
+const MOBILE_LABEL_BUDGET = 56;
+const LOW_QUALITY_LABEL_BUDGET = 40;
 const VR_TILT_DEAD_ZONE_DEGREES = 7.2;
 const VR_TILT_MAX_DEGREES = 22;
 const VR_TILT_PAN_X_PIXELS_PER_SECOND = 220;
@@ -1398,7 +1401,7 @@ function NavigationController({
     ) {
       const store = useAtlasStore.getState();
       store.clearMultiSelection();
-      store.selectNodeInPlace(store.atlasRoot.id);
+      store.focusParentNode();
       window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_CLICK_EVENT));
     }
     backgroundClickRef.current = null;
@@ -2310,6 +2313,20 @@ function NotebookNodes({
     () => mergeCameraRenderNodeIds(layoutRenderNodeIds, cameraVisibleNodeIds, mandatoryRenderNodeIds, atlasRoot.id, layoutPositions),
     [atlasRoot.id, cameraVisibleNodeIds, layoutPositions, layoutRenderNodeIds, mandatoryRenderNodeIds],
   );
+  const labelAnchorNodeId = cameraFocusNodeId ?? selectedNodeId;
+  const labelBudget = renderQuality === "low" ? LOW_QUALITY_LABEL_BUDGET : mobileLabelScope ? MOBILE_LABEL_BUDGET : DESKTOP_LABEL_BUDGET;
+  const labelVisibleNodeIds = useMemo(
+    () =>
+      buildPriorityLabelNodeIds({
+        anchorNodeId: labelAnchorNodeId,
+        candidateNodeIds: renderVisibleNodeIds,
+        mandatoryNodeIds: new Set([selectedNodeId, labelAnchorNodeId]),
+        maxLabels: labelBudget,
+        nodeRenderMetaById,
+        positions: layoutPositions,
+      }),
+    [labelAnchorNodeId, labelBudget, layoutPositions, nodeRenderMetaById, renderVisibleNodeIds, selectedNodeId],
+  );
 
   useEffect(() => {
     if (findNode(atlasRoot, renderSelectedNodeId)) return;
@@ -2407,6 +2424,8 @@ function NotebookNodes({
               theme={theme}
               layoutPositions={layoutPositions}
               visibleNodeIds={renderVisibleNodeIds}
+              labelVisibleNodeIds={labelVisibleNodeIds}
+              labelAnchorNodeId={labelAnchorNodeId}
               currentVisibleNodeIds={currentVisibleNodeIds}
               enteringNodeIds={enteringNodeIds}
               layoutMode={layoutMode}
@@ -2453,6 +2472,8 @@ function NotebookNodes({
           theme={theme}
           layoutPositions={layoutPositions}
           visibleNodeIds={renderVisibleNodeIds}
+          labelVisibleNodeIds={labelVisibleNodeIds}
+          labelAnchorNodeId={labelAnchorNodeId}
           currentVisibleNodeIds={currentVisibleNodeIds}
           enteringNodeIds={enteringNodeIds}
           layoutMode={layoutMode}
@@ -2499,6 +2520,8 @@ function NotebookNodes({
             theme={theme}
             layoutPositions={layoutPositions}
             visibleNodeIds={renderVisibleNodeIds}
+            labelVisibleNodeIds={labelVisibleNodeIds}
+            labelAnchorNodeId={labelAnchorNodeId}
             currentVisibleNodeIds={currentVisibleNodeIds}
             enteringNodeIds={enteringNodeIds}
             layoutMode={layoutMode}
@@ -2692,6 +2715,70 @@ function mergeCameraRenderNodeIds(
   return merged;
 }
 
+function buildPriorityLabelNodeIds({
+  anchorNodeId,
+  candidateNodeIds,
+  mandatoryNodeIds,
+  maxLabels,
+  nodeRenderMetaById,
+  positions,
+}: {
+  anchorNodeId: string;
+  candidateNodeIds: Set<string>;
+  mandatoryNodeIds: Set<string>;
+  maxLabels: number;
+  nodeRenderMetaById: Map<string, NodeRenderMeta>;
+  positions: Map<string, Vec3>;
+}) {
+  const selected = new Set<string>();
+  for (const nodeId of mandatoryNodeIds) {
+    if (candidateNodeIds.has(nodeId)) selected.add(nodeId);
+  }
+
+  const anchorPath = nodeRenderMetaById.get(anchorNodeId)?.pathIds ?? [];
+  const anchorPosition = positions.get(anchorNodeId);
+  const ranked = [...candidateNodeIds]
+    .filter((nodeId) => !selected.has(nodeId) && nodeRenderMetaById.has(nodeId))
+    .map((nodeId) => {
+      const meta = nodeRenderMetaById.get(nodeId)!;
+      return {
+        nodeId,
+        graphDistance: getTreeGraphDistance(anchorPath, meta.pathIds),
+        worldDistance: getSquaredPositionDistance(anchorPosition, positions.get(nodeId)),
+        depth: meta.pathIds.length,
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.graphDistance - right.graphDistance ||
+        left.worldDistance - right.worldDistance ||
+        left.depth - right.depth ||
+        left.nodeId.localeCompare(right.nodeId),
+    );
+
+  const budget = Math.max(selected.size, Math.max(1, Math.round(maxLabels)));
+  for (const entry of ranked) {
+    if (selected.size >= budget) break;
+    selected.add(entry.nodeId);
+  }
+  return selected;
+}
+
+function getTreeGraphDistance(leftPath: string[], rightPath: string[]) {
+  let commonLength = 0;
+  const limit = Math.min(leftPath.length, rightPath.length);
+  while (commonLength < limit && leftPath[commonLength] === rightPath[commonLength]) commonLength += 1;
+  return leftPath.length + rightPath.length - commonLength * 2;
+}
+
+function getSquaredPositionDistance(left?: Vec3, right?: Vec3) {
+  if (!left || !right) return Number.POSITIVE_INFINITY;
+  const x = left[0] - right[0];
+  const y = left[1] - right[1];
+  const z = left[2] - right[2];
+  return x * x + y * y + z * z;
+}
+
 function addNodePathRenderIds(target: Set<string>, metaById: Map<string, NodeRenderMeta>, nodeId: string) {
   const meta = metaById.get(nodeId);
   if (!meta) return;
@@ -2764,6 +2851,8 @@ function HierarchyNode({
   theme,
   layoutPositions,
   visibleNodeIds,
+  labelVisibleNodeIds,
+  labelAnchorNodeId,
   currentVisibleNodeIds,
   enteringNodeIds,
   layoutMode,
@@ -2797,6 +2886,8 @@ function HierarchyNode({
   theme: AtlasTheme;
   layoutPositions: Map<string, Vec3>;
   visibleNodeIds: Set<string>;
+  labelVisibleNodeIds: Set<string>;
+  labelAnchorNodeId: string;
   currentVisibleNodeIds: Set<string>;
   enteringNodeIds: Set<string>;
   layoutMode: AtlasLayoutMode;
@@ -2837,6 +2928,7 @@ function HierarchyNode({
     typeof activePathIndex === "number" ? selectedPathLength - 1 - activePathIndex : null;
   const isDirectChildOfSelected = parentId === selectedNodeId;
   const isRootDirectChild = depth === 1 && parentId === path[0]?.id;
+  const isLabelAnchor = node.id === labelAnchorNodeId;
   const rootActiveDirectChild = selectedNodeId === path[0]?.id && isRootDirectChild;
   const rootOverviewDirectChild = rootOverviewActive && isRootDirectChild;
   const rootDirectTitleVisible = isRootDirectChild && Boolean(node.title.trim());
@@ -2880,11 +2972,12 @@ function HierarchyNode({
     isSelected || isMultiSelected || aiContextPreviewNodeIds.has(node.id) || isActiveAncestor || isActiveSibling || isDirectChildOfSelected || rootOverviewDirectChild;
   const mobileLabelVisible = isSelected || isDirectChildOfSelected || rootDirectTitleVisible || rootOverviewDirectChild;
   const lowQualityLabelVisible = isSelected || isDirectChildOfSelected || rootDirectTitleVisible || rootOverviewDirectChild;
-  const labelVisible = renderQuality === "low"
+  const baseLabelVisible = renderQuality === "low"
     ? lowQualityLabelVisible
     : mobileLabelScope
     ? mobileLabelVisible
     : isLocalContextNode || rootDirectTitleVisible || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
+  const labelVisible = isSelected || isLabelAnchor || (baseLabelVisible && labelVisibleNodeIds.has(node.id));
   const interactiveLabelVisible = !mobileLabelScope || isSelected || isMultiSelected || isAiContextPreviewNode;
   const [layoutEdgeHidden, setLayoutEdgeHidden] = useState(false);
   const parentEdgeVisible = !suppressParentEdge && path.length > 2 && hiddenDragEdgeNodeId !== node.id && !layoutEdgeHidden;
@@ -3545,6 +3638,8 @@ function HierarchyNode({
                 theme={theme}
                 layoutPositions={layoutPositions}
                 visibleNodeIds={visibleNodeIds}
+                labelVisibleNodeIds={labelVisibleNodeIds}
+                labelAnchorNodeId={labelAnchorNodeId}
                 currentVisibleNodeIds={currentVisibleNodeIds}
                 enteringNodeIds={enteringNodeIds}
                 layoutMode={layoutMode}
@@ -3558,7 +3653,7 @@ function HierarchyNode({
         : null}
 
       {labelVisible ? (
-        <Html center position={[0, -radius - 14, 16]} transform={false} zIndexRange={[2, 0]}>
+        <Html center position={[0, -radius - 14, 16]} transform={false} zIndexRange={isLabelAnchor ? [4, 1] : [2, 0]}>
           {interactiveLabelVisible ? (
             <SpaceNodeEditor
               node={node}

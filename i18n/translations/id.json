@@ -1,4 +1,13 @@
 {
+  "cloud.files": "File cloud",
+  "cloud.openNow": "Sedang dibuka",
+  "cloud.unsaved": "Perubahan belum disimpan",
+  "cloud.currentSummary": "File yang sedang dibuka: {name}",
+  "cloud.overwriteCurrentOnly": "Hanya file cloud yang sedang dibuka yang dapat ditimpa.",
+  "cloud.unsavedSwitchTitle": "Simpan perubahan sebelum membuka file cloud lain?",
+  "cloud.unsavedSwitchBody": "\"{current}\" memiliki perubahan yang belum disimpan. Membuka \"{next}\" akan mengganti ruang kerja saat ini.",
+  "cloud.saveAndOpen": "Simpan dan buka",
+  "cloud.discardAndOpen": "Buang dan buka",
   "analytics.consent.label": "Preferensi analitik",
   "analytics.consent.message": "Bantu tingkatkan Mind Atlas dengan analitik penggunaan anonim yang menjaga privasi. Teks notebook, prompt AI, email, dan alamat IP tidak disimpan dalam analitik produk.",
   "analytics.consent.privacy": "Kebijakan privasi",

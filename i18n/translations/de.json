@@ -1,4 +1,13 @@
 {
+  "cloud.files": "Cloud-Dateien",
+  "cloud.openNow": "Jetzt geöffnet",
+  "cloud.unsaved": "Nicht gespeicherte Änderungen",
+  "cloud.currentSummary": "Geöffnete Datei: {name}",
+  "cloud.overwriteCurrentOnly": "Nur die aktuell geöffnete Cloud-Datei kann überschrieben werden.",
+  "cloud.unsavedSwitchTitle": "Änderungen speichern, bevor eine andere Cloud-Datei geöffnet wird?",
+  "cloud.unsavedSwitchBody": "„{current}“ enthält nicht gespeicherte Änderungen. Beim Öffnen von „{next}“ wird der aktuelle Arbeitsbereich ersetzt.",
+  "cloud.saveAndOpen": "Speichern und öffnen",
+  "cloud.discardAndOpen": "Verwerfen und öffnen",
   "analytics.consent.label": "Analyse-Einstellung",
   "analytics.consent.message": "Hilf, Mind Atlas mit anonymen, datenschutzfreundlichen Nutzungsanalysen zu verbessern. Notiztexte, KI-Prompts, E-Mails und IP-Adressen werden nicht in der Produktanalyse gespeichert.",
   "analytics.consent.privacy": "Datenschutzerklärung",

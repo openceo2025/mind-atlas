@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { deriveAtlasLayout, deriveAtlasLayoutFrame, getStoredPositionForWorldDirection, type Vec3 } from "../src/layout/atlasLayout.ts";
+import { deriveAtlasLayout, deriveAtlasLayoutFrame, getStoredPositionForWorldDirection, stabilizePhyllotaxisPositions, type Vec3 } from "../src/layout/atlasLayout.ts";
 import type { AtlasNode } from "../src/types.ts";
 
 const root = node("atlas-root", "Atlas", [
@@ -22,6 +22,25 @@ for (const id of collectNodeIds(root)) {
     `layout parity failed for ${id}`,
   );
 }
+
+const stabilizedRoot = stabilizePhyllotaxisPositions(root);
+const stabilizedBeforeDelete = deriveAtlasLayout(stabilizedRoot);
+const alphaBeforeDelete = stabilizedBeforeDelete.get("alpha");
+const gammaBeforeDelete = stabilizedBeforeDelete.get("gamma");
+const deletedSiblingRoot = cloneTree(stabilizedRoot);
+deletedSiblingRoot.children = deletedSiblingRoot.children.filter((child) => child.id !== "beta");
+const stabilizedAfterDelete = deriveAtlasLayout(deletedSiblingRoot);
+assertVecClose(stabilizedAfterDelete.get("alpha"), alphaBeforeDelete, "deleting a root sibling must not move alpha");
+assertVecClose(stabilizedAfterDelete.get("gamma"), gammaBeforeDelete, "deleting a root sibling must not move gamma");
+
+const stabilizedNestedRoot = cloneTree(stabilizedRoot);
+const stabilizedAlpha = findNode(stabilizedNestedRoot, "alpha");
+assert.ok(stabilizedAlpha);
+const nestedBeforeDelete = deriveAtlasLayout(stabilizedNestedRoot);
+const alphaTwoBeforeDelete = nestedBeforeDelete.get("alpha-2");
+stabilizedAlpha.children = stabilizedAlpha.children.filter((child) => child.id !== "alpha-1");
+const nestedAfterDelete = deriveAtlasLayout(stabilizedNestedRoot);
+assertVecClose(nestedAfterDelete.get("alpha-2"), alphaTwoBeforeDelete, "deleting a nested sibling must preserve parent-relative placement");
 
 const draggedRoot = cloneTree(root);
 const draggedAlpha = findNode(draggedRoot, "alpha");

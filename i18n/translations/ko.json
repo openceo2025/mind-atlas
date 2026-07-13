@@ -1,4 +1,13 @@
 {
+  "cloud.files": "클라우드 파일",
+  "cloud.openNow": "현재 열림",
+  "cloud.unsaved": "저장되지 않은 변경 사항",
+  "cloud.currentSummary": "현재 열린 파일: {name}",
+  "cloud.overwriteCurrentOnly": "현재 열려 있는 클라우드 파일만 덮어쓸 수 있습니다.",
+  "cloud.unsavedSwitchTitle": "다른 클라우드 파일을 열기 전에 변경 사항을 저장할까요?",
+  "cloud.unsavedSwitchBody": "\"{current}\"에 저장되지 않은 변경 사항이 있습니다. \"{next}\"를 열면 현재 작업 공간이 교체됩니다.",
+  "cloud.saveAndOpen": "저장하고 열기",
+  "cloud.discardAndOpen": "저장하지 않고 열기",
   "analytics.consent.label": "분석 설정",
   "analytics.consent.message": "개인정보를 보호하는 익명 사용 분석으로 Mind Atlas 개선에 도움을 주세요. 노트 본문, AI 프롬프트, 이메일 및 IP 주소는 제품 분석에 저장되지 않습니다.",
   "analytics.consent.privacy": "개인정보 처리방침",

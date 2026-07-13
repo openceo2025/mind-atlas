@@ -1,4 +1,13 @@
 {
+  "cloud.files": "雲端檔案",
+  "cloud.openNow": "目前已開啟",
+  "cloud.unsaved": "尚未儲存的變更",
+  "cloud.currentSummary": "目前開啟的檔案：{name}",
+  "cloud.overwriteCurrentOnly": "只能覆寫目前開啟的雲端檔案。",
+  "cloud.unsavedSwitchTitle": "開啟另一個雲端檔案前要儲存變更嗎？",
+  "cloud.unsavedSwitchBody": "「{current}」有尚未儲存的變更。開啟「{next}」將取代目前的工作區。",
+  "cloud.saveAndOpen": "儲存並開啟",
+  "cloud.discardAndOpen": "不儲存並開啟",
   "analytics.consent.label": "分析設定",
   "analytics.consent.message": "透過保護隱私的匿名使用分析協助改善 Mind Atlas。筆記本文、AI 提示詞、電子郵件和 IP 位址不會儲存在產品分析資料中。",
   "analytics.consent.privacy": "隱私權政策",
