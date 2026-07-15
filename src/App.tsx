@@ -5,8 +5,7 @@ import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNoteb
 import { createAboutDemoNotebook, getAboutDemoAttachmentPreviewUrls, getAboutDemoLayoutMode, getAboutDemoNotification, getAboutDemoOverviewFocusRequest, getAboutDemoSelectedNodeId, readAboutDemoConfig } from "./aboutDemo";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
 import { CommandDock } from "./components/CommandDock";
-import { AnalyticsConsentBanner } from "./components/AnalyticsConsentBanner";
-import { trackProductEvent } from "./analytics/productAnalytics";
+import { fetchAnalyticsAvailability, startAnalyticsLifecycle, trackProductEvent } from "./analytics/productAnalytics";
 import { copyContextMarkdown, formatContextCopyStats } from "./context/contextCopy";
 import { Minimap } from "./components/Minimap";
 import { OutlineEditor } from "./components/OutlineEditor";
@@ -190,6 +189,18 @@ export default function App() {
   const analyticsLastUserInputAtRef = useRef(0);
   const analyticsTutorialStartedRef = useRef(false);
   const publicServiceMode = isHostedServiceMode();
+  useEffect(() => {
+    if (!publicServiceMode || aboutDemoConfig) return;
+    let active = true;
+    let stop = () => {};
+    void fetchAnalyticsAvailability().then((enabled) => {
+      if (active && enabled) stop = startAnalyticsLifecycle();
+    });
+    return () => {
+      active = false;
+      stop();
+    };
+  }, [aboutDemoConfig, publicServiceMode]);
   const [aiFeatureDialogOpen, setAiFeatureDialogOpen] = useState(false);
   const [hostedSession, setHostedSession] = useState<HostedServiceSession | null>(null);
   const [hostedSessionLoading, setHostedSessionLoading] = useState(false);
@@ -1790,7 +1801,6 @@ export default function App() {
           <span>{<I18nText id="ui.app.dropMarkdownOpmlFreemindOr.6670d93" />}</span>
         </div>
       ) : null}
-      {publicServiceMode && !aboutDemoConfig ? <AnalyticsConsentBanner /> : null}
 
       <header className="top-bar" aria-label={formatAppMessage("ui.app.mindAtlasStatus.36acaea")}>
         <div className="top-title-stack">

@@ -489,8 +489,10 @@ For the staged rollout, set `MIND_ATLAS_ANALYTICS_ENABLED=1` and
 `MIND_ATLAS_CLIENT_ANALYTICS_ENABLED=0` first. This records only
 server-authoritative Google, cloud, sharing, Stripe, and AI events while the
 nginx daily aggregator is checked. After 24 hours of internal validation, set
-`MIND_ATLAS_CLIENT_ANALYTICS_ENABLED=1` and restart `mind-atlas`; only then does
-the consent prompt appear and consented browser events begin.
+`MIND_ATLAS_CLIENT_ANALYTICS_ENABLED=1` and restart `mind-atlas`; only then do
+storage-free browser events begin. The client uses page-lifetime in-memory
+identifiers and does not display a consent banner or persist analytics IDs in
+cookies, localStorage, or sessionStorage.
 
 Install the daily timer after deploying the templates:
 

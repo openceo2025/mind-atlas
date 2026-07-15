@@ -14,7 +14,6 @@ import {
   getSessionUser,
   getUserSubscription,
   insertProductEvents,
-  linkAnalyticsActorToUser,
   listCloudNotebooks,
   renameCloudNotebook,
   forgetStripeEvent,
@@ -55,7 +54,6 @@ const distDir = path.resolve(serviceRootDir, getEnv("MIND_ATLAS_DIST_DIR", "dist
 const sessionCookieName = "ma_session";
 const oauthStateCookieName = "ma_oauth_state";
 const oauthReturnCookieName = "ma_oauth_return";
-const analyticsLinkCookieName = "ma_analytics_link";
 const adminTrafficCookieName = "ma_admin_traffic";
 const cookieSecure = getEnv("MIND_ATLAS_COOKIE_SECURE", publicOrigin.startsWith("https://") ? "1" : "0") !== "0";
 const googleClientId = getEnv("GOOGLE_CLIENT_ID");
@@ -403,27 +401,6 @@ function requestClientIp(request) {
   return forwardedFor || stringValue(request.headers["x-real-ip"]) || request.socket?.remoteAddress || "unknown";
 }
 
-function signAnalyticsLinkCookie(actorHash) {
-  if (!analyticsHmacKey || !/^[a-f0-9]{64}$/.test(actorHash)) return "";
-  const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60;
-  const value = `${actorHash}.${expiresAt}`;
-  const signature = crypto.createHmac("sha256", analyticsHmacKey).update(`oauth-link:${value}`).digest("base64url");
-  return `${value}.${signature}`;
-}
-
-function verifyAnalyticsLinkCookie(cookieValue) {
-  if (!analyticsHmacKey || typeof cookieValue !== "string") return "";
-  const [actorHash, expiresAtRaw, signature] = cookieValue.split(".");
-  if (!/^[a-f0-9]{64}$/.test(actorHash ?? "") || !/^\d{10}$/.test(expiresAtRaw ?? "") || !signature) return "";
-  if (Number(expiresAtRaw) < Math.floor(Date.now() / 1000)) return "";
-  const value = `${actorHash}.${expiresAtRaw}`;
-  const expected = crypto.createHmac("sha256", analyticsHmacKey).update(`oauth-link:${value}`).digest("base64url");
-  const left = Buffer.from(signature);
-  const right = Buffer.from(expected);
-  if (left.length !== right.length || !crypto.timingSafeEqual(left, right)) return "";
-  return actorHash;
-}
-
 function enterUserConcurrency(key, limit) {
   if (limit <= 0) return () => {};
   const count = userConcurrencyCounts.get(key) ?? 0;
@@ -531,12 +508,9 @@ async function handleGoogleCallback(request, response, url) {
     name: stringValue(profile.name),
     picture: stringValue(profile.picture),
   });
-  const analyticsActorHash = verifyAnalyticsLinkCookie(cookies[analyticsLinkCookieName]);
-  if (analyticsActorHash) await linkAnalyticsActorToUser(analyticsActorHash, user.id);
   await recordServerAnalyticsEventSafe("google_login_completed", {
     eventId: `google-login:${receivedState}`,
     userId: user.id,
-    actorHash: analyticsActorHash || null,
     pageGroup: "app",
   });
   const sessionToken = await createSession(user.id);
@@ -544,7 +518,6 @@ async function handleGoogleCallback(request, response, url) {
   setCookie(response, oauthStateCookieName, "", { maxAge: 0 });
   const returnTo = safeReturnPath(cookies[oauthReturnCookieName] || "/");
   setCookie(response, oauthReturnCookieName, "", { maxAge: 0 });
-  setCookie(response, analyticsLinkCookieName, "", { maxAge: 0 });
   redirectResponse(response, `${publicOrigin}${returnTo}`);
 }
 
@@ -586,8 +559,6 @@ async function handleAnalyticsEvents(request, response) {
   }
   const result = await insertProductEvents(events);
   await recordAnalyticsIngestStats({ accepted: result.inserted, duplicates: result.duplicates });
-  const actorHash = events[0]?.actorHash;
-  if (actorHash) setCookie(response, analyticsLinkCookieName, signAnalyticsLinkCookie(actorHash), { maxAge: 60 * 60 });
   sendJson(response, 200, result);
 }
 

@@ -1,7 +1,6 @@
 import { isAboutDemoMode } from "../aboutDemo";
 import { getHostedServiceUrl, isHostedServiceMode } from "../hosted/serviceClient";
 
-export type AnalyticsConsent = "accepted" | "declined" | "unset";
 export type ProductEventName =
   | "landing_view"
   | "about_demo_interacted"
@@ -17,13 +16,13 @@ export type ProductEventName =
   | "checkout_started"
   | "shared_atlas_imported";
 
-const CONSENT_KEY = "mind-atlas-analytics-consent-v1";
-const ACTOR_KEY = "mind-atlas-analytics-actor-v1";
-const ATTRIBUTION_KEY = "mind-atlas-analytics-attribution-v1";
-const SESSION_KEY = "mind-atlas-analytics-session-v1";
-const SESSION_IDLE_MS = 30 * 60 * 1000;
 const queue: ProductEventPayload[] = [];
 let flushTimer: number | null = null;
+let analyticsAvailable = false;
+let actorId = "";
+let sessionId = "";
+let attributionState: AttributionState | null = null;
+let lifecycleStarted = false;
 
 type Attribution = {
   source: string;
@@ -56,35 +55,20 @@ export function analyticsRuntimeEnabled() {
 }
 
 export async function fetchAnalyticsAvailability() {
-  if (!analyticsRuntimeEnabled()) return false;
+  if (!analyticsRuntimeEnabled()) {
+    analyticsAvailable = false;
+    return false;
+  }
   try {
     const response = await fetch(`${getHostedServiceUrl()}/api/analytics/config`, { credentials: "include" });
     if (!response.ok) return false;
     const data = await response.json() as { enabled?: boolean };
-    return data.enabled === true;
+    analyticsAvailable = data.enabled === true;
+    return analyticsAvailable;
   } catch {
+    analyticsAvailable = false;
     return false;
   }
-}
-
-export function getAnalyticsConsent(): AnalyticsConsent {
-  if (!analyticsRuntimeEnabled()) return "declined";
-  const value = window.localStorage.getItem(CONSENT_KEY);
-  return value === "accepted" || value === "declined" ? value : "unset";
-}
-
-export function setAnalyticsConsent(consent: Exclude<AnalyticsConsent, "unset">) {
-  if (!analyticsRuntimeEnabled()) return;
-  window.localStorage.setItem(CONSENT_KEY, consent);
-  if (consent === "declined") {
-    window.localStorage.removeItem(ACTOR_KEY);
-    window.localStorage.removeItem(ATTRIBUTION_KEY);
-    window.sessionStorage.removeItem(SESSION_KEY);
-    queue.splice(0, queue.length);
-    return;
-  }
-  ensureActorId();
-  ensureAttribution();
 }
 
 export function trackProductEvent(
@@ -92,7 +76,7 @@ export function trackProductEvent(
   properties: Record<string, string | number | boolean> = {},
   options: { immediate?: boolean; pageGroup?: string } = {},
 ) {
-  if (!analyticsRuntimeEnabled() || getAnalyticsConsent() !== "accepted") return;
+  if (!analyticsRuntimeEnabled() || !analyticsAvailable) return;
   const attribution = ensureAttribution();
   queue.push({
     id: randomId(),
@@ -119,7 +103,7 @@ export function trackProductEvent(
 }
 
 export async function flushProductEvents() {
-  if (!analyticsRuntimeEnabled() || getAnalyticsConsent() !== "accepted" || queue.length === 0) return;
+  if (!analyticsRuntimeEnabled() || !analyticsAvailable || queue.length === 0) return;
   if (flushTimer != null) window.clearTimeout(flushTimer);
   flushTimer = null;
   const events = queue.splice(0, 20);
@@ -139,7 +123,8 @@ export async function flushProductEvents() {
 }
 
 export function startAnalyticsLifecycle() {
-  if (!analyticsRuntimeEnabled() || getAnalyticsConsent() !== "accepted") return () => {};
+  if (!analyticsRuntimeEnabled() || !analyticsAvailable || lifecycleStarted) return () => {};
+  lifecycleStarted = true;
   trackProductEvent("landing_view");
   trackProductEvent("app_opened", {}, { immediate: true });
   const flush = () => {
@@ -152,6 +137,7 @@ export function startAnalyticsLifecycle() {
   return () => {
     window.removeEventListener("pagehide", flush);
     document.removeEventListener("visibilitychange", flushOnHidden);
+    lifecycleStarted = false;
   };
 }
 
@@ -160,38 +146,18 @@ function flushOnHidden() {
 }
 
 function ensureActorId() {
-  let value = window.localStorage.getItem(ACTOR_KEY) ?? "";
-  if (!/^[A-Za-z0-9_-]{16,80}$/.test(value)) {
-    value = randomId();
-    window.localStorage.setItem(ACTOR_KEY, value);
-  }
-  return value;
+  if (!actorId) actorId = randomId();
+  return actorId;
 }
 
 function ensureSessionId() {
-  const now = Date.now();
-  try {
-    const stored = JSON.parse(window.sessionStorage.getItem(SESSION_KEY) ?? "null") as { id?: string; lastSeenAt?: number } | null;
-    if (stored?.id && Number(stored.lastSeenAt) > now - SESSION_IDLE_MS) {
-      window.sessionStorage.setItem(SESSION_KEY, JSON.stringify({ id: stored.id, lastSeenAt: now }));
-      return stored.id;
-    }
-  } catch {
-    // Replace malformed session state.
-  }
-  const id = randomId();
-  window.sessionStorage.setItem(SESSION_KEY, JSON.stringify({ id, lastSeenAt: now }));
-  return id;
+  if (!sessionId) sessionId = randomId();
+  return sessionId;
 }
 
 function ensureAttribution(): AttributionState {
   const current = readCurrentAttribution();
-  let state: AttributionState | null = null;
-  try {
-    state = JSON.parse(window.localStorage.getItem(ATTRIBUTION_KEY) ?? "null") as AttributionState | null;
-  } catch {
-    state = null;
-  }
+  const state = attributionState;
   const first = state?.first ?? current;
   const last = {
     source: current.source || state?.last?.source || first.source,
@@ -202,7 +168,7 @@ function ensureAttribution(): AttributionState {
     referrerHost: current.referrerHost || state?.last?.referrerHost || first.referrerHost,
   };
   const next = { first, last };
-  window.localStorage.setItem(ATTRIBUTION_KEY, JSON.stringify(next));
+  attributionState = next;
   return next;
 }
 

@@ -75,16 +75,23 @@ assert.deepEqual(classifyDimensions({
 
 const app = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const client = fs.readFileSync(new URL("../src/analytics/productAnalytics.ts", import.meta.url), "utf8");
+const staticClient = fs.readFileSync(new URL("../public/analytics-static.js", import.meta.url), "utf8");
 const server = fs.readFileSync(new URL("../server/mind-atlas-service.mjs", import.meta.url), "utf8");
 const admin = fs.readFileSync(new URL("../server/admin.mjs", import.meta.url), "utf8");
 const report = fs.readFileSync(new URL("../server/analytics-report.mjs", import.meta.url), "utf8");
 assert.ok(client.includes("isAboutDemoMode()"), "about demos must not send product analytics");
-assert.ok(client.includes('getAnalyticsConsent() !== "accepted"'), "client events must require consent");
+assert.equal(client.includes("localStorage"), false, "SPA analytics must not persist identifiers in localStorage");
+assert.equal(client.includes("sessionStorage"), false, "SPA analytics must not persist identifiers in sessionStorage");
+assert.equal(staticClient.includes("localStorage"), false, "static analytics must not persist identifiers in localStorage");
+assert.equal(staticClient.includes("sessionStorage"), false, "static analytics must not persist identifiers in sessionStorage");
+assert.equal(app.includes("AnalyticsConsentBanner"), false, "public app must not render an analytics consent banner");
+assert.ok(client.includes('let actorId = ""') && client.includes('let sessionId = ""'), "SPA identifiers should remain in memory only");
 assert.ok(app.includes("metrics.nodeCount >= 5 && metrics.maxDepth >= 2"), "activation threshold should require five nodes and depth two");
 assert.ok(app.includes("analyticsIgnoreNextNotebookRef"), "template/import changes should not directly activate users");
 assert.ok(server.includes("analyticsEventMaxBytes"), "analytics endpoint should have a dedicated body cap");
 assert.ok(server.includes("analyticsIpMax"), "analytics endpoint should have a dedicated IP rate limit");
 assert.ok(server.includes("clientAnalyticsEnabled()"), "client analytics should have an independent rollout gate");
+assert.equal(server.includes("ma_analytics_link"), false, "anonymous analytics must not set an OAuth-linking cookie");
 const growthReportBlock = admin.slice(admin.indexOf('command === "growth-report"'), admin.indexOf('command === "analytics-cleanup"'));
 assert.equal(growthReportBlock.includes("migrateDatabase()"), false, "growth-report must remain read-only");
 assert.ok(report.includes("::text as start") && report.includes("::text as end"), "growth report dates should not shift through timezone conversion");

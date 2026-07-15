@@ -158,9 +158,12 @@ try {
     await seedCompletedOnboarding(page);
     await page.goto(appUrl, { waitUntil: "networkidle" });
     await page.waitForSelector("canvas");
-    await page.locator(".analytics-consent").waitFor();
-    await page.getByRole("button", { name: "計測を許可" }).click();
-    await page.waitForFunction(() => Boolean(localStorage.getItem("mind-atlas-analytics-actor-v1")));
+    if (await page.locator(".analytics-consent").count()) throw new Error("Public mode must not show an analytics consent banner");
+    const analyticsStorageKeys = await page.evaluate(() => [
+      ...Object.keys(localStorage),
+      ...Object.keys(sessionStorage),
+    ].filter((key) => key.startsWith("mind-atlas-analytics-")));
+    if (analyticsStorageKeys.length) throw new Error(`Analytics identifiers must not be persisted: ${JSON.stringify(analyticsStorageKeys)}`);
     await page.getByRole("button", { name: /AI\u6a5f\u80fd/ }).waitFor();
     await page.waitForFunction(() => document.querySelector(".ai-feature-button")?.textContent?.includes("87%"), null, { timeout: 15_000 }).catch(() => {});
     await assertNoForbiddenPublicDeveloperSurface(page, "initial public shell");
