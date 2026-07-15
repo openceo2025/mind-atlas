@@ -17,6 +17,12 @@ export type ProductEventName =
   | "shared_atlas_imported";
 
 const queue: ProductEventPayload[] = [];
+const legacyLocalStorageKeys = [
+  "mind-atlas-analytics-consent-v1",
+  "mind-atlas-analytics-actor-v1",
+  "mind-atlas-analytics-attribution-v1",
+];
+const legacySessionStorageKey = "mind-atlas-analytics-session-v1";
 let flushTimer: number | null = null;
 let analyticsAvailable = false;
 let actorId = "";
@@ -59,6 +65,7 @@ export async function fetchAnalyticsAvailability() {
     analyticsAvailable = false;
     return false;
   }
+  clearLegacyAnalyticsStorage();
   try {
     const response = await fetch(`${getHostedServiceUrl()}/api/analytics/config`, { credentials: "include" });
     if (!response.ok) return false;
@@ -68,6 +75,15 @@ export async function fetchAnalyticsAvailability() {
   } catch {
     analyticsAvailable = false;
     return false;
+  }
+}
+
+function clearLegacyAnalyticsStorage() {
+  try {
+    for (const key of legacyLocalStorageKeys) window.localStorage.removeItem(key);
+    window.sessionStorage.removeItem(legacySessionStorageKey);
+  } catch {
+    // Analytics remains storage-free when browser storage is unavailable.
   }
 }
 

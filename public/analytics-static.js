@@ -1,6 +1,10 @@
 (async () => {
   if (!/^https?:$/.test(location.protocol) || /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(location.hostname)) return;
   try {
+    for (const key of ["mind-atlas-analytics-consent-v1", "mind-atlas-analytics-actor-v1", "mind-atlas-analytics-attribution-v1"]) localStorage.removeItem(key);
+    sessionStorage.removeItem("mind-atlas-analytics-session-v1");
+  } catch {}
+  try {
     const response = await fetch("/api/analytics/config", { credentials: "include" });
     const config = response.ok ? await response.json() : null;
     if (config?.enabled !== true) return;

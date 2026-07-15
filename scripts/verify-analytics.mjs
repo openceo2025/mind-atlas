@@ -80,10 +80,11 @@ const server = fs.readFileSync(new URL("../server/mind-atlas-service.mjs", impor
 const admin = fs.readFileSync(new URL("../server/admin.mjs", import.meta.url), "utf8");
 const report = fs.readFileSync(new URL("../server/analytics-report.mjs", import.meta.url), "utf8");
 assert.ok(client.includes("isAboutDemoMode()"), "about demos must not send product analytics");
-assert.equal(client.includes("localStorage"), false, "SPA analytics must not persist identifiers in localStorage");
-assert.equal(client.includes("sessionStorage"), false, "SPA analytics must not persist identifiers in sessionStorage");
-assert.equal(staticClient.includes("localStorage"), false, "static analytics must not persist identifiers in localStorage");
-assert.equal(staticClient.includes("sessionStorage"), false, "static analytics must not persist identifiers in sessionStorage");
+assert.equal(client.includes("localStorage.setItem") || client.includes("localStorage.getItem"), false, "SPA analytics must not persist identifiers in localStorage");
+assert.equal(client.includes("sessionStorage.setItem") || client.includes("sessionStorage.getItem"), false, "SPA analytics must not persist identifiers in sessionStorage");
+assert.equal(staticClient.includes("localStorage.setItem") || staticClient.includes("localStorage.getItem"), false, "static analytics must not persist identifiers in localStorage");
+assert.equal(staticClient.includes("sessionStorage.setItem") || staticClient.includes("sessionStorage.getItem"), false, "static analytics must not persist identifiers in sessionStorage");
+assert.ok(client.includes("localStorage.removeItem") && staticClient.includes("localStorage.removeItem"), "legacy analytics identifiers should be deleted");
 assert.equal(app.includes("AnalyticsConsentBanner"), false, "public app must not render an analytics consent banner");
 assert.ok(client.includes('let actorId = ""') && client.includes('let sessionId = ""'), "SPA identifiers should remain in memory only");
 assert.ok(app.includes("metrics.nodeCount >= 5 && metrics.maxDepth >= 2"), "activation threshold should require five nodes and depth two");
