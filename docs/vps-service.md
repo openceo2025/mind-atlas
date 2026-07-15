@@ -401,6 +401,15 @@ sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d mind-atlas.org -d www.mind-atlas.org
 ```
 
+After the certificate exists, install the tracked live TLS configuration so
+the canonical `www` redirect remains explicit and reproducible:
+
+```bash
+sudo cp deploy/conoha/nginx-live.conf /etc/nginx/sites-available/mind-atlas
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
 After Certbot, verify:
 
 ```bash

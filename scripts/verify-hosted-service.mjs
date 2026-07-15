@@ -14,6 +14,7 @@ const admin = read("server/admin.mjs");
 const envExample = read(".env.example");
 const serviceEnv = read("deploy/conoha/env.service.example");
 const conohaNginx = read("deploy/conoha/nginx.conf");
+const conohaLiveNginx = read("deploy/conoha/nginx-live.conf");
 const conohaRateLimits = read("deploy/conoha/nginx-rate-limits.conf");
 const conohaAnalytics = read("deploy/conoha/nginx-analytics.conf");
 const stagingEnv = read("deploy/staging/env.service.docker.example");
@@ -35,6 +36,7 @@ for (const filePath of [
   "deploy/staging/env.service.local.example",
   "deploy/conoha/mind-atlas.service",
   "deploy/conoha/nginx.conf",
+  "deploy/conoha/nginx-live.conf",
   "deploy/conoha/nginx-rate-limits.conf",
   "deploy/conoha/nginx-analytics.conf",
   "deploy/conoha/mind-atlas-analytics.service",
@@ -241,6 +243,9 @@ assert.ok(conohaNginx.includes('X-Frame-Options "SAMEORIGIN"'), "ConoHa nginx sh
 assert.ok(conohaNginx.includes("Permissions-Policy"), "ConoHa nginx should send a permissions policy");
 assert.ok(conohaNginx.includes("Strict-Transport-Security"), "ConoHa nginx should send HSTS");
 assert.ok(conohaNginx.includes("server_name www.mind-atlas.org") && conohaNginx.includes("return 301 https://mind-atlas.org$request_uri"), "ConoHa nginx should redirect www to the canonical origin");
+assert.ok(conohaLiveNginx.includes("listen 443 ssl") && conohaLiveNginx.includes("server_name www.mind-atlas.org"), "ConoHa live nginx should terminate TLS for www");
+assert.ok(conohaLiveNginx.includes("return 301 https://mind-atlas.org$request_uri"), "ConoHa live nginx should redirect www to the canonical origin");
+assert.ok(conohaLiveNginx.includes('Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"'), "ConoHa live nginx should retain HSTS");
 assert.ok(conohaNginx.includes("limit_req zone=mind_atlas_api"), "ConoHa nginx should rate-limit API routes");
 assert.ok(conohaNginx.includes("limit_req zone=mind_atlas_auth"), "ConoHa nginx should rate-limit auth routes");
 assert.ok(conohaRateLimits.includes("limit_req_zone"), "ConoHa nginx rate-limit zones should be documented");
