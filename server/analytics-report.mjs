@@ -116,7 +116,7 @@ async function buildPeriod(days, offsetDays) {
     pool.query(
       `select
          count(*) filter (where source = 'client')::int as client_events,
-         count(distinct actor_hash) filter (where actor_hash is not null)::int as consent_actors,
+         count(distinct actor_hash) filter (where actor_hash is not null)::int as client_actors,
          count(*) filter (where page_group = 'other' or locale = 'unknown')::int as incomplete_events,
          count(*) filter (where event_name = 'ai_request_started')::int as ai_started,
          count(*) filter (where event_name in ('ai_request_succeeded','ai_request_failed'))::int as ai_finished
@@ -145,7 +145,7 @@ async function buildPeriod(days, offsetDays) {
     };
   });
   const estimatedUu = Number(trafficRow.uu ?? 0);
-  const consentActors = Number(quality.rows[0]?.consent_actors ?? 0);
+  const clientActors = Number(quality.rows[0]?.client_actors ?? 0);
   billing.activationToPro = rate(billing.newSubscriptions, funnelMap.get("activation_reached") ?? 0);
   ai.costToMrr = rate(ai.estimatedCostMicroUsd, billing.mrr.amountMinor * 10_000);
   const attributedActors = acquisitionRows.rows.reduce((sum, row) => sum + Number(row.actors ?? 0), 0);
@@ -175,8 +175,8 @@ async function buildPeriod(days, offsetDays) {
     aiEconomics: ai,
     dataQuality: {
       botRatio: rate(Number(trafficRow.bot_pv ?? 0), Number(trafficRow.pv ?? 0) + Number(trafficRow.bot_pv ?? 0)),
-      analyticsConsentRate: rate(consentActors, estimatedUu),
-      consentActors,
+      clientAnalyticsCoverage: rate(clientActors, estimatedUu),
+      clientActors,
       clientEvents: Number(quality.rows[0]?.client_events ?? 0),
       incompleteEvents: Number(quality.rows[0]?.incomplete_events ?? 0),
       acceptedEvents: Number(ingestQuality.rows[0]?.accepted ?? 0),

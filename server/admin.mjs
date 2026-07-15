@@ -433,7 +433,7 @@ function printGrowthReport(report) {
   console.log("Data quality");
   console.table([{
     botRatio: value(report.dataQuality.botRatio),
-    consentRate: value(report.dataQuality.analyticsConsentRate),
+    clientAnalyticsCoverage: value(report.dataQuality.clientAnalyticsCoverage),
     clientEvents: report.dataQuality.clientEvents,
     incompleteEvents: report.dataQuality.incompleteEvents,
     http4xx: report.dataQuality.http4xx,
