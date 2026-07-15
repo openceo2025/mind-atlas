@@ -1168,11 +1168,8 @@ export default function App() {
     }
   };
 
-  const overwriteCurrentCloudNotebook = async (entry: CloudNotebookEntry, confirmOverwrite: boolean) => {
-    if (!publicServiceMode || !entry.id || entry.id !== currentCloudNotebook?.id) {
-      setCloudError(t("cloud.overwriteCurrentOnly"));
-      return false;
-    }
+  const overwriteCloudNotebook = async (entry: CloudNotebookEntry, confirmOverwrite: boolean) => {
+    if (!publicServiceMode || !entry.id) return false;
     if (confirmOverwrite) {
       const confirmed = window.confirm(t("dialog.cloud.overwriteConfirm", { name: entry.title || entry.name }));
       if (!confirmed) return false;
@@ -1200,7 +1197,7 @@ export default function App() {
   };
 
   const handleHostedOverwriteCloudNotebook = async (entry: CloudNotebookEntry) => {
-    await overwriteCurrentCloudNotebook(entry, true);
+    await overwriteCloudNotebook(entry, true);
   };
 
   const handleHostedRenameCloudNotebook = async (entry: CloudNotebookEntry) => {
@@ -1273,7 +1270,7 @@ export default function App() {
     const pending = pendingWorkspaceSwitch;
     const current = currentCloudNotebook;
     if (!pending || !current) return;
-    const saved = await overwriteCurrentCloudNotebook(current, false);
+    const saved = await overwriteCloudNotebook(current, false);
     if (!saved) return;
     const action = pendingWorkspaceSwitchActionRef.current;
     pendingWorkspaceSwitchActionRef.current = null;
@@ -2704,7 +2701,6 @@ function CloudLoadDialog({
   const [selectedKey, setSelectedKey] = useState("");
   const selectedEntry = notebooks.find((entry) => cloudNotebookKey(entry) === selectedKey) ?? notebooks[0] ?? null;
   const currentKey = currentNotebook ? cloudNotebookKey(currentNotebook) : "";
-  const selectedIsCurrent = Boolean(selectedEntry && currentKey && cloudNotebookKey(selectedEntry) === currentKey);
 
   useEffect(() => {
     if (!hosted) return;
@@ -2762,8 +2758,7 @@ function CloudLoadDialog({
               <button
                 type="button"
                 onClick={() => selectedEntry && onOverwrite?.(selectedEntry)}
-                disabled={selectedDisabled || !onOverwrite || !selectedIsCurrent}
-                title={!selectedIsCurrent ? t("cloud.overwriteCurrentOnly") : undefined}
+                disabled={selectedDisabled || !onOverwrite}
               >
                 <FileText size={15} />
                 <span>{<I18nText id="ui.app.overwrite.d7bec6b" />}</span>

@@ -6,6 +6,7 @@ import net from "node:net";
 const host = "127.0.0.1";
 const providerIds = ["openai", "anthropic", "glm", "deepseek", "gemini", "qwen", "composer", "kimi", "mimo", "minimax", "grok"];
 const requestedPaths = [];
+let cloudOverwriteCount = 0;
 let mockSessionMode = "active";
 const forbiddenPublicDeveloperTerms = [
   "Codex",
@@ -74,6 +75,7 @@ const mockService = http.createServer((request, response) => {
     return;
   }
   if (url.pathname.startsWith("/api/cloud/notebooks/") && request.method === "PATCH") {
+    cloudOverwriteCount += 1;
     collectRequestJson(request).then((body) => {
       sendJson(response, 200, {
         ...createMockCloudEntry("cld_verify_private", body?.title || "Verify cloud notebook"),
@@ -218,8 +220,17 @@ try {
     await cloudDialog.getByText("Delete").waitFor();
     await cloudDialog.getByText("Verify cloud notebook").waitFor();
     const overwriteButton = cloudDialog.getByRole("button", { name: "Overwrite" });
-    if (!(await overwriteButton.isDisabled())) throw new Error("Cloud overwrite should be disabled before a cloud file is loaded.");
-    await cloudDialog.getByText("Verify cloud notebook", { exact: true }).click();
+    if (await overwriteButton.isDisabled()) throw new Error("A selected cloud file should allow overwrite even before it is loaded in this tab.");
+    page.once("dialog", (dialog) => dialog.accept());
+    await overwriteButton.click();
+    await page.waitForFunction(() => document.querySelector(".cloud-current-badge")?.textContent?.trim().length > 0);
+    const firstOverwriteCount = cloudOverwriteCount;
+    page.once("dialog", (dialog) => dialog.accept());
+    await overwriteButton.click();
+    await waitForCondition(() => cloudOverwriteCount > firstOverwriteCount, 3000);
+    if (cloudOverwriteCount <= firstOverwriteCount) throw new Error("Cloud overwrite should save even when the notebook has no unsaved changes.");
+    await page.waitForTimeout(180);
+    await cloudDialog.locator(".cloud-package-button").first().click();
     await cloudDialog.getByRole("button", { name: "Load", exact: true }).click();
     await cloudDialog.waitFor({ state: "detached" });
     await page.locator(".node-body-input").fill("Unsaved hosted cloud edit");
@@ -229,7 +240,7 @@ try {
     await cloudDialog.getByText("未保存の変更", { exact: true }).first().waitFor();
     if (await overwriteButton.isDisabled()) throw new Error("The currently open cloud file should allow overwrite.");
     await cloudDialog.getByText("Second cloud notebook", { exact: true }).click();
-    if (!(await overwriteButton.isDisabled())) throw new Error("A different cloud file must not allow overwrite.");
+    if (await overwriteButton.isDisabled()) throw new Error("Any explicitly selected cloud file should allow confirmed overwrite.");
     await cloudDialog.getByRole("button", { name: "Load", exact: true }).click();
     const unsavedDialog = page.getByRole("alertdialog", { name: "別のクラウドファイルを開く前に変更を保存しますか？" });
     await unsavedDialog.waitFor();
@@ -732,6 +743,15 @@ async function waitForHttp(url, timeoutMs) {
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`Timed out waiting for ${url}: ${lastError instanceof Error ? lastError.message : String(lastError)}\n${viteOutput}`);
+}
+
+async function waitForCondition(predicate, timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for verification condition.");
 }
 
 function stopChild(child) {
