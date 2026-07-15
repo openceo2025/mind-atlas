@@ -26,7 +26,7 @@ export async function aggregateNginxTraffic({ day = yesterdayUtc(), logDir = "/v
       }
       if (String(entry.time ?? "").slice(0, 10) !== day) continue;
       const uri = safeString(entry.uri, 400);
-      if (!isHumanPage(uri)) continue;
+      if (!isTrackedPublicPage(uri)) continue;
       const isBot = BOT_PATTERN.test(safeString(entry.user_agent, 600));
       const isAdmin = entry.admin === "1" || entry.admin === 1;
       const dimensions = classifyDimensions(entry, uri);
@@ -123,10 +123,10 @@ function addEntry(groups, dimensions) {
   }
 }
 
-function isHumanPage(uri) {
-  if (!uri || uri === "/health" || uri.startsWith("/api/")) return false;
-  if (ASSET_PATTERN.test(uri)) return false;
-  return true;
+export function isTrackedPublicPage(uri) {
+  if (!uri || ASSET_PATTERN.test(uri)) return false;
+  if (uri === "/" || uri === "/about.html" || uri === "/privacy.html" || uri === "/terms.html") return true;
+  return /^\/[A-Za-z]{2}(?:-[A-Za-z]+)?\/(?:about|privacy|terms)\.html$/.test(uri);
 }
 
 function pageGroup(uri) {

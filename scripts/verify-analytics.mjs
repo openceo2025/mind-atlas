@@ -5,7 +5,7 @@ process.env.DATABASE_URL ||= "postgres://analytics-test:analytics-test@127.0.0.1
 process.env.MIND_ATLAS_ANALYTICS_HMAC_KEY ||= "analytics-test-key-with-at-least-thirty-two-characters";
 
 const { AnalyticsValidationError, hmacIdentifier, normalizeClientAnalyticsBatch, sanitizeProperties } = await import("../server/analytics.mjs");
-const { classifyDimensions, dailyVisitorHash } = await import("../server/traffic-analytics.mjs");
+const { classifyDimensions, dailyVisitorHash, isTrackedPublicPage } = await import("../server/traffic-analytics.mjs");
 
 const batch = normalizeClientAnalyticsBatch({
   actorId: "actor_0123456789abcdef0123456789abcdef",
@@ -49,6 +49,11 @@ assert.throws(
 assert.deepEqual(sanitizeProperties("meaningful_edit", { kind: "body", node_count: 4, node_title: "secret" }), { kind: "body", node_count: 4 });
 assert.equal(hmacIdentifier("key", "actor", "same"), hmacIdentifier("key", "actor", "same"));
 assert.notEqual(dailyVisitorHash("key", "2026-07-11", "127.0.0.1", "Browser"), dailyVisitorHash("key", "2026-07-12", "127.0.0.1", "Browser"));
+assert.equal(isTrackedPublicPage("/"), true);
+assert.equal(isTrackedPublicPage("/ja/about.html"), true);
+assert.equal(isTrackedPublicPage("/robots.txt"), false);
+assert.equal(isTrackedPublicPage("/.env"), false);
+assert.equal(isTrackedPublicPage("/wp-admin/install.php"), false);
 
 assert.deepEqual(classifyDimensions({
   referrer_host: "x.com",
@@ -71,6 +76,8 @@ assert.deepEqual(classifyDimensions({
 const app = fs.readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const client = fs.readFileSync(new URL("../src/analytics/productAnalytics.ts", import.meta.url), "utf8");
 const server = fs.readFileSync(new URL("../server/mind-atlas-service.mjs", import.meta.url), "utf8");
+const admin = fs.readFileSync(new URL("../server/admin.mjs", import.meta.url), "utf8");
+const report = fs.readFileSync(new URL("../server/analytics-report.mjs", import.meta.url), "utf8");
 assert.ok(client.includes("isAboutDemoMode()"), "about demos must not send product analytics");
 assert.ok(client.includes('getAnalyticsConsent() !== "accepted"'), "client events must require consent");
 assert.ok(app.includes("metrics.nodeCount >= 5 && metrics.maxDepth >= 2"), "activation threshold should require five nodes and depth two");
@@ -78,5 +85,8 @@ assert.ok(app.includes("analyticsIgnoreNextNotebookRef"), "template/import chang
 assert.ok(server.includes("analyticsEventMaxBytes"), "analytics endpoint should have a dedicated body cap");
 assert.ok(server.includes("analyticsIpMax"), "analytics endpoint should have a dedicated IP rate limit");
 assert.ok(server.includes("clientAnalyticsEnabled()"), "client analytics should have an independent rollout gate");
+const growthReportBlock = admin.slice(admin.indexOf('command === "growth-report"'), admin.indexOf('command === "analytics-cleanup"'));
+assert.equal(growthReportBlock.includes("migrateDatabase()"), false, "growth-report must remain read-only");
+assert.ok(report.includes("::text as start") && report.includes("::text as end"), "growth report dates should not shift through timezone conversion");
 
 console.log("Analytics verification passed.");

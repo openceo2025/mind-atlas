@@ -20,6 +20,7 @@ const stagingEnv = read("deploy/staging/env.service.docker.example");
 const docs = read("docs/vps-service.md");
 const stagingDocs = read("docs/staging-service.md");
 const stagingLocalEnv = read("deploy/staging/env.service.local.example");
+const analyticsReport = read("server/analytics-report.mjs");
 
 for (const filePath of [
   "server/mind-atlas-service.mjs",
@@ -40,6 +41,9 @@ for (const filePath of [
   "deploy/conoha/mind-atlas-analytics.timer",
   "deploy/conoha/mind-atlas-analytics.logrotate",
   "deploy/conoha/env.service.example",
+  "public/404.html",
+  "public/robots.txt",
+  "public/og-image.png",
   "docs/vps-service.md",
   "docs/staging-service.md",
   "scripts/build-hosted-public.mjs",
@@ -221,6 +225,9 @@ assert.ok(server.includes("MIND_ATLAS_STRIPE_WEBHOOK_TOLERANCE_SECONDS"), "hoste
 assert.ok(server.includes("timestampAgeSeconds > stripeWebhookToleranceSeconds"), "Stripe webhook signature verification should reject stale signatures");
 assert.ok(server.includes("function isPathWithin"), "hosted static serving should check resolved path boundaries");
 assert.ok(server.includes("decodePathname"), "hosted static serving should reject malformed encoded paths");
+assert.ok(server.includes('url.pathname.startsWith("/api/")'), "unknown hosted API routes should return JSON 404 responses");
+assert.ok(server.includes('filePath = path.join(distRoot, "404.html")'), "unknown public paths should use the noindex 404 page");
+assert.ok(server.includes('ext === ".xml"') && server.includes('ext === ".txt"'), "SEO text assets should have explicit content types");
 assert.ok(server.includes("function isFable5ChatModel"), "hosted service should identify Claude Fable 5 models");
 assert.ok(server.includes('overageAllowed: fable5OnePass ? "fable5_one_pass"'), "hosted service should mark Fable 5 one-pass reservations");
 assert.ok(server.includes("reservationMicroUsd: fable5OnePass ? Math.max(1, Math.round(remaining))"), "Fable 5 should reserve the full remaining token");
@@ -233,12 +240,16 @@ assert.ok(conohaNginx.includes("X-Content-Type-Options"), "ConoHa nginx should s
 assert.ok(conohaNginx.includes('X-Frame-Options "SAMEORIGIN"'), "ConoHa nginx should allow same-origin demo framing only");
 assert.ok(conohaNginx.includes("Permissions-Policy"), "ConoHa nginx should send a permissions policy");
 assert.ok(conohaNginx.includes("Strict-Transport-Security"), "ConoHa nginx should send HSTS");
+assert.ok(conohaNginx.includes("server_name www.mind-atlas.org") && conohaNginx.includes("return 301 https://mind-atlas.org$request_uri"), "ConoHa nginx should redirect www to the canonical origin");
 assert.ok(conohaNginx.includes("limit_req zone=mind_atlas_api"), "ConoHa nginx should rate-limit API routes");
 assert.ok(conohaNginx.includes("limit_req zone=mind_atlas_auth"), "ConoHa nginx should rate-limit auth routes");
 assert.ok(conohaRateLimits.includes("limit_req_zone"), "ConoHa nginx rate-limit zones should be documented");
 assert.ok(conohaAnalytics.includes("log_format mind_atlas_analytics escape=json"), "ConoHa should use JSON analytics logs");
 assert.ok(conohaAnalytics.includes("$uri"), "analytics logs should store path without the query string");
 assert.equal(conohaAnalytics.includes("$request_uri"), false, "analytics logs must not store complete URLs or share tokens");
+const growthReportBlock = admin.slice(admin.indexOf('command === "growth-report"'), admin.indexOf('command === "analytics-cleanup"'));
+assert.equal(growthReportBlock.includes("migrateDatabase()"), false, "growth-report should not mutate the database");
+assert.ok(analyticsReport.includes("::text as start") && analyticsReport.includes("::text as end"), "growth-report period dates should be timezone-stable");
 assert.ok(serviceDb.includes("create table if not exists product_events"), "service DB should store privacy-filtered product events");
 assert.ok(serviceDb.includes("create table if not exists traffic_daily"), "service DB should store cookieless daily traffic aggregates");
 assert.ok(serviceDb.includes("export async function reserveCredit"), "service DB should expose atomic credit reservation");

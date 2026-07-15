@@ -126,8 +126,6 @@ try {
     const deleted = await db.deleteExpiredSessions(idleDays);
     console.log(`Deleted expired sessions: ${deleted}`);
   } else if (command === "growth-report") {
-    const db = await getDb();
-    await db.migrateDatabase();
     const options = parseOptions(args);
     const days = positiveInteger(options.days ?? 30, "days", 730);
     const { buildGrowthReport } = await import("./analytics-report.mjs");

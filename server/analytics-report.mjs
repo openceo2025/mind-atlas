@@ -61,8 +61,8 @@ async function buildPeriod(days, offsetDays) {
   const params = [days, offsetDays];
   const period = (await pool.query(
     `select
-       (current_date - ($2::integer + $1::integer - 1))::date as start,
-       (current_date - $2::integer)::date as end`,
+       (current_date - ($2::integer + $1::integer - 1))::text as start,
+       (current_date - $2::integer)::text as end`,
     params,
   )).rows[0];
   const rangeSql = "occurred_at >= current_date - ($2::integer + $1::integer - 1) and occurred_at < current_date - $2::integer + interval '1 day'";
@@ -421,6 +421,7 @@ function delta(current, previous) {
 }
 
 function dateOnly(value) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   const date = value instanceof Date ? value : new Date(value);
   return date.toISOString().slice(0, 10);
 }

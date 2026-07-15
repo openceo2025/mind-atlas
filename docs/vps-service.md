@@ -58,9 +58,13 @@ npm run service:start -> server/mind-atlas-service.mjs
 Point `mind-atlas.org` to the ConoHa VPS public IPv4 address:
 
 ```text
-A     mind-atlas.org      <VPS IPv4>
-A     www.mind-atlas.org  <VPS IPv4>
+A       mind-atlas.org      <VPS IPv4>
+CNAME   www.mind-atlas.org  mind-atlas.org.
 ```
+
+An `A` record for `www` pointing to the same VPS is also valid. Keep both host
+names resolvable because nginx redirects `www` permanently to the canonical
+`https://mind-atlas.org` origin.
 
 ### Google OAuth
 
@@ -402,7 +406,13 @@ After Certbot, verify:
 ```bash
 curl https://mind-atlas.org/health
 curl -I https://mind-atlas.org/ | grep -i strict-transport-security
+curl -I https://www.mind-atlas.org/ | grep -iE "HTTP/|location:"
 ```
+
+The expected `www` response is `301` with
+`Location: https://mind-atlas.org/`. Certbot should retain the dedicated
+redirect server from `deploy/conoha/nginx.conf`; do not combine `www` into the
+application proxy server after certificate renewal.
 
 ## Admin CUI
 
@@ -500,8 +510,9 @@ npm run ops:kpi -- --days 30
 npm run ops:kpi -- --days 30 --json
 ```
 
-The wrapper invokes only `growth-report` under `/opt/mind-atlas`. It does not
-open a web dashboard or expose a management HTTP endpoint.
+The wrapper invokes only the read-only `growth-report` under
+`/opt/mind-atlas`. It does not run migrations, open a web dashboard, expose a
+management HTTP endpoint, or mutate analytics data.
 
 ## Local Staging Before ConoHa
 

@@ -25,6 +25,14 @@ const serviceUrl = typeof marker.serviceUrl === "string" ? marker.serviceUrl : "
 assert.ok(serviceUrl.startsWith("https://mind-atlas.org"), `unexpected hosted service URL: ${serviceUrl}`);
 
 assert.equal(fs.existsSync(assetsDir), true, "dist/assets is missing");
+for (const staticFile of ["404.html", "robots.txt", "sitemap.xml", "og-image.png"]) {
+  assert.equal(fs.existsSync(path.join(distDir, staticFile)), true, `hosted public file is missing: ${staticFile}`);
+}
+const indexHtml = fs.readFileSync(indexPath, "utf8");
+assert.ok(indexHtml.includes('rel="canonical" href="https://mind-atlas.org/"'), "hosted index is missing its canonical URL");
+assert.ok(indexHtml.includes('property="og:image" content="https://mind-atlas.org/og-image.png"'), "hosted index is missing its Open Graph image");
+assert.ok(fs.readFileSync(path.join(distDir, "robots.txt"), "utf8").includes("Sitemap: https://mind-atlas.org/sitemap.xml"), "robots.txt should advertise the sitemap");
+assert.ok(fs.readFileSync(path.join(distDir, "sitemap.xml"), "utf8").includes("https://mind-atlas.org/ja/about.html"), "sitemap should include localized introduction pages");
 const jsAssets = fs.readdirSync(assetsDir).filter((name) => name.endsWith(".js"));
 assert.ok(jsAssets.length > 0, "dist/assets has no JavaScript bundle");
 
@@ -35,6 +43,8 @@ for (const locale of ["en", "ja"]) {
     const html = fs.readFileSync(localizedPath, "utf8");
     assert.ok(html.includes(`<html lang="${locale}"`), `localized page has wrong html language: ${locale}/${page}.html`);
     assert.ok(html.includes('hreflang="en"') && html.includes('hreflang="ja"'), `localized page is missing hreflang links: ${locale}/${page}.html`);
+    assert.ok(html.includes(`rel="canonical" href="https://mind-atlas.org/${locale}/${page}.html"`), `localized page is missing canonical URL: ${locale}/${page}.html`);
+    assert.ok(html.includes('property="og:image" content="https://mind-atlas.org/og-image.png"'), `localized page is missing Open Graph metadata: ${locale}/${page}.html`);
   }
 }
 assert.ok(fs.readFileSync(path.join(distDir, "en", "about.html"), "utf8").includes("Write a novel"), "English introduction copy is missing");

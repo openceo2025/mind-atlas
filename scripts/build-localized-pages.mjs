@@ -15,6 +15,7 @@ for (const locale of locales) {
   buildLegalPage("privacy", locale);
   buildLegalPage("terms", locale);
 }
+buildSitemap();
 
 console.log(`Localized static pages written for: ${locales.join(", ")}`);
 
@@ -56,6 +57,13 @@ function buildAbout(locale) {
   });
   const description = findElement(document, "meta", (node) => attribute(node, "name") === "description");
   if (description) setAttribute(description, "content", targetCatalog.metaDescription);
+  const pageUrl = `https://mind-atlas.org/${locale}/about.html`;
+  setAttribute(findElement(document, "link", (node) => attribute(node, "rel") === "canonical"), "href", pageUrl);
+  setAttribute(findElement(document, "meta", (node) => attribute(node, "property") === "og:title"), "content", targetCatalog.messages["about.title"]);
+  setAttribute(findElement(document, "meta", (node) => attribute(node, "property") === "og:description"), "content", targetCatalog.metaDescription);
+  setAttribute(findElement(document, "meta", (node) => attribute(node, "property") === "og:url"), "content", pageUrl);
+  setAttribute(findElement(document, "meta", (node) => attribute(node, "name") === "twitter:title"), "content", targetCatalog.messages["about.title"]);
+  setAttribute(findElement(document, "meta", (node) => attribute(node, "name") === "twitter:description"), "content", targetCatalog.metaDescription);
   addAlternateLinks(document, "about.html");
   addLanguageSwitcher(document, locale, "about.html");
   writeOutput(locale, "about.html", `<!doctype html>\n${stripDoctype(serialize(document))}`);
@@ -85,6 +93,17 @@ function buildLegalPage(page, locale) {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="${escapeAttribute(content.metaDescription)}" />
+    <link rel="canonical" href="https://mind-atlas.org/${locale}/${page}.html" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Mind Atlas" />
+    <meta property="og:title" content="${escapeAttribute(content.title)} | Mind Atlas" />
+    <meta property="og:description" content="${escapeAttribute(content.metaDescription)}" />
+    <meta property="og:url" content="https://mind-atlas.org/${locale}/${page}.html" />
+    <meta property="og:image" content="https://mind-atlas.org/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${escapeAttribute(content.title)} | Mind Atlas" />
+    <meta name="twitter:description" content="${escapeAttribute(content.metaDescription)}" />
+    <meta name="twitter:image" content="https://mind-atlas.org/og-image.png" />
     <meta name="theme-color" content="#061014" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     ${locales.map((alternateLocale) => `<link rel="alternate" hreflang="${alternateLocale}" href="https://mind-atlas.org/${alternateLocale}/${page}.html" />`).join("\n    ")}
@@ -111,6 +130,18 @@ function buildLegalPage(page, locale) {
   </body>
 </html>`;
   writeOutput(locale, `${page}.html`, html);
+}
+
+function buildSitemap() {
+  const urls = ["https://mind-atlas.org/"];
+  for (const locale of locales) {
+    for (const page of ["about", "privacy", "terms"]) urls.push(`https://mind-atlas.org/${locale}/${page}.html`);
+  }
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map((url) => `  <url><loc>${escapeHtml(url)}</loc></url>`).join("\n")}
+</urlset>`;
+  fs.writeFileSync(path.join(outputRoot, "sitemap.xml"), `${xml}\n`, "utf8");
 }
 
 function collectVisibleTextNodes(root) {

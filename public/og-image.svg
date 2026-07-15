@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="35%" r="75%">
+      <stop offset="0" stop-color="#17483a"/>
+      <stop offset="0.58" stop-color="#071713"/>
+      <stop offset="1" stop-color="#050706"/>
+    </radialGradient>
+    <filter id="soft"><feGaussianBlur stdDeviation="18"/></filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <g opacity=".12" stroke="#d7ead9">
+    <path d="M0 105h1200M0 210h1200M0 315h1200M0 420h1200M0 525h1200"/>
+    <path d="M150 0v630M300 0v630M450 0v630M600 0v630M750 0v630M900 0v630M1050 0v630"/>
+  </g>
+  <ellipse cx="916" cy="316" rx="230" ry="118" fill="none" stroke="#f5df80" stroke-width="8" opacity=".75" transform="rotate(-12 916 316)"/>
+  <circle cx="916" cy="316" r="108" fill="#69d6a4"/>
+  <circle cx="870" cy="272" r="23" fill="#d7ead9" opacity=".85"/>
+  <circle cx="970" cy="358" r="31" fill="#2f7f68" opacity=".72"/>
+  <circle cx="916" cy="316" r="150" fill="#69d6a4" opacity=".12" filter="url(#soft)"/>
+  <text x="86" y="246" fill="#f5fbef" font-family="Inter, Segoe UI, sans-serif" font-size="82" font-weight="800">MIND ATLAS</text>
+  <text x="92" y="315" fill="#d8f56d" font-family="Inter, Segoe UI, sans-serif" font-size="34" font-weight="700">Turn your thoughts into a universe.</text>
+  <text x="92" y="374" fill="#d7ead9" opacity=".78" font-family="Inter, Segoe UI, sans-serif" font-size="26">Spatial notebook for ideas and AI-assisted work</text>
+  <text x="92" y="528" fill="#78dfbb" font-family="Inter, Segoe UI, sans-serif" font-size="24" font-weight="700">mind-atlas.org</text>
+</svg>

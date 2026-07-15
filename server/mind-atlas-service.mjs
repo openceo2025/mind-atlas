@@ -291,6 +291,11 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname.startsWith("/api/")) {
+      sendJson(response, 404, createServiceErrorPayload(new ServiceError(404, "not_found", "Not found")));
+      return;
+    }
+
     if (request.method === "GET" || request.method === "HEAD") {
       await serveStatic(response, request.method, url.pathname);
       return;
@@ -2370,14 +2375,17 @@ async function serveStatic(response, method, pathname) {
   }
   let filePath = path.resolve(distRoot, normalized);
   if (!isPathWithin(filePath, distRoot)) throw new ServiceError(403, "Forbidden");
-  if (!fs.existsSync(filePath)) filePath = path.join(distRoot, "index.html");
+  const status = fs.existsSync(filePath) ? 200 : 404;
+  if (status === 404) filePath = path.join(distRoot, "404.html");
   const realFilePath = await fsp.realpath(filePath);
   if (!isPathWithin(realFilePath, distRoot)) throw new ServiceError(403, "Forbidden");
   const stat = await fsp.stat(realFilePath);
-  response.writeHead(200, {
+  const noCache = realFilePath.endsWith(".html") || realFilePath.endsWith("robots.txt") || realFilePath.endsWith("sitemap.xml");
+  response.writeHead(status, {
     "Content-Type": contentType(realFilePath),
     "Content-Length": stat.size,
-    "Cache-Control": realFilePath.endsWith(".html") ? "no-cache" : "public, max-age=31536000, immutable",
+    "Cache-Control": noCache ? "no-cache" : "public, max-age=31536000, immutable",
+    ...(status === 404 ? { "X-Robots-Tag": "noindex, nofollow" } : {}),
   });
   if (method === "HEAD") {
     response.end();
@@ -2785,6 +2793,8 @@ function contentType(filePath) {
   if (ext === ".svg") return "image/svg+xml";
   if (ext === ".json") return "application/json; charset=utf-8";
   if (ext === ".webmanifest") return "application/manifest+json";
+  if (ext === ".txt") return "text/plain; charset=utf-8";
+  if (ext === ".xml") return "application/xml; charset=utf-8";
   if (ext === ".png") return "image/png";
   if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
   if (ext === ".wasm") return "application/wasm";
