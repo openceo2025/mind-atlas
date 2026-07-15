@@ -2314,6 +2314,10 @@ function NotebookNodes({
     [atlasRoot.id, cameraVisibleNodeIds, layoutPositions, layoutRenderNodeIds, mandatoryRenderNodeIds],
   );
   const labelAnchorNodeId = cameraFocusNodeId ?? selectedNodeId;
+  const structuralPriorityLabelNodeIds = useMemo(() => {
+    const anchorDepth = (nodeRenderMetaById.get(labelAnchorNodeId)?.pathIds.length ?? Number.POSITIVE_INFINITY) - 1;
+    return anchorDepth <= 1 ? new Set(atlasRoot.children.map((child) => child.id)) : new Set<string>();
+  }, [atlasRoot.children, labelAnchorNodeId, nodeRenderMetaById]);
   const labelBudget = renderQuality === "low" ? LOW_QUALITY_LABEL_BUDGET : mobileLabelScope ? MOBILE_LABEL_BUDGET : DESKTOP_LABEL_BUDGET;
   const labelVisibleNodeIds = useMemo(
     () =>
@@ -2321,11 +2325,12 @@ function NotebookNodes({
         anchorNodeId: labelAnchorNodeId,
         candidateNodeIds: renderVisibleNodeIds,
         mandatoryNodeIds: new Set([selectedNodeId, labelAnchorNodeId]),
+        structuralPriorityNodeIds: structuralPriorityLabelNodeIds,
         maxLabels: labelBudget,
         nodeRenderMetaById,
         positions: layoutPositions,
       }),
-    [labelAnchorNodeId, labelBudget, layoutPositions, nodeRenderMetaById, renderVisibleNodeIds, selectedNodeId],
+    [labelAnchorNodeId, labelBudget, layoutPositions, nodeRenderMetaById, renderVisibleNodeIds, selectedNodeId, structuralPriorityLabelNodeIds],
   );
 
   useEffect(() => {
@@ -2719,6 +2724,7 @@ function buildPriorityLabelNodeIds({
   anchorNodeId,
   candidateNodeIds,
   mandatoryNodeIds,
+  structuralPriorityNodeIds,
   maxLabels,
   nodeRenderMetaById,
   positions,
@@ -2726,6 +2732,7 @@ function buildPriorityLabelNodeIds({
   anchorNodeId: string;
   candidateNodeIds: Set<string>;
   mandatoryNodeIds: Set<string>;
+  structuralPriorityNodeIds: Set<string>;
   maxLabels: number;
   nodeRenderMetaById: Map<string, NodeRenderMeta>;
   positions: Map<string, Vec3>;
@@ -2737,29 +2744,33 @@ function buildPriorityLabelNodeIds({
 
   const anchorPath = nodeRenderMetaById.get(anchorNodeId)?.pathIds ?? [];
   const anchorPosition = positions.get(anchorNodeId);
-  const ranked = [...candidateNodeIds]
-    .filter((nodeId) => !selected.has(nodeId) && nodeRenderMetaById.has(nodeId))
-    .map((nodeId) => {
-      const meta = nodeRenderMetaById.get(nodeId)!;
-      return {
-        nodeId,
-        graphDistance: getTreeGraphDistance(anchorPath, meta.pathIds),
-        worldDistance: getSquaredPositionDistance(anchorPosition, positions.get(nodeId)),
-        depth: meta.pathIds.length,
-      };
-    })
-    .sort(
-      (left, right) =>
-        left.graphDistance - right.graphDistance ||
-        left.worldDistance - right.worldDistance ||
-        left.depth - right.depth ||
-        left.nodeId.localeCompare(right.nodeId),
-    );
+  const rankNodeIds = (nodeIds: Iterable<string>) =>
+    [...nodeIds]
+      .filter((nodeId) => candidateNodeIds.has(nodeId) && !selected.has(nodeId) && nodeRenderMetaById.has(nodeId))
+      .map((nodeId) => {
+        const meta = nodeRenderMetaById.get(nodeId)!;
+        return {
+          nodeId,
+          graphDistance: getTreeGraphDistance(anchorPath, meta.pathIds),
+          worldDistance: getSquaredPositionDistance(anchorPosition, positions.get(nodeId)),
+          depth: meta.pathIds.length,
+        };
+      })
+      .sort(
+        (left, right) =>
+          left.graphDistance - right.graphDistance ||
+          left.worldDistance - right.worldDistance ||
+          left.depth - right.depth ||
+          left.nodeId.localeCompare(right.nodeId),
+      );
 
   const budget = Math.max(selected.size, Math.max(1, Math.round(maxLabels)));
-  for (const entry of ranked) {
+  for (const nodeIds of [structuralPriorityNodeIds, candidateNodeIds]) {
+    for (const entry of rankNodeIds(nodeIds)) {
+      if (selected.size >= budget) break;
+      selected.add(entry.nodeId);
+    }
     if (selected.size >= budget) break;
-    selected.add(entry.nodeId);
   }
   return selected;
 }

@@ -1809,6 +1809,27 @@ async function verifyCameraScopedRendering(browser) {
   }
   await desktopContext.close();
 
+  const rootPriorityContext = await browser.newContext({
+    viewport: { width: 1920, height: 945 },
+    ignoreHTTPSErrors: true,
+  });
+  const rootPriorityPage = await rootPriorityContext.newPage();
+  await seedCompletedOnboarding(rootPriorityPage);
+  const rootSiblingIds = await seedRootPriorityNotebook(rootPriorityPage);
+  await rootPriorityPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await rootPriorityPage.waitForSelector("canvas");
+  await rootPriorityPage.waitForTimeout(1600);
+  const rootPriorityCounts = await rootPriorityPage.evaluate((expectedRootSiblingIds) => ({
+    total: document.querySelectorAll("[data-node-id]").length,
+    missingRootSiblingIds: expectedRootSiblingIds.filter(
+      (nodeId) => !document.querySelector(`[data-node-id="${nodeId}"]`),
+    ),
+  }), rootSiblingIds);
+  if (rootPriorityCounts.total > 96 || rootPriorityCounts.missingRootSiblingIds.length > 0) {
+    throw new Error(`Root-level labels lost priority to a high-fanout branch: ${JSON.stringify(rootPriorityCounts)}`);
+  }
+  await rootPriorityContext.close();
+
   const mobileContext = await browser.newContext({
     viewport: { width: 390, height: 844 },
     ignoreHTTPSErrors: true,
@@ -1833,7 +1854,7 @@ async function verifyCameraScopedRendering(browser) {
   }
   await mobileContext.close();
 
-  return { desktop: desktopCounts, mobile: mobileCounts };
+  return { desktop: desktopCounts, rootPriority: rootPriorityCounts, mobile: mobileCounts };
 }
 
 async function verifyExternalImports(browser) {
@@ -2579,6 +2600,59 @@ async function seedLargeNotebook(page, childCount, layoutMode = "phyllotaxis", s
       }),
     );
   }, { root, now, layoutMode, selectedNodeId });
+}
+
+async function seedRootPriorityNotebook(page) {
+  const now = new Date().toISOString();
+  const makeNode = (id, title, children = []) => ({
+    id,
+    kind: "thread",
+    nodeType: "note",
+    title,
+    subtitle: title,
+    body: title,
+    author: "human",
+    status: "waiting",
+    color: "#94a3ff",
+    texture: "bands",
+    radius: 48,
+    summary: title,
+    nextDecision: "",
+    tags: [],
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    children,
+  });
+  const rootSiblingIds = Array.from({ length: 7 }, (_, index) => `root-priority-sibling-${index}`);
+  const root = {
+    ...makeNode("atlas-root", "Root priority verify", [
+      makeNode(
+        "root-priority-anchor",
+        "Root priority anchor",
+        Array.from({ length: 140 }, (_, index) => makeNode(`root-priority-child-${index}`, `Root priority child ${index}`)),
+      ),
+      ...rootSiblingIds.map((id, index) => makeNode(id, `Root priority sibling ${index}`)),
+    ]),
+    kind: "root",
+    radius: 80,
+  };
+  await page.addInitScript((seed) => {
+    window.localStorage.setItem("mind-atlas-notebook-v2", JSON.stringify(seed.root));
+    window.localStorage.setItem(
+      "mind-atlas-ui-state-v1",
+      JSON.stringify({
+        version: 1,
+        savedAt: seed.now,
+        selectedNodeId: "root-priority-anchor",
+        viewport: { x: 0, y: 0, zoom: 0.92 },
+        renderQuality: "high",
+        layoutMode: "phyllotaxis",
+        mobilePanelTab: "command",
+      }),
+    );
+  }, { root, now });
+  return rootSiblingIds;
 }
 
 async function seedGeneratedLayoutNotebook(page, layoutMode, selectedNodeId = "atlas-root") {
