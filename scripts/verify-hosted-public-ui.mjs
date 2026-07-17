@@ -154,6 +154,34 @@ try {
   await waitForHttp(appUrl, 20_000);
   const browser = await launchBrowser();
   try {
+    mockSessionMode = "signed-out";
+    const signedOutPage = await browser.newPage({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
+    await seedCompletedOnboarding(signedOutPage);
+    await signedOutPage.goto(appUrl, { waitUntil: "networkidle" });
+    await signedOutPage.waitForSelector("canvas");
+    const signedOutButton = signedOutPage.locator(".ai-feature-button");
+    await signedOutButton.waitFor();
+    const signedOutButtonText = cleanText(await signedOutButton.textContent());
+    if (!signedOutButtonText.includes("クラウド保存・共有")) {
+      throw new Error(`Signed-out public button should describe cloud save and sharing: ${signedOutButtonText}`);
+    }
+    await signedOutButton.click();
+    const signedOutDialog = signedOutPage.locator(".ai-feature-dialog");
+    await signedOutDialog.waitFor();
+    const signedOutDialogText = cleanText(await signedOutDialog.textContent());
+    for (const forbidden of ["Mind Atlas Pro", "US$10", "/ month", "月額登録"]) {
+      if (signedOutDialogText.includes(forbidden)) {
+        throw new Error(`Signed-out Google login dialog exposed paid-plan copy (${forbidden}): ${signedOutDialogText}`);
+      }
+    }
+    for (const required of ["データをクラウドへ保存する", "共有リンクを作成する", "課金が始まることはありません"]) {
+      if (!signedOutDialogText.includes(required)) {
+        throw new Error(`Signed-out Google login dialog is missing ${required}: ${signedOutDialogText}`);
+      }
+    }
+    await signedOutPage.close();
+
+    mockSessionMode = "active";
     const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
     await seedCompletedOnboarding(page);
     await page.goto(appUrl, { waitUntil: "networkidle" });
@@ -253,6 +281,12 @@ try {
     await publicMenu.getByText("クラウドへ保存").click();
     await cloudDialog.waitFor();
     await cloudDialog.getByText("未保存の変更", { exact: true }).first().waitFor();
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector(".cloud-load-dialog");
+      const button = Array.from(dialog?.querySelectorAll("button") ?? [])
+        .find((candidate) => candidate.textContent?.trim() === "Overwrite");
+      return button instanceof HTMLButtonElement && !button.disabled;
+    });
     if (await overwriteButton.isDisabled()) throw new Error("The currently open cloud file should allow overwrite.");
     await cloudDialog.getByText("Second cloud notebook", { exact: true }).click();
     if (await overwriteButton.isDisabled()) throw new Error("Any explicitly selected cloud file should allow confirmed overwrite.");
@@ -410,7 +444,7 @@ try {
     }
 
     console.log("Hosted public UI verification passed");
-    console.log(JSON.stringify({ aiButtonText, exhaustedButtonText, modeButtonCount, scopeSelectCount, serviceOptions, aboutTouchScrollState, requestedPaths: Array.from(new Set(requestedPaths)) }, null, 2));
+    console.log(JSON.stringify({ signedOutButtonText, aiButtonText, exhaustedButtonText, modeButtonCount, scopeSelectCount, serviceOptions, aboutTouchScrollState, requestedPaths: Array.from(new Set(requestedPaths)) }, null, 2));
   } finally {
     await browser.close();
   }
@@ -476,6 +510,20 @@ async function verifyAboutEmbeddedTouchScroll(browser) {
 }
 
 function createMockSession() {
+  if (mockSessionMode === "signed-out") {
+    return {
+      publicService: true,
+      authenticated: false,
+      user: null,
+      subscription: null,
+      credit: null,
+      entitlement: {
+        aiEnabled: false,
+        reason: "authentication_required",
+      },
+      chatOptions: createMockChatOptions(),
+    };
+  }
   const exhausted = mockSessionMode === "exhausted";
   return {
     publicService: true,

@@ -2373,9 +2373,34 @@ async function verifyTutorialModeMenuActions(browser) {
     }
   }
   if (!tutorialNodeCreated) throw new Error("Tutorial root node was not created after three long-press attempts.");
-  await clickPage.getByRole("button", { name: "Skip tutorial" }).click();
+  const completionStartedAt = Date.now();
+  for (const detail of [
+    { type: "pan" },
+    { type: "zoom" },
+    { type: "node-drag" },
+    { type: "child-node-created", childDepth: 2 },
+  ]) {
+    await clickPage.evaluate((eventDetail) => {
+      window.dispatchEvent(new CustomEvent("mindatlas:onboarding-event", { detail: eventDetail }));
+    }, detail);
+    await clickPage.waitForTimeout(120);
+  }
+  await clickPage.waitForFunction(() => {
+    const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
+    if (!raw) return false;
+    const progress = JSON.parse(raw);
+    return progress.childNodeCreated === true && progress.spaceBasicsCompleted === true;
+  });
   const startSpaceDialog = clickPage.getByRole("dialog", { name: "Choose how to start" });
-  await startSpaceDialog.waitFor();
+  await clickPage.waitForTimeout(1000);
+  if (await startSpaceDialog.count()) {
+    throw new Error("Tutorial template chooser opened before the child-node completion feedback was visible for five seconds.");
+  }
+  await startSpaceDialog.waitFor({ timeout: 7000 });
+  const templateDelayMs = Date.now() - completionStartedAt;
+  if (templateDelayMs < 4500) {
+    throw new Error(`Tutorial template chooser delay was too short: ${templateDelayMs}ms.`);
+  }
   await startSpaceDialog.getByRole("heading", { name: "Templates", exact: true }).waitFor();
   await startSpaceDialog.getByRole("button", { name: /Continue with tutorial nodes/ }).click();
   await startSpaceDialog.waitFor({ state: "detached" });
@@ -2385,7 +2410,7 @@ async function verifyTutorialModeMenuActions(browser) {
   }
   await clickContext.close();
 
-  return { tutorialResetConfirmed: true, noTemplateContinuationConfirmed: true };
+  return { tutorialResetConfirmed: true, noTemplateContinuationConfirmed: true, templateDelayMs };
 }
 
 async function addTutorialVerificationChild(page) {

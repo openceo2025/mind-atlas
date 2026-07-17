@@ -48,6 +48,7 @@ import { formatAppMessage } from "./i18n/format";
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const WORKSPACE_PANEL_EXIT_MS = 960;
 const LAYOUT_BIRTH_UNAVAILABLE_NOTICE_MS = 3600;
+const TUTORIAL_TEMPLATE_DELAY_MS = 5000;
 const RENDER_QUALITY_STORAGE_KEY = "mind-atlas-render-quality";
 const ROOT_COMMAND_MAX_ZOOM = 1.08;
 const DEFAULT_DATASET_TITLE = "Mind Atlas";
@@ -183,7 +184,9 @@ export default function App() {
   const [cloudLoadOpen, setCloudLoadOpen] = useState(false);
   const [startSpaceOpen, setStartSpaceOpen] = useState(false);
   const [startSpaceSource, setStartSpaceSource] = useState<StartSpaceSource>("initialize");
+  const [tutorialStartSpaceDueAt, setTutorialStartSpaceDueAt] = useState<number | null>(null);
   const tutorialCompletionRef = useRef({ initialized: false, awaitingCompletion: false });
+  const tutorialCompletionDelayMsRef = useRef(TUTORIAL_TEMPLATE_DELAY_MS);
   const analyticsNotebookRef = useRef<{ rootId: string; nodeCount: number; maxDepth: number; textSize: number } | null>(null);
   const analyticsIgnoreNextNotebookRef = useRef(false);
   const analyticsLastMeaningfulAtRef = useRef(0);
@@ -245,6 +248,7 @@ export default function App() {
   const outlineEditorRoot = outlineEditorRootId ? findNode(atlasRoot, outlineEditorRootId) ?? selectedNode : selectedNode;
   const onboarding = useOnboarding();
   const hostedAuthenticated = Boolean(publicServiceMode && hostedSession?.authenticated && hostedSession.user);
+  const hostedAccountFeatureLabel = hostedAuthenticated ? t("app.aiFeatures") : t("app.cloudAccountFeatures");
   const aiFeaturesUnlocked = publicServiceMode ? Boolean(hostedSession?.entitlement.aiEnabled) : onboarding.showMainChrome;
   const cloudNotebooksAvailable = publicServiceMode ? hostedAuthenticated : aiFeaturesUnlocked && !publicServiceMode;
   const currentCloudFingerprint = useMemo(
@@ -1515,13 +1519,29 @@ export default function App() {
     }
     if (!onboarding.showMainChrome) {
       tutorialState.awaitingCompletion = true;
+      setTutorialStartSpaceDueAt(null);
       return;
     }
     if (!tutorialState.awaitingCompletion) return;
     tutorialState.awaitingCompletion = false;
     trackProductEvent("tutorial_completed", {}, { immediate: true });
-    openStartSpaceDialog("tutorial");
-  }, [onboarding.showMainChrome, openStartSpaceDialog]);
+    const delayMs = tutorialCompletionDelayMsRef.current;
+    tutorialCompletionDelayMsRef.current = TUTORIAL_TEMPLATE_DELAY_MS;
+    if (delayMs <= 0) {
+      openStartSpaceDialog("tutorial");
+      return;
+    }
+    setTutorialStartSpaceDueAt(Date.now() + delayMs);
+  }, [onboarding.showMainChrome]);
+
+  useEffect(() => {
+    if (tutorialStartSpaceDueAt === null) return;
+    const timeout = window.setTimeout(() => {
+      setTutorialStartSpaceDueAt(null);
+      openStartSpaceDialog("tutorial");
+    }, Math.max(0, tutorialStartSpaceDueAt - Date.now()));
+    return () => window.clearTimeout(timeout);
+  }, [tutorialStartSpaceDueAt]);
 
   useEffect(() => {
     const mark = (event: Event) => {
@@ -1586,6 +1606,8 @@ export default function App() {
     latestUiStateRef.current = nextUiState;
     setLayoutMode("phyllotaxis");
     persistUiStatePatch(nextUiState);
+    tutorialCompletionDelayMsRef.current = TUTORIAL_TEMPLATE_DELAY_MS;
+    setTutorialStartSpaceDueAt(null);
     onboarding.startTutorialMode();
     setOutlineEditorOpen(false);
     setOutlineEditorRootId(null);
@@ -1595,6 +1617,7 @@ export default function App() {
 
   const handleSkipTutorial = () => {
     trackProductEvent("tutorial_skipped", {}, { immediate: true });
+    tutorialCompletionDelayMsRef.current = 0;
     onboarding.completeTutorial();
   };
 
@@ -1891,11 +1914,11 @@ export default function App() {
             className={`ai-feature-button ${aiFeaturesUnlocked ? "is-active" : ""}`}
             type="button"
             onClick={() => setAiFeatureDialogOpen(true)}
-            aria-label={t("app.aiFeatures")}
-            title={t("app.aiFeatures")}
+            aria-label={hostedAccountFeatureLabel}
+            title={hostedAccountFeatureLabel}
           >
             <Sparkles size={16} />
-            <span>{t("app.aiFeatures")}</span>
+            <span>{hostedAccountFeatureLabel}</span>
             <small>{aiFeatureButtonBadge(hostedSession, hostedSessionLoading, hostedSessionError)}</small>
           </button>
         ) : null}
@@ -2399,6 +2422,7 @@ function AiFeatureDialog({
   onClose: () => void;
   onRefresh: () => Promise<void>;
 }) {
+  const t = useMessage();
   const [actionBusy, setActionBusy] = useState<"login" | "checkout" | "portal" | "logout" | "refresh" | null>(null);
   const creditPercent = session?.credit ? Math.max(0, Math.min(100, session.credit.remainingPercent)) : 0;
   const roundedCreditPercent = Math.round(creditPercent);
@@ -2411,6 +2435,7 @@ function AiFeatureDialog({
     && (!session?.subscription || session.subscription.status === "canceled" || session.subscription.status === "incomplete");
   const portalAvailable = authenticated && Boolean(session?.subscription) && session?.subscription?.status !== "canceled";
   const showCredit = authenticated && Boolean(session?.credit && session.subscription && session.subscription.status !== "canceled");
+  const dialogTitle = authenticated ? t("app.aiFeatures") : t("app.cloudAccountFeatures");
   const creditCardClass = [
     "ai-credit-card",
     aiEnabled ? "is-active" : "",
@@ -2436,11 +2461,11 @@ function AiFeatureDialog({
   const handleRefresh = () => runAction("refresh", onRefresh);
 
   return (
-    <section className="ai-feature-dialog" role="dialog" aria-modal="true" aria-label={formatAppMessage("ui.app.aiFeatures.e64941b")} onMouseDown={(event) => event.stopPropagation()}>
+    <section className="ai-feature-dialog" role="dialog" aria-modal="true" aria-label={dialogTitle} onMouseDown={(event) => event.stopPropagation()}>
       <header className="voice-log-header">
         <div>
-          <h2>{<I18nText id="ui.app.aiFeatures.8149424" />}</h2>
-          <p>{aiFeatureStatusLabel(session, loading, error)}</p>
+          <h2>{dialogTitle}</h2>
+          <p>{authenticated ? aiFeatureStatusLabel(session, loading, error) : t("app.cloudAccountStatus")}</p>
         </div>
         <button className="icon-button" type="button" onClick={onClose} aria-label={formatAppMessage("ui.app.closeAiSettings.2147ae4")}>
           <X size={16} />
@@ -2449,9 +2474,20 @@ function AiFeatureDialog({
       <div className="ai-feature-body">
         {error ? <p className="ai-feature-error">{error}</p> : null}
         {!authenticated ? (
-          <p className="ai-feature-copy">{<I18nText id="ui.app.theNotebookWorksWithoutSigning.de5cd82" />}</p>
-        ) : null}
-        {aiEnabled ? (
+          <div className="ai-plan-card ai-account-benefits-card">
+            <p>{t("app.cloudAccountDescription")}</p>
+            <dl>
+              <div>
+                <dt>{t("app.cloudSaveFeature")}</dt>
+                <dd>{t("app.cloudSaveFeatureDetail")}</dd>
+              </div>
+              <div>
+                <dt>{t("app.shareLinkFeature")}</dt>
+                <dd>{t("app.shareLinkFeatureDetail")}</dd>
+              </div>
+            </dl>
+          </div>
+        ) : aiEnabled ? (
           <div className="ai-plan-card ai-usage-guide-card">
             <div className="ai-plan-card-header">
               <span>{<I18nText id="ui.app.aiRequest.752b5a1" />}</span>
