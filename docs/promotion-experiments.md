@@ -55,7 +55,7 @@ stops the next paid experiment until the cause is revised and retested.
 
 | Date | Experiment ID | State | Evidence | Remaining gate |
 | --- | --- | --- | --- | --- |
-| 2026-07-17 | `sticky_2026w29_00_attribution` | local verification | Short campaign routes, OAuth attribution cookie, new-vs-returning Google-user event, login triggers, campaign funnel, 24-hour save, and age-eligible Google-user D1/D7/D30 reporting implemented; analytics unit verification passed. | Run full local/hosted checks, deploy without including unrelated working-tree changes, then exercise one real end-to-end campaign login and inspect the VPS report. |
+| 2026-07-17 | `sticky_2026w29_00_attribution` | server deployed, end-to-end pending | Short campaign routes, OAuth attribution cookie, new-vs-returning Google-user event, login triggers, campaign funnel, 24-hour save, and age-eligible Google-user D1/D7/D30 reporting implemented. Analytics and hosted-service verification passed; report queries executed against production; the server-only deployment passed live `/health`, short-link redirect, OAuth-cookie, report, and journal checks. The unrelated calendar/explicit-save public UI was not deployed because its current UI checks fail. | Complete one real OAuth callback with a new test Google account and confirm `google_user_created` in the VPS report. Resolve the unrelated UI regressions before the next full hosted build. |
 
 ## Result template
 
