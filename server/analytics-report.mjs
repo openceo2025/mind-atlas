@@ -23,6 +23,7 @@ export async function buildGrowthReport({ days = 30 } = {}) {
     overview: current.overview,
     funnel: current.funnel,
     acquisition: current.acquisition,
+    promotion: current.promotion,
     retention: current.retention,
     sharing: current.sharing,
     billing: current.billing,
@@ -70,7 +71,7 @@ async function buildPeriod(days, offsetDays) {
   const nonAdminSql = "not exists (select 1 from users analytics_user where analytics_user.id = product_events.user_id and analytics_user.role = 'admin')";
   const actorSql = "coalesce(product_events.user_id, product_events.actor_hash, product_events.session_hash)";
 
-  const [traffic, trafficSegments, northStar, funnelRows, acquisitionRows, lastTouchRows, retention, sharing, billing, ai, quality, ingestQuality] = await Promise.all([
+  const [traffic, trafficSegments, northStar, funnelRows, acquisitionRows, lastTouchRows, promotion, retention, sharing, billing, ai, quality, ingestQuality] = await Promise.all([
     pool.query(
       `select coalesce(sum(pv),0)::int as pv, coalesce(sum(unique_visitors),0)::int as uu,
               coalesce(sum(error_4xx),0)::int as error_4xx, coalesce(sum(error_5xx),0)::int as error_5xx,
@@ -109,6 +110,7 @@ async function buildPeriod(days, offsetDays) {
        group by 1 order by actors desc limit 20`,
       params,
     ),
+    buildPromotion(days, offsetDays),
     buildRetention(days, offsetDays),
     buildSharing(days, offsetDays),
     buildBilling(days, offsetDays),
@@ -169,6 +171,7 @@ async function buildPeriod(days, offsetDays) {
       lastTouchSources: lastTouchRows.rows.map((row) => ({ source: row.source, actors: Number(row.actors) })),
       cookieless: trafficSegments,
     },
+    promotion,
     retention,
     sharing,
     billing,
@@ -176,6 +179,7 @@ async function buildPeriod(days, offsetDays) {
     dataQuality: {
       botRatio: rate(Number(trafficRow.bot_pv ?? 0), Number(trafficRow.pv ?? 0) + Number(trafficRow.bot_pv ?? 0)),
       clientAnalyticsCoverage: rate(clientActors, estimatedUu),
+      clientActorToVisitorDayRatio: rate(clientActors, estimatedUu),
       clientActors,
       clientEvents: Number(quality.rows[0]?.client_events ?? 0),
       incompleteEvents: Number(quality.rows[0]?.incomplete_events ?? 0),
@@ -187,6 +191,177 @@ async function buildPeriod(days, offsetDays) {
       http4xx: Number(trafficRow.error_4xx ?? 0),
       http5xx: Number(trafficRow.error_5xx ?? 0),
     },
+  };
+}
+
+async function buildPromotion(days, offsetDays) {
+  const params = [days, offsetDays];
+  const [totalUsers, campaigns, campaignFunnel, triggers, retention] = await Promise.all([
+    pool.query(`select count(*)::int as count from users where role <> 'admin'`),
+    pool.query(
+      `with created as (
+         select distinct on (product_events.user_id)
+           product_events.user_id, product_events.occurred_at,
+           coalesce(nullif(product_events.utm_campaign, ''), 'unattributed') as campaign,
+           coalesce(nullif(product_events.utm_source, ''), 'unattributed') as partner,
+           coalesce(nullif(product_events.utm_content, ''), 'unattributed') as asset,
+           coalesce(nullif(product_events.utm_medium, ''), 'unknown') as platform,
+           coalesce(nullif(product_events.locale, ''), 'unknown') as locale
+         from product_events
+         join users on users.id = product_events.user_id
+         where product_events.event_name = 'google_user_created'
+           and product_events.occurred_at >= current_date - ($2::integer + $1::integer - 1)
+           and product_events.occurred_at < current_date - $2::integer + interval '1 day'
+           and users.role <> 'admin'
+         order by product_events.user_id, product_events.occurred_at
+       )
+       select campaign, partner, asset, platform, locale,
+         count(*)::int as new_users,
+         count(*) filter (where exists (
+           select 1 from product_events saved
+           where saved.user_id = created.user_id
+             and saved.event_name = 'cloud_save_completed'
+             and saved.occurred_at >= created.occurred_at
+             and saved.occurred_at < created.occurred_at + interval '24 hours'
+         ))::int as saved_within_24h
+       from created
+       group by campaign, partner, asset, platform, locale
+       order by new_users desc, campaign, partner, asset`,
+      params,
+    ),
+    pool.query(
+      `select utm_campaign as campaign,
+              coalesce(nullif(utm_source, ''), 'unattributed') as partner,
+              coalesce(nullif(utm_content, ''), 'unattributed') as asset,
+              coalesce(nullif(utm_medium, ''), 'unknown') as platform,
+              coalesce(nullif(locale, ''), 'unknown') as locale,
+              count(distinct coalesce(user_id, actor_hash, session_hash)) filter (where event_name = 'app_opened')::int as landings,
+              count(distinct coalesce(user_id, actor_hash, session_hash)) filter (where event_name = 'google_login_started')::int as login_starts,
+              count(distinct coalesce(user_id, actor_hash, session_hash)) filter (where event_name = 'google_login_completed')::int as login_completions
+       from product_events
+       where occurred_at >= current_date - ($2::integer + $1::integer - 1)
+         and occurred_at < current_date - $2::integer + interval '1 day'
+         and utm_campaign <> ''
+         and event_name = any($3::text[])
+         and not exists (select 1 from users u where u.id = product_events.user_id and u.role = 'admin')
+       group by utm_campaign, partner, asset, platform, locale
+       order by landings desc, campaign, partner, asset`,
+      [...params, ["app_opened", "google_login_started", "google_login_completed"]],
+    ),
+    pool.query(
+      `select event_name, coalesce(nullif(properties->>'trigger', ''), 'account') as trigger,
+              count(*)::int as events, count(distinct coalesce(user_id, actor_hash, session_hash))::int as users
+       from product_events
+       where occurred_at >= current_date - ($2::integer + $1::integer - 1)
+         and occurred_at < current_date - $2::integer + interval '1 day'
+         and event_name = any($3::text[])
+         and not exists (select 1 from users u where u.id = product_events.user_id and u.role = 'admin')
+       group by event_name, trigger order by event_name, trigger`,
+      [...params, ["google_login_started", "google_login_completed", "google_user_created"]],
+    ),
+    buildGoogleUserRetention(days, offsetDays),
+  ]);
+  const campaignMap = new Map();
+  const keyFor = (row) => [row.campaign, row.partner, row.asset, row.platform, row.locale].join("\u0000");
+  for (const row of campaignFunnel.rows) {
+    campaignMap.set(keyFor(row), {
+      campaign: row.campaign,
+      partner: row.partner,
+      asset: row.asset,
+      platform: row.platform,
+      locale: row.locale,
+      landings: Number(row.landings ?? 0),
+      loginStarts: Number(row.login_starts ?? 0),
+      loginCompletions: Number(row.login_completions ?? 0),
+      newUsers: 0,
+      savedWithin24h: 0,
+    });
+  }
+  for (const row of campaigns.rows) {
+    const key = keyFor(row);
+    const current = campaignMap.get(key) ?? {
+      campaign: row.campaign,
+      partner: row.partner,
+      asset: row.asset,
+      platform: row.platform,
+      locale: row.locale,
+      landings: 0,
+      loginStarts: 0,
+      loginCompletions: 0,
+      newUsers: 0,
+      savedWithin24h: 0,
+    };
+    current.newUsers = Number(row.new_users ?? 0);
+    current.savedWithin24h = Number(row.saved_within_24h ?? 0);
+    campaignMap.set(key, current);
+  }
+  const campaignRows = [...campaignMap.values()].map((row) => ({
+    campaign: row.campaign,
+    partner: row.partner,
+    asset: row.asset,
+    platform: row.platform,
+    locale: row.locale,
+    landings: row.landings,
+    loginStarts: row.loginStarts,
+    loginCompletions: row.loginCompletions,
+    newUsers: row.newUsers,
+    landingToNewUser: rate(row.newUsers, row.landings),
+    oauthCompletion: rate(row.loginCompletions, row.loginStarts),
+    cloudSavedWithin24h: countAndRate(row.savedWithin24h, row.newUsers),
+    cashSpendJpy: null,
+    ownerMinutes: null,
+  })).sort((a, b) => b.landings - a.landings || b.newUsers - a.newUsers);
+  return {
+    totalGoogleUsers: Number(totalUsers.rows[0]?.count ?? 0),
+    attributedNewUsers: campaignRows.filter((row) => row.campaign !== "unattributed").reduce((sum, row) => sum + row.newUsers, 0),
+    unattributedNewUsers: campaignRows.filter((row) => row.campaign === "unattributed").reduce((sum, row) => sum + row.newUsers, 0),
+    campaigns: campaignRows,
+    loginTriggers: triggers.rows.map((row) => ({
+      event: row.event_name,
+      trigger: row.trigger,
+      events: Number(row.events ?? 0),
+      users: Number(row.users ?? 0),
+    })),
+    retention,
+  };
+}
+
+async function buildGoogleUserRetention(days, offsetDays) {
+  const result = await pool.query(
+    `with cohort as (
+       select id as user_id, created_at
+       from users
+       where role <> 'admin'
+         and created_at >= current_date - ($2::integer + $1::integer - 1)
+         and created_at < current_date - $2::integer + interval '1 day'
+     ), activity as (
+       select user_id, occurred_at from product_events
+       where user_id is not null and event_name = any($3::text[])
+     ), report_period as (
+       select current_date - $2::integer + interval '1 day' as end_at
+     )
+     select count(*)::int as cohort,
+       count(*) filter (where created_at < end_at - interval '1 day')::int as d1_eligible,
+       count(*) filter (where created_at < end_at - interval '1 day' and exists (
+         select 1 from activity x where x.user_id = cohort.user_id and x.occurred_at >= created_at + interval '1 day' and x.occurred_at < created_at + interval '2 day'
+       ))::int as d1,
+       count(*) filter (where created_at < end_at - interval '7 day')::int as d7_eligible,
+       count(*) filter (where created_at < end_at - interval '7 day' and exists (
+         select 1 from activity x where x.user_id = cohort.user_id and x.occurred_at >= created_at + interval '7 day' and x.occurred_at < created_at + interval '8 day'
+       ))::int as d7,
+       count(*) filter (where created_at < end_at - interval '30 day')::int as d30_eligible,
+       count(*) filter (where created_at < end_at - interval '30 day' and exists (
+         select 1 from activity x where x.user_id = cohort.user_id and x.occurred_at >= created_at + interval '30 day' and x.occurred_at < created_at + interval '31 day'
+       ))::int as d30
+     from cohort cross join report_period`,
+    [days, offsetDays, MEANINGFUL_EVENTS],
+  );
+  const row = result.rows[0] ?? {};
+  return {
+    cohort: Number(row.cohort ?? 0),
+    d1: countAndRate(row.d1, row.d1_eligible),
+    d7: countAndRate(row.d7, row.d7_eligible),
+    d30: countAndRate(row.d30, row.d30_eligible),
   };
 }
 

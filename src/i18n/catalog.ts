@@ -1,6 +1,6 @@
-import type { AppLocale } from "./locales";
+import type { AppLocale } from "./locales.ts";
 import { japaneseMessages, sourceMessages } from "./messages.ts";
-import { pseudoLocalize } from "./pseudo";
+import { pseudoLocalize } from "./pseudo.ts";
 import { RUNTIME_TRANSLATIONS } from "./runtimeTranslations.ts";
 
 export function messagesForLocale(locale: AppLocale): Record<string, string> {

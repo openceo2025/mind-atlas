@@ -112,6 +112,43 @@ assert.ok(focusedMindMapFrame.visibleIds.has("atlas-root"), "mind map should sho
 assert.ok(focusedMindMapFrame.visibleIds.has("beta"), "mind map should show focused siblings near parent context");
 assertMinDistance(focusedMindMapFrame, 46, "mind map visible nodes should not collapse onto each other");
 
+const calendarRoot = node("calendar-root", "Calendar", [
+  node("unscheduled", "No reminder"),
+  node("calendar-a", "Monday morning"),
+  node("calendar-b", "Monday noon"),
+  node("calendar-c", "Monday afternoon"),
+  node("calendar-d", "Monday evening"),
+  node("calendar-e", "Monday night"),
+  node("calendar-next-week", "Next week"),
+]);
+for (const [id, reminderAt] of [
+  ["calendar-a", "2026-07-13T09:00:00"],
+  ["calendar-b", "2026-07-13T12:00:00"],
+  ["calendar-c", "2026-07-13T15:00:00"],
+  ["calendar-d", "2026-07-13T18:00:00"],
+  ["calendar-e", "2026-07-13T21:00:00"],
+  ["calendar-next-week", "2026-07-20T10:00:00"],
+] as const) {
+  const scheduled = findNode(calendarRoot, id);
+  assert.ok(scheduled);
+  scheduled.reminderAt = reminderAt;
+}
+const calendarFrame = deriveAtlasLayoutFrame(calendarRoot, "calendar", undefined, { viewport: "desktop", locale: "en" });
+assert.equal(calendarFrame.planeZ, -1320, "calendar should use the generated-layout Cartesian plane");
+assert.ok(!calendarFrame.visibleIds.has("unscheduled"), "calendar should omit nodes without reminders");
+assert.equal(calendarFrame.visibleIds.size, 6, "calendar should include every scheduled node");
+const denseCalendarPositions = ["calendar-a", "calendar-b", "calendar-c", "calendar-d", "calendar-e"].map((id) => calendarFrame.positions.get(id));
+assert.ok(denseCalendarPositions.every(Boolean), "calendar should position every node in a dense day");
+assert.equal(new Set(denseCalendarPositions.map((position) => position?.[0])).size, 3, "five nodes in one day should use a near-square three-column grid");
+assert.equal(new Set(denseCalendarPositions.map((position) => position?.[1])).size, 2, "five nodes in one day should use two rows");
+assert.ok((calendarFrame.nodeScales.get("calendar-a") ?? 1) < 1, "dense calendar days should reduce node scale to stay inside the cell");
+assert.equal(calendarFrame.labelScales.get("calendar-a"), 0, "dense calendar days should collapse non-focused titles into a count badge");
+assert.ok((calendarFrame.positions.get("calendar-next-week")?.[1] ?? 0) < (calendarFrame.positions.get("calendar-a")?.[1] ?? 0), "later calendar weeks should be placed lower");
+assert.ok(calendarFrame.overlay.lines.length >= 11, "calendar should expose reusable spatial grid lines");
+assert.equal(calendarFrame.overlay.labels.filter((label) => label.tone === "weekday").length, 7, "calendar should render seven weekday labels");
+assert.ok(calendarFrame.overlay.labels.some((label) => label.text === "MON"), "calendar should localize and render Monday");
+assert.ok(calendarFrame.overlay.labels.some((label) => label.tone === "count" && label.text === "×5"), "dense calendar days should expose an item-count guide label");
+
 console.log("Layout verification passed");
 
 function bakeLegacyAutoPositions(tree: AtlasNode): AtlasNode {

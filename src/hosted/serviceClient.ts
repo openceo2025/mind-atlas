@@ -34,11 +34,14 @@ export async function fetchHostedServiceSession(): Promise<HostedServiceSession>
   return await readHostedJson<HostedServiceSession>(response);
 }
 
-export function startHostedGoogleLogin() {
+export type HostedGoogleLoginTrigger = "cloud_save" | "share" | "account" | "remix";
+
+export function startHostedGoogleLogin(trigger: HostedGoogleLoginTrigger = "account") {
   if (typeof window === "undefined") return;
   const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   const url = new URL(`${getHostedServiceUrl()}/api/auth/google/start`);
   url.searchParams.set("returnTo", returnTo || "/");
+  url.searchParams.set("trigger", trigger);
   window.location.assign(url.toString());
 }
 

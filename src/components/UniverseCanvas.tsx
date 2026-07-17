@@ -41,6 +41,7 @@ import { getStatusColor } from "../utils/status";
 import { I18nText } from "../i18n/I18nProvider";
 import { formatAppMessage } from "../i18n/format";
 import { currentAppLocale } from "../i18n/locales";
+import { SpatialLayoutOverlay } from "./SpatialLayoutOverlay";
 
 const FOCUS_DURATION_SECONDS = 1.05;
 const FOCUS_PITCH_LIMIT = Math.PI / 2 - 0.04;
@@ -495,6 +496,7 @@ export function UniverseCanvas({
           tutorialRootBirthUnlocked={Boolean(tutorialRootBirthUnlocked)}
           embedInteractionLocked={embedInteractionLocked}
         />
+        <SpatialOverlayLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} />
         <NotebookNodes
           theme={theme}
           renderQuality={renderQuality}
@@ -508,6 +510,22 @@ export function UniverseCanvas({
       </Canvas>
       <NodeContextMenu menu={nodeContextMenu} onClose={() => setNodeContextMenu(null)} />
     </section>
+  );
+}
+
+function SpatialOverlayLayer({ theme, renderQuality, layoutMode }: { theme: AtlasTheme; renderQuality: RenderQuality; layoutMode: AtlasLayoutMode }) {
+  const { size } = useThree();
+  const stableLayoutMetrics = getStableLayoutMetrics(size.width, size.height);
+  const viewport = getGeneratedLayoutViewport(layoutMode, stableLayoutMetrics.width, stableLayoutMetrics.height, stableLayoutMetrics.keyboardPortraitLock);
+  return (
+    <SpatialLayoutOverlay
+      layoutMode={layoutMode}
+      viewport={viewport}
+      viewportWidth={stableLayoutMetrics.width}
+      viewportHeight={stableLayoutMetrics.height}
+      theme={theme}
+      lowQuality={renderQuality === "low"}
+    />
   );
 }
 
@@ -672,6 +690,8 @@ function NotificationPulseLayer({
     lastPruneRef.current = now;
     tickNotificationPulses();
   });
+
+  if (layoutMode === "calendar") return null;
 
   return (
     <>
@@ -1108,7 +1128,7 @@ function NavigationController({
     const targetDiameter = Math.max(focusRequest.diameter, generatedFocusDiameter);
     const targetDistance =
       mobileGeneratedLayout
-        ? getGeneratedLayoutMobileCameraDistance(targetDiameter, stableLayoutMetrics.height, perspective.fov, layoutViewport)
+        ? getGeneratedLayoutMobileCameraDistance(targetDiameter, stableLayoutMetrics.height, perspective.fov, layoutViewport, layoutMode)
         : getCameraDistanceForDiameter(
             targetDiameter,
             stableLayoutMetrics.height,
@@ -2196,6 +2216,8 @@ function NotebookNodes({
   );
   const currentLayoutPositions = layoutFrame.positions;
   const currentVisibleNodeIds = layoutFrame.visibleIds;
+  const currentNodeScales = layoutFrame.nodeScales;
+  const currentLabelScales = layoutFrame.labelScales;
   const previousVisibleNodeIdsRef = useRef<Set<string> | null>(null);
   const previousLayoutPositionsRef = useRef<Map<string, Vec3>>(currentLayoutPositions);
   const retainedLayoutPositionsRef = useRef<Map<string, Vec3>>(new Map());
@@ -2388,6 +2410,62 @@ function NotebookNodes({
     }, remainingMs);
     return () => window.clearTimeout(timeout);
   }, [dismissNotificationSnoozePrompt, notificationSnoozePrompt, pageActive]);
+
+  if (layoutMode === "calendar") {
+    const calendarPaths = [...currentVisibleNodeIds]
+      .map((nodeId) => findNodePath(atlasRoot, nodeId))
+      .filter((path): path is AtlasNode[] => Boolean(path));
+    return (
+      <group>
+        {calendarPaths.map((path) => {
+          const node = path[path.length - 1];
+          const position = getLayoutPosition(layoutPositions, node.id);
+          return (
+            <HierarchyNode
+              key={`calendar-${node.id}`}
+              node={node}
+              path={path}
+              worldPosition={position}
+              localPosition={position}
+              depth={Math.max(1, path.length - 1)}
+              visibleDepthRemaining={0}
+              visibleDepthIndex={0}
+              selectedNodeId={effectiveSelectedNodeId}
+              highlightSelectedNodeId={highlightSelectedNodeId}
+              multiSelectedNodeIds={multiSelectedNodeIdSet}
+              aiContextPreviewNodeIds={aiContextPreviewNodeIds}
+              runningLineageNodeIds={runningLineageNodeIds}
+              selectedPathIndexByNodeId={selectedPathIndexByNodeId}
+              selectedPathLength={selectedPath.length}
+              selectedParentId={rootIsSelected ? null : selectedParentId}
+              focusWaveStartedAt={focusWaveStartedAt}
+              notificationKind={notificationKindsByNodeId.get(node.id) ?? null}
+              notificationKindsByNodeId={notificationKindsByNodeId}
+              notificationSnoozePrompt={activeNotificationSnoozePrompt}
+              mobileLabelScope={false}
+              suppressParentEdge
+              renderQuality={renderQuality}
+              theme={theme}
+              layoutPositions={layoutPositions}
+              visibleNodeIds={renderVisibleNodeIds}
+              labelVisibleNodeIds={labelVisibleNodeIds}
+              labelAnchorNodeId={labelAnchorNodeId}
+              currentVisibleNodeIds={currentVisibleNodeIds}
+              enteringNodeIds={enteringNodeIds}
+              layoutMode={layoutMode}
+              layoutScale={currentNodeScales.get(node.id) ?? 1}
+              labelScale={currentLabelScales.get(node.id) ?? 1}
+              flattenedLayout
+              rootOverviewActive={rootIsSelected}
+              embedInteractionLocked={embedInteractionLocked}
+              attachmentsEnabled={attachmentsEnabled}
+              onOpenNodeContextMenu={onOpenNodeContextMenu}
+            />
+          );
+        })}
+      </group>
+    );
+  }
 
   if (!atlasRoot.children.length) {
     return null;
@@ -2867,6 +2945,9 @@ function HierarchyNode({
   currentVisibleNodeIds,
   enteringNodeIds,
   layoutMode,
+  layoutScale = 1,
+  labelScale = 1,
+  flattenedLayout = false,
   rootOverviewActive,
   embedInteractionLocked,
   attachmentsEnabled,
@@ -2902,6 +2983,9 @@ function HierarchyNode({
   currentVisibleNodeIds: Set<string>;
   enteringNodeIds: Set<string>;
   layoutMode: AtlasLayoutMode;
+  layoutScale?: number;
+  labelScale?: number;
+  flattenedLayout?: boolean;
   rootOverviewActive: boolean;
   embedInteractionLocked: boolean;
   attachmentsEnabled: boolean;
@@ -2988,7 +3072,8 @@ function HierarchyNode({
     : mobileLabelScope
     ? mobileLabelVisible
     : isLocalContextNode || rootDirectTitleVisible || (depth <= 1 ? zoom > 0.55 : zoom > getLabelZoom(depth));
-  const labelVisible = isSelected || isLabelAnchor || (baseLabelVisible && labelVisibleNodeIds.has(node.id));
+  const calendarLabelEligible = layoutMode !== "calendar" || labelScale > 0;
+  const labelVisible = calendarLabelEligible && (isSelected || isLabelAnchor || (baseLabelVisible && labelVisibleNodeIds.has(node.id)));
   const interactiveLabelVisible = !mobileLabelScope || isSelected || isMultiSelected || isAiContextPreviewNode;
   const [layoutEdgeHidden, setLayoutEdgeHidden] = useState(false);
   const parentEdgeVisible = !suppressParentEdge && path.length > 2 && hiddenDragEdgeNodeId !== node.id && !layoutEdgeHidden;
@@ -3069,7 +3154,7 @@ function HierarchyNode({
   const birthStartedAt = birthMarks[node.id];
 
   applyVisualWorldPositionRef.current = (nextWorld, parentWorldOverride) => {
-    const parentWorld = parentWorldOverride ?? getVisualParentWorld(path, parentWorldRef.current);
+    const parentWorld = parentWorldOverride ?? (flattenedLayout ? parentWorldRef.current : getVisualParentWorld(path, parentWorldRef.current));
     const nextLocal = subtractPosition(nextWorld, parentWorld);
     groupRef.current?.position.set(nextLocal[0], nextLocal[1], nextLocal[2]);
     visualWorldRef.current = nextWorld;
@@ -3078,6 +3163,7 @@ function HierarchyNode({
   const applyVisualWorldPosition = (nextWorld: Vec3Tuple, parentWorldOverride?: Vec3Tuple) => {
     applyVisualWorldPositionRef.current(nextWorld, parentWorldOverride);
   };
+  const resolveVisualParentWorld = (fallback: Vec3Tuple) => (flattenedLayout ? fallback : getVisualParentWorld(path, fallback));
 
   useLayoutEffect(() => {
     const parentWorld = subtractPosition(worldPosition, localPosition);
@@ -3087,7 +3173,7 @@ function HierarchyNode({
       layoutTransitionRef.current = null;
       setLayoutEdgeHidden(false);
       applyVisualWorldPosition(worldPosition, parentWorld);
-      groupRef.current?.scale.setScalar(1);
+      groupRef.current?.scale.setScalar(layoutScale);
       return;
     }
 
@@ -3097,7 +3183,7 @@ function HierarchyNode({
       layoutTransitionRef.current = null;
       setLayoutEdgeHidden(false);
       applyVisualWorldPosition(targetWorld, parentWorld);
-      groupRef.current?.scale.setScalar(isNodeLayoutVisible ? 1 : 0.56);
+      groupRef.current?.scale.setScalar((isNodeLayoutVisible ? 1 : 0.56) * layoutScale);
       return;
     }
     const transitionKind: "move" | "enter" | "exit" = isNodeLayoutVisible ? (isEnteringLayout ? "enter" : "move") : "exit";
@@ -3124,6 +3210,7 @@ function HierarchyNode({
     isEnteringLayout,
     isNodeLayoutVisible,
     layoutMode,
+    layoutScale,
     localPosition[0],
     localPosition[1],
     localPosition[2],
@@ -3142,12 +3229,12 @@ function HierarchyNode({
     const progress = Math.min(1, delayedElapsed / transition.duration);
     const eased = getLayoutMotionProgress(progress, renderQuality);
     const nextWorld = lerpPosition(transition.startWorld, transition.targetWorld, eased);
-    applyVisualWorldPosition(nextWorld, getVisualParentWorld(path, transition.parentWorld));
-    groupRef.current?.scale.setScalar(getNodeTransitionScale(progress, transition.kind));
+    applyVisualWorldPosition(nextWorld, resolveVisualParentWorld(transition.parentWorld));
+    groupRef.current?.scale.setScalar(getNodeTransitionScale(progress, transition.kind) * layoutScale);
     if (progress >= 1) {
       layoutTransitionRef.current = null;
-      applyVisualWorldPosition(transition.targetWorld, getVisualParentWorld(path, transition.parentWorld));
-      groupRef.current?.scale.setScalar(transition.kind === "exit" ? 0.56 : 1);
+      applyVisualWorldPosition(transition.targetWorld, resolveVisualParentWorld(transition.parentWorld));
+      groupRef.current?.scale.setScalar((transition.kind === "exit" ? 0.56 : 1) * layoutScale);
       setLayoutEdgeHidden(false);
     }
   });
@@ -3665,26 +3752,31 @@ function HierarchyNode({
 
       {labelVisible ? (
         <Html center position={[0, -radius - 14, 16]} transform={false} zIndexRange={isLabelAnchor ? [4, 1] : [2, 0]}>
-          {interactiveLabelVisible ? (
-            <SpaceNodeEditor
-              node={node}
-              isSelected={isSelected || isMultiSelected}
-              isPrimarySelected={isSelected}
-              onSelect={() => selectNodeInPlace(node.id)}
-              onFocusNode={() => focusNode(node.id)}
-              onChange={(title) =>
-                updateNode(node.id, {
-                  title,
-                })
-              }
-            />
-          ) : (
-            <SpaceNodePreview
-              node={node}
-              isSelected={isSelected || isMultiSelected}
-              onFocusNode={() => focusNode(node.id)}
-            />
-          )}
+          <div
+            className={layoutMode === "calendar" ? "calendar-node-label" : undefined}
+            style={layoutMode === "calendar" ? { transform: `scale(${labelScale})` } : undefined}
+          >
+            {interactiveLabelVisible ? (
+              <SpaceNodeEditor
+                node={node}
+                isSelected={isSelected || isMultiSelected}
+                isPrimarySelected={isSelected}
+                onSelect={() => selectNodeInPlace(node.id)}
+                onFocusNode={() => focusNode(node.id)}
+                onChange={(title) =>
+                  updateNode(node.id, {
+                    title,
+                  })
+                }
+              />
+            ) : (
+              <SpaceNodePreview
+                node={node}
+                isSelected={isSelected || isMultiSelected}
+                onFocusNode={() => focusNode(node.id)}
+              />
+            )}
+          </div>
         </Html>
       ) : null}
     </group>
@@ -5102,6 +5194,12 @@ function areAllNodesOffscreen(root: AtlasNode, camera: PerspectiveCamera, layout
   if (!root.children.length) return false;
   camera.updateMatrixWorld();
   const frame = deriveAtlasLayoutFrame(root, layoutMode, undefined, { focusNodeId: selectedNodeId, viewport });
+  if (layoutMode === "calendar") {
+    return !Array.from(frame.visibleIds).some((nodeId) => {
+      const position = frame.positions.get(nodeId);
+      return position ? isWorldPositionOnscreen(position, camera) : false;
+    });
+  }
   return !root.children.some((child) => frame.visibleIds.has(child.id) && isNodePathOnscreen([root, child], camera, frame.positions, frame.visibleIds));
 }
 
@@ -5210,9 +5308,17 @@ function getCameraDistanceForDiameter(diameter: number, viewportHeight: number, 
   return Math.min(maxDistance, Math.max(42, distance * Math.max(0.72, 920 / Math.max(viewportHeight, 1))));
 }
 
-function getGeneratedLayoutMobileCameraDistance(diameter: number, viewportHeight: number, fov: number, viewport: AtlasLayoutViewport) {
+function getGeneratedLayoutMobileCameraDistance(
+  diameter: number,
+  viewportHeight: number,
+  fov: number,
+  viewport: AtlasLayoutViewport,
+  layoutMode: AtlasLayoutMode,
+) {
   const verticalFov = (fov * Math.PI) / 180;
-  const padding = viewport === "mobile-landscape" ? GENERATED_LAYOUT_MOBILE_LANDSCAPE_FIT_PADDING : GENERATED_LAYOUT_MOBILE_FIT_PADDING;
+  const padding = layoutMode === "calendar"
+    ? viewport === "mobile-landscape" ? 1.1 : 1.3
+    : viewport === "mobile-landscape" ? GENERATED_LAYOUT_MOBILE_LANDSCAPE_FIT_PADDING : GENERATED_LAYOUT_MOBILE_FIT_PADDING;
   const targetWorldHeight = Math.max(diameter * padding, NOTEBOOK_NODE_RADIUS * 9);
   const distance = targetWorldHeight / (2 * Math.tan(verticalFov / 2));
   return clamp(distance, 180, GENERATED_LAYOUT_MOBILE_MAX_CAMERA_DISTANCE);
@@ -5237,9 +5343,12 @@ function getGeneratedLayoutFocusScreenOffset(
     y: (reserved.top - reserved.bottom) / 2,
   };
   const treeBias = layoutMode === "tree" ? getGeneratedLayoutTreeScreenBias(viewport, usableWidth, usableHeight) : { x: 0, y: 0 };
+  const calendarBias = layoutMode === "calendar" && viewport !== "mobile-landscape"
+    ? { x: Math.min(viewport === "mobile-portrait" ? 24 : 44, usableWidth * 0.08), y: 0 }
+    : { x: 0, y: 0 };
   return {
-    x: dialogOffset.x + treeBias.x,
-    y: dialogOffset.y + treeBias.y,
+    x: dialogOffset.x + treeBias.x + calendarBias.x,
+    y: dialogOffset.y + treeBias.y + calendarBias.y,
   };
 }
 
@@ -5483,7 +5592,7 @@ function getLayoutAwareDepthFade(
       backgroundBlend: 0,
     };
   }
-  if ((layoutMode === "tree" || layoutMode === "mind-map") && renderQuality === "high" && layoutVisible) {
+  if ((layoutMode === "tree" || layoutMode === "mind-map" || layoutMode === "calendar") && renderQuality === "high" && layoutVisible) {
     return {
       index: 0,
       opacity: 1,

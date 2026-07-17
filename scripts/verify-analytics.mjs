@@ -47,6 +47,7 @@ assert.throws(
   AnalyticsValidationError,
 );
 assert.deepEqual(sanitizeProperties("meaningful_edit", { kind: "body", node_count: 4, node_title: "secret" }), { kind: "body", node_count: 4 });
+assert.deepEqual(sanitizeProperties("google_login_started", { trigger: "cloud_save", email: "secret@example.com" }), { trigger: "cloud_save" });
 assert.equal(hmacIdentifier("key", "actor", "same"), hmacIdentifier("key", "actor", "same"));
 assert.notEqual(dailyVisitorHash("key", "2026-07-11", "127.0.0.1", "Browser"), dailyVisitorHash("key", "2026-07-12", "127.0.0.1", "Browser"));
 assert.equal(isTrackedPublicPage("/"), true);
@@ -96,5 +97,6 @@ assert.equal(server.includes("ma_analytics_link"), false, "anonymous analytics m
 const growthReportBlock = admin.slice(admin.indexOf('command === "growth-report"'), admin.indexOf('command === "analytics-cleanup"'));
 assert.equal(growthReportBlock.includes("migrateDatabase()"), false, "growth-report must remain read-only");
 assert.ok(report.includes("::text as start") && report.includes("::text as end"), "growth report dates should not shift through timezone conversion");
+assert.ok(report.includes("buildPromotion") && report.includes("cloudSavedWithin24h"), "growth report should expose campaign-to-new-user attribution");
 
 console.log("Analytics verification passed.");

@@ -1,8 +1,11 @@
-import type { AtlasNode } from "../types";
-import { formatAppMessage } from "../i18n/format";
+import type { AtlasNode } from "../types.ts";
+import { formatAppMessage } from "../i18n/format.ts";
+import { currentAppLocale } from "../i18n/locales.ts";
+import { CALENDAR_LAYOUT_PLANE_Z, deriveCalendarLayout } from "./calendarLayout.ts";
+import { EMPTY_SPATIAL_LAYOUT_OVERLAY, type SpatialLayoutOverlay, type SpatialVec3 } from "./spatialOverlay.ts";
 
-export type Vec3 = [number, number, number];
-export type AtlasLayoutMode = "phyllotaxis" | "tree" | "mind-map";
+export type Vec3 = SpatialVec3;
+export type AtlasLayoutMode = "phyllotaxis" | "tree" | "mind-map" | "calendar";
 export type AtlasPositionOverrides = Map<string, Vec3> | Record<string, Vec3 | undefined>;
 export type AtlasLayoutViewport = "desktop" | "mobile-portrait" | "mobile-landscape";
 
@@ -11,12 +14,16 @@ export interface AtlasLayoutOptions {
   viewport?: AtlasLayoutViewport;
   viewportWidth?: number;
   viewportHeight?: number;
+  locale?: string;
 }
 
 export interface AtlasLayoutFrame {
   positions: Map<string, Vec3>;
   visibleIds: Set<string>;
   planeZ: number | null;
+  nodeScales: Map<string, number>;
+  labelScales: Map<string, number>;
+  overlay: SpatialLayoutOverlay;
   bounds: { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number };
 }
 
@@ -95,6 +102,10 @@ export function deriveAtlasLayoutFrame(
   let positions: Map<string, Vec3>;
   let visibleIds: Set<string>;
   let planeZ: number | null = null;
+  let nodeScales = new Map<string, number>();
+  let labelScales = new Map<string, number>();
+  let overlay = EMPTY_SPATIAL_LAYOUT_OVERLAY;
+  let boundsPoints: Vec3[] = [];
 
   switch (mode) {
     case "phyllotaxis": {
@@ -114,13 +125,31 @@ export function deriveAtlasLayoutFrame(
       planeZ = FOCUS_LAYOUT_PLANE_Z;
       break;
     }
+    case "calendar": {
+      const calendar = deriveCalendarLayout(tree, {
+        viewport: options.viewport,
+        locale: options.locale ?? currentAppLocale(),
+        focusNodeId: options.focusNodeId,
+      });
+      positions = calendar.positions;
+      visibleIds = calendar.visibleIds;
+      planeZ = CALENDAR_LAYOUT_PLANE_Z;
+      nodeScales = calendar.nodeScales;
+      labelScales = calendar.labelScales;
+      overlay = calendar.overlay;
+      boundsPoints = calendar.boundsPoints;
+      break;
+    }
   }
 
   return {
     positions,
     visibleIds,
     planeZ,
-    bounds: getLayoutBounds(positions, visibleIds),
+    nodeScales,
+    labelScales,
+    overlay,
+    bounds: getLayoutBounds(positions, visibleIds, boundsPoints),
   };
 }
 
@@ -269,11 +298,13 @@ export function getAtlasLayoutModeLabel(mode: AtlasLayoutMode) {
       return formatAppMessage("label.layout.tree");
     case "mind-map":
       return formatAppMessage("label.layout.mindMap");
+    case "calendar":
+      return formatAppMessage("label.layout.calendar");
   }
 }
 
 export function isAtlasLayoutMode(value: unknown): value is AtlasLayoutMode {
-  return value === "phyllotaxis" || value === "tree" || value === "mind-map";
+  return value === "phyllotaxis" || value === "tree" || value === "mind-map" || value === "calendar";
 }
 
 export function getShellRadius(depth: number) {
@@ -521,10 +552,11 @@ function findAtlasNodePath(root: AtlasNode, id: string): AtlasNode[] | null {
   return null;
 }
 
-function getLayoutBounds(positions: Map<string, Vec3>, visibleIds: Set<string>) {
+function getLayoutBounds(positions: Map<string, Vec3>, visibleIds: Set<string>, extraPoints: Vec3[] = []) {
   const visiblePositions = [...positions.entries()]
     .filter(([id]) => visibleIds.has(id))
-    .map(([, position]) => position);
+    .map(([, position]) => position)
+    .concat(extraPoints);
   if (!visiblePositions.length) {
     return { minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 };
   }

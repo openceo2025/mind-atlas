@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { getEnv } from "./service-config.mjs";
 import { insertProductEvents } from "./service-db.mjs";
+import { normalizePromotionContext } from "./promotion-attribution.mjs";
 
 export const CLIENT_ANALYTICS_EVENTS = new Set([
   "landing_view",
@@ -19,6 +20,7 @@ export const CLIENT_ANALYTICS_EVENTS = new Set([
 ]);
 
 export const SERVER_ANALYTICS_EVENTS = new Set([
+  "google_user_created",
   "google_login_completed",
   "cloud_save_completed",
   "share_link_created",
@@ -41,6 +43,9 @@ const PROPERTY_ALLOWLIST = new Map([
   ["first_node_created", new Set(["method", "node_count", "max_depth"])],
   ["activation_reached", new Set(["node_count", "max_depth"])],
   ["meaningful_edit", new Set(["kind", "node_count", "max_depth"])],
+  ["google_login_started", new Set(["trigger"])],
+  ["google_user_created", new Set(["trigger"])],
+  ["google_login_completed", new Set(["trigger"])],
   ["shared_atlas_imported", new Set(["notebook_id"])],
   ["cloud_save_completed", new Set(["notebook_id", "operation", "size_bytes"])],
   ["share_link_created", new Set(["notebook_id", "new_share"])],
@@ -118,6 +123,7 @@ export function normalizeClientAnalyticsBatch(payload, { userId = null } = {}) {
 export async function recordServerAnalyticsEvent(eventName, options = {}) {
   if (!analyticsEnabled() || !SERVER_ANALYTICS_EVENTS.has(eventName)) return { inserted: 0, duplicates: 0 };
   const eventId = safeOpaqueId(options.eventId, 180) || `server:${eventName}:${crypto.randomUUID()}`;
+  const attribution = normalizePromotionContext(options.attribution);
   return await insertProductEvents([{
     eventId: eventId.startsWith("server:") ? eventId : `server:${eventId}`,
     eventName,
@@ -126,19 +132,19 @@ export async function recordServerAnalyticsEvent(eventName, options = {}) {
     sessionHash: options.sessionHash ?? null,
     userId: options.userId ?? null,
     occurredAt: options.occurredAt ?? new Date().toISOString(),
-    locale: safeLocale(options.locale),
+    locale: safeLocale(attribution.locale || options.locale),
     pageGroup: safePageGroup(options.pageGroup),
     referrerHost: "",
-    utmSource: "",
-    utmMedium: "",
-    utmCampaign: "",
-    utmContent: "",
+    utmSource: safeText(attribution.partner, 120),
+    utmMedium: safeText(attribution.platform, 120),
+    utmCampaign: safeText(attribution.campaign, 160),
+    utmContent: safeText(attribution.asset, 160),
     utmTerm: "",
     firstReferrerHost: "",
-    firstUtmSource: "",
-    firstUtmMedium: "",
-    firstUtmCampaign: "",
-    firstUtmContent: "",
+    firstUtmSource: safeText(attribution.partner, 120),
+    firstUtmMedium: safeText(attribution.platform, 120),
+    firstUtmCampaign: safeText(attribution.campaign, 160),
+    firstUtmContent: safeText(attribution.asset, 160),
     firstUtmTerm: "",
     deviceClass: "unknown",
     experimentId: "",

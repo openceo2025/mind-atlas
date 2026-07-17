@@ -237,6 +237,18 @@ try {
     await cloudDialog.getByRole("button", { name: "Load", exact: true }).click();
     await cloudDialog.waitFor({ state: "detached" });
     await page.locator(".node-body-input").fill("Unsaved hosted cloud edit");
+    const shortcutOverwriteCount = cloudOverwriteCount;
+    const cloudSavePrevented = await page.evaluate(() => {
+      const event = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    if (!cloudSavePrevented) throw new Error("Ctrl+S did not prevent the browser save-page action in hosted mode.");
+    await waitForCondition(() => cloudOverwriteCount > shortcutOverwriteCount, 3000);
+    if (cloudOverwriteCount <= shortcutOverwriteCount) throw new Error("Ctrl+S did not overwrite the current hosted cloud notebook.");
+    const shortcutSaveToast = page.locator(".context-copy-toast", { hasText: "Verify cloud notebook" });
+    await shortcutSaveToast.waitFor();
+    await page.locator(".node-body-input").fill("Unsaved hosted cloud edit after shortcut");
     await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
     await publicMenu.getByText("クラウドへ保存").click();
     await cloudDialog.waitFor();

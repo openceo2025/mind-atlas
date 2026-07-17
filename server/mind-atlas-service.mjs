@@ -46,6 +46,12 @@ import {
   normalizeClientAnalyticsBatch,
   recordServerAnalyticsEventSafe,
 } from "./analytics.mjs";
+import {
+  buildPromotionRedirect,
+  decodePromotionContext,
+  encodePromotionContext,
+  promotionContextFromGoogleStart,
+} from "./promotion-attribution.mjs";
 
 const serviceHost = getEnv("MIND_ATLAS_SERVICE_HOST", "127.0.0.1");
 const servicePort = readIntEnv("MIND_ATLAS_SERVICE_PORT", 8788);
@@ -54,6 +60,7 @@ const distDir = path.resolve(serviceRootDir, getEnv("MIND_ATLAS_DIST_DIR", "dist
 const sessionCookieName = "ma_session";
 const oauthStateCookieName = "ma_oauth_state";
 const oauthReturnCookieName = "ma_oauth_return";
+const oauthAttributionCookieName = "ma_oauth_attribution";
 const adminTrafficCookieName = "ma_admin_traffic";
 const cookieSecure = getEnv("MIND_ATLAS_COOKIE_SECURE", publicOrigin.startsWith("https://") ? "1" : "0") !== "0";
 const googleClientId = getEnv("GOOGLE_CLIENT_ID");
@@ -137,6 +144,14 @@ const server = http.createServer(async (request, response) => {
 
     const url = new URL(request.url ?? "/", publicOrigin);
     enforceBrowserOrigin(request, url);
+
+    if (request.method === "GET") {
+      const promotionRedirect = buildPromotionRedirect(url.pathname, url.searchParams);
+      if (promotionRedirect) {
+        redirectResponse(response, `${publicOrigin}${promotionRedirect.location}`);
+        return;
+      }
+    }
 
     if (request.method === "GET" && url.pathname === "/health") {
       sendJson(response, 200, {
@@ -457,15 +472,17 @@ function enterRealtimeSession(userId) {
 }
 
 async function handleGoogleStart(_request, response, url) {
+  const returnTo = safeReturnPath(url.searchParams.get("returnTo") || "/");
+  const attribution = promotionContextFromGoogleStart(returnTo, url.searchParams.get("trigger"));
   if (stagingMockAuth) {
-    await handleMockGoogleLogin(response, url);
+    await handleMockGoogleLogin(response, returnTo, attribution);
     return;
   }
   if (!googleClientId || !googleClientSecret) throw new ServiceError(503, "Google OAuth is not configured");
   const state = crypto.randomBytes(24).toString("base64url");
-  const returnTo = safeReturnPath(url.searchParams.get("returnTo") || "/");
   setCookie(response, oauthStateCookieName, state, { maxAge: 600 });
   setCookie(response, oauthReturnCookieName, returnTo, { maxAge: 600 });
+  setCookie(response, oauthAttributionCookieName, encodePromotionContext(attribution), { maxAge: 600 });
   const redirect = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   redirect.searchParams.set("client_id", googleClientId);
   redirect.searchParams.set("redirect_uri", `${publicOrigin}/api/auth/google/callback`);
@@ -479,6 +496,7 @@ async function handleGoogleStart(_request, response, url) {
 
 async function handleGoogleCallback(request, response, url) {
   const cookies = parseCookies(request.headers.cookie);
+  const attribution = decodePromotionContext(cookies[oauthAttributionCookieName]);
   const expectedState = cookies[oauthStateCookieName];
   const receivedState = url.searchParams.get("state") ?? "";
   if (!expectedState || expectedState !== receivedState) throw new ServiceError(400, "Google OAuth state did not match");
@@ -508,26 +526,53 @@ async function handleGoogleCallback(request, response, url) {
     name: stringValue(profile.name),
     picture: stringValue(profile.picture),
   });
+  if (user.created) {
+    await recordServerAnalyticsEventSafe("google_user_created", {
+      eventId: `google-user-created:${user.id}`,
+      userId: user.id,
+      pageGroup: "app",
+      attribution,
+      properties: { trigger: attribution.trigger },
+    });
+  }
   await recordServerAnalyticsEventSafe("google_login_completed", {
     eventId: `google-login:${receivedState}`,
     userId: user.id,
     pageGroup: "app",
+    attribution,
+    properties: { trigger: attribution.trigger },
   });
   const sessionToken = await createSession(user.id);
   setCookie(response, sessionCookieName, sessionToken, { maxAge: 30 * 24 * 60 * 60 });
   setCookie(response, oauthStateCookieName, "", { maxAge: 0 });
   const returnTo = safeReturnPath(cookies[oauthReturnCookieName] || "/");
   setCookie(response, oauthReturnCookieName, "", { maxAge: 0 });
+  setCookie(response, oauthAttributionCookieName, "", { maxAge: 0 });
   redirectResponse(response, `${publicOrigin}${returnTo}`);
 }
 
-async function handleMockGoogleLogin(response, url) {
-  const returnTo = safeReturnPath(url.searchParams.get("returnTo") || "/");
+async function handleMockGoogleLogin(response, returnTo, attribution) {
   const user = await upsertGoogleUser({
     sub: getEnv("MIND_ATLAS_STAGING_MOCK_GOOGLE_SUB", "mock-google-staging-user"),
     email: stagingMockEmail,
     name: stagingMockName,
     picture: "",
+  });
+  if (user.created) {
+    await recordServerAnalyticsEventSafe("google_user_created", {
+      eventId: `google-user-created:${user.id}`,
+      userId: user.id,
+      pageGroup: "app",
+      attribution,
+      properties: { trigger: attribution.trigger },
+    });
+  }
+  await recordServerAnalyticsEventSafe("google_login_completed", {
+    eventId: `mock-google-login:${crypto.randomUUID()}`,
+    userId: user.id,
+    pageGroup: "app",
+    attribution,
+    properties: { trigger: attribution.trigger },
   });
   const sessionToken = await createSession(user.id);
   setCookie(response, sessionCookieName, sessionToken, { maxAge: 30 * 24 * 60 * 60 });

@@ -30,7 +30,7 @@
     "verify:hosted-public-ui": "node scripts/verify-hosted-public-ui.mjs",
     "verify:hosted-dist": "node scripts/verify-hosted-dist.mjs",
     "verify:hosted-service": "node scripts/verify-hosted-service.mjs",
-    "verify:analytics": "node scripts/verify-analytics.mjs",
+    "verify:analytics": "node scripts/verify-analytics.mjs && node scripts/verify-promotion-attribution.mjs",
     "verify:title-maintenance": "node --experimental-strip-types scripts/verify-title-maintenance.ts",
     "verify:templates": "node --experimental-strip-types scripts/verify-notebook-templates.ts",
     "verify:layout": "node --experimental-strip-types scripts/verify-layout.ts",

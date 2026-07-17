@@ -412,6 +412,31 @@ function printGrowthReport(report) {
   }]);
   console.log("Acquisition");
   console.table(report.acquisition.sources);
+  console.log("Promotion attribution");
+  console.table([{
+    totalGoogleUsers: report.promotion.totalGoogleUsers,
+    attributedNewUsers: report.promotion.attributedNewUsers,
+    unattributedNewUsers: report.promotion.unattributedNewUsers,
+    d1: value(report.promotion.retention.d1),
+    d7: value(report.promotion.retention.d7),
+    d30: value(report.promotion.retention.d30),
+  }]);
+  console.table(report.promotion.campaigns.map((row) => ({
+    campaign: row.campaign,
+    partner: row.partner,
+    asset: row.asset,
+    platform: row.platform,
+    locale: row.locale,
+    landings: row.landings,
+    loginStarts: row.loginStarts,
+    loginCompletions: row.loginCompletions,
+    newUsers: row.newUsers,
+    landingToG: value(row.landingToNewUser),
+    oauthCompletion: value(row.oauthCompletion),
+    saveWithin24h: value(row.cloudSavedWithin24h),
+  })));
+  console.log("Google login triggers");
+  console.table(report.promotion.loginTriggers);
   console.log("Sharing");
   console.table([{
     shares: report.sharing.shares,

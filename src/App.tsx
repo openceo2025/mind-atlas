@@ -1,5 +1,5 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CloudDownload, CloudUpload, CreditCard, Download, FileText, GitBranch, Github, GraduationCap, History, Info, Languages, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CalendarDays, CloudDownload, CloudUpload, CreditCard, Download, FileText, GitBranch, Github, GraduationCap, History, Info, Languages, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
 import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { createAboutDemoNotebook, getAboutDemoAttachmentPreviewUrls, getAboutDemoLayoutMode, getAboutDemoNotification, getAboutDemoOverviewFocusRequest, getAboutDemoSelectedNodeId, readAboutDemoConfig } from "./aboutDemo";
@@ -59,10 +59,11 @@ const CURRENT_CLOUD_NOTEBOOK_SESSION_KEY = "mind-atlas-current-cloud-notebook-v1
 type StartSpaceSource = "initialize" | "tutorial";
 type CloudLoadCloseOptions = { closeCloudDialog: boolean; closeStartSpace: boolean };
 type PendingWorkspaceSwitch = { nextName: string };
-const MODE_OPTIONS: Array<{ mode: AtlasLayoutMode; icon: "orbit" | "tree" | "mind" }> = [
+const MODE_OPTIONS: Array<{ mode: AtlasLayoutMode; icon: "orbit" | "tree" | "mind" | "calendar" }> = [
   { mode: "phyllotaxis", icon: "orbit" },
   { mode: "tree", icon: "tree" },
   { mode: "mind-map", icon: "mind" },
+  { mode: "calendar", icon: "calendar" },
 ];
 const UNIVERSE_TITLE_PLACEHOLDER_ALIASES = [
   "Name this universe.",
@@ -188,6 +189,7 @@ export default function App() {
   const analyticsLastMeaningfulAtRef = useRef(0);
   const analyticsLastUserInputAtRef = useRef(0);
   const analyticsTutorialStartedRef = useRef(false);
+  const explicitSaveRunningRef = useRef(false);
   const publicServiceMode = isHostedServiceMode();
   useEffect(() => {
     if (!publicServiceMode || aboutDemoConfig) return;
@@ -906,8 +908,8 @@ export default function App() {
       if (publicServiceMode) {
         if (!hostedAuthenticated) {
           setCloudStatus("");
-          trackProductEvent("google_login_started", {}, { immediate: true });
-          startHostedGoogleLogin();
+          trackProductEvent("google_login_started", { trigger: "cloud_save" }, { immediate: true });
+          startHostedGoogleLogin("cloud_save");
           return;
         }
         const { root } = prepareHostedCloudNotebook();
@@ -976,8 +978,8 @@ export default function App() {
 
   const handleOpenCloudLoad = () => {
     if (publicServiceMode && !hostedAuthenticated) {
-      trackProductEvent("google_login_started", {}, { immediate: true });
-      startHostedGoogleLogin();
+      trackProductEvent("google_login_started", { trigger: "account" }, { immediate: true });
+      startHostedGoogleLogin("account");
       return;
     }
     setCloudLoadOpen(true);
@@ -998,8 +1000,8 @@ export default function App() {
       if (publicServiceMode) {
         if (!hostedAuthenticated) {
       setContextCopyStatus(t("status.cloud.loginRequired"));
-          trackProductEvent("google_login_started", {}, { immediate: true });
-          startHostedGoogleLogin();
+          trackProductEvent("google_login_started", { trigger: "share" }, { immediate: true });
+          startHostedGoogleLogin("share");
           return;
         }
         setCloudLoadOpen(true);
@@ -1155,10 +1157,10 @@ export default function App() {
     requestCloudLoad(entry, { closeCloudDialog: true, closeStartSpace: false });
   };
 
-  const handleHostedSaveCloudAs = async () => {
-    if (!publicServiceMode) return;
+  const handleHostedSaveCloudAs = async (): Promise<CloudNotebookEntry | null> => {
+    if (!publicServiceMode) return null;
     const title = window.prompt(formatAppMessage("ui.app.saveCurrentAtlasAs.999bb1c"), atlasRoot.title || "Mind Atlas");
-    if (!title?.trim()) return;
+    if (!title?.trim()) return null;
     try {
       setCloudLoading(true);
       setCloudError("");
@@ -1169,11 +1171,13 @@ export default function App() {
       rememberCurrentCloudNotebook(saved, root);
       setCloudStatus(t("status.cloud.saved", { name: saved.title || saved.name }));
       await refreshCloudNotebooks();
+      return saved;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Cloud save failed.";
       setCloudError(message);
       setCloudStatus("");
       window.alert(message);
+      return null;
     } finally {
       setCloudLoading(false);
     }
@@ -1609,6 +1613,56 @@ export default function App() {
     redo();
     setMenuOpen(false);
   };
+
+  useEffect(() => {
+    const handleExplicitSaveShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || (!event.ctrlKey && !event.metaKey) || event.key.toLowerCase() !== "s") return;
+      event.preventDefault();
+      if (event.repeat || explicitSaveRunningRef.current || aboutDemoConfig) return;
+
+      explicitSaveRunningRef.current = true;
+      void (async () => {
+        try {
+          if (publicServiceMode && hostedAuthenticated) {
+            if (currentCloudNotebook?.id) {
+              const overwritten = await overwriteCloudNotebook(currentCloudNotebook, false);
+              if (overwritten) {
+                const message = t("status.cloud.overwritten", { name: currentCloudNotebook.title || currentCloudNotebook.name });
+                setContextCopyStatus(message);
+                window.setTimeout(() => setContextCopyStatus((current) => (current === message ? "" : current)), 2400);
+              }
+              return;
+            }
+
+            const saved = await handleHostedSaveCloudAs();
+            if (saved) {
+              const message = t("status.cloud.saved", { name: saved.title || saved.name });
+              setContextCopyStatus(message);
+              window.setTimeout(() => setContextCopyStatus((current) => (current === message ? "" : current)), 2400);
+            }
+            return;
+          }
+
+          await saveNotebookNow();
+          const persistence = useAtlasStore.getState();
+          if (persistence.notebookPersistenceStatus === "error") {
+            throw new Error(persistence.notebookPersistenceError || "Notebook could not be saved locally.");
+          }
+          const message = t("status.notebook.savedLocally");
+          setContextCopyStatus(message);
+          window.setTimeout(() => setContextCopyStatus((current) => (current === message ? "" : current)), 2400);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Notebook save failed.";
+          window.alert(message);
+        } finally {
+          explicitSaveRunningRef.current = false;
+        }
+      })();
+    };
+
+    window.addEventListener("keydown", handleExplicitSaveShortcut, { capture: true });
+    return () => window.removeEventListener("keydown", handleExplicitSaveShortcut, { capture: true });
+  }, [aboutDemoConfig, atlasRoot, currentCloudNotebook, hostedAuthenticated, publicServiceMode, saveNotebookNow, t]);
 
   useEffect(() => {
     const handleHistoryShortcut = (event: KeyboardEvent) => {
@@ -2307,8 +2361,8 @@ export default function App() {
           onStartFromCloud={handleStartWithCloudNotebook}
           onContinueWithoutTemplate={() => setStartSpaceOpen(false)}
           onLogin={() => {
-            trackProductEvent("google_login_started", {}, { immediate: true });
-            startHostedGoogleLogin();
+            trackProductEvent("google_login_started", { trigger: "account" }, { immediate: true });
+            startHostedGoogleLogin("account");
           }}
         />
       ) : null}
@@ -2451,8 +2505,8 @@ function AiFeatureDialog({
         <div className="ai-feature-actions">
           {!authenticated ? (
             <button className="secondary-button" type="button" onClick={() => void runAction("login", () => {
-              trackProductEvent("google_login_started", {}, { immediate: true });
-              startHostedGoogleLogin();
+              trackProductEvent("google_login_started", { trigger: "account" }, { immediate: true });
+              startHostedGoogleLogin("account");
             })} disabled={loading || Boolean(actionBusy)}>
               <LogIn size={15} />
               {<I18nText id="ui.app.signInWithGoogle.adee61b" />}</button>
@@ -3095,7 +3149,7 @@ function VoiceSettingsDialog({
   );
 }
 
-function LayoutModeIcon({ icon }: { icon: "orbit" | "tree" | "mind" }) {
+function LayoutModeIcon({ icon }: { icon: "orbit" | "tree" | "mind" | "calendar" }) {
   switch (icon) {
     case "orbit":
       return <Orbit size={15} />;
@@ -3103,6 +3157,8 @@ function LayoutModeIcon({ icon }: { icon: "orbit" | "tree" | "mind" }) {
       return <GitBranch size={15} />;
     case "mind":
       return <Network size={15} />;
+    case "calendar":
+      return <CalendarDays size={15} />;
   }
 }
 

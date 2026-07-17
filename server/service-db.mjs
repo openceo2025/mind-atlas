@@ -216,7 +216,7 @@ export async function upsertGoogleUser(profile) {
         name = excluded.name,
         picture_url = excluded.picture_url,
         updated_at = now()
-      returning id, google_sub, email, name, picture_url, role, created_at, updated_at
+      returning id, google_sub, email, name, picture_url, role, created_at, updated_at, (xmax = 0) as created
     `,
     [id, profile.sub, profile.email, profile.name || "", profile.picture || ""],
   );

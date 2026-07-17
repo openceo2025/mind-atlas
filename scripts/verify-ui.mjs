@@ -84,7 +84,7 @@ async function verifyLayoutModeSwitch(browser) {
   await seedCompletedOnboarding(page);
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
-  for (const label of ["Tree", "Mind map", "Mind Atlas"]) {
+  for (const label of ["Tree", "Mind map", "Calendar", "Mind Atlas"]) {
     await page.getByLabel("Open atlas menu").click();
     await page.locator(".global-context-menu").getByRole("button", { name: label }).click();
     await page.locator(".global-context-menu").waitFor({ state: "detached" });
@@ -99,6 +99,69 @@ async function verifyLayoutModeSwitch(browser) {
   await page.locator(".global-context-menu").getByTitle("Text editor").click();
   await page.waitForSelector(".outline-editor-shell");
   await page.close();
+}
+
+async function verifyCalendarLayout(browser) {
+  const results = {};
+  for (const viewportCase of [
+    { name: "desktop", viewport: { width: 1440, height: 920 }, mobile: false },
+    { name: "mobile", viewport: { width: 390, height: 844 }, mobile: true },
+  ]) {
+    const context = await browser.newContext({
+      viewport: viewportCase.viewport,
+      ignoreHTTPSErrors: true,
+      ...(viewportCase.mobile ? { isMobile: true, hasTouch: true } : {}),
+    });
+    const page = await context.newPage();
+    await seedCompletedOnboarding(page);
+    await seedCalendarNotebook(page);
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.waitForSelector("canvas");
+    await page.waitForSelector(".spatial-guide-label-weekday");
+    await page.waitForTimeout(1500);
+
+    const stats = await page.evaluate(() => {
+      const weekdayLabels = [...document.querySelectorAll(".spatial-guide-label-weekday")];
+      const scheduledLabels = [...document.querySelectorAll('[data-node-id^="calendar-"]')].map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          id: element.getAttribute("data-node-id"),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          centerX: Math.round(rect.left + rect.width / 2),
+          centerY: Math.round(rect.top + rect.height / 2),
+        };
+      });
+      const sameDay = scheduledLabels.filter((label) => label.id?.startsWith("calendar-dense-"));
+      const nextWeek = scheduledLabels.find((label) => label.id === "calendar-next-week");
+      return {
+        weekdayCount: weekdayLabels.length,
+        weekdayText: weekdayLabels.map((label) => label.textContent?.trim()),
+        scheduledCount: scheduledLabels.length,
+        unscheduledCount: document.querySelectorAll('[data-node-id="calendar-unscheduled"]').length,
+        denseBadge: document.querySelector(".spatial-guide-label-count")?.textContent?.trim() ?? null,
+        sameDayDistinctX: new Set(sameDay.map((label) => label.centerX)).size,
+        sameDayDistinctY: new Set(sameDay.map((label) => label.centerY)).size,
+        nextWeekBelow: Boolean(nextWeek && sameDay.length && nextWeek.centerY > Math.max(...sameDay.map((label) => label.centerY))),
+        visibleLabels: scheduledLabels.filter((label) => label.width > 0 && label.height > 0).length,
+      };
+    });
+
+    if (stats.weekdayCount !== 7 || !stats.weekdayText.includes("MON")) {
+      throw new Error(`${viewportCase.name} calendar weekday labels are incomplete: ${JSON.stringify(stats)}`);
+    }
+    if (stats.scheduledCount !== 2 || stats.unscheduledCount !== 0 || stats.visibleLabels !== 2 || stats.denseBadge !== "×5") {
+      throw new Error(`${viewportCase.name} calendar scheduled-node filtering failed: ${JSON.stringify(stats)}`);
+    }
+    if (!stats.nextWeekBelow) {
+      throw new Error(`${viewportCase.name} calendar cell packing failed: ${JSON.stringify(stats)}`);
+    }
+
+    await page.screenshot({ path: `${outputDir}/calendar-${viewportCase.name}.png`, fullPage: true });
+    results[viewportCase.name] = stats;
+    await context.close();
+  }
+  return results;
 }
 
 async function verifyLocaleSwitching(browser) {
@@ -142,6 +205,14 @@ async function verifyLocalDeveloperModeSurface(browser) {
   await page.waitForSelector("canvas");
   await page.locator(".mode-switch").waitFor();
 
+  const localSavePrevented = await page.evaluate(() => {
+    const event = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  if (!localSavePrevented) throw new Error("Ctrl+S did not prevent the browser save-page action in local mode.");
+  await page.locator(".context-copy-toast", { hasText: "Saved locally." }).waitFor();
+
   const hostedButtonCount = await page.getByRole("button", { name: /AI\u6a5f\u80fd/ }).count();
   if (hostedButtonCount !== 0) {
     throw new Error(`Local developer mode exposed the hosted AI feature button: ${hostedButtonCount}`);
@@ -178,7 +249,7 @@ async function verifyLocalDeveloperModeSurface(browser) {
   }
 
   await context.close();
-  return { modeLabels, codeBackends, chatServices };
+  return { modeLabels, codeBackends, chatServices, localSavePrevented };
 }
 
 async function verifyGeneratedLayoutBlocksBackgroundBirth(browser) {
@@ -2700,6 +2771,55 @@ async function seedGeneratedLayoutNotebook(page, layoutMode, selectedNodeId = "a
   }, { root, now, layoutMode, selectedNodeId });
 }
 
+async function seedCalendarNotebook(page) {
+  const now = new Date().toISOString();
+  const makeNode = (id, title, reminderAt, children = []) => ({
+    id,
+    kind: id === "atlas-root" ? "root" : "thread",
+    nodeType: "note",
+    title,
+    subtitle: title,
+    body: `${title} body`,
+    author: "human",
+    status: "waiting",
+    color: id.endsWith("1") ? "#94a3ff" : "#8df5cf",
+    texture: "speckled",
+    radius: id === "atlas-root" ? 80 : 48,
+    summary: title,
+    nextDecision: "",
+    tags: [],
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    ...(reminderAt ? { reminderAt } : {}),
+    children,
+  });
+  const root = makeNode("atlas-root", "Calendar root", null, [
+    makeNode("calendar-unscheduled", "No reminder", null),
+    makeNode("calendar-dense-1", "Morning", "2026-07-13T09:00:00"),
+    makeNode("calendar-dense-2", "Noon", "2026-07-13T12:00:00"),
+    makeNode("calendar-dense-3", "Afternoon", "2026-07-13T15:00:00"),
+    makeNode("calendar-dense-4", "Evening", "2026-07-13T18:00:00"),
+    makeNode("calendar-dense-5", "Night", "2026-07-13T21:00:00"),
+    makeNode("calendar-next-week", "Next week", "2026-07-20T10:00:00"),
+  ]);
+  await page.addInitScript((seed) => {
+    window.localStorage.setItem("mind-atlas-notebook-v2", JSON.stringify(seed.root));
+    window.localStorage.setItem(
+      "mind-atlas-ui-state-v1",
+      JSON.stringify({
+        version: 1,
+        savedAt: seed.now,
+        selectedNodeId: "calendar-dense-1",
+        viewport: { x: 0, y: 0, zoom: 0.92 },
+        renderQuality: "high",
+        layoutMode: "calendar",
+        mobilePanelTab: "editor",
+      }),
+    );
+  }, { root, now });
+}
+
 function readBulkLabelCounts(page) {
   return page.evaluate(() => ({
     total: document.querySelectorAll('[data-node-id^="bulk-child-"]').length,
@@ -2847,10 +2967,15 @@ try {
   } else if (process.argv[2] === "background-parent") {
     await runStep("backgroundReturnsOneParent", () => verifyBackgroundReturnsOneParent(browser));
     console.log("Background parent verification passed");
+  } else if (process.argv[2] === "calendar") {
+    const calendarLayout = await runStep("calendarLayout", () => verifyCalendarLayout(browser));
+    console.log("Calendar layout verification passed");
+    console.log({ calendarLayout });
   } else {
     const desktop = await runStep("desktopViewport", () => verifyViewport(browser, "desktop", { width: 1440, height: 920 }));
     const localeSwitching = await runStep("localeSwitching", () => verifyLocaleSwitching(browser));
     await runStep("layoutModeSwitch", () => verifyLayoutModeSwitch(browser));
+    const calendarLayout = await runStep("calendarLayout", () => verifyCalendarLayout(browser));
     const localDeveloperMode = await runStep("localDeveloperMode", () => verifyLocalDeveloperModeSurface(browser));
     await runStep("generatedLayoutBlocksBackgroundBirth", () => verifyGeneratedLayoutBlocksBackgroundBirth(browser));
     await runStep("backgroundReturnsOneParent", () => verifyBackgroundReturnsOneParent(browser));
@@ -2883,7 +3008,7 @@ try {
     const mobile = await runStep("mobileViewport", () => verifyViewport(browser, "mobile", { width: 390, height: 844 }));
     const mobileLandscape = await runStep("mobileLandscapeViewport", () => verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 }));
     console.log("UI verification passed");
-    console.log({ desktop, localDeveloperMode, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+    console.log({ desktop, calendarLayout, localDeveloperMode, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
   }
 } finally {
   await browser.close();
