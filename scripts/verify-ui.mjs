@@ -252,6 +252,60 @@ async function verifyLocalDeveloperModeSurface(browser) {
   return { modeLabels, codeBackends, chatServices, localSavePrevented };
 }
 
+async function verifyNotificationSnoozeActions(browser) {
+  const context = await browser.newContext({ viewport: { width: 1100, height: 760 }, ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  const reminderAt = new Date(Date.now() - 120_000).toISOString();
+  const reminderFiredAt = new Date(Date.now() - 60_000).toISOString();
+  await seedSingleChildNotebook(page, "phyllotaxis", { reminderAt, reminderFiredAt });
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+
+  const reminderNotification = page.locator(".unread-notification-link.is-needs_review");
+  await reminderNotification.waitFor();
+  await reminderNotification.click();
+
+  const actions = page.locator(".node-snooze-actions");
+  await actions.waitFor();
+  const labels = await actions.getByRole("button").allTextContents();
+  const expectedLabels = ["OK", "In 2 hours", "In 1 day", "In 1 week"];
+  if (JSON.stringify(labels) !== JSON.stringify(expectedLabels)) {
+    throw new Error(`Reminder actions are incorrect: ${JSON.stringify(labels)}`);
+  }
+
+  const acknowledgeButton = actions.getByRole("button", { name: "OK", exact: true });
+  const buttonStyles = await actions.evaluate((group) => {
+    const buttons = [...group.querySelectorAll("button")];
+    return {
+      acknowledgeClass: buttons[0]?.className ?? "",
+      acknowledgeBackground: buttons[0] ? getComputedStyle(buttons[0]).backgroundColor : "",
+      snoozeBackground: buttons[1] ? getComputedStyle(buttons[1]).backgroundColor : "",
+    };
+  });
+  if (!buttonStyles.acknowledgeClass.includes("is-acknowledge") || buttonStyles.acknowledgeBackground === buttonStyles.snoozeBackground) {
+    throw new Error(`Reminder OK action is not visually distinct: ${JSON.stringify(buttonStyles)}`);
+  }
+
+  await acknowledgeButton.click();
+  await actions.waitFor({ state: "detached" });
+  if (await reminderNotification.count()) throw new Error("Reminder notification remained visible after OK.");
+
+  const persistedReminder = await page.evaluate(() => {
+    const raw = window.localStorage.getItem("mind-atlas-notebook-v2");
+    if (!raw) return null;
+    const root = JSON.parse(raw);
+    const child = root.children?.find((node) => node.id === "verify-child");
+    return child ? { reminderAt: child.reminderAt, reminderFiredAt: child.reminderFiredAt } : null;
+  });
+  if (persistedReminder?.reminderAt !== reminderAt || persistedReminder?.reminderFiredAt !== reminderFiredAt) {
+    throw new Error(`OK cleared the reminder instead of only acknowledging its notification: ${JSON.stringify(persistedReminder)}`);
+  }
+
+  await context.close();
+  return { labels, buttonStyles, persistedReminder };
+}
+
 async function verifyGeneratedLayoutBlocksBackgroundBirth(browser) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
   const page = await context.newPage();
@@ -2523,7 +2577,7 @@ async function seedCompletedOnboarding(page, { aiUnlocked = true } = {}) {
   }, { aiUnlocked });
 }
 
-async function seedSingleChildNotebook(page, layoutMode = "phyllotaxis") {
+async function seedSingleChildNotebook(page, layoutMode = "phyllotaxis", childPatch = {}) {
   const now = new Date().toISOString();
   const baseFields = {
     author: "human",
@@ -2560,6 +2614,7 @@ async function seedSingleChildNotebook(page, layoutMode = "phyllotaxis") {
         summary: "Verify child",
         ...baseFields,
         children: [],
+        ...childPatch,
       },
     ],
   };
@@ -3077,6 +3132,7 @@ try {
     await runStep("layoutModeSwitch", () => verifyLayoutModeSwitch(browser));
     const calendarLayout = await runStep("calendarLayout", () => verifyCalendarLayout(browser));
     const localDeveloperMode = await runStep("localDeveloperMode", () => verifyLocalDeveloperModeSurface(browser));
+    const notificationSnoozeActions = await runStep("notificationSnoozeActions", () => verifyNotificationSnoozeActions(browser));
     await runStep("generatedLayoutBlocksBackgroundBirth", () => verifyGeneratedLayoutBlocksBackgroundBirth(browser));
     await runStep("backgroundReturnsOneParent", () => verifyBackgroundReturnsOneParent(browser));
     await runStep("stablePhyllotaxisPositions", () => verifyStablePhyllotaxisPositions(browser));
@@ -3109,7 +3165,7 @@ try {
     const mobile = await runStep("mobileViewport", () => verifyViewport(browser, "mobile", { width: 390, height: 844 }));
     const mobileLandscape = await runStep("mobileLandscapeViewport", () => verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 }));
     console.log("UI verification passed");
-    console.log({ desktop, calendarLayout, localDeveloperMode, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileCanvasInterruptionRecovery, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+    console.log({ desktop, calendarLayout, localDeveloperMode, notificationSnoozeActions, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileCanvasInterruptionRecovery, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
   }
 } finally {
   await browser.close();

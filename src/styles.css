@@ -4118,6 +4118,17 @@ button:disabled,
   background: rgba(20, 58, 50, 0.95);
 }
 
+.node-snooze-button.is-acknowledge {
+  border-color: rgba(122, 238, 151, 0.66);
+  background: rgba(24, 102, 58, 0.92);
+  color: #effff1;
+}
+
+.node-snooze-button.is-acknowledge:hover {
+  border-color: rgba(168, 255, 187, 0.94);
+  background: rgba(31, 132, 73, 0.98);
+}
+
 .space-body-editor {
   --space-label-max-lines: 4;
 }
@@ -4910,6 +4921,17 @@ button:disabled,
 .app-shell[data-theme="light"] .node-snooze-button:hover {
   border-color: rgba(20, 117, 120, 0.48);
   background: rgba(226, 246, 241, 0.94);
+}
+
+.app-shell[data-theme="light"] .node-snooze-button.is-acknowledge {
+  border-color: rgba(31, 139, 75, 0.48);
+  background: rgba(213, 246, 222, 0.96);
+  color: #14572e;
+}
+
+.app-shell[data-theme="light"] .node-snooze-button.is-acknowledge:hover {
+  border-color: rgba(22, 119, 61, 0.72);
+  background: rgba(191, 239, 205, 1);
 }
 
 .app-shell[data-theme="light"] .space-body-editor::placeholder {

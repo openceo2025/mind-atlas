@@ -119,7 +119,6 @@ const DOM_TOUCH_SPACE_POINTER_ID = -90001;
 type RenderQuality = "high" | "low";
 const NOTIFICATION_SNOOZE_OPTIONS = [
   { messageId: "label.snooze.twoHours", delayMs: 2 * 60 * 60 * 1000 },
-  { messageId: "label.snooze.halfDay", delayMs: 12 * 60 * 60 * 1000 },
   { messageId: "label.snooze.oneDay", delayMs: 24 * 60 * 60 * 1000 },
   { messageId: "label.snooze.oneWeek", delayMs: 7 * 24 * 60 * 60 * 1000 },
 ] as const;
@@ -3120,6 +3119,7 @@ function HierarchyNode({
   const addChildNode = useAtlasStore((state) => state.addChildNode);
   const updateNode = useAtlasStore((state) => state.updateNode);
   const runNodeAction = useAtlasStore((state) => state.runNodeAction);
+  const acknowledgeNodeNotification = useAtlasStore((state) => state.acknowledgeNodeNotification);
   const snoozeNodeNotification = useAtlasStore((state) => state.snoozeNodeNotification);
   const birthMarks = useAtlasStore((state) => state.birthMarks);
   const zoom = useAtlasStore((state) => state.viewport.zoom);
@@ -3828,6 +3828,17 @@ function HierarchyNode({
       {showNotificationSnoozeActions ? (
         <Html center position={[0, 0, radius + (node.action ? 62 : 26)]} transform={false} zIndexRange={[6, 2]}>
           <div className="node-snooze-actions" role="group" aria-label={formatAppMessage("ui.universeCanvas.snoozeNotification.316afb2")}>
+            <button
+              className="node-snooze-button is-acknowledge"
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                acknowledgeNodeNotification(node.id);
+              }}
+            >
+              {formatAppMessage("common.ok")}
+            </button>
             {NOTIFICATION_SNOOZE_OPTIONS.map((option) => (
               <button
                 key={option.messageId}
