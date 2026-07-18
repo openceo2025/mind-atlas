@@ -1705,10 +1705,14 @@ async function verifyCommandDockAndMobileTextTap(browser) {
   await seedSingleChildNotebook(desktopPage);
   await desktopPage.goto(baseUrl, { waitUntil: "networkidle" });
   await desktopPage.waitForSelector('textarea.space-title-editor[data-node-id="verify-child"]', { state: "visible" });
+  await desktopPage.keyboard.press("ArrowDown");
   await desktopPage.waitForTimeout(700);
   const desktopLabelState = await readCommandDockProbe(desktopPage);
   if (desktopLabelState.editorValue !== "Verify Child" || desktopLabelState.editorPlaceholder !== "Untitled") {
     throw new Error(`Desktop canvas editor should edit title with the new placeholder: ${JSON.stringify(desktopLabelState)}`);
+  }
+  if (desktopLabelState.dockBottomGap > 24 || desktopLabelState.titleOverlapsDock) {
+    throw new Error(`Local command dock should sit at the lower edge without covering the active node title: ${JSON.stringify(desktopLabelState)}`);
   }
   await desktopPage.click('textarea.space-title-editor[data-node-id="verify-child"]');
   await desktopPage.waitForFunction(() => document.activeElement?.getAttribute?.("data-node-id") === "verify-child");
@@ -3064,8 +3068,20 @@ function readCommandDockProbe(page) {
     const panel = document.querySelector(".mobile-workspace-panel");
     const editor = document.querySelector('textarea.space-title-editor[data-node-id="verify-child"]');
     const preview = document.querySelector('.space-title-preview[data-node-id="verify-child"]');
+    const dockRect = dock?.getBoundingClientRect();
+    const titleRect = editor?.getBoundingClientRect();
+    const titleOverlapsDock = Boolean(
+      dockRect &&
+        titleRect &&
+        titleRect.right > dockRect.left &&
+        titleRect.left < dockRect.right &&
+        titleRect.bottom > dockRect.top &&
+        titleRect.top < dockRect.bottom,
+    );
     return {
       commandDockExists: Boolean(dock),
+      dockBottomGap: dockRect ? Math.round(window.innerHeight - dockRect.bottom) : null,
+      titleOverlapsDock,
       panelTab: panel?.getAttribute("data-active-tab") ?? null,
       panelClass: panel?.className ?? null,
       editorSelected: editor?.getAttribute("data-selected") ?? null,

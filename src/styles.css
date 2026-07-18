@@ -3313,6 +3313,11 @@ button:disabled,
   width: min(940px, calc(100vw - 460px));
 }
 
+/* Keep the local developer dock at the bottom edge so it does not cover the active node's label. */
+.app-shell:not(.is-public-service):not(.is-about-demo) .command-dock {
+  bottom: 16px;
+}
+
 .command-dock.is-public-service .chat-options-row {
   grid-template-columns: minmax(136px, 1fr) minmax(190px, 1.8fr) minmax(86px, 0.7fr);
 }
