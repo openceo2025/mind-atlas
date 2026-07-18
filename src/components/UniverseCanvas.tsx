@@ -238,6 +238,8 @@ const hiddenDragEdgeListeners = new Set<() => void>();
 type MobileRaycastMode = { kind: "idle" } | { kind: "space-drag" } | { kind: "node-drag"; nodeId: string };
 let mobileRaycastMode: MobileRaycastMode = { kind: "idle" };
 let mobilePerformanceModeSnapshot = false;
+type UniversePointerSession = { owner: symbol; reset: () => void };
+let activeUniversePointerSession: UniversePointerSession | null = null;
 
 function setHiddenDragEdgeNodeId(id: string | null) {
   if (hiddenDragEdgeNodeId === id) return;
@@ -247,6 +249,27 @@ function setHiddenDragEdgeNodeId(id: string | null) {
 
 function setMobileRaycastMode(mode: MobileRaycastMode) {
   mobileRaycastMode = mode;
+}
+
+function claimUniversePointerSession(owner: symbol, reset: () => void) {
+  if (activeUniversePointerSession && activeUniversePointerSession.owner !== owner) {
+    const staleSession = activeUniversePointerSession;
+    activeUniversePointerSession = null;
+    staleSession.reset();
+  }
+  activeUniversePointerSession = { owner, reset };
+}
+
+function releaseUniversePointerSession(owner: symbol) {
+  if (activeUniversePointerSession?.owner === owner) activeUniversePointerSession = null;
+}
+
+function recoverUniversePointerInteractions() {
+  const staleSession = activeUniversePointerSession;
+  activeUniversePointerSession = null;
+  staleSession?.reset();
+  setMobileRaycastMode({ kind: "idle" });
+  setHiddenDragEdgeNodeId(null);
 }
 
 function createConditionalMeshRaycast(shouldSkip: () => boolean): Mesh["raycast"] {
@@ -328,6 +351,54 @@ function CanvasClearColor({ theme }: { theme: AtlasTheme }) {
   return null;
 }
 
+function CanvasInteractionRecovery({ onRuntimeResume }: { onRuntimeResume?: () => void }) {
+  const { gl, invalidate } = useThree();
+  const onRuntimeResumeRef = useRef(onRuntimeResume);
+  onRuntimeResumeRef.current = onRuntimeResume;
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const recover = () => {
+      recoverUniversePointerInteractions();
+      invalidate();
+    };
+    const resume = () => {
+      recover();
+      onRuntimeResumeRef.current?.();
+    };
+    const handlePrimaryPointerDown = (event: PointerEvent) => {
+      if (!event.isPrimary) return;
+      resume();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") resume();
+      else recover();
+    };
+
+    canvas.addEventListener("pointerdown", handlePrimaryPointerDown, { capture: true });
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("freeze", recover);
+    document.addEventListener("resume", resume);
+    window.addEventListener("blur", recover);
+    window.addEventListener("focus", resume);
+    window.addEventListener("pagehide", recover);
+    window.addEventListener("pageshow", resume);
+    return () => {
+      canvas.removeEventListener("pointerdown", handlePrimaryPointerDown, { capture: true });
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("freeze", recover);
+      document.removeEventListener("resume", resume);
+      window.removeEventListener("blur", recover);
+      window.removeEventListener("focus", resume);
+      window.removeEventListener("pagehide", recover);
+      window.removeEventListener("pageshow", resume);
+      recoverUniversePointerInteractions();
+    };
+  }, [gl.domElement, invalidate]);
+
+  return null;
+}
+
 export function UniverseCanvas({
   theme,
   vrPanEnabled,
@@ -339,6 +410,7 @@ export function UniverseCanvas({
   tutorialRootBirthUnlocked,
   embedInteractionLocked = false,
   attachmentsEnabled = true,
+  onRuntimeResume,
 }: {
   theme: AtlasTheme;
   vrPanEnabled: boolean;
@@ -350,6 +422,7 @@ export function UniverseCanvas({
   tutorialRootBirthUnlocked?: boolean;
   embedInteractionLocked?: boolean;
   attachmentsEnabled?: boolean;
+  onRuntimeResume?: () => void;
 }) {
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeContextMenuState | null>(null);
   const mobilePerformanceMode = useMobilePerformanceMode();
@@ -478,6 +551,7 @@ export function UniverseCanvas({
         frameloop={pageActive ? "always" : "demand"}
       >
         <CanvasClearColor theme={theme} />
+        <CanvasInteractionRecovery onRuntimeResume={onRuntimeResume} />
         <ambientLight intensity={lowQuality ? (theme === "light" ? 1.25 : 1.05) : theme === "light" ? 1.05 : 0.7} />
         {!lowQuality ? (
           <>
@@ -862,6 +936,31 @@ type CameraPoseState = {
   panZ: number;
 };
 
+type CameraFocusPlan = {
+  nonce: number;
+  nodeId: string;
+  targetYaw: number;
+  targetPitch: number;
+  targetOffset: number;
+  targetPanX: number;
+  targetPanY: number;
+  targetPanZ: number;
+  duration: number;
+};
+
+function isSameCameraFocusPlan(previous: CameraFocusPlan | null, next: CameraFocusPlan) {
+  if (!previous || previous.nonce !== next.nonce || previous.nodeId !== next.nodeId) return false;
+  return (
+    Math.abs(previous.targetYaw - next.targetYaw) < 0.001 &&
+    Math.abs(previous.targetPitch - next.targetPitch) < 0.001 &&
+    Math.abs(previous.targetOffset - next.targetOffset) < 0.001 &&
+    Math.abs(previous.targetPanX - next.targetPanX) < 0.001 &&
+    Math.abs(previous.targetPanY - next.targetPanY) < 0.001 &&
+    Math.abs(previous.targetPanZ - next.targetPanZ) < 0.001 &&
+    previous.duration === next.duration
+  );
+}
+
 type StableLayoutMetrics = {
   width: number;
   height: number;
@@ -900,7 +999,9 @@ function NavigationController({
   const mobileLandscapeCamera = isMobileLandscapeCamera(stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
   const initialCenteredRef = useRef(false);
   const yawPitchRef = useRef<CameraPoseState>({ yaw: 0, pitch: 0, offset: INITIAL_CAMERA_OFFSET, panX: 0, panY: 0, panZ: 0 });
+  const lastFocusPlanRef = useRef<CameraFocusPlan | null>(null);
   const dragRef = useRef<SpaceDragState | null>(null);
+  const pointerSessionOwnerRef = useRef(Symbol("universe-space-pointer"));
   const wheelZoomOutRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelZoomInRef = useRef({ amount: 0, startedAt: 0, lastFiredAt: 0 });
   const wheelSuppressUntilRef = useRef(0);
@@ -937,6 +1038,15 @@ function NavigationController({
   const [birthEffect, setBirthEffect] = useState<BirthEffect | null>(null);
   const inputSphereSegments: [number, number] = renderQuality === "low" ? [32, 16] : [64, 32];
 
+  const resetNavigationPointerInteraction = () => {
+    dragRef.current = null;
+    backgroundClickRef.current = null;
+    multiTouchRef.current = false;
+    pinchGestureRef.current = null;
+    setBirthEffect(null);
+    setMobileRaycastMode({ kind: "idle" });
+  };
+
   const setViewportFromCameraState = (state: CameraPoseState, forcePersist = false) => {
     const viewport = { x: state.yaw, y: state.pitch, zoom: getViewportScale(state.offset) };
     setViewport(viewport);
@@ -955,6 +1065,7 @@ function NavigationController({
 
   useEffect(
     () => () => {
+      releaseUniversePointerSession(pointerSessionOwnerRef.current);
       if (mobileRaycastMode.kind === "space-drag") setMobileRaycastMode({ kind: "idle" });
     },
     [],
@@ -985,7 +1096,6 @@ function NavigationController({
   }, [gl.domElement]);
 
   useEffect(() => {
-    if (!pageActive) return;
     const element = gl.domElement;
     const handleDomWheel = (event: WheelEvent) => {
       if (event.target instanceof HTMLElement && event.target.closest("textarea, input, select")) return;
@@ -1001,11 +1111,8 @@ function NavigationController({
     };
     const handleTouchStart = (event: TouchEvent) => {
       if (embedInteractionLocked) {
-        dragRef.current = null;
-        backgroundClickRef.current = null;
-        setBirthEffect(null);
-        multiTouchRef.current = false;
-        pinchGestureRef.current = null;
+        releaseUniversePointerSession(pointerSessionOwnerRef.current);
+        resetNavigationPointerInteraction();
         return;
       }
       if (event.touches.length < 2) {
@@ -1030,9 +1137,8 @@ function NavigationController({
         return;
       }
       event.preventDefault();
-      dragRef.current = null;
-      backgroundClickRef.current = null;
-      setBirthEffect(null);
+      releaseUniversePointerSession(pointerSessionOwnerRef.current);
+      resetNavigationPointerInteraction();
       multiTouchRef.current = true;
       pinchGestureRef.current = { lastDistance: getTouchDistance(event.touches) };
     };
@@ -1172,6 +1278,20 @@ function NavigationController({
           focusWorldPerPixel,
         );
 
+    const focusPlan: CameraFocusPlan = {
+      nonce: focusRequest.nonce,
+      nodeId: focusRequest.nodeId ?? "",
+      targetYaw,
+      targetPitch,
+      targetOffset,
+      targetPanX: generatedLayoutActive ? targetVector.x - focusScreenOffset.x * focusWorldPerPixel : phyllotaxisFocusPan.x,
+      targetPanY: generatedLayoutActive ? targetVector.y + focusScreenOffset.y * focusWorldPerPixel : phyllotaxisFocusPan.y,
+      targetPanZ: generatedLayoutActive ? 0 : phyllotaxisFocusPan.z,
+      duration: renderQuality === "low" ? LOW_QUALITY_MOTION_DURATION_SECONDS : LAYOUT_MOTION_DURATION_SECONDS,
+    };
+    if (isSameCameraFocusPlan(lastFocusPlanRef.current, focusPlan)) return;
+    lastFocusPlanRef.current = focusPlan;
+
     transitionRef.current = {
       startYaw: current.yaw,
       startPitch: current.pitch,
@@ -1179,16 +1299,16 @@ function NavigationController({
       startPanX: current.panX,
       startPanY: current.panY,
       startPanZ: current.panZ,
-      targetYaw,
-      targetPitch,
-      targetOffset,
-      targetPanX: generatedLayoutActive ? targetVector.x - focusScreenOffset.x * focusWorldPerPixel : phyllotaxisFocusPan.x,
-      targetPanY: generatedLayoutActive ? targetVector.y + focusScreenOffset.y * focusWorldPerPixel : phyllotaxisFocusPan.y,
-      targetPanZ: generatedLayoutActive ? 0 : phyllotaxisFocusPan.z,
+      targetYaw: focusPlan.targetYaw,
+      targetPitch: focusPlan.targetPitch,
+      targetOffset: focusPlan.targetOffset,
+      targetPanX: focusPlan.targetPanX,
+      targetPanY: focusPlan.targetPanY,
+      targetPanZ: focusPlan.targetPanZ,
       elapsed: 0,
-      duration: renderQuality === "low" ? LOW_QUALITY_MOTION_DURATION_SECONDS : LAYOUT_MOTION_DURATION_SECONDS,
-      nonce: focusRequest.nonce,
-      nodeId: focusRequest.nodeId ?? "",
+      duration: focusPlan.duration,
+      nonce: focusPlan.nonce,
+      nodeId: focusPlan.nodeId,
     };
   }, [
     atlasRoot,
@@ -1363,6 +1483,7 @@ function NavigationController({
       canBirth,
       blockedBirthHintEmitted: false,
     };
+    claimUniversePointerSession(pointerSessionOwnerRef.current, resetNavigationPointerInteraction);
     transitionRef.current = null;
 
     if (canBirth) {
@@ -1427,6 +1548,7 @@ function NavigationController({
     backgroundClickRef.current = null;
     if (vrManualPanPendingRef.current) recenterVrBaseline();
     dragRef.current = null;
+    releaseUniversePointerSession(pointerSessionOwnerRef.current);
     setMobileRaycastMode({ kind: "idle" });
     if (!drag.created && drag.mode === "hold" && drag.canBirth) {
       setBirthEffect(null);
@@ -3126,6 +3248,7 @@ function HierarchyNode({
     torn: boolean;
     shiftKey: boolean;
   } | null>(null);
+  const pointerSessionOwnerRef = useRef(Symbol(`atlas-node-pointer:${node.id}`));
   const passThroughPanRef = useRef<{
     pointerId: number;
     startScreen: { x: number; y: number };
@@ -3134,6 +3257,16 @@ function HierarchyNode({
     hasPanned: boolean;
     allowPan: boolean;
   } | null>(null);
+  const resetNodePointerInteraction = () => {
+    dragRef.current = null;
+    passThroughPanRef.current = null;
+    setDragVisual(null);
+    setDragBoundary(null);
+    setHiddenDragEdgeNodeId(null);
+    if (mobileRaycastMode.kind === "node-drag" && mobileRaycastMode.nodeId === node.id) {
+      setMobileRaycastMode({ kind: "idle" });
+    }
+  };
   const groupRef = useRef<Group>(null);
   const parentWorldRef = useRef<Vec3Tuple>(subtractPosition(worldPosition, localPosition));
   const isNodeLayoutVisible = layoutMode === "phyllotaxis" || currentVisibleNodeIds.has(node.id) || visibleNodeIds.has(node.id);
@@ -3256,6 +3389,7 @@ function HierarchyNode({
 
   useEffect(
     () => () => {
+      releaseUniversePointerSession(pointerSessionOwnerRef.current);
       if (mobileRaycastMode.kind === "node-drag" && mobileRaycastMode.nodeId === node.id) {
         setMobileRaycastMode({ kind: "idle" });
       }
@@ -3325,6 +3459,7 @@ function HierarchyNode({
         hasPanned: false,
         allowPan: false,
       };
+      claimUniversePointerSession(pointerSessionOwnerRef.current, resetNodePointerInteraction);
       setMobileRaycastMode({ kind: "idle" });
       dragRef.current = null;
       setDragVisual(null);
@@ -3347,7 +3482,11 @@ function HierarchyNode({
     }
     if (event.button !== 0) return;
     event.stopPropagation();
-    (event.target as Element | null)?.setPointerCapture?.(event.pointerId);
+    try {
+      (event.target as Element | null)?.setPointerCapture?.(event.pointerId);
+    } catch {
+      // A resumed mobile page can deliver a retargeted pointer before capture is available.
+    }
     if (dragFallsThroughToSpace) {
       passThroughPanRef.current = {
         pointerId: event.pointerId,
@@ -3357,6 +3496,7 @@ function HierarchyNode({
         hasPanned: false,
         allowPan: true,
       };
+      claimUniversePointerSession(pointerSessionOwnerRef.current, resetNodePointerInteraction);
       return;
     }
     const layerRadius = vectorLength(worldPosition);
@@ -3381,6 +3521,7 @@ function HierarchyNode({
       torn: false,
       shiftKey: event.nativeEvent.shiftKey,
     };
+    claimUniversePointerSession(pointerSessionOwnerRef.current, resetNodePointerInteraction);
     setHiddenDragEdgeNodeId(node.id);
     setDragBoundary({
       depth,
@@ -3535,6 +3676,7 @@ function HierarchyNode({
       event.stopPropagation();
       const screenDistance = Math.hypot(event.clientX - passThroughPan.startScreen.x, event.clientY - passThroughPan.startScreen.y);
       passThroughPanRef.current = null;
+      releaseUniversePointerSession(pointerSessionOwnerRef.current);
       if (!passThroughPan.hasPanned && screenDistance <= 6) {
         if (passThroughPan.shiftKey || event.nativeEvent.shiftKey) {
           toggleMultiSelectedNode(node.id);
@@ -3557,6 +3699,7 @@ function HierarchyNode({
       }
     }
     dragRef.current = null;
+    releaseUniversePointerSession(pointerSessionOwnerRef.current);
     setMobileRaycastMode({ kind: "idle" });
     if (drag.hasMoved || drag.torn) {
       moveNode(node.id, drag.currentWorld);

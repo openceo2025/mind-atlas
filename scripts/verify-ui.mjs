@@ -1058,6 +1058,81 @@ async function verifyMobileCanvasPinchZoom(browser) {
   return pinchState;
 }
 
+async function verifyMobileCanvasInterruptionRecovery(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    ignoreHTTPSErrors: true,
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  await page.waitForTimeout(1150);
+
+  const recoveryState = await page.evaluate(async () => {
+    const canvas = document.querySelector("canvas");
+    if (!(canvas instanceof HTMLCanvasElement)) return { ok: false, reason: "missing canvas" };
+    const wait = (duration) => new Promise((resolve) => window.setTimeout(resolve, duration));
+    const dispatchPointer = (type, pointerId, x, y, buttons) => {
+      canvas.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId,
+          pointerType: "touch",
+          isPrimary: true,
+          button: 0,
+          buttons,
+          clientX: x,
+          clientY: y,
+        }),
+      );
+    };
+    const readPose = () => {
+      const raw = window.localStorage.getItem("mind-atlas-ui-state-v1");
+      const cameraPose = raw ? JSON.parse(raw).cameraPose : null;
+      return {
+        yaw: Number(cameraPose?.yaw ?? 0),
+        pitch: Number(cameraPose?.pitch ?? 0),
+      };
+    };
+
+    dispatchPointer("pointerdown", 4101, 310, 370, 1);
+    dispatchPointer("pointermove", 4101, 270, 400, 1);
+    await wait(980);
+    dispatchPointer("pointermove", 4101, 245, 414, 1);
+    await wait(80);
+    const interruptedPose = readPose();
+
+    document.dispatchEvent(new Event("freeze"));
+    document.dispatchEvent(new Event("resume"));
+    await wait(120);
+
+    dispatchPointer("pointerdown", 4102, 300, 370, 1);
+    dispatchPointer("pointermove", 4102, 342, 344, 1);
+    await wait(980);
+    dispatchPointer("pointermove", 4102, 368, 330, 1);
+    dispatchPointer("pointerup", 4102, 368, 330, 0);
+    await wait(80);
+    const recoveredPose = readPose();
+    const recoveredDelta = Math.abs(recoveredPose.yaw - interruptedPose.yaw) + Math.abs(recoveredPose.pitch - interruptedPose.pitch);
+    return {
+      ok: recoveredDelta > 0.001,
+      interruptedPose,
+      recoveredPose,
+      recoveredDelta,
+    };
+  });
+  if (!recoveryState.ok) {
+    throw new Error(`Mobile canvas did not recover after an interrupted pointer session: ${JSON.stringify(recoveryState)}`);
+  }
+
+  await context.close();
+  return recoveryState;
+}
+
 async function verifyMobileTutorialRootBirth(browser) {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -3020,6 +3095,7 @@ try {
     const mobileOutline = await runStep("mobileOutline", () => verifyMobileOutlinePanel(browser));
     const mobileGlobalMenuScroll = await runStep("mobileGlobalMenuScroll", () => verifyMobileGlobalMenuScroll(browser));
     const mobileCanvasPinchZoom = await runStep("mobileCanvasPinchZoom", () => verifyMobileCanvasPinchZoom(browser));
+    const mobileCanvasInterruptionRecovery = await runStep("mobileCanvasInterruptionRecovery", () => verifyMobileCanvasInterruptionRecovery(browser));
     const mobileTutorialRootBirth = await runStep("mobileTutorialRootBirth", () => verifyMobileTutorialRootBirth(browser));
     const mobileGeneratedLayout = await runStep("mobileGeneratedLayout", () => verifyMobileGeneratedLayoutVisibility(browser));
     const phyllotaxisFocusOffset = await runStep("phyllotaxisFocusOffset", () => verifyPhyllotaxisFocusOffset(browser));
@@ -3033,7 +3109,7 @@ try {
     const mobile = await runStep("mobileViewport", () => verifyViewport(browser, "mobile", { width: 390, height: 844 }));
     const mobileLandscape = await runStep("mobileLandscapeViewport", () => verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 }));
     console.log("UI verification passed");
-    console.log({ desktop, calendarLayout, localDeveloperMode, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+    console.log({ desktop, calendarLayout, localDeveloperMode, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileCanvasInterruptionRecovery, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
   }
 } finally {
   await browser.close();

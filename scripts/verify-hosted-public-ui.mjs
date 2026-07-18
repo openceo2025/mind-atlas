@@ -162,6 +162,7 @@ try {
     const signedOutButton = signedOutPage.locator(".ai-feature-button");
     await signedOutButton.waitFor();
     const signedOutButtonText = cleanText(await signedOutButton.textContent());
+    const signedOutFeatureLabel = cleanText(await signedOutButton.locator("span").textContent());
     if (!signedOutButtonText.includes("クラウド保存・共有")) {
       throw new Error(`Signed-out public button should describe cloud save and sharing: ${signedOutButtonText}`);
     }
@@ -180,6 +181,91 @@ try {
       }
     }
     await signedOutPage.close();
+
+    const signedOutMobilePage = await browser.newPage({
+      viewport: { width: 390, height: 844 },
+      ignoreHTTPSErrors: true,
+      isMobile: true,
+      hasTouch: true,
+    });
+    await seedCompletedOnboarding(signedOutMobilePage);
+    await seedHostedMobileEditorNotebook(signedOutMobilePage);
+    await signedOutMobilePage.goto(appUrl, { waitUntil: "networkidle" });
+    await signedOutMobilePage.waitForSelector("canvas");
+    const mobileHeaderState = await signedOutMobilePage.evaluate(() => {
+      const title = document.querySelector(".dataset-title-input");
+      const menu = document.querySelector(".global-menu");
+      const accountButton = document.querySelector(".top-account-feature-button");
+      if (!(title instanceof HTMLElement) || !(menu instanceof HTMLElement) || !(accountButton instanceof HTMLElement)) {
+        return { ok: false, reason: "missing mobile header elements" };
+      }
+      const titleRect = title.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      const overlaps = titleRect.left < menuRect.right && titleRect.right > menuRect.left && titleRect.top < menuRect.bottom && titleRect.bottom > menuRect.top;
+      return {
+        ok: window.getComputedStyle(accountButton).display === "none" && !overlaps,
+        accountDisplay: window.getComputedStyle(accountButton).display,
+        titleRect: { left: titleRect.left, right: titleRect.right, top: titleRect.top, bottom: titleRect.bottom },
+        menuRect: { left: menuRect.left, right: menuRect.right, top: menuRect.top, bottom: menuRect.bottom },
+      };
+    });
+    if (!mobileHeaderState.ok) throw new Error(`Mobile hosted header still overlaps: ${JSON.stringify(mobileHeaderState)}`);
+
+    await signedOutMobilePage.locator(".global-menu > .icon-button").last().click();
+    const mobileAccountMenuButton = signedOutMobilePage.locator(".global-context-menu > .mobile-menu-account-feature");
+    await mobileAccountMenuButton.waitFor({ state: "visible" });
+    const mobileAccountMenuText = cleanText(await mobileAccountMenuButton.textContent());
+    if (!mobileAccountMenuText.includes(signedOutFeatureLabel)) {
+      throw new Error(`Mobile account entry is missing from the top of the submenu: ${mobileAccountMenuText}`);
+    }
+    const mobileMenuFirstClass = await signedOutMobilePage.locator(".global-context-menu > :first-child").getAttribute("class");
+    if (!mobileMenuFirstClass?.includes("mobile-menu-account-feature")) {
+      throw new Error(`Mobile account entry is not first in the submenu: ${mobileMenuFirstClass}`);
+    }
+    await mobileAccountMenuButton.click();
+    await signedOutMobilePage.locator(".ai-feature-dialog").waitFor();
+    await signedOutMobilePage.locator(".ai-feature-dialog .icon-button").click();
+
+    await signedOutMobilePage.waitForSelector('.space-title-preview[data-node-id="hosted-mobile-child"]', { state: "visible" });
+    await signedOutMobilePage.tap('.space-title-preview[data-node-id="hosted-mobile-child"]');
+    await signedOutMobilePage.waitForSelector(".mobile-workspace-panel.is-single-editor");
+    await signedOutMobilePage.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+    const mobileEditorState = await signedOutMobilePage.evaluate(() => {
+      const panel = document.querySelector(".mobile-workspace-panel.is-single-editor");
+      const focusPanel = panel?.querySelector(".focus-panel.is-text-only");
+      const title = focusPanel?.querySelector(".node-title-input");
+      const body = focusPanel?.querySelector(".node-body-input");
+      if (!(panel instanceof HTMLElement) || !(focusPanel instanceof HTMLElement) || !(title instanceof HTMLTextAreaElement) || !(body instanceof HTMLTextAreaElement)) {
+        return { ok: false, reason: "missing compact hosted editor" };
+      }
+      const panelRect = panel.getBoundingClientRect();
+      const titleRect = title.getBoundingClientRect();
+      const bodyRect = body.getBoundingClientRect();
+      const tabCount = panel.querySelectorAll(".mobile-workspace-tabs").length;
+      const previewCount = focusPanel.querySelectorAll(".panel-preview-area").length;
+      return {
+        ok:
+          tabCount === 0 &&
+          previewCount === 0 &&
+          panelRect.height <= 190 &&
+          title.rows === 1 &&
+          titleRect.height <= 38 &&
+          bodyRect.height >= 50 &&
+          bodyRect.height <= 64 &&
+          body.scrollHeight > body.clientHeight,
+        tabCount,
+        previewCount,
+        panelHeight: panelRect.height,
+        titleHeight: titleRect.height,
+        bodyHeight: bodyRect.height,
+        bodyClientHeight: body.clientHeight,
+        bodyScrollHeight: body.scrollHeight,
+      };
+    });
+    if (!mobileEditorState.ok) throw new Error(`Hosted mobile editor is not compact: ${JSON.stringify(mobileEditorState)}`);
+    await signedOutMobilePage.close();
 
     mockSessionMode = "active";
     const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
@@ -226,7 +312,11 @@ try {
     const publicMenu = page.locator(".global-context-menu");
     await publicMenu.getByText("クラウドへ保存").waitFor();
     await publicMenu.getByText("クラウドから読み込み").waitFor();
-    const publicMenuOrder = await publicMenu.evaluate((menu) => Array.from(menu.children).map((child) => child.textContent?.replace(/\s+/g, " ").trim() ?? ""));
+    const publicMenuOrder = await publicMenu.evaluate((menu) =>
+      Array.from(menu.children)
+        .filter((child) => child instanceof HTMLElement && window.getComputedStyle(child).display !== "none")
+        .map((child) => child.textContent?.replace(/\s+/g, " ").trim() ?? ""),
+    );
     if (!publicMenuOrder[0]?.includes("新しく始める") || !publicMenuOrder[0]?.includes("テキストのみエクスポート")) {
       throw new Error(`New start and export should begin the file section: ${JSON.stringify(publicMenuOrder)}`);
     }
@@ -726,6 +816,63 @@ async function seedCompletedOnboarding(page) {
       }),
     );
   });
+}
+
+async function seedHostedMobileEditorNotebook(page) {
+  const now = new Date().toISOString();
+  const baseFields = {
+    author: "human",
+    status: "waiting",
+    texture: "speckled",
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    nextDecision: "",
+    tags: [],
+    position: [0, 0, 0],
+  };
+  const root = {
+    id: "atlas-root",
+    kind: "root",
+    nodeType: "note",
+    title: "Hosted mobile root",
+    subtitle: "Hosted mobile root",
+    body: "Hosted mobile root body",
+    color: "#8df5cf",
+    radius: 80,
+    summary: "Hosted mobile root",
+    ...baseFields,
+    children: [
+      {
+        id: "hosted-mobile-child",
+        kind: "thread",
+        nodeType: "human_prompt",
+        title: "Hosted mobile child",
+        subtitle: "Hosted mobile child",
+        body: "Line one\nLine two\nLine three\nLine four\nLine five\nLine six",
+        color: "#94a3ff",
+        radius: 48,
+        summary: "Hosted mobile child",
+        ...baseFields,
+        children: [],
+      },
+    ],
+  };
+  await page.addInitScript((seed) => {
+    window.localStorage.setItem("mind-atlas-notebook-v2", JSON.stringify(seed.root));
+    window.localStorage.setItem(
+      "mind-atlas-ui-state-v1",
+      JSON.stringify({
+        version: 1,
+        savedAt: seed.now,
+        selectedNodeId: "atlas-root",
+        viewport: { x: 0, y: 0, zoom: 0.92 },
+        renderQuality: "high",
+        layoutMode: "phyllotaxis",
+        mobilePanelTab: "editor",
+      }),
+    );
+  }, { root, now });
 }
 
 async function seedVoiceLog(page) {

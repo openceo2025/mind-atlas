@@ -173,6 +173,9 @@ export default function App() {
   const setLayoutMode = useAtlasStore((state) => state.setLayoutMode);
   const [persistedUiState] = useState<PersistedUiState | null>(() => loadPersistedUiState());
   const [pageActive, setPageActive] = useState(() => isPageRuntimeActive());
+  const handleCanvasRuntimeResume = useCallback(() => {
+    if (isPageRuntimeActive()) setPageActive(true);
+  }, []);
   const [menuOpen, setMenuOpen] = useState(false);
   const globalMenuRef = useRef<HTMLDivElement | null>(null);
   const universeShareTargetRef = useRef<HTMLElement | null>(null);
@@ -287,6 +290,7 @@ export default function App() {
   const mobileOperationPanelTabAvailable = !mobilePortraitOperationSurface;
   const operationPanelInWorkspace = mobileOperationSurface && mobileOperationPanelTabAvailable;
   const effectiveMobilePanelTab: MobilePanelTab = getEffectiveMobilePanelTab(mobilePanelTab, showCommandDock, outlineEditorOpen, mobileOperationPanelTabAvailable);
+  const mobileWorkspaceTabsNeeded = showCommandDock || mobileOperationPanelTabAvailable || outlineEditorOpen;
   const showWorkspacePanel =
     !outlineEditorOpen &&
     (showCommandDock ||
@@ -1855,6 +1859,7 @@ export default function App() {
         tutorialRootBirthUnlocked={onboarding.showRootPulse}
         embedInteractionLocked={Boolean(aboutDemoConfig)}
         attachmentsEnabled={attachmentsEnabled}
+        onRuntimeResume={handleCanvasRuntimeResume}
       />
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
       {onboarding.message ? (
@@ -1911,7 +1916,7 @@ export default function App() {
       <div ref={globalMenuRef} className="global-menu" aria-label={formatAppMessage("ui.app.atlasActions.8babf3a")}>
         {publicServiceMode ? (
           <button
-            className={`ai-feature-button ${aiFeaturesUnlocked ? "is-active" : ""}`}
+            className={`ai-feature-button top-account-feature-button ${aiFeaturesUnlocked ? "is-active" : ""}`}
             type="button"
             onClick={() => setAiFeatureDialogOpen(true)}
             aria-label={hostedAccountFeatureLabel}
@@ -1937,6 +1942,23 @@ export default function App() {
         </button>
         {menuOpen ? (
           <div className="context-menu global-context-menu">
+            {publicServiceMode ? (
+              <button
+                className={`mobile-menu-account-feature ${aiFeaturesUnlocked ? "is-active" : ""}`}
+                type="button"
+                onClick={() => {
+                  setAiFeatureDialogOpen(true);
+                  setMenuOpen(false);
+                }}
+                aria-label={hostedAccountFeatureLabel}
+              >
+                <Sparkles size={15} />
+                <span>
+                  {hostedAccountFeatureLabel}
+                  <small>{aiFeatureButtonBadge(hostedSession, hostedSessionLoading, hostedSessionError)}</small>
+                </span>
+              </button>
+            ) : null}
             <div className="context-menu-section" aria-label={t("menu.files.label")}>
               <span className="context-menu-section-title">{t("menu.files")}</span>
               <button type="button" onClick={handleInitialize}>
@@ -2213,10 +2235,11 @@ export default function App() {
       {(onboarding.showMainChrome || showTutorialOperationFallback) && !operationPanelInWorkspace ? <OperationPanel actions={operationActions} variant="desktop" /> : null}
       {renderWorkspacePanel ? (
         <section
-          className={`mobile-workspace-panel ${showWorkspacePanel ? "is-open" : "is-closing"}`}
+          className={`mobile-workspace-panel ${showWorkspacePanel ? "is-open" : "is-closing"} ${mobileWorkspaceTabsNeeded ? "" : "is-single-editor"}`}
           data-active-tab={effectiveMobilePanelTab}
           aria-label={formatAppMessage("ui.app.mobileWorkspace.35daa52")}
         >
+          {mobileWorkspaceTabsNeeded ? (
           <div className="mobile-workspace-tabs" role="tablist" aria-label={formatAppMessage("ui.app.workspacePanel.8b247f7")}>
             {showCommandDock ? (
               <button
@@ -2265,6 +2288,7 @@ export default function App() {
               </button>
             ) : null}
           </div>
+          ) : null}
           {showCommandDock ? (
             <div className="mobile-panel-slot mobile-command-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "command"}>
               <CommandDock />
