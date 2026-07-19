@@ -1,12 +1,59 @@
 # Mind Atlas
 
-![Mind Atlas spatial interface concept](docs/images/mindatlas1.png)
+![Mind Atlas - spatial mission control for AI coding agents](docs/images/mind-atlas-github-social-preview.png)
 
-Mind Atlas is a 2.5D spatial notebook for navigating parallel AI-assisted work.
+**Spatial mission control for Codex, Claude Code, and OpenClaw.**
 
-Instead of treating prompts, artifacts, and project states as a flat list of chats or files, Mind Atlas places them in a fixed-orientation semantic space. Each visible object is an editable notebook node. The user can pan, zoom, focus, inspect attachments, and re-enter a work stream from the same spatial context.
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--only-83d7a1)](LICENSE)
+![Version](https://img.shields.io/badge/version-0.1.1-25332b)
+![TypeScript](https://img.shields.io/badge/TypeScript-React%20%2B%20Three.js-3178c6)
+![Local first](https://img.shields.io/badge/agent%20workspace-local--first-6f8f7b)
 
-Public site: https://mind-atlas.org
+[Public notebook](https://mind-atlas.org) · [Run locally](#run-the-agent-workspace-locally) · [Agent bridge details](docs/ai-bridge.md) · [Contributing](CONTRIBUTING.md)
+
+![AI completion notifications ripple through the Mind Atlas workspace](docs/media/mind-atlas-agent-notification-loop.gif)
+
+AI coding agents are fast. Keeping track of parallel requests, branches,
+approvals, logs, and results is not. Mind Atlas turns that work into a
+navigable 2.5D space: each request stays attached to its project context, and
+completed work calls your attention with a visible notification pulse.
+
+## Why Mind Atlas
+
+- **See parallel agent work.** Codex, Claude Code, and OpenClaw runs become
+  spatial request/result branches instead of disappearing into terminal tabs.
+- **Return to the right context.** Select a node and continue the work from its
+  branch history, nearby notes, files, and prior agent output.
+- **Recover interrupted results.** Local agent requests are journaled before
+  execution and restored after browser or bridge interruption.
+- **Keep powerful tooling local.** Work roots, command execution, provider
+  credentials, and agent logs stay in the local developer bridge.
+
+## Run the agent workspace locally
+
+```powershell
+git clone https://github.com/openceo2025/mind-atlas.git
+cd mind-atlas
+npm install
+npm run dev:all
+```
+
+Open the local URL printed in the terminal. The notebook works without an AI
+provider. Install and configure at least one supported CLI (`codex`, `claude`,
+or `openclaw`) to run real local coding-agent work. See
+[docs/ai-bridge.md](docs/ai-bridge.md) for provider and Windows setup.
+
+![Mind Atlas local Code mode with Codex and Claude Code](docs/images/mind-atlas-agent-control.png)
+
+> [!IMPORTANT]
+> The agent mission-control surface is local-only. The public hosted service at
+> `mind-atlas.org` intentionally hides work roots, shell execution, Codex,
+> Claude Code, OpenClaw, local provider controls, and local credentials.
+
+Mind Atlas is also a 2.5D spatial notebook for navigating parallel
+AI-assisted work. Each visible object is an editable notebook node. You can
+pan, zoom, focus, inspect attachments, and re-enter a work stream from the same
+spatial context.
 
 Production hosting currently runs on a ConoHa VPS. GitHub is the public source
 repository and collaboration record, not the production database, secret store,

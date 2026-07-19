@@ -555,3 +555,43 @@ campaign attribution and referral loops are not yet operating.
 - 2026-07-16: Required disclosed, honest creator use; fan loyalty must not be
   exploited through concealed or deceptive endorsement.
 - 2026-07-16: Attribution engineering is the gate before paid outreach.
+
+## 15. Separate GitHub developer track
+
+The local developer edition has a separate audience and success metric from
+the public Sticky Notes acquisition loop. Do not mix GitHub stars with free
+Google-linked users or treat one as evidence for the other.
+
+Developer positioning:
+
+> Spatial mission control for Codex, Claude Code, and OpenClaw.
+
+The first developer experiment uses one real notification-pulse loop and one
+real Code-mode screenshot. It sends technical visitors directly to the GitHub
+repository, where the README must explain the local-only security boundary and
+provide a copyable local setup path.
+
+Developer-track metrics:
+
+- GitHub unique visitors and referrers from the 14-day Traffic view
+- stars and star-to-unique-visitor rate
+- full clones
+- substantive issues, discussions, and pull requests
+
+The first launch is organic and English-first. Use the `openceo2025` account
+for the technical explanation and at most one maker-story reshare from
+`morusukochan`. Do not buy stars, ask coordinated groups to upvote, or mix the
+developer result with the active Japanese consumer-video experiment.
+
+Developer review cadence is the same promotion loop: observe at 24 hours and
+72 hours, decide at seven days, and append the result to
+`docs/promotion-experiments.md`.
+
+Initial directional thresholds, evaluated only after at least 100 GitHub
+unique visitors:
+
+- 8 percent or higher visitor-to-star rate: scale the winning message
+- 3 to 8 percent: revise the README hook or demo before another launch
+- below 3 percent: stop distribution and repair positioning or setup friction
+
+These are internal experiment thresholds, not claimed industry benchmarks.

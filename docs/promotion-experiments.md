@@ -47,6 +47,7 @@ Notes:
 | `sticky_2026w31_02_discovery` | Week 2 | Creator-audience fit | 1 JP productivity micro-creator | JPY 10,000 max | 30 min | Attribution passes end to end; owned sample may be directional. |
 | `sticky_2026w32_03_business` | Week 3 | Creator-audience fit | Remaining JP and EN productivity/business creators | JPY 36,000 max | 30 min | Combined traffic reaches at least 20 G and passes the scale gate. |
 | `sticky_2026w33_04_vtuber` | Week 4 | Creator-audience fit | 1 JP and 1 EN adult independent VTubers | JPY 54,000 max | 30 min | Business batch is measured and VTuber content is disclosed. |
+| `dev_2026w29_01_github` | Separate track | GitHub README conversion | AI coding-agent developers | JPY 0 | 15 min | Real UI loop, privacy-safe screenshot, local setup, and local-only boundary are published. |
 
 The week numbers are scheduling labels, not promises to spend. A failed gate
 stops the next paid experiment until the cause is revised and retested.
@@ -103,3 +104,29 @@ Exactly one primary change for the next loop:
 | 2026-07-16 | Use a real-UI, CapCut-assisted vertical master instead of a fully generated ad. | Product truth and fast multilingual reuse matter more than synthetic visual novelty. |
 | 2026-07-16 | Block paid creator spend until attribution is repaired. | The live baseline cannot reliably connect campaigns to newly created Google-linked users. |
 | 2026-07-16 | Use the current JPY 10,000 for one JP productivity micro-creator discovery pilot, not X paid promotion. | The owned X audiences are topic-mismatched; a carefully selected creator provides relevant traffic and a credible workflow demonstration. |
+| 2026-07-19 | Add a separate organic GitHub developer track without changing the primary public Sticky Notes audience. | The local edition has a distinct demonstrable workflow for Codex, Claude Code, and OpenClaw; stars and clones are developer-interest signals, not free-user acquisition. |
+
+## Developer experiment: `dev_2026w29_01_github`
+
+State: live when the README commit reaches `main`
+
+- Start: 2026-07-19 JST
+- Audience: developers using AI coding agents
+- Primary hypothesis: a real notification loop plus an explicit spatial
+  mission-control promise will convert qualified repository visitors into
+  stars more effectively than the previous generic 2.5D notebook introduction.
+- Primary variable: the GitHub first-screen positioning and demo
+- Hook: `Spatial mission control for Codex, Claude Code, and OpenClaw.`
+- Assets: `docs/media/mind-atlas-agent-notification-loop.gif` and
+  `docs/images/mind-atlas-agent-control.png`
+- Destination: `https://github.com/openceo2025/mind-atlas`
+- Cash spend: JPY 0
+- Baseline: 0 stars and 0 forks immediately before publication
+
+Predeclared decision:
+
+- Observe GitHub unique visitors, referrers, stars, and clones at 24 hours,
+  72 hours, and seven days.
+- Do not rate visitor-to-star conversion until at least 100 unique visitors.
+- At or above 8 percent: scale. From 3 to 8 percent: revise. Below 3 percent:
+  stop distribution and repair the README hook or local setup friction.
