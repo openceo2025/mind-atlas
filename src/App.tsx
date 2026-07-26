@@ -58,6 +58,7 @@ const HOSTED_IMPORT_ACCEPT_TYPES = ".mindatlas,.md,.markdown,.opml,.mm,applicati
 const CLOUD_NOTEBOOK_MAX_BYTES = 10 * 1024 * 1024;
 const CURRENT_CLOUD_NOTEBOOK_SESSION_KEY = "mind-atlas-current-cloud-notebook-v1";
 type StartSpaceSource = "initialize" | "tutorial";
+type TutorialCompletionStep = "complete" | "choice" | null;
 type CloudLoadCloseOptions = { closeCloudDialog: boolean; closeStartSpace: boolean };
 type PendingWorkspaceSwitch = { nextName: string };
 const MODE_OPTIONS: Array<{ mode: AtlasLayoutMode; icon: "orbit" | "tree" | "mind" | "calendar" }> = [
@@ -81,6 +82,7 @@ const KEYBOARD_OVERLAY_INPUT_SELECTOR =
 const SPACE_LABEL_KEYBOARD_SELECTOR = ".space-title-editor, .space-body-editor";
 const MOBILE_KEYBOARD_OPEN_THRESHOLD_PX = 150;
 const MOBILE_KEYBOARD_PREPARE_MS = 1200;
+const MOBILE_KEYBOARD_OPEN_SETTLE_MS = 280;
 const MOBILE_KEYBOARD_CLOSING_MS = 320;
 const MOBILE_KEYBOARD_SETTLE_DELAYS_MS = [80, 180, 360, 700, 1100, 1500] as const;
 const MOBILE_KEYBOARD_PROFILE_EVENT = "mind-atlas-mobile-keyboard-profile";
@@ -168,6 +170,7 @@ export default function App() {
   const acknowledgeNodeNotification = useAtlasStore((state) => state.acknowledgeNodeNotification);
   const restoreAttachmentPreviews = useAtlasStore((state) => state.restoreAttachmentPreviews);
   const recoverCompletedCodexRuns = useAtlasStore((state) => state.recoverCompletedCodexRuns);
+  const recoverMissedAgentRuns = useAtlasStore((state) => state.recoverMissedAgentRuns);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
   const layoutMode = useAtlasStore((state) => state.layoutMode);
   const setLayoutMode = useAtlasStore((state) => state.setLayoutMode);
@@ -188,6 +191,7 @@ export default function App() {
   const [startSpaceOpen, setStartSpaceOpen] = useState(false);
   const [startSpaceSource, setStartSpaceSource] = useState<StartSpaceSource>("initialize");
   const [tutorialStartSpaceDueAt, setTutorialStartSpaceDueAt] = useState<number | null>(null);
+  const [tutorialCompletionStep, setTutorialCompletionStep] = useState<TutorialCompletionStep>(null);
   const tutorialCompletionRef = useRef({ initialized: false, awaitingCompletion: false });
   const tutorialCompletionDelayMsRef = useRef(TUTORIAL_TEMPLATE_DELAY_MS);
   const analyticsNotebookRef = useRef<{ rootId: string; nodeCount: number; maxDepth: number; textSize: number } | null>(null);
@@ -834,12 +838,14 @@ export default function App() {
   }, [restoreAttachmentPreviews]);
 
   useEffect(() => {
+    if (publicServiceMode || aboutDemoConfig) return;
     let recoveryRunning = false;
     const recover = () => {
       if (recoveryRunning) return;
       recoveryRunning = true;
       void recoverCompletedCodexRuns()
-        .catch((error) => console.error("Codex run recovery failed", error))
+        .then(() => recoverMissedAgentRuns())
+        .catch((error) => console.error("Local agent run recovery failed", error))
         .finally(() => {
           recoveryRunning = false;
         });
@@ -856,7 +862,7 @@ export default function App() {
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("pageshow", recover);
     };
-  }, [recoverCompletedCodexRuns]);
+  }, [aboutDemoConfig, publicServiceMode, recoverCompletedCodexRuns, recoverMissedAgentRuns]);
 
   const handleExportLight = async () => {
     try {
@@ -1474,6 +1480,8 @@ export default function App() {
   };
 
   const openStartSpaceDialog = (source: StartSpaceSource) => {
+    setTutorialCompletionStep(null);
+    setTutorialStartSpaceDueAt(null);
     setStartSpaceSource(source);
     setStartSpaceOpen(true);
     setMenuOpen(false);
@@ -1542,7 +1550,7 @@ export default function App() {
     if (tutorialStartSpaceDueAt === null) return;
     const timeout = window.setTimeout(() => {
       setTutorialStartSpaceDueAt(null);
-      openStartSpaceDialog("tutorial");
+      setTutorialCompletionStep("complete");
     }, Math.max(0, tutorialStartSpaceDueAt - Date.now()));
     return () => window.clearTimeout(timeout);
   }, [tutorialStartSpaceDueAt]);
@@ -1612,6 +1620,8 @@ export default function App() {
     persistUiStatePatch(nextUiState);
     tutorialCompletionDelayMsRef.current = TUTORIAL_TEMPLATE_DELAY_MS;
     setTutorialStartSpaceDueAt(null);
+    setTutorialCompletionStep(null);
+    setStartSpaceOpen(false);
     onboarding.startTutorialMode();
     setOutlineEditorOpen(false);
     setOutlineEditorRootId(null);
@@ -2413,6 +2423,17 @@ export default function App() {
           }}
         />
       ) : null}
+      {tutorialCompletionStep ? (
+        <TutorialCompletionDialog
+          step={tutorialCompletionStep}
+          onAcknowledge={() => setTutorialCompletionStep("choice")}
+          onContinue={() => setTutorialCompletionStep(null)}
+          onUseTemplate={() => {
+            setTutorialCompletionStep(null);
+            openStartSpaceDialog("initialize");
+          }}
+        />
+      ) : null}
       {publicServiceMode && aiFeatureDialogOpen ? (
         <AiFeatureDialog
           session={hostedSession}
@@ -2963,6 +2984,53 @@ function UnsavedCloudSwitchDialog({
           <button type="button" onClick={onCancel} disabled={loading}>{t("common.cancel")}</button>
           <button className="danger-button" type="button" onClick={onDiscardAndOpen} disabled={loading}>{t("cloud.discardAndOpen")}</button>
           <button className="primary-button" type="button" onClick={onSaveAndOpen} disabled={loading}>{t("cloud.saveAndOpen")}</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function TutorialCompletionDialog({
+  step,
+  onAcknowledge,
+  onContinue,
+  onUseTemplate,
+}: {
+  step: Exclude<TutorialCompletionStep, null>;
+  onAcknowledge: () => void;
+  onContinue: () => void;
+  onUseTemplate: () => void;
+}) {
+  const t = useMessage();
+  const complete = step === "complete";
+
+  return (
+    <div className="modal-backdrop tutorial-completion-backdrop" role="presentation">
+      <section
+        className={`cloud-switch-dialog tutorial-completion-dialog${complete ? " is-complete" : " is-choice"}`}
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={complete ? t("tutorial.complete.title") : t("tutorial.next.title")}
+      >
+        <header>
+          <h2>{complete ? t("tutorial.complete.title") : t("tutorial.next.title")}</h2>
+          <p>{complete ? t("tutorial.complete.detail") : t("tutorial.next.detail")}</p>
+        </header>
+        <footer>
+          {complete ? (
+            <button className="primary-button" type="button" onClick={onAcknowledge} autoFocus>
+              {t("common.ok")}
+            </button>
+          ) : (
+            <>
+              <button className="primary-button" type="button" onClick={onContinue} autoFocus>
+                {t("tutorial.next.continue")}
+              </button>
+              <button type="button" onClick={onUseTemplate}>
+                {t("tutorial.next.template")}
+              </button>
+            </>
+          )}
         </footer>
       </section>
     </div>
@@ -3792,6 +3860,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
   const keyboardOpeningStartedAtRef = useRef<number | null>(null);
   const keyboardClosingStartedAtRef = useRef<number | null>(null);
   const lastKeyboardBottomOffsetRef = useRef(0);
+  const lastKeyboardLayoutSignatureRef = useRef("");
 
   useEffect(() => {
     commandInputEditingRef.current = commandInputEditing;
@@ -3801,6 +3870,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
   useEffect(() => {
     const timeoutIds = new Set<number>();
     let animationFrameId: number | null = null;
+    let geometrySettleTimeoutId: number | null = null;
 
     const readViewport = () => {
       const visualViewport = window.visualViewport;
@@ -3840,19 +3910,24 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
     };
 
     const applyIdleViewportState = (appHeight: number) => {
+      const roundedAppHeight = Math.round(appHeight);
+      const layoutSignature = `idle:${roundedAppHeight}`;
+      const layoutChanged = lastKeyboardLayoutSignatureRef.current !== layoutSignature;
       keyboardPhaseRef.current = "idle";
       keyboardOpeningStartedAtRef.current = null;
       keyboardClosingStartedAtRef.current = null;
       keyboardOverlayPreparedUntilRef.current = 0;
       lastKeyboardBottomOffsetRef.current = 0;
+      lastKeyboardLayoutSignatureRef.current = layoutSignature;
       setVirtualKeyboardOverlay(false);
       clearKeyboardPanelSizeLock();
       document.documentElement.removeAttribute("data-keyboard-overlay-input");
       document.documentElement.removeAttribute("data-keyboard-overlay-portrait");
       document.documentElement.removeAttribute("data-keyboard-overlay-space-label");
       document.documentElement.removeAttribute("data-keyboard-state");
-      document.documentElement.style.setProperty("--app-height", `${appHeight}px`);
-      document.documentElement.style.setProperty("--keyboard-top", `${appHeight}px`);
+      if (!layoutChanged) return;
+      document.documentElement.style.setProperty("--app-height", `${roundedAppHeight}px`);
+      document.documentElement.style.setProperty("--keyboard-top", `${roundedAppHeight}px`);
       document.documentElement.style.setProperty("--keyboard-bottom-offset", "0px");
       window.dispatchEvent(new Event(MOBILE_KEYBOARD_PROFILE_EVENT));
     };
@@ -3860,22 +3935,27 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
     const applyKeyboardViewportState = (phase: MobileKeyboardPhase, stableHeight: number, keyboardBottomOffset: number) => {
       const boundedKeyboardBottomOffset = clampNumber(Math.round(keyboardBottomOffset), 0, stableHeight);
       const keyboardTop = Math.max(0, stableHeight - boundedKeyboardBottomOffset);
+      const spaceLabelActive = isSpaceLabelKeyboardTargetActive();
+      const layoutSignature = `keyboard:${Math.round(stableHeight)}:${boundedKeyboardBottomOffset}:${spaceLabelActive ? 1 : 0}`;
+      const layoutChanged = lastKeyboardLayoutSignatureRef.current !== layoutSignature;
 
       keyboardPhaseRef.current = phase;
       lastKeyboardBottomOffsetRef.current = boundedKeyboardBottomOffset;
+      lastKeyboardLayoutSignatureRef.current = layoutSignature;
       setVirtualKeyboardOverlay(false);
       document.documentElement.setAttribute("data-keyboard-overlay-input", "true");
       document.documentElement.setAttribute("data-keyboard-overlay-portrait", "true");
       document.documentElement.setAttribute("data-keyboard-state", phase);
-      if (isSpaceLabelKeyboardTargetActive()) {
+      if (spaceLabelActive) {
         document.documentElement.setAttribute("data-keyboard-overlay-space-label", "true");
       } else {
         document.documentElement.removeAttribute("data-keyboard-overlay-space-label");
       }
+      if (!hasKeyboardPanelSizeLock()) lockKeyboardPanelSizeForKeyboardOverlay();
+      if (!layoutChanged) return;
       document.documentElement.style.setProperty("--app-height", `${stableHeight}px`);
       document.documentElement.style.setProperty("--keyboard-top", `${keyboardTop}px`);
       document.documentElement.style.setProperty("--keyboard-bottom-offset", `${boundedKeyboardBottomOffset}px`);
-      if (!hasKeyboardPanelSizeLock()) lockKeyboardPanelSizeForKeyboardOverlay();
       window.dispatchEvent(new Event(MOBILE_KEYBOARD_PROFILE_EVENT));
     };
 
@@ -3893,6 +3973,18 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
         animationFrameId = null;
         updateViewportHeight();
       });
+    };
+
+    const scheduleGeometrySettledUpdate = () => {
+      if (keyboardPhaseRef.current === "idle") {
+        scheduleViewportUpdate();
+        return;
+      }
+      if (geometrySettleTimeoutId !== null) window.clearTimeout(geometrySettleTimeoutId);
+      geometrySettleTimeoutId = window.setTimeout(() => {
+        geometrySettleTimeoutId = null;
+        scheduleViewportUpdate();
+      }, 120);
     };
 
     const scheduleSettledUpdates = () => {
@@ -3938,14 +4030,19 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
       let phase: MobileKeyboardPhase = "idle";
 
       if (keyboardOverlayPortrait && (activeKeyboardTarget || keyboardOverlayPrepared)) {
-        const openingStartedAt = keyboardOpeningStartedAtRef.current ?? Date.now();
-        keyboardOpeningStartedAtRef.current = openingStartedAt;
         keyboardClosingStartedAtRef.current = null;
-        if (viewport.keyboardLikelyOpen) {
+        if (viewport.keyboardLikelyOpen && previousPhase === "open") {
           phase = "open";
           keyboardOpeningStartedAtRef.current = null;
-        } else if (Date.now() - openingStartedAt <= MOBILE_KEYBOARD_PREPARE_MS) {
-          phase = "opening";
+        } else {
+          const openingStartedAt = keyboardOpeningStartedAtRef.current ?? Date.now();
+          keyboardOpeningStartedAtRef.current = openingStartedAt;
+          if (viewport.keyboardLikelyOpen && Date.now() - openingStartedAt >= MOBILE_KEYBOARD_OPEN_SETTLE_MS) {
+            phase = "open";
+            keyboardOpeningStartedAtRef.current = null;
+          } else if (Date.now() - openingStartedAt <= MOBILE_KEYBOARD_PREPARE_MS) {
+            phase = "opening";
+          }
         }
       } else if (keyboardOverlayPortrait && previousPhase !== "idle" && viewport.keyboardLikelyOpen) {
         const closingStartedAt = keyboardClosingStartedAtRef.current ?? Date.now();
@@ -3968,7 +4065,11 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
           : 0;
       const closingKeyboardBottomOffset =
         phase === "closing" ? Math.max(viewport.measuredKeyboardBottomOffset, lastKeyboardBottomOffsetRef.current) : 0;
-      const keyboardBottomOffset = Math.max(viewport.measuredKeyboardBottomOffset, fallbackKeyboardBottomOffset, closingKeyboardBottomOffset);
+      let keyboardBottomOffset = Math.max(viewport.measuredKeyboardBottomOffset, fallbackKeyboardBottomOffset, closingKeyboardBottomOffset);
+      if (phase === "open" && previousPhase === "open" && lastKeyboardBottomOffsetRef.current > 0) {
+        const measuredDelta = Math.abs(keyboardBottomOffset - lastKeyboardBottomOffsetRef.current);
+        if (measuredDelta < 64) keyboardBottomOffset = lastKeyboardBottomOffsetRef.current;
+      }
       applyKeyboardViewportState(phase, viewport.stableHeight, keyboardBottomOffset);
     };
 
@@ -4002,24 +4103,25 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
     document.addEventListener("touchstart", handleTouchStart, true);
     document.addEventListener("focusin", handleFocusIn, true);
     document.addEventListener("focusout", handleFocusOut, true);
-    window.visualViewport?.addEventListener("resize", updateViewportHeight);
-    window.visualViewport?.addEventListener("scroll", updateViewportHeight);
-    virtualKeyboard?.addEventListener("geometrychange", updateViewportHeight);
-    window.addEventListener("resize", updateViewportHeight);
+    window.visualViewport?.addEventListener("resize", scheduleGeometrySettledUpdate);
+    window.visualViewport?.addEventListener("scroll", scheduleGeometrySettledUpdate);
+    virtualKeyboard?.addEventListener("geometrychange", scheduleGeometrySettledUpdate);
+    window.addEventListener("resize", scheduleGeometrySettledUpdate);
     window.addEventListener("orientationchange", updateViewportHeightAfterOrientation);
     return () => {
       requestViewportUpdateRef.current = () => undefined;
       timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
       timeoutIds.clear();
       if (animationFrameId !== null) window.cancelAnimationFrame(animationFrameId);
+      if (geometrySettleTimeoutId !== null) window.clearTimeout(geometrySettleTimeoutId);
       document.removeEventListener("pointerdown", handlePointerDown, true);
       document.removeEventListener("touchstart", handleTouchStart, true);
       document.removeEventListener("focusin", handleFocusIn, true);
       document.removeEventListener("focusout", handleFocusOut, true);
-      window.visualViewport?.removeEventListener("resize", updateViewportHeight);
-      window.visualViewport?.removeEventListener("scroll", updateViewportHeight);
-      virtualKeyboard?.removeEventListener("geometrychange", updateViewportHeight);
-      window.removeEventListener("resize", updateViewportHeight);
+      window.visualViewport?.removeEventListener("resize", scheduleGeometrySettledUpdate);
+      window.visualViewport?.removeEventListener("scroll", scheduleGeometrySettledUpdate);
+      virtualKeyboard?.removeEventListener("geometrychange", scheduleGeometrySettledUpdate);
+      window.removeEventListener("resize", scheduleGeometrySettledUpdate);
       window.removeEventListener("orientationchange", updateViewportHeightAfterOrientation);
       applyIdleViewportState(readViewport().visualHeight);
     };
@@ -4509,7 +4611,11 @@ function UnreadNotificationLinks({
 
 function isUnreadPartnerEntry(entry: VoiceLogEntry, lastSeenAt: string) {
   if (entry.role !== "assistant" && entry.role !== "error") return false;
-  if (!entry.sessionId?.startsWith("text-partner-") && !entry.sessionId?.startsWith("openclaw-partner-")) return false;
+  if (
+    !entry.sessionId?.startsWith("text-partner-") &&
+    !entry.sessionId?.startsWith("openclaw-partner-") &&
+    !entry.sessionId?.startsWith("agent-recovery-")
+  ) return false;
   if (typeof entry.metadata?.responseNodeId === "string" && entry.metadata.responseNodeId) return false;
   const entryTime = new Date(entry.createdAt).getTime();
   const seenTime = new Date(lastSeenAt).getTime();

@@ -1819,6 +1819,50 @@ async function verifyProviderUsagePanel(browser) {
   return { initialMetricCount, filteredMetricCount, persistedMetricCount };
 }
 
+async function verifyIosTouchSuppression(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    ignoreHTTPSErrors: true,
+    isMobile: true,
+    hasTouch: true,
+    userAgent:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
+  });
+  const page = await context.newPage();
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  await page.locator(".tutorial-skip-button").waitFor();
+  const styles = await page.evaluate(() => {
+    const shell = document.querySelector(".app-shell");
+    const skip = document.querySelector(".tutorial-skip-button");
+    const canvas = document.querySelector("canvas");
+    if (!(shell instanceof HTMLElement) || !(skip instanceof HTMLElement) || !(canvas instanceof HTMLElement)) {
+      throw new Error("Missing iOS touch-protection targets.");
+    }
+    const read = (element) => {
+      const style = window.getComputedStyle(element);
+      return {
+        userSelect: style.userSelect,
+        webkitUserSelect: style.getPropertyValue("-webkit-user-select"),
+        webkitTouchCallout: style.getPropertyValue("-webkit-touch-callout"),
+        tapHighlight: style.getPropertyValue("-webkit-tap-highlight-color"),
+      };
+    };
+    return {
+      shell: read(shell),
+      skip: read(skip),
+      canvas: read(canvas),
+    };
+  });
+  for (const [target, style] of Object.entries(styles)) {
+    if (style.userSelect !== "none" && style.webkitUserSelect !== "none") {
+      throw new Error(`iOS touch target ${target} still allows native text selection: ${JSON.stringify(styles)}`);
+    }
+  }
+  await context.close();
+  return styles;
+}
+
 async function verifyMobileEditorKeyboardOverlay(browser) {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -1842,6 +1886,21 @@ async function verifyMobileEditorKeyboardOverlay(browser) {
   await page.waitForTimeout(1250);
   const shellRectBeforeKeyboard = await readUniverseShellRect(page);
   const titleCenterBeforeKeyboard = await readVerifyChildTitleCenterY(page);
+  await page.evaluate(() => {
+    window.__mindAtlasKeyboardProfileEvents = 0;
+    window.__mindAtlasKeyboardShellResizes = 0;
+    window.addEventListener("mind-atlas-mobile-keyboard-profile", () => {
+      window.__mindAtlasKeyboardProfileEvents += 1;
+    });
+    const shell = document.querySelector(".universe-shell");
+    if (shell instanceof HTMLElement) {
+      const observer = new ResizeObserver(() => {
+        window.__mindAtlasKeyboardShellResizes += 1;
+      });
+      observer.observe(shell);
+      window.__mindAtlasKeyboardResizeObserver = observer;
+    }
+  });
   await bodyInput.evaluate((element) => {
     element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 1001, pointerType: "touch" }));
   });
@@ -1903,6 +1962,10 @@ async function verifyMobileEditorKeyboardOverlay(browser) {
       mobileTabs,
       operationTabCount: mobileTabs.filter((label) => label === "Operation").length,
       operationSlotCount: document.querySelectorAll(".mobile-operation-slot").length,
+      profileEventCount: window.__mindAtlasKeyboardProfileEvents ?? 0,
+      shellResizeCount: window.__mindAtlasKeyboardShellResizes ?? 0,
+      viewportHeight: window.innerHeight,
+      bodyUserSelect: window.getComputedStyle(document.querySelector(".node-body-input")).userSelect,
     };
     })),
     shellRectBeforeKeyboard,
@@ -1918,6 +1981,15 @@ async function verifyMobileEditorKeyboardOverlay(browser) {
   }
   if (overlayState.panelTab !== "editor" || !overlayState.panelRect || overlayState.panelRect.x > 24 || overlayState.panelRect.width < 330) {
     throw new Error(`Editor keyboard overlay panel looked like the compressed landscape layout: ${JSON.stringify(overlayState)}`);
+  }
+  if (overlayState.panelRect.y < 0 || overlayState.panelRect.y + overlayState.panelRect.height > overlayState.viewportHeight + 1) {
+    throw new Error(`Editor keyboard overlay panel escaped the visible viewport: ${JSON.stringify(overlayState)}`);
+  }
+  if (overlayState.profileEventCount > 3 || overlayState.shellResizeCount > 3) {
+    throw new Error(`Editor keyboard overlay produced repeated layout recentering: ${JSON.stringify(overlayState)}`);
+  }
+  if (overlayState.bodyUserSelect !== "text") {
+    throw new Error(`Editable text must remain selectable while app chrome is protected: ${JSON.stringify(overlayState)}`);
   }
   if (overlayState.minimapDisplay !== "none") {
     throw new Error(`Minimap should stay hidden while editor keyboard overlay is active: ${JSON.stringify(overlayState)}`);
@@ -1941,6 +2013,7 @@ async function verifyMobileEditorKeyboardOverlay(browser) {
     throw new Error(`Edited node should remain inside the shrunken universe shell: ${JSON.stringify(overlayState)}`);
   }
   await bodyInput.evaluate((element) => element.blur());
+  await page.evaluate(() => window.__mindAtlasKeyboardResizeObserver?.disconnect());
   await page.waitForFunction(() => document.documentElement.getAttribute("data-keyboard-overlay-input") !== "true", undefined, { timeout: 3500 });
   const settledState = await page.evaluate(() => ({
     keyboardOverlay: document.documentElement.getAttribute("data-keyboard-overlay-input"),
@@ -2264,6 +2337,85 @@ async function verifyVoiceLogDialog(browser) {
   return { approvalPending: 1, openClawNotification: true, openClawModels: modelOptions.length, timeoutWidth: Math.round(timeoutWidth) };
 }
 
+async function verifyAgentRecoveryNotification(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  let acknowledged = false;
+  const agentRequests = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/agent-runs/")) {
+      agentRequests.push({ method: request.method(), url: request.url(), body: request.postData() });
+    }
+  });
+  await page.route("**/health", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, bridge: "verify" }) });
+  });
+  await page.route("**/api/agent-runs/inbox", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: acknowledged
+          ? []
+          : [{
+              id: "verify-agent-recovery",
+              provider: "claude",
+              status: "completed",
+              startedAt: "2026-07-19T00:00:00.000Z",
+              completedAt: "2026-07-19T00:01:00.000Z",
+              clientRunId: "verify-agent-run",
+              workspace: "C:\\verify\\workspace",
+              model: "claude-verify",
+              prompt: "Recover this coding request.",
+              result: {
+                id: "verify-agent-result",
+                provider: "anthropic",
+                model: "claude-verify",
+                output: {
+                  title: "Recovered result",
+                  body: "Recovered coding response from the durable inbox.",
+                  summary: "Recovered coding response.",
+                  suggestedStatus: "needs_review",
+                  tags: [],
+                },
+                rawText: "Recovered coding response from the durable inbox.",
+              },
+            }],
+      }),
+    });
+  });
+  await page.route("**/api/agent-runs/ack", async (route) => {
+    const payload = route.request().postDataJSON();
+    if (payload?.ids?.includes("verify-agent-recovery")) acknowledged = true;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ acknowledged: 1 }) });
+  });
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  const notification = page.locator(".unread-notification-link.is-voice-log");
+  await notification.waitFor();
+  const title = await notification.getAttribute("title");
+  if (title !== "Recovered Claude Code result") {
+    throw new Error(`Recovered agent result did not create an unread AI Partner notification: ${title ?? "missing title"}`);
+  }
+  await notification.click();
+  const dialog = page.getByRole("dialog", { name: "AI Partner log" });
+  await dialog.waitFor();
+  const dialogText = await dialog.innerText();
+  for (const expected of ["Recover this coding request.", "Recovered coding response from the durable inbox."]) {
+    if (!dialogText.includes(expected)) throw new Error(`Recovered agent log is missing ${expected}: ${dialogText}`);
+  }
+  for (let attempt = 0; attempt < 20 && !acknowledged; attempt += 1) await page.waitForTimeout(25);
+  if (!acknowledged) {
+    throw new Error(`Recovered agent journal was not acknowledged after being stored in the AI Partner log: ${JSON.stringify(agentRequests)}`);
+  }
+  await context.close();
+  return { notificationTitle: title, acknowledged };
+}
+
 async function verifyShareFlows(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 820 },
@@ -2524,26 +2676,43 @@ async function verifyTutorialModeMenuActions(browser) {
     const progress = JSON.parse(raw);
     return progress.childNodeCreated === true && progress.spaceBasicsCompleted === true;
   });
+  const tutorialCompleteDialog = clickPage.getByRole("alertdialog", { name: "Tutorial complete" });
+  const tutorialNextDialog = clickPage.getByRole("alertdialog", { name: "How would you like to begin?" });
   const startSpaceDialog = clickPage.getByRole("dialog", { name: "Choose how to start" });
   await clickPage.waitForTimeout(1000);
-  if (await startSpaceDialog.count()) {
-    throw new Error("Tutorial template chooser opened before the child-node completion feedback was visible for five seconds.");
+  if ((await tutorialCompleteDialog.count()) || (await tutorialNextDialog.count()) || (await startSpaceDialog.count())) {
+    throw new Error("Tutorial completion flow opened before the child-node completion feedback was visible for five seconds.");
   }
-  await startSpaceDialog.waitFor({ timeout: 7000 });
+  await tutorialCompleteDialog.waitFor({ timeout: 7000 });
   const templateDelayMs = Date.now() - completionStartedAt;
   if (templateDelayMs < 4500) {
-    throw new Error(`Tutorial template chooser delay was too short: ${templateDelayMs}ms.`);
+    throw new Error(`Tutorial completion acknowledgement delay was too short: ${templateDelayMs}ms.`);
   }
-  await startSpaceDialog.getByRole("heading", { name: "Templates", exact: true }).waitFor();
-  await startSpaceDialog.getByRole("button", { name: /Continue with tutorial nodes/ }).click();
-  await startSpaceDialog.waitFor({ state: "detached" });
+  if (await startSpaceDialog.count()) {
+    throw new Error("Template chooser should not compete with the tutorial-complete acknowledgement.");
+  }
+  await tutorialCompleteDialog.getByRole("button", { name: "OK", exact: true }).click();
+  await tutorialCompleteDialog.waitFor({ state: "detached" });
+  await tutorialNextDialog.waitFor();
+  if (await startSpaceDialog.count()) {
+    throw new Error("Template chooser should remain closed until the user chooses to use a template.");
+  }
+  await tutorialNextDialog.getByRole("button", { name: "Use a template", exact: true }).waitFor();
+  await tutorialNextDialog.getByRole("button", { name: "Continue with these nodes", exact: true }).click();
+  await tutorialNextDialog.waitFor({ state: "detached" });
   const preservedTutorialNodeCount = await readPersistedNodeCount(clickPage);
   if (preservedTutorialNodeCount < 2) {
     throw new Error(`Tutorial no-template continuation should preserve created nodes, got ${preservedTutorialNodeCount}.`);
   }
   await clickContext.close();
 
-  return { tutorialResetConfirmed: true, noTemplateContinuationConfirmed: true, templateDelayMs };
+  return {
+    tutorialResetConfirmed: true,
+    completionAcknowledgementConfirmed: true,
+    noTemplateContinuationConfirmed: true,
+    templateChoiceOfferedConfirmed: true,
+    templateDelayMs,
+  };
 }
 
 async function addTutorialVerificationChild(page) {
@@ -3142,6 +3311,15 @@ try {
     const calendarLayout = await runStep("calendarLayout", () => verifyCalendarLayout(browser));
     console.log("Calendar layout verification passed");
     console.log({ calendarLayout });
+  } else if (process.argv[2] === "tutorial") {
+    const tutorialMode = await runStep("tutorialMode", () => verifyTutorialModeMenuActions(browser));
+    console.log("Tutorial completion verification passed");
+    console.log({ tutorialMode });
+  } else if (process.argv[2] === "mobile-input") {
+    const iosTouchSuppression = await runStep("iosTouchSuppression", () => verifyIosTouchSuppression(browser));
+    const mobileEditorKeyboard = await runStep("mobileEditorKeyboard", () => verifyMobileEditorKeyboardOverlay(browser));
+    console.log("Mobile input verification passed");
+    console.log({ iosTouchSuppression, mobileEditorKeyboard });
   } else {
     const desktop = await runStep("desktopViewport", () => verifyViewport(browser, "desktop", { width: 1440, height: 920 }));
     const localeSwitching = await runStep("localeSwitching", () => verifyLocaleSwitching(browser));
@@ -3159,6 +3337,7 @@ try {
     const lockedMenu = await runStep("lockedMenu", () => verifyLockedModeGlobalMenu(browser));
     const tutorialMode = await runStep("tutorialMode", () => verifyTutorialModeMenuActions(browser));
     const voiceLog = await runStep("voiceLog", () => verifyVoiceLogDialog(browser));
+    const agentRecovery = await runStep("agentRecovery", () => verifyAgentRecoveryNotification(browser));
     const shareFlows = await runStep("shareFlows", () => verifyShareFlows(browser));
     const outline = await runStep("outline", () => verifyOutlineAndContextCopy(browser));
     const outlineSafety = await runStep("outlineSafety", () => verifyOutlineCollapseAndDeletionSafety(browser));
@@ -3176,12 +3355,13 @@ try {
     const editorKeyboardCreateFocus = await runStep("editorKeyboardCreateFocus", () => verifyEditorTitleAndKeyboardCreateFocus(browser));
     const commandDock = await runStep("commandDock", () => verifyCommandDockAndMobileTextTap(browser));
     const providerUsage = await runStep("providerUsage", () => verifyProviderUsagePanel(browser));
+    const iosTouchSuppression = await runStep("iosTouchSuppression", () => verifyIosTouchSuppression(browser));
     const mobileEditorKeyboard = await runStep("mobileEditorKeyboard", () => verifyMobileEditorKeyboardOverlay(browser));
     const cameraScopedRendering = await runStep("cameraScopedRendering", () => verifyCameraScopedRendering(browser));
     const mobile = await runStep("mobileViewport", () => verifyViewport(browser, "mobile", { width: 390, height: 844 }));
     const mobileLandscape = await runStep("mobileLandscapeViewport", () => verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 }));
     console.log("UI verification passed");
-    console.log({ desktop, calendarLayout, localDeveloperMode, notificationSnoozeActions, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileCanvasInterruptionRecovery, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+    console.log({ desktop, calendarLayout, localDeveloperMode, notificationSnoozeActions, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, agentRecovery, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileCanvasInterruptionRecovery, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, iosTouchSuppression, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
   }
 } finally {
   await browser.close();

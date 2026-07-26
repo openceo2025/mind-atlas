@@ -139,19 +139,23 @@ export type HostedChatServiceId =
 
 export type ChatServiceId = HostedChatServiceId | "local";
 
-export type ChatReasoningEffort = "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+// Providers add and rename reasoning levels independently. Keep the browser
+// contract extensible while the bridge validates values before execution.
+export type ReasoningEffort = string;
+
+export type ChatReasoningEffort = ReasoningEffort;
 
 export type AiRunStatus = "running" | "needs_review" | "error" | "done";
 
-export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
+export type CodexReasoningEffort = ReasoningEffort;
 
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
 export type CodexContinueMode = "auto" | "new";
 
-export type OpenClawThinkingLevel = "off";
+export type OpenClawThinkingLevel = ReasoningEffort;
 
-export type ClaudeReasoningEffort = "default" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ClaudeReasoningEffort = ReasoningEffort;
 
 export type ClaudePermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions";
 
@@ -284,6 +288,7 @@ export interface CodexOptionsResult {
   models: CodexModelOption[];
   defaultModel: string;
   defaultReasoningEffort: CodexReasoningEffort;
+  claudeReasoningEfforts?: ClaudeReasoningEffort[];
   defaultWorkspace: string;
   defaultSandbox: CodexSandboxMode;
   defaultTimeoutMs: number;
@@ -562,6 +567,28 @@ export interface CodexRunRecoveryResult {
   result?: AiResponseResult;
   logPath?: string;
   metadata?: Record<string, unknown>;
+}
+
+export type LocalAgentRunMode = Extract<AiExecutionMode, "codex" | "claude" | "openclaw">;
+
+export interface AgentRunInboxItem {
+  id: string;
+  provider: LocalAgentRunMode;
+  status: "completed" | "error" | "interrupted";
+  startedAt: string;
+  completedAt?: string;
+  clientRunId?: string;
+  requestNodeId?: string;
+  sourceNodeId?: string;
+  workspace?: string;
+  model?: string;
+  prompt?: string;
+  result?: AiResponseResult;
+  error?: string;
+}
+
+export interface AgentRunInboxResult {
+  items: AgentRunInboxItem[];
 }
 
 export interface GitPushResult {

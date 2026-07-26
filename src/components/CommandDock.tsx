@@ -156,6 +156,7 @@ export function CommandDock() {
       ? selectedChatService.supportedReasoningEfforts
       : (["default"] as ChatReasoningEffort[]);
   const selectedClaudePreset = getClaudePresetId(claudeSettings.model, claudeSettings.baseUrl);
+  const claudeEfforts = codexOptions?.claudeReasoningEfforts?.length ? codexOptions.claudeReasoningEfforts : CLAUDE_REASONING_EFFORTS;
   const openClawModelOptions = openClawOptions?.models.length
     ? openClawOptions.models
     : [{ model: "", displayName: "OpenClaw default" }];
@@ -1079,9 +1080,9 @@ export function CommandDock() {
               onBlur={() => setCommandInputEditing(false)}
               onChange={(event) => setCodexSettings({ reasoningEffort: event.target.value as CodexReasoningEffort })}
             >
-              {codexEfforts.map((effort) => (
+              {dedupeReasoningEfforts(codexEfforts).map((effort) => (
                 <option key={effort} value={effort}>
-                  {effort === "xhigh" ? formatAppMessage("ui.commandDock.extraHigh.6818406") : effort}
+                  {reasoningEffortLabel(effort)}
                 </option>
               ))}
             </select>
@@ -1153,9 +1154,9 @@ export function CommandDock() {
               onChange={(event) => setClaudeSettings({ reasoningEffort: event.target.value as ClaudeReasoningEffort })}
               title={formatAppMessage("ui.commandDock.claudeCodeEffortLeaveDefault.8357b80")}
             >
-              {CLAUDE_REASONING_EFFORTS.map((effort) => (
+              {dedupeReasoningEfforts(claudeEfforts).map((effort) => (
                 <option key={effort} value={effort}>
-                  {claudeEffortLabel(effort)}
+                  {reasoningEffortLabel(effort, true)}
                 </option>
               ))}
             </select>
@@ -1567,10 +1568,14 @@ function chatEffortLabel(effort: ChatReasoningEffort) {
   return effort;
 }
 
-function claudeEffortLabel(effort: ClaudeReasoningEffort) {
-  if (effort === "default") return formatAppMessage("label.effort.default");
+function reasoningEffortLabel(effort: string, defaultLabel = false) {
+  if (effort === "default") return defaultLabel ? formatAppMessage("label.effort.default") : formatAppMessage("label.effort.providerDefault");
   if (effort === "xhigh") return formatAppMessage("label.effort.extraHigh");
-  return effort;
+  return effort.replace(/[-_]+/g, " ");
+}
+
+function dedupeReasoningEfforts(efforts: readonly string[]) {
+  return Array.from(new Set(efforts.map((effort) => effort.trim().toLowerCase()).filter(Boolean)));
 }
 
 function claudePermissionLabel(permissionMode: ClaudePermissionMode) {

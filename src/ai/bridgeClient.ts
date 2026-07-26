@@ -2,6 +2,7 @@ import type {
   AiBridgeHealth,
   AiResponsePayload,
   AiResponseResult,
+  AgentRunInboxResult,
   AudioTranscriptionResult,
   ChatOptionsResult,
   CloudNotebookListResult,
@@ -130,6 +131,20 @@ export async function recoverCodexRun(payload: CodexRunRecoveryRequest): Promise
     body: JSON.stringify(payload),
   });
   return await readJsonResponse<CodexRunRecoveryResult>(response);
+}
+
+export async function getAgentRunInbox(): Promise<AgentRunInboxResult> {
+  const response = await fetchBridgeGet("/api/agent-runs/inbox");
+  return await readJsonResponse<AgentRunInboxResult>(response);
+}
+
+export async function acknowledgeAgentRuns(payload: { ids?: string[]; clientRunIds?: string[] }): Promise<{ acknowledged: number }> {
+  const response = await fetchBridge("/api/agent-runs/ack", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return await readJsonResponse<{ acknowledged: number }>(response);
 }
 
 export async function requestGitPush(workspace: string): Promise<GitPushResult> {

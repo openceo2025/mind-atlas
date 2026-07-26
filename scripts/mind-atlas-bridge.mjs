@@ -3,7 +3,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
@@ -33,6 +33,7 @@ const openAiImageModel = process.env.MIND_ATLAS_OPENAI_IMAGE_MODEL ?? "gpt-image
 const openAiImageSize = process.env.MIND_ATLAS_OPENAI_IMAGE_SIZE ?? "1024x1024";
 const openAiTranscriptionModel = process.env.MIND_ATLAS_OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-transcribe";
 const openAiChatModels = parseStringList(process.env.MIND_ATLAS_OPENAI_CHAT_MODELS, [defaultModel, "gpt-5.5-pro", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]);
+const openAiChatReasoningEfforts = parseReasoningEffortList(process.env.MIND_ATLAS_OPENAI_REASONING_EFFORTS, ["default", "none", "minimal", "low", "medium", "high", "xhigh"]);
 
 const localBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_LOCAL_BASE_URL ?? "http://127.0.0.1:1234/v1");
 const localApiKey = process.env.MIND_ATLAS_LOCAL_API_KEY ?? "lm-studio";
@@ -43,6 +44,7 @@ const codexBin = resolveCodexBin(process.env.MIND_ATLAS_CODEX_BIN ?? "codex", co
 const codexWorkspace = process.env.MIND_ATLAS_CODEX_WORKSPACE ?? process.cwd();
 const codexModel = process.env.MIND_ATLAS_CODEX_MODEL ?? "";
 const codexReasoningEffort = normalizeReasoningEffort(process.env.MIND_ATLAS_CODEX_REASONING_EFFORT ?? "medium");
+const codexFallbackReasoningEfforts = parseReasoningEffortList(process.env.MIND_ATLAS_CODEX_REASONING_EFFORTS, ["low", "medium", "high", "xhigh"]);
 const codexSandbox = normalizeCodexSandbox(process.env.MIND_ATLAS_CODEX_SANDBOX ?? "workspace-write");
 const codexTimeoutMs = Number(process.env.MIND_ATLAS_CODEX_TIMEOUT_MS ?? 60 * 60 * 1000);
 const codexDisabled = process.env.MIND_ATLAS_CODEX_DISABLED === "true";
@@ -73,6 +75,7 @@ const claudePromptCharLimit = readPositiveIntEnv("MIND_ATLAS_CLAUDE_PROMPT_CHAR_
 const claudeDisabled = process.env.MIND_ATLAS_CLAUDE_DISABLED === "true";
 const claudeLogDir = resolve(process.env.MIND_ATLAS_CLAUDE_LOG_DIR ?? join(process.cwd(), "server-data", "claude-runs"));
 const claudeDeepSeekBaseUrl = "https://api.deepseek.com/anthropic";
+const claudeReasoningEfforts = parseReasoningEffortList(process.env.MIND_ATLAS_CLAUDE_REASONING_EFFORTS, ["default", "low", "medium", "high", "xhigh", "max"]);
 
 const anthropicChatBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_ANTHROPIC_BASE_URL ?? process.env.MIND_ATLAS_CLAUDE_ANTHROPIC_BASE_URL ?? process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com");
 const anthropicChatApiKey = process.env.MIND_ATLAS_ANTHROPIC_API_KEY ?? claudeApiKey;
@@ -80,6 +83,7 @@ const anthropicChatAuthToken = process.env.MIND_ATLAS_ANTHROPIC_AUTH_TOKEN ?? cl
 const anthropicChatDefaultModel = process.env.MIND_ATLAS_ANTHROPIC_MODEL ?? claudeModel ?? "claude-opus-4-8";
 const anthropicChatModels = parseStringList(process.env.MIND_ATLAS_ANTHROPIC_MODELS, [anthropicChatDefaultModel || "claude-opus-4-8", "claude-opus-4-8", "claude-fable-5"]);
 const anthropicChatMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_ANTHROPIC_MAX_OUTPUT_TOKENS", openAiMaxOutputTokens);
+const anthropicChatReasoningEfforts = parseReasoningEffortList(process.env.MIND_ATLAS_ANTHROPIC_REASONING_EFFORTS, ["default", "low", "medium", "high", "max"]);
 
 const deepSeekChatBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_DEEPSEEK_ANTHROPIC_BASE_URL ?? process.env.MIND_ATLAS_DEEPSEEK_BASE_URL ?? claudeDeepSeekBaseUrl);
 const deepSeekChatAuthToken = process.env.MIND_ATLAS_DEEPSEEK_AUTH_TOKEN ?? claudeDeepSeekAuthToken;
@@ -87,6 +91,7 @@ const deepSeekChatDefaultModel = process.env.MIND_ATLAS_DEEPSEEK_MODEL ?? "deeps
 const deepSeekChatModels = parseStringList(process.env.MIND_ATLAS_DEEPSEEK_MODELS, [deepSeekChatDefaultModel, "deepseek-v4-pro[1m]", "deepseek-v4-flash"]);
 const deepSeekChatMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_DEEPSEEK_MAX_OUTPUT_TOKENS", openAiMaxOutputTokens);
 const deepSeekBalanceBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_DEEPSEEK_BALANCE_BASE_URL ?? "https://api.deepseek.com");
+const deepSeekChatReasoningEfforts = parseReasoningEffortList(process.env.MIND_ATLAS_DEEPSEEK_REASONING_EFFORTS, ["default", "low", "medium", "high", "max"]);
 
 const realtimeModel = process.env.MIND_ATLAS_REALTIME_MODEL ?? "gpt-realtime-2";
 const realtimeVoice = process.env.MIND_ATLAS_REALTIME_VOICE ?? "marin";
@@ -94,6 +99,10 @@ const realtimeTranscriptionModel = process.env.MIND_ATLAS_REALTIME_TRANSCRIPTION
 const realtimeReasoningEffort = normalizeRealtimeReasoningEffort(process.env.MIND_ATLAS_REALTIME_REASONING_EFFORT ?? "low");
 const allowMockWithoutKey = process.env.MIND_ATLAS_ALLOW_MOCK_WITHOUT_KEY !== "false";
 const cloudNotebookDir = resolve(process.env.MIND_ATLAS_CLOUD_DIR ?? join(process.cwd(), "server-data", "notebooks"));
+const agentRunInboxDir = resolve(process.env.MIND_ATLAS_AGENT_RUN_INBOX_DIR ?? join(process.cwd(), "server-data", "agent-run-inbox"));
+const agentRunInboxGraceMs = readPositiveIntEnv("MIND_ATLAS_AGENT_RUN_INBOX_GRACE_MS", 5000);
+const agentRunInboxLimit = readPositiveIntEnv("MIND_ATLAS_AGENT_RUN_INBOX_LIMIT", 100);
+const bridgeInstanceId = randomUUID();
 const MAX_PROCESS_OUTPUT_CHARS = readPositiveIntEnv("MIND_ATLAS_PROCESS_OUTPUT_CHAR_LIMIT", 1_500_000);
 
 process.on("uncaughtException", (error) => {
@@ -295,6 +304,19 @@ const server = createBridgeServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/agent-runs/inbox") {
+      const result = await listAgentRunInbox();
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/agent-runs/ack") {
+      const payload = await readJson(request);
+      const result = await acknowledgeAgentRunInbox(payload);
+      sendJson(response, 200, result);
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/git/push") {
       const payload = await readJson(request);
       const result = await createGitPushResponse(payload);
@@ -304,7 +326,7 @@ const server = createBridgeServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/ai/respond") {
       const payload = await readJson(request);
-      const result = await createAiResponse(payload);
+      const result = await createJournaledAiResponse(payload);
       sendJson(response, 200, result);
       return;
     }
@@ -436,6 +458,148 @@ function createBridgeServer(handler) {
     key: readFileSync(httpsKeyPath),
     cert: readFileSync(httpsCertPath),
   }, handler);
+}
+
+async function createJournaledAiResponse(payload) {
+  const journal = await beginAgentRunJournal(payload);
+  try {
+    const result = await createAiResponse(payload);
+    await finishAgentRunJournal(journal, { status: "completed", result });
+    return result;
+  } catch (error) {
+    await finishAgentRunJournal(journal, {
+      status: "error",
+      error: error instanceof Error ? error.message : "Unknown local agent error",
+    });
+    throw error;
+  }
+}
+
+async function beginAgentRunJournal(payload) {
+  const provider = stringOr(payload?.provider, "");
+  if (provider !== "codex" && provider !== "claude" && provider !== "openclaw") return null;
+  const settings = provider === "codex" ? payload?.codex : provider === "claude" ? payload?.claude : payload?.openclaw;
+  const id = randomUUID();
+  const startedAt = new Date().toISOString();
+  const record = {
+    version: 1,
+    id,
+    provider,
+    status: "running",
+    bridgeInstanceId,
+    startedAt,
+    clientRunId: safeJournalText(settings?.clientRunId, 180),
+    requestNodeId: safeJournalText(settings?.requestNodeId, 180),
+    sourceNodeId: safeJournalText(settings?.sourceNodeId, 180),
+    workspace: safeJournalText(settings?.workspace, 1200),
+    model: safeJournalText(payload?.model ?? settings?.model, 180),
+    prompt: safeJournalText(payload?.prompt, 32_000),
+  };
+  try {
+    await mkdir(agentRunInboxDir, { recursive: true });
+    const filePath = join(agentRunInboxDir, `${startedAt.replace(/[-:.TZ]/g, "").slice(0, 17)}-${id}.json`);
+    await writeAgentRunJournal(filePath, record);
+    return { filePath, record };
+  } catch (error) {
+    console.warn(`[bridge] failed to start agent run journal: ${error instanceof Error ? error.message : error}`);
+    return null;
+  }
+}
+
+async function finishAgentRunJournal(journal, terminal) {
+  if (!journal) return;
+  const record = {
+    ...journal.record,
+    status: terminal.status,
+    completedAt: new Date().toISOString(),
+    ...(terminal.result ? { result: compactAgentRunResult(terminal.result) } : {}),
+    ...(terminal.error ? { error: safeJournalText(terminal.error, 20_000) } : {}),
+  };
+  try {
+    await writeAgentRunJournal(journal.filePath, record);
+  } catch (error) {
+    console.warn(`[bridge] failed to finish agent run journal: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
+function compactAgentRunResult(result) {
+  return {
+    ...result,
+    rawText: safeJournalText(result?.rawText, 40_000),
+  };
+}
+
+async function listAgentRunInbox() {
+  const records = await readAgentRunJournalRecords();
+  const now = Date.now();
+  const items = records
+    .filter(({ record }) => !record.acknowledgedAt)
+    .map(({ record }) => {
+      if (record.status === "running" && record.bridgeInstanceId !== bridgeInstanceId) {
+        return {
+          ...record,
+          status: "interrupted",
+          completedAt: record.completedAt || new Date(now).toISOString(),
+          error: record.error || "The local bridge restarted before this agent result was recorded.",
+        };
+      }
+      return record;
+    })
+    .filter((record) => {
+      if (record.status === "running") return false;
+      if (record.status === "interrupted") return true;
+      const completedAt = Date.parse(stringOr(record.completedAt, record.startedAt));
+      return !Number.isFinite(completedAt) || now - completedAt >= agentRunInboxGraceMs;
+    })
+    .sort((left, right) => Date.parse(stringOr(left.completedAt, left.startedAt)) - Date.parse(stringOr(right.completedAt, right.startedAt)))
+    .slice(0, agentRunInboxLimit);
+  return { items };
+}
+
+async function acknowledgeAgentRunInbox(payload) {
+  const ids = new Set(Array.isArray(payload?.ids) ? payload.ids.map((value) => safeJournalText(value, 180)).filter(Boolean) : []);
+  const clientRunIds = new Set(Array.isArray(payload?.clientRunIds) ? payload.clientRunIds.map((value) => safeJournalText(value, 180)).filter(Boolean) : []);
+  if (!ids.size && !clientRunIds.size) return { acknowledged: 0 };
+  let acknowledged = 0;
+  for (const { filePath, record } of await readAgentRunJournalRecords()) {
+    if (record.acknowledgedAt) continue;
+    if (!ids.has(record.id) && !clientRunIds.has(record.clientRunId)) continue;
+    await writeAgentRunJournal(filePath, { ...record, acknowledgedAt: new Date().toISOString() });
+    acknowledged += 1;
+  }
+  return { acknowledged };
+}
+
+async function readAgentRunJournalRecords() {
+  try {
+    const entries = await readdir(agentRunInboxDir, { withFileTypes: true });
+    const records = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      const filePath = join(agentRunInboxDir, entry.name);
+      try {
+        const record = JSON.parse(await readFile(filePath, "utf8"));
+        if (record && typeof record === "object" && typeof record.id === "string") records.push({ filePath, record });
+      } catch (error) {
+        console.warn(`[bridge] ignored unreadable agent run journal ${entry.name}: ${error instanceof Error ? error.message : error}`);
+      }
+    }
+    return records;
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function writeAgentRunJournal(filePath, record) {
+  const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
+  await writeFile(temporaryPath, JSON.stringify(record, null, 2), "utf8");
+  await rename(temporaryPath, filePath);
+}
+
+function safeJournalText(value, maxLength) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text.length <= maxLength ? text : text.slice(0, maxLength);
 }
 
 async function createAiResponse(payload) {
@@ -964,7 +1128,7 @@ async function createCodexOptionsResponse() {
       ...fallback,
       models: models.length ? models : fallback.models,
       defaultModel: codexModel || models[0]?.model || fallback.defaultModel,
-      defaultReasoningEffort: codexReasoningEffort,
+      defaultReasoningEffort: resolveDefaultReasoningEffort(models.length ? models : fallback.models, codexReasoningEffort),
     };
     codexOptionsCache = { createdAt: Date.now(), value };
     return value;
@@ -983,9 +1147,9 @@ function createChatOptionsResponse() {
         label: "OpenAI",
         configured: Boolean(openAiApiKey) || allowMockWithoutKey,
         defaultModel,
-        defaultReasoningEffort: "medium",
-        supportedReasoningEfforts: ["default", "none", "minimal", "low", "medium", "high", "xhigh"],
-        models: createChatModelOptions(openAiChatModels, "medium", ["default", "none", "minimal", "low", "medium", "high", "xhigh"]),
+        defaultReasoningEffort: defaultReasoningEffort(openAiChatReasoningEfforts, "medium"),
+        supportedReasoningEfforts: openAiChatReasoningEfforts,
+        models: createChatModelOptions(openAiChatModels, defaultReasoningEffort(openAiChatReasoningEfforts, "medium"), openAiChatReasoningEfforts),
         baseUrl: openAiBaseUrl,
         detail: openAiApiKey ? "OpenAI key configured" : "mock fallback",
       },
@@ -994,9 +1158,9 @@ function createChatOptionsResponse() {
         label: "Opus",
         configured: Boolean(anthropicChatApiKey || anthropicChatAuthToken),
         defaultModel: anthropicChatDefaultModel || "claude-opus-4-8",
-        defaultReasoningEffort: "default",
-        supportedReasoningEfforts: ["default", "low", "medium", "high", "max"],
-        models: createChatModelOptions(anthropicChatModels, "default", ["default", "low", "medium", "high", "max"]),
+        defaultReasoningEffort: defaultReasoningEffort(anthropicChatReasoningEfforts, "default"),
+        supportedReasoningEfforts: anthropicChatReasoningEfforts,
+        models: createChatModelOptions(anthropicChatModels, defaultReasoningEffort(anthropicChatReasoningEfforts, "default"), anthropicChatReasoningEfforts),
         baseUrl: anthropicChatBaseUrl,
         detail: anthropicChatApiKey || anthropicChatAuthToken ? "Anthropic key configured" : "Anthropic key not configured",
       },
@@ -1005,9 +1169,9 @@ function createChatOptionsResponse() {
         label: "DeepSeek",
         configured: Boolean(deepSeekChatAuthToken),
         defaultModel: deepSeekChatDefaultModel,
-        defaultReasoningEffort: "max",
-        supportedReasoningEfforts: ["default", "low", "medium", "high", "max"],
-        models: createChatModelOptions(deepSeekChatModels, "max", ["default", "low", "medium", "high", "max"]),
+        defaultReasoningEffort: defaultReasoningEffort(deepSeekChatReasoningEfforts, "max"),
+        supportedReasoningEfforts: deepSeekChatReasoningEfforts,
+        models: createChatModelOptions(deepSeekChatModels, defaultReasoningEffort(deepSeekChatReasoningEfforts, "max"), deepSeekChatReasoningEfforts),
         baseUrl: deepSeekChatBaseUrl,
         detail: deepSeekChatAuthToken ? "DeepSeek key configured" : "DeepSeek key not configured",
       },
@@ -1277,13 +1441,14 @@ function createFallbackCodexOptions() {
     model,
     displayName: model.toUpperCase(),
     description: "Codex CLI model",
-    defaultReasoningEffort: "medium",
-    supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+    defaultReasoningEffort: defaultReasoningEffort(codexFallbackReasoningEfforts, "medium"),
+    supportedReasoningEfforts: codexFallbackReasoningEfforts,
   }));
   return {
     models: fallbackModels,
     defaultModel: codexModel || "gpt-5.5",
-    defaultReasoningEffort: codexReasoningEffort,
+    defaultReasoningEffort: defaultReasoningEffort(codexFallbackReasoningEfforts, codexReasoningEffort),
+    claudeReasoningEfforts,
     defaultWorkspace: codexWorkspace,
     defaultSandbox: codexSandbox,
     defaultTimeoutMs: codexTimeoutMs,
@@ -1425,7 +1590,7 @@ function parseCodexModelOverride(value) {
       model,
       displayName: model,
       defaultReasoningEffort: codexReasoningEffort,
-      supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+      supportedReasoningEfforts: codexFallbackReasoningEfforts,
     }));
 }
 
@@ -1435,6 +1600,23 @@ function parseStringList(value, fallback = []) {
     .map((item) => item.trim())
     .filter(Boolean);
   return Array.from(new Set(parsed.length ? parsed : fallback.filter(Boolean)));
+}
+
+function parseReasoningEffortList(value, fallback = []) {
+  const values = parseStringList(value, fallback)
+    .map((item) => normalizeReasoningEffortValue(item))
+    .filter(Boolean);
+  return Array.from(new Set(values.length ? values : fallback.map((item) => normalizeReasoningEffortValue(item)).filter(Boolean)));
+}
+
+function defaultReasoningEffort(efforts, preferred) {
+  const normalizedPreferred = normalizeReasoningEffortValue(preferred);
+  return efforts.includes(normalizedPreferred) ? normalizedPreferred : efforts.find((effort) => effort !== "default") ?? efforts[0] ?? "default";
+}
+
+function resolveDefaultReasoningEffort(models, fallback) {
+  const supported = models.flatMap((model) => model.supportedReasoningEfforts ?? []);
+  return defaultReasoningEffort(Array.from(new Set(supported)), fallback);
 }
 
 function normalizeChatSettings(input, provider, model) {
@@ -1457,7 +1639,7 @@ function defaultChatModelForService(service) {
 }
 
 function normalizeChatReasoningEffort(value) {
-  return ["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value) ? value : "default";
+  return normalizeReasoningEffortValue(value) || "default";
 }
 
 function normalizeRealtimeReasoningEffort(value) {
@@ -1468,14 +1650,15 @@ function normalizeCodexModelOption(model) {
   const slug = stringOr(model?.slug ?? model?.model, "");
   if (!slug) return null;
   const supported = Array.isArray(model?.supported_reasoning_levels)
-    ? model.supported_reasoning_levels.map((item) => normalizeReasoningEffort(item?.effort)).filter(Boolean)
-    : ["low", "medium", "high", "xhigh"];
+    ? model.supported_reasoning_levels.map(extractReasoningEffortValue).filter(Boolean)
+    : codexFallbackReasoningEfforts;
+  const uniqueSupported = Array.from(new Set(supported));
   return {
     model: slug,
     displayName: stringOr(model?.display_name, slug),
     description: stringOr(model?.description, ""),
-    defaultReasoningEffort: normalizeReasoningEffort(model?.default_reasoning_level ?? codexReasoningEffort),
-    supportedReasoningEfforts: supported.length ? supported : ["low", "medium", "high", "xhigh"],
+    defaultReasoningEffort: defaultReasoningEffort(uniqueSupported, extractReasoningEffortValue(model?.default_reasoning_level) || codexReasoningEffort),
+    supportedReasoningEfforts: uniqueSupported.length ? uniqueSupported : codexFallbackReasoningEfforts,
   };
 }
 
@@ -2088,7 +2271,7 @@ function normalizeClaudeSettings(input, model, context) {
 }
 
 function normalizeClaudeReasoningEffort(value) {
-  return ["low", "medium", "high", "xhigh", "max"].includes(value) ? value : "default";
+  return normalizeReasoningEffortValue(value) || "default";
 }
 
 function normalizeClaudePermissionMode(value) {
@@ -3702,7 +3885,8 @@ function applyChatCompletionsReasoning(body, effort) {
 }
 
 function normalizeOpenAiReasoningEffort(effort) {
-  return ["none", "minimal", "low", "medium", "high", "xhigh"].includes(effort) ? effort : "";
+  const normalized = normalizeReasoningEffortValue(effort);
+  return normalized === "default" ? "" : normalized;
 }
 
 function applyAnthropicEffort(body, effort) {
@@ -3712,8 +3896,9 @@ function applyAnthropicEffort(body, effort) {
 }
 
 function normalizeAnthropicEffort(effort) {
-  if (effort === "xhigh") return "max";
-  return ["low", "medium", "high", "max"].includes(effort) ? effort : "";
+  const normalized = normalizeReasoningEffortValue(effort);
+  if (normalized === "default") return "";
+  return normalized === "xhigh" ? "max" : normalized;
 }
 
 function anthropicMessagesUrl(baseUrl) {
@@ -4213,12 +4398,19 @@ function withoutUndefined(value) {
 }
 
 function normalizeReasoningEffort(value) {
-  const normalized = String(value ?? "").toLowerCase();
-  if (normalized === "low" || normalized === "medium" || normalized === "high" || normalized === "xhigh") {
-    return normalized;
+  return normalizeReasoningEffortValue(value) || "medium";
+}
+
+function extractReasoningEffortValue(value) {
+  if (value && typeof value === "object") {
+    return normalizeReasoningEffortValue(value.effort ?? value.level ?? value.id ?? value.value);
   }
-  if (normalized === "extra-high" || normalized === "extrahigh") return "xhigh";
-  return "medium";
+  return normalizeReasoningEffortValue(value);
+}
+
+function normalizeReasoningEffortValue(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return /^[a-z][a-z0-9_-]{0,31}$/.test(normalized) ? normalized : "";
 }
 
 function normalizeCodexSandbox(value) {

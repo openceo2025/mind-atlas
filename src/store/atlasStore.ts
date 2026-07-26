@@ -8,7 +8,7 @@ import {
 import { isAboutDemoMode } from "../aboutDemo";
 import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme";
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
-import { getBridgeUrl, getBridgeUrlCandidates, recoverCodexRun, requestAiResponse, requestGitPush } from "../ai/bridgeClient";
+import { acknowledgeAgentRuns, getAgentRunInbox, getBridgeUrl, getBridgeUrlCandidates, recoverCodexRun, requestAiResponse, requestGitPush } from "../ai/bridgeClient";
 import {
   NOTEBOOK_FIRST_SHELL_RADIUS,
   NOTEBOOK_SHELL_GAP,
@@ -66,6 +66,7 @@ import type {
   AiProvider,
   AiRun,
   AiUsage,
+  AgentRunInboxItem,
   AtlasEvent,
   AtlasNodeAction,
   AtlasNode,
@@ -340,6 +341,7 @@ interface AtlasStore {
   runAiOnSelectedNode: (prompt: string, mode: AiExecutionMode, options?: AiContextScope | Partial<AiContextOptions>) => Promise<void>;
   runNodeAction: (nodeId: string) => Promise<void>;
   recoverCompletedCodexRuns: () => Promise<void>;
+  recoverMissedAgentRuns: () => Promise<void>;
   tickNotificationPulses: () => void;
 }
 
@@ -1998,6 +2000,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       void Promise.all(generatedAttachmentBlobs.map(({ attachment, blob }) => saveStoredAttachmentBlob(attachment, blob))).catch((error) => {
         console.error("Failed to store generated attachment blob", error);
       });
+      if (mode === "codex" || mode === "claude" || mode === "openclaw") {
+        void acknowledgeAgentRuns({ clientRunIds: [runId] }).catch((error) => {
+          console.warn("Agent run acknowledgement failed", error);
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "AI request failed.";
       set((current) => {
@@ -2055,6 +2062,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           },
         };
       });
+      if (mode === "codex" || mode === "claude" || mode === "openclaw") {
+        void acknowledgeAgentRuns({ clientRunIds: [runId] }).catch((acknowledgementError) => {
+          console.warn("Agent run acknowledgement failed", acknowledgementError);
+        });
+      }
     }
   },
 
@@ -2324,6 +2336,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           },
         };
       });
+      void acknowledgeAgentRuns({ clientRunIds: [runId] }).catch((error) => {
+        console.warn("Codex retry acknowledgement failed", error);
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Codex Full access retry failed.";
       set((current) => {
@@ -2361,6 +2376,9 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             },
           },
         };
+      });
+      void acknowledgeAgentRuns({ clientRunIds: [runId] }).catch((acknowledgementError) => {
+        console.warn("Codex retry acknowledgement failed", acknowledgementError);
       });
     }
   },
@@ -2470,6 +2488,228 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         });
       } catch (error) {
         console.warn("Codex run recovery failed", error);
+      }
+    }
+  },
+
+  recoverMissedAgentRuns: async () => {
+    const inbox = await getAgentRunInbox();
+    for (const item of inbox.items) {
+      const alreadyLogged = get().voiceLogEntries.some((entry) => entry.metadata?.agentRecoveryId === item.id);
+      let nodeDisposition: "missing" | "already-resolved" | "recovered" = "missing";
+      let fallbackLogged = false;
+      if (!alreadyLogged && item.requestNodeId) {
+        set((current) => {
+          const requestPath = findNodePath(current.atlasRoot, item.requestNodeId ?? "");
+          const requestNode = requestPath?.at(-1);
+          if (!requestPath || !requestNode) return current;
+          if (requestNode.status !== "running" || requestNode.children.length > 0) {
+            nodeDisposition = "already-resolved";
+            return current;
+          }
+
+          const runId = item.clientRunId || requestNode.aiRunId || requestNode.sourceId || `agent-recovered-${item.id}`;
+          const completedAt = item.completedAt || new Date().toISOString();
+          const sourceNodeId = requestNode.sourceParentId || item.sourceNodeId || requestPath.at(-2)?.id || requestNode.id;
+          const result = item.status === "completed" ? item.result : undefined;
+          if (result?.output) {
+            const usedNodeIds = collectNodeIdSet(current.atlasRoot);
+            const children = result.codexNodes?.length
+              ? createCodexGeneratedNodeTrees(
+                  requestNode.id,
+                  requestNode.children.length,
+                  runId,
+                  item.provider,
+                  result.model,
+                  result.codexNodes,
+                  result.usage,
+                  result.codexThreadId,
+                  result.codexLogPath,
+                  requestPath.length,
+                  requestNode.id,
+                  requestNode.aiDialogSettings,
+                  usedNodeIds,
+                )
+              : [
+                  createAiResponseNode(
+                    requestNode.id,
+                    requestNode.children.length,
+                    runId,
+                    result.provider,
+                    item.provider,
+                    result.model,
+                    result.output,
+                    result.usage,
+                    {
+                      aiDialogSettings: requestNode.aiDialogSettings,
+                      codexThreadId: result.codexThreadId ?? requestNode.codexThreadId,
+                      codexLogPath: result.codexLogPath ?? requestNode.codexLogPath,
+                      openClawSessionKey: result.openClawSessionKey ?? requestNode.openClawSessionKey,
+                      openClawLogPath: result.openClawLogPath ?? requestNode.openClawLogPath,
+                      claudeLogPath: result.claudeLogPath ?? requestNode.claudeLogPath,
+                      claudeSessionId: result.claudeSessionId ?? requestNode.claudeSessionId,
+                      usedNodeIds,
+                    },
+                  ),
+                ];
+            const recoveredStatus = result.output.suggestedStatus === "done" ? "needs_review" : result.output.suggestedStatus;
+            const withSourceUpdated = sourceNodeId
+              ? updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
+                  ...node,
+                  status: recoveredStatus,
+                  nextDecision: `Recovered ${modeLabel(item.provider)} result after reconnecting to the local bridge.`,
+                  updatedAt: completedAt,
+                }))
+              : current.atlasRoot;
+            const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(withSourceUpdated, requestNode.id, (node) => ({
+              ...node,
+              status: recoveredStatus,
+              nextDecision: `Recovered ${modeLabel(item.provider)} result after reconnecting to the local bridge.`,
+              updatedAt: completedAt,
+              codexThreadId: result.codexThreadId ?? node.codexThreadId,
+              codexLogPath: result.codexLogPath ?? node.codexLogPath,
+              openClawSessionKey: result.openClawSessionKey ?? node.openClawSessionKey,
+              openClawLogPath: result.openClawLogPath ?? node.openClawLogPath,
+              claudeLogPath: result.claudeLogPath ?? node.claudeLogPath,
+              claudeSessionId: result.claudeSessionId ?? node.claudeSessionId,
+              children: [...node.children, ...children],
+            })));
+            const pulseTargets = getCodexPulseTargetIds(children);
+            const notificationKind = aiResultNotificationKind(item.provider);
+            const notificationTitle = `Recovered ${modeLabel(item.provider)} result ready`;
+            persistNotebook(atlasRoot);
+            nodeDisposition = "recovered";
+            return {
+              ...pushHistory(current),
+              atlasRoot,
+              birthMarks: {
+                ...current.birthMarks,
+                ...Object.fromEntries(collectNodeIdsFromMany(children).map((id) => [id, performance.now()])),
+              },
+              notificationPulses: [
+                ...current.notificationPulses,
+                ...pulseTargets.map((id) => createNotificationPulse(id, notificationKind, notificationTitle)),
+              ],
+              unreadNotifications: markUnreadNotifications(current.unreadNotifications, pulseTargets, notificationKind, notificationTitle),
+              aiRuns: {
+                ...current.aiRuns,
+                [runId]: {
+                  id: runId,
+                  nodeId: sourceNodeId,
+                  requestNodeId: requestNode.id,
+                  provider: result.provider,
+                  mode: item.provider,
+                  modelId: result.model,
+                  status: "needs_review",
+                  prompt: requestNode.body,
+                  startedAt: item.startedAt || requestNode.createdAt,
+                  completedAt,
+                  responseNodeId: children.at(-1)?.id ?? children[0]?.id,
+                  usage: result.usage,
+                  workspace: item.workspace,
+                  codexThreadId: result.codexThreadId,
+                  codexLogPath: result.codexLogPath,
+                  openClawSessionKey: result.openClawSessionKey,
+                  openClawLogPath: result.openClawLogPath,
+                  claudeLogPath: result.claudeLogPath,
+                  claudeSessionId: result.claudeSessionId,
+                  sessionInfo: result.sessionInfo,
+                },
+              },
+            };
+          }
+
+          const message = item.error || `${modeLabel(item.provider)} ended without a recoverable result.`;
+          const errorNode = createAiErrorNode(requestNode.id, runId, item.provider, message, {
+            aiDialogSettings: requestNode.aiDialogSettings,
+            codexThreadId: requestNode.codexThreadId,
+            codexLogPath: requestNode.codexLogPath,
+            openClawSessionKey: requestNode.openClawSessionKey,
+            openClawLogPath: requestNode.openClawLogPath,
+            claudeLogPath: requestNode.claudeLogPath,
+            usedNodeIds: collectNodeIdSet(current.atlasRoot),
+          });
+          const withSourceUpdated = sourceNodeId
+            ? updateNodeById(current.atlasRoot, sourceNodeId, (node) => ({
+                ...node,
+                status: "error",
+                nextDecision: message,
+                propagatedErrorSourceId: errorNode.id,
+                updatedAt: completedAt,
+              }))
+            : current.atlasRoot;
+          const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(withSourceUpdated, requestNode.id, (node) => ({
+            ...node,
+            status: "error",
+            nextDecision: message,
+            propagatedErrorSourceId: errorNode.id,
+            updatedAt: completedAt,
+            children: [...node.children, errorNode],
+          })));
+          const notificationTitle = `Recovered ${modeLabel(item.provider)} error`;
+          persistNotebook(atlasRoot);
+          nodeDisposition = "recovered";
+          return {
+            ...pushHistory(current),
+            atlasRoot,
+            birthMarks: { ...current.birthMarks, [errorNode.id]: performance.now() },
+            notificationPulses: [...current.notificationPulses, createNotificationPulse(errorNode.id, "error", notificationTitle)],
+            unreadNotifications: markUnreadNotification(current.unreadNotifications, errorNode.id, "error", notificationTitle),
+            aiRuns: {
+              ...current.aiRuns,
+              [runId]: {
+                id: runId,
+                nodeId: sourceNodeId,
+                requestNodeId: requestNode.id,
+                provider: item.provider,
+                mode: item.provider,
+                modelId: item.model || item.provider,
+                status: "error",
+                prompt: requestNode.body,
+                startedAt: item.startedAt || requestNode.createdAt,
+                completedAt,
+                responseNodeId: errorNode.id,
+                error: message,
+                workspace: item.workspace,
+              },
+            },
+          };
+        });
+      }
+
+      if (!alreadyLogged && nodeDisposition === "missing") {
+        const recoveredText = item.status === "completed" && item.result?.output
+          ? item.result.output.body.trim() || item.result.output.summary || "(No text response.)"
+          : item.error || `${modeLabel(item.provider)} ended without a recoverable result.`;
+        get().appendVoiceLogEntry({
+          id: `agent-recovery-${item.id}`,
+          role: item.status === "completed" ? "assistant" : "error",
+          title: item.status === "completed"
+            ? `Recovered ${modeLabel(item.provider)} result`
+            : `Recovered ${modeLabel(item.provider)} error`,
+          text: [
+            item.prompt ? `Request: ${item.prompt}` : "",
+            recoveredText,
+          ].filter(Boolean).join("\n\n"),
+          sessionId: `agent-recovery-${item.id}`,
+          status: item.status === "completed" ? "done" : "error",
+          metadata: {
+            agentRecoveryId: item.id,
+            provider: item.provider,
+            model: item.result?.model || item.model,
+            workspace: item.workspace,
+            originalCompletedAt: item.completedAt,
+          },
+        });
+        fallbackLogged = true;
+      }
+
+      if (alreadyLogged || nodeDisposition !== "missing" || fallbackLogged) {
+        try {
+          await acknowledgeAgentRuns({ ids: [item.id] });
+        } catch (error) {
+          console.warn("Agent run acknowledgement failed", error);
+        }
       }
     }
   },
@@ -4443,8 +4683,7 @@ function normalizeClaudeSettings(settings: Partial<ClaudeSettings>): ClaudeSetti
 }
 
 function normalizeClaudeReasoningEffort(value: ClaudeSettings["reasoningEffort"] | undefined): ClaudeSettings["reasoningEffort"] {
-  if (value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") return value;
-  return "default";
+  return normalizeDynamicReasoningEffort(value, "default");
 }
 
 function normalizeClaudePermissionMode(value: ClaudeSettings["permissionMode"] | undefined): ClaudeSettings["permissionMode"] {
@@ -4479,12 +4718,16 @@ function normalizeChatService(value: ChatSettings["service"] | undefined): ChatS
 }
 
 function normalizeChatReasoningEffort(value: ChatSettings["reasoningEffort"] | undefined): ChatSettings["reasoningEffort"] {
-  if (value === "none" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") return value;
-  return "default";
+  return normalizeDynamicReasoningEffort(value, "default");
 }
 
 function normalizeReasoningEffort(value: CodexSettings["reasoningEffort"] | undefined): CodexSettings["reasoningEffort"] {
-  return value === "low" || value === "medium" || value === "high" || value === "xhigh" ? value : "medium";
+  return normalizeDynamicReasoningEffort(value, "medium");
+}
+
+function normalizeDynamicReasoningEffort(value: string | undefined, fallback: string) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return /^[a-z][a-z0-9_-]{0,31}$/.test(normalized) ? normalized : fallback;
 }
 
 function normalizeCodexSandbox(value: CodexSettings["sandbox"] | undefined, fullAccessApproved?: boolean): CodexSettings["sandbox"] {

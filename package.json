@@ -27,6 +27,7 @@
     "typecheck": "tsc -b",
     "verify:context": "node --experimental-strip-types scripts/verify-context-assembly.ts",
     "verify:context-engine": "node --experimental-strip-types scripts/verify-context-engine.ts",
+    "verify:agent-recovery": "node scripts/verify-agent-run-inbox.mjs",
     "verify:hosted-public-ui": "node scripts/verify-hosted-public-ui.mjs",
     "verify:hosted-dist": "node scripts/verify-hosted-dist.mjs",
     "verify:hosted-service": "node scripts/verify-hosted-service.mjs",

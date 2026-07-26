@@ -40,10 +40,7 @@ const PLANET_TEXTURES: PlanetTexture[] = ["speckled", "bands", "freckles", "crat
 const AI_PROVIDERS: AiProvider[] = ["openai", "openai-compatible", "anthropic", "deepseek", "local", "codex", "openclaw", "claude", "mock"];
 const AI_EXECUTION_MODES: AiExecutionMode[] = ["chat", "openai", "local", "codex", "openclaw", "claude"];
 const CHAT_SERVICES: ChatServiceId[] = ["openai", "anthropic", "deepseek", "local"];
-const CHAT_REASONING_EFFORTS: ChatReasoningEffort[] = ["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
-const CODEX_REASONING_EFFORTS: CodexReasoningEffort[] = ["low", "medium", "high", "xhigh"];
 const CODEX_SANDBOX_MODES: CodexSandboxMode[] = ["read-only", "workspace-write", "danger-full-access"];
-const CLAUDE_REASONING_EFFORTS: ClaudeReasoningEffort[] = ["default", "low", "medium", "high", "xhigh", "max"];
 const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
 
 export interface NotebookExportOptions {
@@ -134,6 +131,11 @@ function safeText(value: unknown, fallback: string) {
 
 function safeString(value: unknown, fallback: string) {
   return typeof value === "string" ? value : fallback;
+}
+
+function safeReasoningEffort(value: unknown, fallback: string) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return /^[a-z][a-z0-9_-]{0,31}$/.test(normalized) ? normalized : fallback;
 }
 
 function safeBoundedText(value: unknown, fallback: string, maxLength: number) {
@@ -271,9 +273,7 @@ function sanitizeCodexSettings(value: unknown): CodexSettings | undefined {
   if (!isRecord(value)) return undefined;
   return {
     model: safeString(value.model, "gpt-5.5"),
-    reasoningEffort: CODEX_REASONING_EFFORTS.includes(value.reasoningEffort as CodexReasoningEffort)
-      ? (value.reasoningEffort as CodexReasoningEffort)
-      : "medium",
+    reasoningEffort: safeReasoningEffort(value.reasoningEffort, "medium"),
     sandbox: CODEX_SANDBOX_MODES.includes(value.sandbox as CodexSandboxMode)
       ? (value.sandbox as CodexSandboxMode)
       : "workspace-write",
@@ -304,9 +304,7 @@ function sanitizeClaudeSettings(value: unknown): ClaudeSettings | undefined {
   return {
     model: safeString(value.model, ""),
     baseUrl: safeString(value.baseUrl, ""),
-    reasoningEffort: CLAUDE_REASONING_EFFORTS.includes(value.reasoningEffort as ClaudeReasoningEffort)
-      ? (value.reasoningEffort as ClaudeReasoningEffort)
-      : "default",
+    reasoningEffort: safeReasoningEffort(value.reasoningEffort, "default"),
     permissionMode: CLAUDE_PERMISSION_MODES.includes(value.permissionMode as ClaudePermissionMode)
       ? (value.permissionMode as ClaudePermissionMode)
       : "default",
@@ -322,9 +320,7 @@ function sanitizeChatSettings(value: unknown): ChatSettings | undefined {
   return {
     service: CHAT_SERVICES.includes(value.service as ChatServiceId) ? (value.service as ChatServiceId) : "openai",
     model: safeString(value.model, ""),
-    reasoningEffort: CHAT_REASONING_EFFORTS.includes(value.reasoningEffort as ChatReasoningEffort)
-      ? (value.reasoningEffort as ChatReasoningEffort)
-      : "default",
+    reasoningEffort: safeReasoningEffort(value.reasoningEffort, "default"),
   };
 }
 

@@ -1,8 +1,11 @@
 import { chromium } from "@playwright/test";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import http from "node:http";
 import net from "node:net";
+import path from "node:path";
 
+const hardTimeoutMs = Number(process.env.MIND_ATLAS_HOSTED_UI_TIMEOUT_MS || 180_000);
 const host = "127.0.0.1";
 const providerIds = ["openai", "anthropic", "glm", "deepseek", "gemini", "qwen", "composer", "kimi", "mimo", "minimax", "grok"];
 const requestedPaths = [];
@@ -128,11 +131,19 @@ const mockPort = await listenOnRandomPort(mockService);
 const vitePort = await getFreePort();
 const serviceUrl = `http://${host}:${mockPort}`;
 const appUrl = `http://${host}:${vitePort}`;
-const viteCommand = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : "npm";
-const viteArgs = process.platform === "win32"
-  ? ["/d", "/s", "/c", `npm run dev -- --host ${host} --port ${vitePort} --strictPort`]
-  : ["run", "dev", "--", "--host", host, "--port", String(vitePort), "--strictPort"];
-const vite = spawn(viteCommand, viteArgs, {
+const require = createRequire(import.meta.url);
+const vitePackageDirectory = path.dirname(require.resolve("vite/package.json"));
+const viteEntryPath = path.join(vitePackageDirectory, "bin", "vite.js");
+const vite = spawn(process.execPath, [
+  viteEntryPath,
+  "--configLoader",
+  "runner",
+  "--host",
+  host,
+  "--port",
+  String(vitePort),
+  "--strictPort",
+], {
   cwd: process.cwd(),
   env: cleanEnv({
     ...process.env,
@@ -140,7 +151,14 @@ const vite = spawn(viteCommand, viteArgs, {
     VITE_MIND_ATLAS_SERVICE_URL: serviceUrl,
   }),
   stdio: ["ignore", "pipe", "pipe"],
+  windowsHide: true,
 });
+const hardTimeout = setTimeout(() => {
+  console.error(`Hosted public UI verification exceeded ${hardTimeoutMs}ms and was terminated.`);
+  terminateChildNow(vite);
+  process.exit(1);
+}, hardTimeoutMs);
+hardTimeout.unref();
 
 let viteOutput = "";
 vite.stdout.on("data", (chunk) => {
@@ -536,12 +554,15 @@ try {
     console.log("Hosted public UI verification passed");
     console.log(JSON.stringify({ signedOutButtonText, aiButtonText, exhaustedButtonText, modeButtonCount, scopeSelectCount, serviceOptions, aboutTouchScrollState, requestedPaths: Array.from(new Set(requestedPaths)) }, null, 2));
   } finally {
-    await browser.close();
+    await closeBrowser(browser);
   }
 } finally {
-  stopChild(vite);
+  await stopChild(vite);
   await closeServer(mockService);
+  await waitForPortClosed(vitePort, 5_000);
 }
+clearTimeout(hardTimeout);
+process.exit(0);
 
 async function verifyAboutEmbeddedTouchScroll(browser) {
   const context = await browser.newContext({
@@ -964,20 +985,96 @@ async function waitForCondition(predicate, timeoutMs) {
   throw new Error("Timed out waiting for verification condition.");
 }
 
-function stopChild(child) {
-  if (!child.pid || child.exitCode !== null) return;
-  if (process.platform === "win32") {
-    spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
-  } else {
-    child.kill("SIGTERM");
+async function stopChild(child) {
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+  if (!child.pid || child.exitCode !== null) {
+    child.unref();
+    return;
   }
+  const exited = waitForChildExit(child);
+  terminateChildNow(child);
+  await Promise.race([exited, delay(2_000)]);
+  if (child.exitCode === null) {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // The process may have exited between the status check and the signal.
+    }
+    await Promise.race([waitForChildExit(child), delay(2_000)]);
+  }
+  child.unref();
+}
+
+function terminateChildNow(child) {
+  if (!child.pid || child.exitCode !== null) return;
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    // The process may already have exited.
+  }
+}
+
+function waitForChildExit(child) {
+  if (child.exitCode !== null) return Promise.resolve();
+  return new Promise((resolve) => child.once("exit", resolve));
+}
+
+async function waitForPortClosed(port, timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!(await isPortOpen(port))) return;
+    await delay(50);
+  }
+  throw new Error(`Vite verification port ${port} remained open after cleanup.`);
+}
+
+function isPortOpen(port) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host, port });
+    socket.setTimeout(250);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    const finishClosed = () => {
+      socket.destroy();
+      resolve(false);
+    };
+    socket.once("error", finishClosed);
+    socket.once("timeout", finishClosed);
+  });
 }
 
 async function closeServer(server) {
   if (!server.listening) return;
-  await new Promise((resolve, reject) => {
-    server.close((error) => error ? reject(error) : resolve());
-  });
+  server.closeIdleConnections?.();
+  server.closeAllConnections?.();
+  await Promise.race([
+    new Promise((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    }),
+    delay(2_000),
+  ]);
+}
+
+async function closeBrowser(browser) {
+  let closed = false;
+  await Promise.race([
+    browser.close()
+      .catch(() => {})
+      .then(() => {
+        closed = true;
+      }),
+    delay(3_000),
+  ]);
+  if (!closed) {
+    console.warn("Browser close exceeded 3000ms; forcing verifier process shutdown.");
+  }
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function cleanText(value) {

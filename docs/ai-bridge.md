@@ -84,10 +84,12 @@ overriding variables already set by the shell.
 - `MIND_ATLAS_CODEX_USE_WSL`: set `true` to run `wsl codex ...`.
 - `MIND_ATLAS_CODEX_WORKSPACE`: workspace passed to `codex exec --cd`.
 - `MIND_ATLAS_CODEX_MODEL`: default Codex model. The UI also reads `codex debug models` through the bridge.
-- `MIND_ATLAS_CODEX_REASONING_EFFORT`: default effort (`low`, `medium`, `high`, or `xhigh`).
+- `MIND_ATLAS_CODEX_REASONING_EFFORT`: default Codex reasoning level. The bridge accepts a safe level reported by the installed CLI, including future values such as `ultra`.
+- `MIND_ATLAS_CODEX_REASONING_EFFORTS`: fallback comma-separated Codex levels used only when `codex debug models` is unavailable or a manual model list is configured. Live CLI model metadata takes precedence and is deduplicated before the browser receives it.
 - `MIND_ATLAS_CODEX_SANDBOX`: default sandbox. Use `workspace-write`; Full access normally requires an approval button in Mind Atlas.
 - `MIND_ATLAS_CODEX_MODELS`: optional comma-separated model override when `codex debug models` is unavailable.
 - `MIND_ATLAS_CODEX_TIMEOUT_MS`: Codex execution timeout in milliseconds. Defaults to 60 minutes.
+- `MIND_ATLAS_OPENAI_REASONING_EFFORTS`, `MIND_ATLAS_ANTHROPIC_REASONING_EFFORTS`, `MIND_ATLAS_DEEPSEEK_REASONING_EFFORTS`: comma-separated Chat reasoning levels exposed for each local bridge provider. Provider APIs do not expose one common capability-discovery endpoint, so update these lists when a provider changes its supported levels. Values are forwarded only as safe identifiers; `default` does not send an effort override.
 - `MIND_ATLAS_OPENCLAW_BIN`: OpenClaw executable. Defaults to `openclaw`; on Windows the bridge also auto-detects the user npm OpenClaw entrypoint.
 - `MIND_ATLAS_OPENCLAW_AGENT`: optional OpenClaw agent id. Leave blank to use the OpenClaw default agent.
 - `MIND_ATLAS_OPENCLAW_TIMEOUT_MS`: OpenClaw execution timeout in milliseconds. Defaults to 10 minutes.
@@ -98,6 +100,7 @@ overriding variables already set by the shell.
 - `MIND_ATLAS_CLAUDE_DEEPSEEK_AUTH_TOKEN`: optional DeepSeek API key sent as `ANTHROPIC_AUTH_TOKEN` only when the run targets `https://api.deepseek.com/anthropic`.
 - `MIND_ATLAS_CLAUDE_ANTHROPIC_AUTH_TOKEN`: optional generic `ANTHROPIC_AUTH_TOKEN` for custom Anthropic-compatible gateways. Prefer `MIND_ATLAS_CLAUDE_DEEPSEEK_AUTH_TOKEN` for DeepSeek when switching between Anthropic and DeepSeek presets.
 - `MIND_ATLAS_CLAUDE_DEFAULT_FABLE_MODEL`, `MIND_ATLAS_CLAUDE_DEFAULT_OPUS_MODEL`, `MIND_ATLAS_CLAUDE_DEFAULT_SONNET_MODEL`, `MIND_ATLAS_CLAUDE_DEFAULT_HAIKU_MODEL`, `MIND_ATLAS_CLAUDE_SUBAGENT_MODEL`, `MIND_ATLAS_CLAUDE_EFFORT_LEVEL`: optional Claude Code env overrides. DeepSeek runs automatically fill the recommended V4 Pro / V4 Flash defaults when these are not set.
+- `MIND_ATLAS_CLAUDE_REASONING_EFFORTS`: comma-separated Claude Code `--effort` choices shown in the local command dock. Update it with the installed Claude Code release when Anthropic changes the supported levels.
 - `MIND_ATLAS_CLAUDE_WORKSPACE`: default work root for Claude Code runs.
 - `MIND_ATLAS_CLAUDE_TIMEOUT_MS`: Claude Code execution timeout in milliseconds. Defaults to 60 minutes.
 
@@ -114,6 +117,9 @@ in the Codex instructions. The Codex details node records this as
 - `MIND_ATLAS_VOICE_IDLE_TIMEOUT_MS`: Voice Partner idle timeout for `npm run dev:all` and docs. Defaults to one hour.
 - `VITE_MIND_ATLAS_VOICE_IDLE_TIMEOUT_MS`: browser-side Voice Partner idle timeout. Defaults to one hour; set a short value in local verification to exercise idle summary shutdown.
 - `MIND_ATLAS_CLOUD_DIR`: server-side folder for `クラウドへ保存` / `クラウドから読み込み` notebook packages. Defaults to `server-data/notebooks`.
+- `MIND_ATLAS_AGENT_RUN_INBOX_DIR`: local-only durable journal for Codex, Claude Code, and OpenClaw requests. Defaults to `server-data/agent-run-inbox`.
+- `MIND_ATLAS_AGENT_RUN_INBOX_GRACE_MS`: delay before a completed journal entry becomes eligible for recovery. This gives the original browser time to store the normal result and acknowledge the entry. Defaults to 5000 milliseconds.
+- `MIND_ATLAS_AGENT_RUN_INBOX_LIMIT`: maximum unacknowledged entries returned by one recovery poll. Defaults to 100.
 - `MIND_ATLAS_DEV_HTTPS`: when running `npm run dev:all`, defaults to `true` and generates local HTTPS certificates in `.certs/`.
 - `MIND_ATLAS_BRIDGE_HOST`: bridge bind host. Defaults to `127.0.0.1`; `npm run dev:all` overrides it to `0.0.0.0` for LAN use.
 - `MIND_ATLAS_BRIDGE_PROTOCOL`: `http` or `https`. `npm run dev:all` sets this to match `MIND_ATLAS_DEV_HTTPS`.
@@ -176,6 +182,7 @@ Node-anchored AI requests are assembled by one shared context engine
 - Chat is the shared non-agent conversation entry. It can target OpenAI, Opus/Anthropic, DeepSeek, or Local from one service/model/effort settings row.
 - Code is the shared workspace-aware CLI entry. Its first setting chooses Codex or Claude Code, then shows that backend's compact settings. Codex exposes model, effort, sandbox, work root, and thread controls. Claude Code exposes preset, effort, permission mode, and work root controls.
 - A user request is saved as a child notebook node first. The provider result is saved as a child of that request.
+- Codex, Claude Code, and OpenClaw requests are also written to a local durable run journal before execution. The browser acknowledges a journal entry only after the normal result or error has been stored. On startup, page resume, and a 60-second poll, an unacknowledged result is restored into its still-running request branch. If that branch no longer exists, the request and result are preserved in the AI Partner log with an unread notification. A bridge restart turns an unfinished journal entry into an explicit interrupted result instead of leaving an indefinite running node. Verify this contract with `npm run verify:agent-recovery`.
 - From the root surface, Chat requests are written to the AI Partner log instead of creating notebook nodes. With an active node, Chat creates the same request/result child branch as before.
 - OpenAI Chat uses the Responses API by default and passes supported `reasoning.effort` values when selected.
 - OpenAI image-generation prompts in Chat are routed through the Image API and saved as image attachments on the result node.

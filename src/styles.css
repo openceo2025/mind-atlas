@@ -72,10 +72,28 @@ button {
   height: var(--app-height);
   overflow: hidden;
   touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
   background:
     radial-gradient(circle at 50% 46%, rgba(141, 245, 207, 0.055), transparent 34%),
     linear-gradient(180deg, rgba(16, 20, 15, 0.18), rgba(5, 7, 6, 0.86)),
     #050706;
+}
+
+.app-shell input,
+.app-shell textarea,
+.app-shell [contenteditable="true"] {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.app-shell img,
+.app-shell svg,
+.app-shell canvas {
+  -webkit-user-drag: none;
 }
 
 .app-shell.is-about-demo .global-menu,
@@ -2062,6 +2080,10 @@ h1 {
   z-index: 120;
 }
 
+.tutorial-completion-backdrop {
+  z-index: 121;
+}
+
 .cloud-switch-dialog {
   width: min(440px, calc(100vw - 28px));
   border: 1px solid rgba(255, 213, 111, 0.34);
@@ -2112,6 +2134,14 @@ h1 {
 
 .cloud-switch-dialog .danger-button {
   color: #ffb1a2;
+}
+
+.tutorial-completion-dialog footer {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tutorial-completion-dialog.is-complete footer {
+  grid-template-columns: 1fr;
 }
 
 @media (max-width: 560px) {
@@ -5819,14 +5849,17 @@ button:disabled,
 
   :root[data-keyboard-overlay-input="true"] .app-shell {
     --mobile-panel-height: min(236px, calc(var(--app-height) - var(--keyboard-bottom-offset) - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    --keyboard-panel-available-height: max(72px, calc(var(--app-height) - var(--keyboard-bottom-offset) - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    --keyboard-panel-effective-height: min(var(--keyboard-panel-height, var(--mobile-panel-height)), var(--keyboard-panel-available-height));
     height: var(--app-height);
   }
 
   :root[data-keyboard-overlay-input="true"] .universe-shell {
     bottom: min(
-      calc(var(--keyboard-bottom-offset) + var(--keyboard-panel-height, var(--mobile-panel-height)) + 24px + env(safe-area-inset-bottom)),
+      calc(var(--keyboard-bottom-offset) + var(--keyboard-panel-effective-height) + 24px + env(safe-area-inset-bottom)),
       calc(var(--app-height) - 132px - env(safe-area-inset-top))
     );
+    transition: none;
   }
 
   :root[data-keyboard-overlay-space-label="true"] .universe-shell {
@@ -5888,11 +5921,10 @@ button:disabled,
     width: var(--keyboard-panel-width, auto);
     min-width: 0;
     max-width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
-    height: var(--keyboard-panel-height, var(--mobile-panel-height));
-    max-height: var(--keyboard-panel-height, calc(var(--app-height) - var(--keyboard-bottom-offset) - 92px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    height: var(--keyboard-panel-effective-height);
+    max-height: var(--keyboard-panel-available-height);
     pointer-events: none;
     transition:
-      bottom 180ms ease,
       opacity 620ms cubic-bezier(0.22, 1, 0.36, 1),
       transform 620ms cubic-bezier(0.22, 1, 0.36, 1);
     animation: mobile-panel-rise-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both;

@@ -1,4 +1,4 @@
-import { requestAiResponse } from "./bridgeClient";
+import { acknowledgeAgentRuns, requestAiResponse } from "./bridgeClient";
 import { buildAiNodeContextWithAttachments, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
 import type { OpenClawSettings } from "../types";
 
@@ -45,6 +45,9 @@ export async function runOpenClawPartnerTurn(prompt: string, settings: OpenClawS
         continueMode: settings.continueMode,
         resumeSessionKey: settings.resumeSessionKey,
         timeoutMs: settings.timeoutMs,
+        workspace: settings.workspace,
+        clientRunId: sessionId,
+        sourceNodeId: state.atlasRoot.id,
       },
     });
     useAtlasStore.getState().appendVoiceLogEntry({
@@ -60,6 +63,9 @@ export async function runOpenClawPartnerTurn(prompt: string, settings: OpenClawS
         openClawLogPath: result.openClawLogPath,
       },
     });
+    void acknowledgeAgentRuns({ clientRunIds: [sessionId] }).catch((error) => {
+      console.warn("OpenClaw Partner acknowledgement failed", error);
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "OpenClaw request failed.";
     useAtlasStore.getState().appendVoiceLogEntry({
@@ -68,6 +74,9 @@ export async function runOpenClawPartnerTurn(prompt: string, settings: OpenClawS
       text: message,
       sessionId,
       status: "error",
+    });
+    void acknowledgeAgentRuns({ clientRunIds: [sessionId] }).catch((acknowledgementError) => {
+      console.warn("OpenClaw Partner acknowledgement failed", acknowledgementError);
     });
   }
 }
