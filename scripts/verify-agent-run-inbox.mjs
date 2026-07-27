@@ -50,6 +50,29 @@ try {
   assert.equal(interrupted?.status, "interrupted");
   assert.match(interrupted?.error ?? "", /bridge restarted/i);
   await acknowledge(8899, { ids: [interrupted.id] });
+  stopProcessTree(bridge);
+  bridge = null;
+
+  const subscriptionCapturePath = join(inboxDir, "subscription-capture.json");
+  bridge = await startBridge(8900, {
+    MIND_ATLAS_FAKE_CLAUDE_CAPTURE_PATH: subscriptionCapturePath,
+    ANTHROPIC_API_KEY: "must-not-reach-subscription",
+    ANTHROPIC_AUTH_TOKEN: "must-not-reach-subscription",
+    ANTHROPIC_BASE_URL: "https://must-not-reach-subscription.invalid",
+    DEEPSEEK_API_KEY: "must-not-reach-subscription",
+  });
+  const subscription = await requestClaude(8900, "fixture-subscription", {
+    authMode: "subscription",
+    model: "fable",
+    baseUrl: "",
+  });
+  assert.equal(subscription.model, "fake-claude-code");
+  const capture = JSON.parse(await readFile(subscriptionCapturePath, "utf8"));
+  assert.deepEqual(capture.args.slice(0, 5), ["-p", "--output-format", "json", "--model", "fable"]);
+  for (const [key, value] of Object.entries(capture.env)) {
+    assert.equal(value, null, `${key} leaked into the Claude Code Pro process`);
+  }
+  await acknowledge(8900, { clientRunIds: ["fixture-subscription"] });
 
   console.log("Agent run inbox verification passed");
 } finally {
@@ -89,14 +112,14 @@ async function startBridge(port, extraEnv = {}) {
   throw new Error(`Bridge did not become ready: ${diagnostics}`);
 }
 
-async function requestClaude(port, clientRunId) {
-  const response = await fetch(`http://127.0.0.1:${port}/api/ai/respond`, requestOptions(clientRunId));
+async function requestClaude(port, clientRunId, claudePatch = {}) {
+  const response = await fetch(`http://127.0.0.1:${port}/api/ai/respond`, requestOptions(clientRunId, claudePatch));
   const text = await response.text();
   assert.equal(response.status, 200, text);
   return JSON.parse(text);
 }
 
-function requestOptions(clientRunId) {
+function requestOptions(clientRunId, claudePatch = {}) {
   return {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -110,6 +133,7 @@ function requestOptions(clientRunId) {
         sourceNodeId: "test-node",
         workspace,
         timeoutMs: 60000,
+        ...claudePatch,
       },
     }),
   };

@@ -32,6 +32,7 @@ import { currentAppLocale } from "../i18n/locales";
 
 type CommandMode = AiExecutionMode | "note";
 type AgentExecutionMode = Extract<AiExecutionMode, "codex" | "claude">;
+type CodeBackendSelection = "codex" | "claude-api" | "claude-subscription";
 type VoiceButtonState = "idle" | "dictation_recording" | "dictation_transcribing" | "voice_connecting" | "voice_ptt" | "voice_responding";
 
 const VOICE_LONG_PRESS_MS = 460;
@@ -40,11 +41,17 @@ const VOICE_IDLE_TIMEOUT_MS = readVoiceIdleTimeoutMs();
 const CHAT_OPTIONS_REFRESH_MS = 5 * 60 * 1000;
 const CLAUDE_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 const CLAUDE_DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic";
-const CLAUDE_MODEL_PRESETS = [
+const CLAUDE_API_MODEL_PRESETS = [
   { id: "bridge", label: "Bridge env", model: "", baseUrl: "" },
   { id: "opus-4-8", label: "Claude Opus 4.8", model: "claude-opus-4-8", baseUrl: CLAUDE_ANTHROPIC_BASE_URL },
   { id: "fable-5", label: "Claude Fable 5", model: "claude-fable-5", baseUrl: CLAUDE_ANTHROPIC_BASE_URL },
   { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", model: "deepseek-v4-pro[1m]", baseUrl: CLAUDE_DEEPSEEK_BASE_URL },
+] as const;
+const CLAUDE_SUBSCRIPTION_MODEL_PRESETS = [
+  { id: "account-default", label: "Claude account default", model: "", baseUrl: "" },
+  { id: "opus", label: "Claude Opus", model: "opus", baseUrl: "" },
+  { id: "fable", label: "Claude Fable", model: "fable", baseUrl: "" },
+  { id: "sonnet", label: "Claude Sonnet", model: "sonnet", baseUrl: "" },
 ] as const;
 const CLAUDE_REASONING_EFFORTS: ClaudeReasoningEffort[] = ["default", "low", "medium", "high", "xhigh", "max"];
 const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
@@ -132,6 +139,12 @@ export function CommandDock() {
     ? codexOptions.models
     : [
         {
+          model: "gpt-5.3-codex-spark",
+          displayName: "GPT-5.3-Codex-Spark",
+          defaultReasoningEffort: "high" as CodexReasoningEffort,
+          supportedReasoningEfforts: ["low", "medium", "high", "xhigh"] as CodexReasoningEffort[],
+        },
+        {
           model: "gpt-5.5",
           displayName: "GPT-5.5",
           defaultReasoningEffort: "medium" as CodexReasoningEffort,
@@ -155,7 +168,10 @@ export function CommandDock() {
     : selectedChatService?.supportedReasoningEfforts.length
       ? selectedChatService.supportedReasoningEfforts
       : (["default"] as ChatReasoningEffort[]);
-  const selectedClaudePreset = getClaudePresetId(claudeSettings.model, claudeSettings.baseUrl);
+  const codeBackendSelection: CodeBackendSelection =
+    mode === "codex" ? "codex" : claudeSettings.authMode === "subscription" ? "claude-subscription" : "claude-api";
+  const claudeModelPresets = claudeSettings.authMode === "subscription" ? CLAUDE_SUBSCRIPTION_MODEL_PRESETS : CLAUDE_API_MODEL_PRESETS;
+  const selectedClaudePreset = getClaudePresetId(claudeSettings.model, claudeSettings.baseUrl, claudeModelPresets);
   const claudeEfforts = codexOptions?.claudeReasoningEfforts?.length ? codexOptions.claudeReasoningEfforts : CLAUDE_REASONING_EFFORTS;
   const openClawModelOptions = openClawOptions?.models.length
     ? openClawOptions.models
@@ -1034,17 +1050,31 @@ export function CommandDock() {
           <label className="context-option-field">
             <span>{<I18nText id="ui.commandDock.code.da19690" />}</span>
             <select
-              value={mode}
+              value={codeBackendSelection}
               onFocus={() => setCommandInputEditing(true)}
               onBlur={() => setCommandInputEditing(false)}
               onChange={(event) => {
                 setVoiceError("");
-                setMode(event.target.value as AgentExecutionMode);
+                const backend = event.target.value as CodeBackendSelection;
+                if (backend === "codex") {
+                  setMode("codex");
+                  return;
+                }
+                requestNewAgentSession(true);
+                setClaudeSettings({
+                  authMode: backend === "claude-subscription" ? "subscription" : "api",
+                  model: "",
+                  baseUrl: "",
+                  resumeSessionId: "",
+                  forkSession: false,
+                });
+                setMode("claude");
               }}
               title={formatAppMessage("ui.commandDock.chooseTheCodeBackendFor.2b5180b")}
             >
               <option value="codex">{<I18nText id="ui.commandDock.codex.ec3dea3" />}</option>
-              <option value="claude">{<I18nText id="ui.commandDock.claudeCode.432aa3f" />}</option>
+              <option value="claude-api">{formatAppMessage("label.mode.claudeCodeApi")}</option>
+              <option value="claude-subscription">{formatAppMessage("label.mode.claudeCodePro")}</option>
             </select>
           </label>
           {mode === "codex" ? (
@@ -1132,12 +1162,12 @@ export function CommandDock() {
               onFocus={() => setCommandInputEditing(true)}
               onBlur={() => setCommandInputEditing(false)}
               onChange={(event) => {
-                const preset = CLAUDE_MODEL_PRESETS.find((item) => item.id === event.target.value);
+                const preset = claudeModelPresets.find((item) => item.id === event.target.value);
                 if (preset) setClaudeSettings({ model: preset.model, baseUrl: preset.baseUrl });
               }}
               title={formatAppMessage("ui.commandDock.claudeCodeProviderAndModel.01362ae")}
             >
-              {CLAUDE_MODEL_PRESETS.map((preset) => (
+              {claudeModelPresets.map((preset) => (
                 <option key={preset.id} value={preset.id}>
                   {preset.label}
                 </option>
@@ -1595,10 +1625,14 @@ function claudePermissionLabel(permissionMode: ClaudePermissionMode) {
   }
 }
 
-function getClaudePresetId(model: string, baseUrl: string) {
+function getClaudePresetId(
+  model: string,
+  baseUrl: string,
+  presets: readonly { id: string; model: string; baseUrl: string }[],
+) {
   const normalizedModel = model.trim();
   const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
-  return CLAUDE_MODEL_PRESETS.find((preset) => preset.model === normalizedModel && preset.baseUrl === normalizedBaseUrl)?.id ?? "custom";
+  return presets.find((preset) => preset.model === normalizedModel && preset.baseUrl === normalizedBaseUrl)?.id ?? "custom";
 }
 
 function isCommandMode(value: unknown): value is CommandMode {

@@ -189,6 +189,7 @@ export interface OpenClawSettings {
 }
 
 export interface ClaudeSettings {
+  authMode: "api" | "subscription";
   model: string;
   baseUrl: string;
   reasoningEffort: ClaudeReasoningEffort;

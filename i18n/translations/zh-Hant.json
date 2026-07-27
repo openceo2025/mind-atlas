@@ -123,6 +123,8 @@
   "label.mobile.unsupported": "不支援",
   "label.mode.chat": "聊天",
   "label.mode.claudeCode": "Claude Code",
+  "label.mode.claudeCodeApi": "Claude Code API",
+  "label.mode.claudeCodePro": "Claude Code Pro",
   "label.mode.codex": "Codex",
   "label.mode.local": "本機",
   "label.mode.note": "筆記",

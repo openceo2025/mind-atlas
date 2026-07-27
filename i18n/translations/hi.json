@@ -123,6 +123,8 @@
   "label.mobile.unsupported": "असमर्थित",
   "label.mode.chat": "चैट",
   "label.mode.claudeCode": "Claude Code",
+  "label.mode.claudeCodeApi": "Claude Code API",
+  "label.mode.claudeCodePro": "Claude Code Pro",
   "label.mode.codex": "Codex",
   "label.mode.local": "स्थानीय",
   "label.mode.note": "नोट",

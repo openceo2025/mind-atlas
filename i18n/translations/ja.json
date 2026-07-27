@@ -108,6 +108,8 @@
   "label.mobile.unsupported": "未対応",
   "label.mode.chat": "チャット",
   "label.mode.claudeCode": "Claude Code",
+  "label.mode.claudeCodeApi": "Claude Code API",
+  "label.mode.claudeCodePro": "Claude Code Pro",
   "label.mode.codex": "Codex",
   "label.mode.local": "ローカル",
   "label.mode.note": "ノート",

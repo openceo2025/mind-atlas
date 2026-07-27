@@ -123,6 +123,8 @@
   "label.mobile.unsupported": "지원 안 함",
   "label.mode.chat": "채팅",
   "label.mode.claudeCode": "Claude Code",
+  "label.mode.claudeCodeApi": "Claude Code API",
+  "label.mode.claudeCodePro": "Claude Code Pro",
   "label.mode.codex": "Codex",
   "label.mode.local": "로컬",
   "label.mode.note": "노트",

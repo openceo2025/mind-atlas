@@ -138,6 +138,7 @@ const DEFAULT_OPENCLAW_SETTINGS: OpenClawSettings = {
   resumeSessionKey: "",
 };
 const DEFAULT_CLAUDE_SETTINGS: ClaudeSettings = {
+  authMode: "api",
   model: "",
   baseUrl: "",
   reasoningEffort: "default",
@@ -4667,6 +4668,7 @@ function normalizeClaudeSettings(settings: Partial<ClaudeSettings>): ClaudeSetti
   return {
     ...DEFAULT_CLAUDE_SETTINGS,
     ...settings,
+    authMode: settings.authMode === "subscription" ? "subscription" : "api",
     model: (settings.model ?? "").trim(),
     baseUrl: (settings.baseUrl ?? "").trim().replace(/\/+$/, ""),
     reasoningEffort: normalizeClaudeReasoningEffort(settings.reasoningEffort),

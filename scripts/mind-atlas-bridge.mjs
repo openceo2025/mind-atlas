@@ -76,6 +76,7 @@ const claudeDisabled = process.env.MIND_ATLAS_CLAUDE_DISABLED === "true";
 const claudeLogDir = resolve(process.env.MIND_ATLAS_CLAUDE_LOG_DIR ?? join(process.cwd(), "server-data", "claude-runs"));
 const claudeDeepSeekBaseUrl = "https://api.deepseek.com/anthropic";
 const claudeReasoningEfforts = parseReasoningEffortList(process.env.MIND_ATLAS_CLAUDE_REASONING_EFFORTS, ["default", "low", "medium", "high", "xhigh", "max"]);
+let claudeSubscriptionAuthCache = null;
 
 const anthropicChatBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_ANTHROPIC_BASE_URL ?? process.env.MIND_ATLAS_CLAUDE_ANTHROPIC_BASE_URL ?? process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com");
 const anthropicChatApiKey = process.env.MIND_ATLAS_ANTHROPIC_API_KEY ?? claudeApiKey;
@@ -1437,13 +1438,22 @@ async function readCodexModels() {
 }
 
 function createFallbackCodexOptions() {
-  const fallbackModels = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"].map((model) => ({
-    model,
-    displayName: model.toUpperCase(),
-    description: "Codex CLI model",
-    defaultReasoningEffort: defaultReasoningEffort(codexFallbackReasoningEfforts, "medium"),
-    supportedReasoningEfforts: codexFallbackReasoningEfforts,
-  }));
+  const fallbackModels = [
+    {
+      model: "gpt-5.3-codex-spark",
+      displayName: "GPT-5.3-Codex-Spark",
+      description: "Fast Codex model available through supported Codex subscriptions",
+      defaultReasoningEffort: "high",
+      supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+    },
+    ...["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"].map((model) => ({
+      model,
+      displayName: model.toUpperCase(),
+      description: "Codex CLI model",
+      defaultReasoningEffort: defaultReasoningEffort(codexFallbackReasoningEfforts, "medium"),
+      supportedReasoningEfforts: codexFallbackReasoningEfforts,
+    })),
+  ];
   return {
     models: fallbackModels,
     defaultModel: codexModel || "gpt-5.5",
@@ -2116,6 +2126,9 @@ function claudeResumeLooksFailed(result, parsed) {
 
 async function runClaudeCode(prompt, settings) {
   assertExistingWorkspace(settings.workspace, "Claude Code");
+  if (settings.authMode === "subscription") {
+    await assertClaudeSubscriptionAuthenticated(settings);
+  }
   const startedAt = new Date().toISOString();
   const boundedPrompt = truncateText(prompt, claudePromptCharLimit);
   const args = [
@@ -2123,6 +2136,9 @@ async function runClaudeCode(prompt, settings) {
     "--output-format",
     "json",
   ];
+  if (settings.authMode === "subscription" && settings.model) {
+    args.push("--model", settings.model);
+  }
   if (settings.reasoningEffort && settings.reasoningEffort !== "default") {
     args.push("--effort", settings.reasoningEffort);
   }
@@ -2166,17 +2182,18 @@ function buildClaudeCommand(args) {
 
 function buildClaudeEnv(settings) {
   const env = { ...process.env };
+  clearClaudeProviderEnv(env);
+  env.API_TIMEOUT_MS = stringOr(process.env.API_TIMEOUT_MS, String(settings.timeoutMs));
+  if (settings.authMode === "subscription") {
+    return env;
+  }
   const baseUrl = settings.baseUrl || claudeBaseUrl;
   const model = settings.model || claudeModel;
-  delete env.ANTHROPIC_API_KEY;
-  delete env.ANTHROPIC_AUTH_TOKEN;
-  delete env.ANTHROPIC_BASE_URL;
   if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
   const auth = resolveClaudeAuthForBaseUrl(baseUrl);
   if (auth.apiKey) env.ANTHROPIC_API_KEY = auth.apiKey;
   if (auth.authToken) env.ANTHROPIC_AUTH_TOKEN = auth.authToken;
   if (model) env.ANTHROPIC_MODEL = model;
-  env.API_TIMEOUT_MS = stringOr(process.env.API_TIMEOUT_MS, String(settings.timeoutMs));
   for (const [source, target] of [
     ["MIND_ATLAS_CLAUDE_DEFAULT_FABLE_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL"],
     ["MIND_ATLAS_CLAUDE_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL"],
@@ -2190,6 +2207,66 @@ function buildClaudeEnv(settings) {
   }
   applyDeepSeekClaudeDefaults(env, baseUrl, model);
   return env;
+}
+
+function clearClaudeProviderEnv(env) {
+  for (const key of [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+    "CLAUDE_CODE_EFFORT_LEVEL",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_AWS_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "MIND_ATLAS_CLAUDE_ANTHROPIC_API_KEY",
+    "MIND_ATLAS_CLAUDE_API_KEY",
+    "MIND_ATLAS_CLAUDE_ANTHROPIC_AUTH_TOKEN",
+    "MIND_ATLAS_CLAUDE_AUTH_TOKEN",
+    "MIND_ATLAS_CLAUDE_DEEPSEEK_AUTH_TOKEN",
+    "DEEPSEEK_API_KEY",
+  ]) {
+    delete env[key];
+  }
+}
+
+async function assertClaudeSubscriptionAuthenticated(settings) {
+  const cacheIsFresh = claudeSubscriptionAuthCache && Date.now() - claudeSubscriptionAuthCache.createdAt < 30_000;
+  const status = cacheIsFresh
+    ? claudeSubscriptionAuthCache.value
+    : await readClaudeSubscriptionAuthStatus(settings);
+  if (status.loggedIn) return;
+  throw new BridgeError(
+    401,
+    "Claude Code Pro is not signed in. Run `claude auth login` in PowerShell, choose your Claude Pro or Max account, then retry.",
+  );
+}
+
+async function readClaudeSubscriptionAuthStatus(settings) {
+  const commandSpec = buildClaudeCommand(["auth", "status"]);
+  let value = { loggedIn: false };
+  try {
+    const result = await runProcess(
+      commandSpec.command,
+      commandSpec.args,
+      "",
+      Math.min(settings.timeoutMs, 10_000),
+      settings.workspace,
+      buildClaudeEnv({ ...settings, authMode: "subscription" }),
+    );
+    const parsed = parseJsonText(result.stdout);
+    value = { loggedIn: result.exitCode === 0 && parsed?.loggedIn === true };
+  } catch {
+    value = { loggedIn: false };
+  }
+  claudeSubscriptionAuthCache = { createdAt: Date.now(), value };
+  return value;
 }
 
 function resolveClaudeAuthForBaseUrl(baseUrl) {
@@ -2255,6 +2332,7 @@ function normalizeClaudeSettings(input, model, context) {
   const workspace = stringOr(input?.workspace, stringOr(extractWorkspaceFromContext(context), claudeWorkspace));
   const continueMode = input?.continueMode === "new" ? "new" : "auto";
   return {
+    authMode: input?.authMode === "subscription" ? "subscription" : "api",
     model: stringOr(input?.model, model || claudeModel),
     baseUrl: stringOr(input?.baseUrl, claudeBaseUrl).replace(/\/+$/, ""),
     reasoningEffort: normalizeClaudeReasoningEffort(input?.reasoningEffort),

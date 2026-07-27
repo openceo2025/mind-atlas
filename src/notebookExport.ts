@@ -302,6 +302,7 @@ function sanitizeOpenClawSettings(value: unknown): OpenClawSettings | undefined 
 function sanitizeClaudeSettings(value: unknown): ClaudeSettings | undefined {
   if (!isRecord(value)) return undefined;
   return {
+    authMode: value.authMode === "subscription" ? "subscription" : "api",
     model: safeString(value.model, ""),
     baseUrl: safeString(value.baseUrl, ""),
     reasoningEffort: safeReasoningEffort(value.reasoningEffort, "default"),

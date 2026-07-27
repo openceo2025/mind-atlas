@@ -123,6 +123,8 @@
   "label.mobile.unsupported": "Nicht unterstützt",
   "label.mode.chat": "Chat",
   "label.mode.claudeCode": "Claude Code",
+  "label.mode.claudeCodeApi": "Claude Code API",
+  "label.mode.claudeCodePro": "Claude Code Pro",
   "label.mode.codex": "Codex",
   "label.mode.local": "Lokal",
   "label.mode.note": "Notiz",

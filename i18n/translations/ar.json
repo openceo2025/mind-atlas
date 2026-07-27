@@ -123,6 +123,8 @@
   "label.mobile.unsupported": "غير مدعوم",
   "label.mode.chat": "دردشة",
   "label.mode.claudeCode": "Claude Code",
+  "label.mode.claudeCodeApi": "Claude Code API",
+  "label.mode.claudeCodePro": "Claude Code Pro",
   "label.mode.codex": "Codex",
   "label.mode.local": "محلي",
   "label.mode.note": "ملاحظة",

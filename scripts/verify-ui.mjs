@@ -231,10 +231,24 @@ async function verifyLocalDeveloperModeSurface(browser) {
   await page.locator(".code-options-row").waitFor();
   const codeBackends = await page.locator('.code-options-row select[title="Choose the code backend for this node-anchored run."] option')
     .evaluateAll((options) => options.map((option) => option.textContent?.trim()));
-  for (const expected of ["Codex", "Claude Code"]) {
+  for (const expected of ["Codex", "Claude Code API", "Claude Code Pro"]) {
     if (!codeBackends.includes(expected)) {
       throw new Error(`Local developer mode is missing ${expected} backend: ${JSON.stringify(codeBackends)}`);
     }
+  }
+  const backendSelect = page.locator('.code-options-row select[title="Choose the code backend for this node-anchored run."]');
+  await backendSelect.selectOption("claude-subscription");
+  await page.locator(".claude-options-row").waitFor();
+  const proPresets = await page.locator(".claude-options-row select").nth(1).locator("option")
+    .evaluateAll((options) => options.map((option) => option.textContent?.trim()));
+  if (!proPresets.includes("Claude account default") || proPresets.some((preset) => preset?.includes("DeepSeek"))) {
+    throw new Error(`Claude Code Pro presets are not subscription-safe: ${JSON.stringify(proPresets)}`);
+  }
+  await backendSelect.selectOption("codex");
+  const codexModels = await page.locator(".code-options-row select").nth(1).locator("option")
+    .evaluateAll((options) => options.map((option) => ({ value: option.getAttribute("value"), label: option.textContent?.trim() })));
+  if (!codexModels.some((option) => option.value === "gpt-5.3-codex-spark")) {
+    throw new Error(`Codex Spark is missing from the model selector: ${JSON.stringify(codexModels)}`);
   }
 
   await page.getByRole("button", { name: "OpenClaw" }).click();
@@ -249,7 +263,7 @@ async function verifyLocalDeveloperModeSurface(browser) {
   }
 
   await context.close();
-  return { modeLabels, codeBackends, chatServices, localSavePrevented };
+  return { modeLabels, codeBackends, codexModels, proPresets, chatServices, localSavePrevented };
 }
 
 async function verifyNotificationSnoozeActions(browser) {
@@ -3320,6 +3334,10 @@ try {
     const mobileEditorKeyboard = await runStep("mobileEditorKeyboard", () => verifyMobileEditorKeyboardOverlay(browser));
     console.log("Mobile input verification passed");
     console.log({ iosTouchSuppression, mobileEditorKeyboard });
+  } else if (process.argv[2] === "local-developer") {
+    const localDeveloperMode = await runStep("localDeveloperMode", () => verifyLocalDeveloperModeSurface(browser));
+    console.log("Local developer mode verification passed");
+    console.log({ localDeveloperMode });
   } else {
     const desktop = await runStep("desktopViewport", () => verifyViewport(browser, "desktop", { width: 1440, height: 920 }));
     const localeSwitching = await runStep("localeSwitching", () => verifyLocaleSwitching(browser));
