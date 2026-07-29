@@ -145,12 +145,15 @@ const server = http.createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", publicOrigin);
     enforceBrowserOrigin(request, url);
 
-    if (request.method === "GET") {
+    if (request.method === "GET" || request.method === "HEAD") {
       const canonicalRedirect = buildCanonicalPageRedirect(url.pathname, url.searchParams);
       if (canonicalRedirect) {
         redirectResponse(response, `${publicOrigin}${canonicalRedirect}`, 301);
         return;
       }
+    }
+
+    if (request.method === "GET") {
       const promotionRedirect = buildPromotionRedirect(url.pathname, url.searchParams);
       if (promotionRedirect) {
         redirectResponse(response, `${publicOrigin}${promotionRedirect.location}`);

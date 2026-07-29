@@ -229,6 +229,7 @@ assert.ok(server.includes("function isPathWithin"), "hosted static serving shoul
 assert.ok(server.includes("decodePathname"), "hosted static serving should reject malformed encoded paths");
 assert.ok(server.includes("function buildCanonicalPageRedirect"), "hosted service should canonicalize legacy public page URLs");
 assert.ok(server.includes('redirectResponse(response, `${publicOrigin}${canonicalRedirect}`, 301)'), "legacy public page redirects should be permanent");
+assert.ok(server.includes('request.method === "GET" || request.method === "HEAD"'), "legacy public page redirects should cover GET and HEAD requests");
 assert.ok(server.includes('pathname === "/index.html"'), "hosted service should redirect index.html to the canonical root");
 assert.ok(server.includes('url.pathname.startsWith("/api/")'), "unknown hosted API routes should return JSON 404 responses");
 assert.ok(server.includes('filePath = path.join(distRoot, "404.html")'), "unknown public paths should use the noindex 404 page");
