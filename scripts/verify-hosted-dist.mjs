@@ -32,7 +32,13 @@ const indexHtml = fs.readFileSync(indexPath, "utf8");
 assert.ok(indexHtml.includes('rel="canonical" href="https://mind-atlas.org/"'), "hosted index is missing its canonical URL");
 assert.ok(indexHtml.includes('property="og:image" content="https://mind-atlas.org/og-image.png"'), "hosted index is missing its Open Graph image");
 assert.ok(fs.readFileSync(path.join(distDir, "robots.txt"), "utf8").includes("Sitemap: https://mind-atlas.org/sitemap.xml"), "robots.txt should advertise the sitemap");
-assert.ok(fs.readFileSync(path.join(distDir, "sitemap.xml"), "utf8").includes("https://mind-atlas.org/ja/about.html"), "sitemap should include localized introduction pages");
+const sitemap = fs.readFileSync(path.join(distDir, "sitemap.xml"), "utf8");
+assert.ok(sitemap.includes("https://mind-atlas.org/ja/about.html"), "sitemap should include localized introduction pages");
+assert.ok(sitemap.includes('xmlns:xhtml="http://www.w3.org/1999/xhtml"'), "sitemap should declare the hreflang namespace");
+assert.ok(sitemap.includes('hreflang="x-default" href="https://mind-atlas.org/en/about.html"'), "sitemap should use the English introduction as x-default");
+for (const legacyPath of ["about", "privacy", "terms"]) {
+  assert.equal(sitemap.includes(`<loc>https://mind-atlas.org/${legacyPath}.html</loc>`), false, `sitemap should exclude redirect-only legacy page: ${legacyPath}.html`);
+}
 const jsAssets = fs.readdirSync(assetsDir).filter((name) => name.endsWith(".js"));
 assert.ok(jsAssets.length > 0, "dist/assets has no JavaScript bundle");
 
@@ -43,6 +49,7 @@ for (const locale of ["en", "ja"]) {
     const html = fs.readFileSync(localizedPath, "utf8");
     assert.ok(html.includes(`<html lang="${locale}"`), `localized page has wrong html language: ${locale}/${page}.html`);
     assert.ok(html.includes('hreflang="en"') && html.includes('hreflang="ja"'), `localized page is missing hreflang links: ${locale}/${page}.html`);
+    assert.ok(html.includes(`hreflang="x-default" href="https://mind-atlas.org/en/${page}.html"`), `localized page has wrong x-default URL: ${locale}/${page}.html`);
     assert.ok(html.includes(`rel="canonical" href="https://mind-atlas.org/${locale}/${page}.html"`), `localized page is missing canonical URL: ${locale}/${page}.html`);
     assert.ok(html.includes('property="og:image" content="https://mind-atlas.org/og-image.png"'), `localized page is missing Open Graph metadata: ${locale}/${page}.html`);
   }

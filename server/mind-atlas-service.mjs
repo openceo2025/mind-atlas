@@ -146,6 +146,11 @@ const server = http.createServer(async (request, response) => {
     enforceBrowserOrigin(request, url);
 
     if (request.method === "GET") {
+      const canonicalRedirect = buildCanonicalPageRedirect(url.pathname, url.searchParams);
+      if (canonicalRedirect) {
+        redirectResponse(response, `${publicOrigin}${canonicalRedirect}`, 301);
+        return;
+      }
       const promotionRedirect = buildPromotionRedirect(url.pathname, url.searchParams);
       if (promotionRedirect) {
         redirectResponse(response, `${publicOrigin}${promotionRedirect.location}`);
@@ -2514,8 +2519,36 @@ function scrubServiceErrorMessage(message) {
     .slice(0, 220);
 }
 
-function redirectResponse(response, location) {
-  response.writeHead(302, { Location: location });
+function buildCanonicalPageRedirect(pathname, searchParams) {
+  if (pathname === "/index.html") return "/";
+  if (!["/about.html", "/privacy.html", "/terms.html"].includes(pathname)) return "";
+  const aliases = {
+    pt: "pt-BR",
+    "pt-pt": "pt-BR",
+    zh: "zh-Hans",
+    "zh-cn": "zh-Hans",
+    "zh-sg": "zh-Hans",
+    "zh-tw": "zh-Hant",
+    "zh-hk": "zh-Hant",
+    "zh-mo": "zh-Hant",
+  };
+  const supported = new Set(["en", "ja", "es", "pt-BR", "fr", "de", "ko", "zh-Hans", "zh-Hant", "id", "hi", "ar"]);
+  const requested = stringValue(searchParams.get("locale")).replaceAll("_", "-");
+  const lower = requested.toLowerCase();
+  const locale = aliases[lower]
+    || [...supported].find((item) => item.toLowerCase() === lower)
+    || "en";
+  const retained = new URLSearchParams();
+  for (const key of ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"]) {
+    const value = stringValue(searchParams.get(key)).trim().slice(0, 160);
+    if (value) retained.set(key, value);
+  }
+  const query = retained.toString();
+  return `/${locale}${pathname}${query ? `?${query}` : ""}`;
+}
+
+function redirectResponse(response, location, status = 302) {
+  response.writeHead(status, { Location: location });
   response.end();
 }
 

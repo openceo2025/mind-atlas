@@ -227,6 +227,9 @@ assert.ok(server.includes("MIND_ATLAS_STRIPE_WEBHOOK_TOLERANCE_SECONDS"), "hoste
 assert.ok(server.includes("timestampAgeSeconds > stripeWebhookToleranceSeconds"), "Stripe webhook signature verification should reject stale signatures");
 assert.ok(server.includes("function isPathWithin"), "hosted static serving should check resolved path boundaries");
 assert.ok(server.includes("decodePathname"), "hosted static serving should reject malformed encoded paths");
+assert.ok(server.includes("function buildCanonicalPageRedirect"), "hosted service should canonicalize legacy public page URLs");
+assert.ok(server.includes('redirectResponse(response, `${publicOrigin}${canonicalRedirect}`, 301)'), "legacy public page redirects should be permanent");
+assert.ok(server.includes('pathname === "/index.html"'), "hosted service should redirect index.html to the canonical root");
 assert.ok(server.includes('url.pathname.startsWith("/api/")'), "unknown hosted API routes should return JSON 404 responses");
 assert.ok(server.includes('filePath = path.join(distRoot, "404.html")'), "unknown public paths should use the noindex 404 page");
 assert.ok(server.includes('ext === ".xml"') && server.includes('ext === ".txt"'), "SEO text assets should have explicit content types");

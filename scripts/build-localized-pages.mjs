@@ -107,7 +107,7 @@ function buildLegalPage(page, locale) {
     <meta name="theme-color" content="#061014" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     ${locales.map((alternateLocale) => `<link rel="alternate" hreflang="${alternateLocale}" href="https://mind-atlas.org/${alternateLocale}/${page}.html" />`).join("\n    ")}
-    <link rel="alternate" hreflang="x-default" href="https://mind-atlas.org/${page}.html" />
+    <link rel="alternate" hreflang="x-default" href="https://mind-atlas.org/en/${page}.html" />
     <title>${escapeHtml(content.title)} | Mind Atlas</title>
     <style>${legalPageCss()}</style>
   </head>
@@ -133,13 +133,19 @@ function buildLegalPage(page, locale) {
 }
 
 function buildSitemap() {
-  const urls = ["https://mind-atlas.org/"];
+  const urls = ['  <url><loc>https://mind-atlas.org/</loc></url>'];
   for (const locale of locales) {
-    for (const page of ["about", "privacy", "terms"]) urls.push(`https://mind-atlas.org/${locale}/${page}.html`);
+    for (const page of ["about", "privacy", "terms"]) {
+      urls.push(`  <url>
+    <loc>https://mind-atlas.org/${locale}/${page}.html</loc>
+${locales.map((alternateLocale) => `    <xhtml:link rel="alternate" hreflang="${alternateLocale}" href="https://mind-atlas.org/${alternateLocale}/${page}.html" />`).join("\n")}
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mind-atlas.org/en/${page}.html" />
+  </url>`);
+    }
   }
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${urls.map((url) => `  <url><loc>${escapeHtml(url)}</loc></url>`).join("\n")}
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+${urls.join("\n")}
 </urlset>`;
   fs.writeFileSync(path.join(outputRoot, "sitemap.xml"), `${xml}\n`, "utf8");
 }
@@ -158,7 +164,7 @@ function addAlternateLinks(document, page) {
   const head = findElement(document, "head");
   const fragment = parseFragment(`
     ${locales.map((locale) => `<link rel="alternate" hreflang="${locale}" href="https://mind-atlas.org/${locale}/${page}">`).join("\n    ")}
-    <link rel="alternate" hreflang="x-default" href="https://mind-atlas.org/${page}">
+    <link rel="alternate" hreflang="x-default" href="https://mind-atlas.org/en/${page}">
   `);
   for (const child of fragment.childNodes) appendChild(head, child);
 }
