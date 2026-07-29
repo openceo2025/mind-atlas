@@ -9,13 +9,14 @@ import { currentAppLocale } from "../i18n/locales";
 
 const PROVIDER_USAGE_SELECTION_KEY = "mind-atlas-provider-usage-selection-v1";
 
-export function ProviderUsagePanel() {
+export function ProviderUsagePanel({ selectedVendor = "" }: { selectedVendor?: string }) {
   const { locale } = useMindAtlasLocale();
   const aboutDemoConfig = useMemo(() => readAboutDemoConfig(), []);
   const aboutDemoUsage = useMemo(() => (aboutDemoConfig?.kind === "app" ? getAboutDemoProviderUsage(locale) : null), [aboutDemoConfig, locale]);
   const [result, setResult] = useState<ProviderUsageResult | null>(aboutDemoUsage);
   const [selectedIds, setSelectedIds] = useState<string[] | null>(() => aboutDemoUsage?.metrics.map((metric) => metric.id) ?? loadProviderUsageSelection());
   const [configuring, setConfiguring] = useState(false);
+  const [view, setView] = useState<"selected" | "all">(() => (selectedVendor ? "selected" : "all"));
   const [loading, setLoading] = useState(!aboutDemoUsage);
   const [error, setError] = useState("");
 
@@ -45,14 +46,41 @@ export function ProviderUsagePanel() {
   }, [aboutDemoUsage]);
 
   useEffect(() => {
+    if (aboutDemoUsage) return undefined;
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    const timer = window.setInterval(refreshWhenVisible, 60_000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("pageshow", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("pageshow", refreshWhenVisible);
+    };
+  }, [aboutDemoUsage]);
+
+  useEffect(() => {
     if (!aboutDemoUsage && selectedIds) persistProviderUsageSelection(selectedIds);
   }, [aboutDemoUsage, selectedIds]);
 
+  useEffect(() => {
+    if (selectedVendor) {
+      setView("selected");
+      setConfiguring(false);
+    }
+  }, [selectedVendor]);
+
   const selectedMetrics = useMemo(() => {
-    if (!result || !selectedIds) return [];
+    if (!result) return [];
+    if (aboutDemoUsage) return result.metrics;
+    if (view === "selected" && selectedVendor) {
+      return result.metrics.filter((metric) => metric.vendor === selectedVendor);
+    }
+    if (!selectedIds) return [];
     const selected = new Set(selectedIds);
     return result.metrics.filter((metric) => selected.has(metric.id));
-  }, [result, selectedIds]);
+  }, [aboutDemoUsage, result, selectedIds, selectedVendor, view]);
 
   const toggleMetric = (id: string) => {
     setSelectedIds((current) => {
@@ -70,6 +98,23 @@ export function ProviderUsagePanel() {
           <Gauge size={14} />
           {<I18nText id="ui.providerUsagePanel.usage.83f3a8e" />}</span>
         <span className="provider-usage-updated">{loading ? formatAppMessage("ui.providerUsagePanel.sync.f877560") : formatUpdatedAt(result?.fetchedAt)}</span>
+        {selectedVendor && !aboutDemoUsage ? (
+          <span className="provider-usage-view-switch" role="group" aria-label="Usage view">
+            <button
+              type="button"
+              className={view === "selected" ? "is-active" : ""}
+              onClick={() => {
+                setView("selected");
+                setConfiguring(false);
+              }}
+            >
+              Selected
+            </button>
+            <button type="button" className={view === "all" ? "is-active" : ""} onClick={() => setView("all")}>
+              All
+            </button>
+          </span>
+        ) : null}
         {!aboutDemoUsage ? (
           <>
             <button
@@ -85,7 +130,10 @@ export function ProviderUsagePanel() {
             <button
               className={`provider-usage-icon-button ${configuring ? "is-active" : ""}`}
               type="button"
-              onClick={() => setConfiguring((current) => !current)}
+              onClick={() => {
+                setView("all");
+                setConfiguring((current) => !current);
+              }}
               aria-label={formatAppMessage("ui.providerUsagePanel.selectProviderUsageMetrics.481f1cf")}
               aria-expanded={configuring}
               title={formatAppMessage("ui.providerUsagePanel.selectProviderUsageMetrics.e40b46d")}
@@ -96,7 +144,7 @@ export function ProviderUsagePanel() {
         ) : null}
       </header>
 
-      {configuring && result ? (
+      {configuring && view === "all" && result ? (
         <div className="provider-usage-selector" aria-label={formatAppMessage("ui.providerUsagePanel.providerUsageMetricSelection.8b11260")}>
           {result.metrics.map((metric) => (
             <label key={metric.id}>

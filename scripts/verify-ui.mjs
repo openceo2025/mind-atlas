@@ -101,6 +101,40 @@ async function verifyLayoutModeSwitch(browser) {
   await page.close();
 }
 
+async function verifyNodeSearch(browser) {
+  const page = await browser.newPage({ viewport: { width: 1040, height: 760 }, ignoreHTTPSErrors: true });
+  await seedCompletedOnboarding(page);
+  await seedSingleChildNotebook(page);
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+
+  await page.keyboard.press("Control+f");
+  const dialog = page.locator(".node-search-dialog");
+  await dialog.waitFor({ state: "visible" });
+  const input = dialog.locator('input[type="search"]');
+  await input.fill("mobile tap");
+  const plainResults = dialog.locator(".node-search-result");
+  if (await plainResults.count() !== 1) throw new Error("Ctrl+F node search should find matching body text.");
+
+  await dialog.getByText("Regular expression", { exact: true }).click();
+  await input.fill("^Verify Child$");
+  const regexResults = dialog.locator(".node-search-result");
+  if (await regexResults.count() !== 1) throw new Error("Regular-expression node search should find the exact title.");
+  await regexResults.first().click();
+  await dialog.waitFor({ state: "detached" });
+  const selectedTitle = await page.locator(".node-title-input").inputValue();
+  if (selectedTitle !== "Verify Child") throw new Error(`Search result did not focus the selected node: ${selectedTitle}`);
+
+  await page.getByLabel("Open atlas menu").click();
+  await page.getByRole("button", { name: /Search all nodes/ }).click();
+  await page.locator(".node-search-dialog").waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.activeElement?.matches('.node-search-dialog input[type="search"]'));
+  await page.locator(".node-search-dialog").getByLabel("Close").click();
+  await page.locator(".node-search-dialog").waitFor({ state: "detached" });
+  await page.close();
+  return { plainMatches: 1, regexMatches: 1, selectedTitle };
+}
+
 async function verifyCalendarLayout(browser) {
   const results = {};
   for (const viewportCase of [
@@ -205,6 +239,19 @@ async function verifyLocalDeveloperModeSurface(browser) {
   await page.waitForSelector("canvas");
   await page.locator(".mode-switch").waitFor();
 
+  const agentRunsLauncher = page.getByRole("button", { name: "Open Agent runs" });
+  await agentRunsLauncher.waitFor();
+  await agentRunsLauncher.click();
+  const agentWorkspace = page.locator(".agent-workspace");
+  await agentWorkspace.waitFor();
+  const closeAgentWorkspace = agentWorkspace.getByRole("button", { name: "Close run workspace" });
+  if (await closeAgentWorkspace.count()) {
+    await closeAgentWorkspace.click();
+  } else {
+    await agentWorkspace.getByRole("button", { name: "Close", exact: true }).click();
+  }
+  await agentRunsLauncher.waitFor();
+
   const localSavePrevented = await page.evaluate(() => {
     const event = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true });
     window.dispatchEvent(event);
@@ -229,6 +276,16 @@ async function verifyLocalDeveloperModeSurface(browser) {
 
   await page.getByRole("button", { name: "Code" }).click();
   await page.locator(".code-options-row").waitFor();
+  const repositoryGuard = page.locator(".agent-repository-guard");
+  await repositoryGuard.waitFor();
+  const bindRepository = repositoryGuard.getByRole("button", { name: "Bind this branch" });
+  await bindRepository.waitFor();
+  const repositoryText = await repositoryGuard.innerText();
+  if (!repositoryText.toLowerCase().includes("mind_atlas")) {
+    throw new Error(`Code workspace preflight did not expose the actual repository: ${repositoryText}`);
+  }
+  await bindRepository.click();
+  await repositoryGuard.getByText("Bound", { exact: true }).waitFor();
   const codeBackends = await page.locator('.code-options-row select[title="Choose the code backend for this node-anchored run."] option')
     .evaluateAll((options) => options.map((option) => option.textContent?.trim()));
   for (const expected of ["Codex", "Claude Code API", "Claude Code Pro"]) {
@@ -263,7 +320,16 @@ async function verifyLocalDeveloperModeSurface(browser) {
   }
 
   await context.close();
-  return { modeLabels, codeBackends, codexModels, proPresets, chatServices, localSavePrevented };
+  return {
+    modeLabels,
+    codeBackends,
+    codexModels,
+    proPresets,
+    chatServices,
+    localSavePrevented,
+    repositoryText,
+    agentRunsReopened: true,
+  };
 }
 
 async function verifyNotificationSnoozeActions(browser) {
@@ -275,6 +341,26 @@ async function verifyNotificationSnoozeActions(browser) {
   await seedSingleChildNotebook(page, "phyllotaxis", { reminderAt, reminderFiredAt });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
+  await page.waitForFunction(
+    () =>
+      new Promise((resolve) => {
+        const request = indexedDB.open("mind-atlas-notebook", 1);
+        request.onerror = () => resolve(false);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction("meta", "readonly");
+          const current = tx.objectStore("meta").get("current");
+          current.onerror = () => resolve(false);
+          current.onsuccess = () => {
+            const child = current.result?.root?.children?.find((node) => node.id === "verify-child");
+            resolve(Boolean(child?.reminderAt && child?.reminderFiredAt));
+          };
+          tx.oncomplete = () => db.close();
+        };
+      }),
+    undefined,
+    { timeout: 10_000 },
+  );
 
   const reminderNotification = page.locator(".unread-notification-link.is-needs_review");
   await reminderNotification.waitFor();
@@ -305,12 +391,33 @@ async function verifyNotificationSnoozeActions(browser) {
   await actions.waitFor({ state: "detached" });
   if (await reminderNotification.count()) throw new Error("Reminder notification remained visible after OK.");
 
-  const persistedReminder = await page.evaluate(() => {
-    const raw = window.localStorage.getItem("mind-atlas-notebook-v2");
-    if (!raw) return null;
-    const root = JSON.parse(raw);
+  const persistedReminder = await page.evaluate(async () => {
+    const root = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("mind-atlas-notebook", 1);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction("meta", "readonly");
+        const current = tx.objectStore("meta").get("current");
+        current.onerror = () => reject(current.error);
+        current.onsuccess = () => resolve(current.result?.root ?? null);
+        tx.oncomplete = () => db.close();
+      };
+    });
+    if (!root) return { missingRoot: true, childIds: [] };
     const child = root.children?.find((node) => node.id === "verify-child");
-    return child ? { reminderAt: child.reminderAt, reminderFiredAt: child.reminderFiredAt } : null;
+    return child
+      ? {
+          rootTitle: root.title,
+          childIds: root.children?.map((node) => node.id) ?? [],
+          reminderAt: child.reminderAt,
+          reminderFiredAt: child.reminderFiredAt,
+        }
+      : {
+          rootTitle: root.title,
+          childIds: root.children?.map((node) => node.id) ?? [],
+          missingChild: true,
+        };
   });
   if (persistedReminder?.reminderAt !== reminderAt || persistedReminder?.reminderFiredAt !== reminderFiredAt) {
     throw new Error(`OK cleared the reminder instead of only acknowledging its notification: ${JSON.stringify(persistedReminder)}`);
@@ -1787,6 +1894,21 @@ async function verifyProviderUsagePanel(browser) {
             defaultVisible: true,
           },
           {
+            id: "claude-plan-five-hour",
+            vendor: "claude",
+            vendorLabel: "CLAUDE",
+            kind: "rate_limit",
+            label: "5H",
+            available: true,
+            displayValue: "42%",
+            value: 42,
+            unit: "%",
+            barPercent: 42,
+            resetAt: "2026-06-25T06:00:00.000Z",
+            source: "claude-stream",
+            defaultVisible: true,
+          },
+          {
             id: "deepseek-balance",
             vendor: "deepseek",
             vendorLabel: "DEEPSEEK",
@@ -1808,12 +1930,23 @@ async function verifyProviderUsagePanel(browser) {
   await page.waitForSelector("canvas");
   const panel = page.getByLabel("AI provider usage");
   await panel.waitFor();
-  const panelText = await panel.innerText();
-  for (const expected of ["OPENAI", "CODEX 5H", "76%", "DEEPSEEK", "USD 19.39"]) {
-    if (!panelText.includes(expected)) throw new Error(`Provider usage panel missing ${expected}: ${panelText}`);
+  const selectedText = await panel.innerText();
+  for (const expected of ["OPENAI", "CODEX 5H", "76%"]) {
+    if (!selectedText.includes(expected)) throw new Error(`Selected-provider usage is missing ${expected}: ${selectedText}`);
   }
-  const initialMetricCount = await page.locator(".provider-usage-metric").count();
-  if (initialMetricCount !== 3) throw new Error(`Expected three provider usage metrics, got ${initialMetricCount}`);
+  if (selectedText.includes("CLAUDE") || selectedText.includes("DEEPSEEK")) {
+    throw new Error(`Selected OpenAI usage leaked other providers: ${selectedText}`);
+  }
+  const selectedOpenAiMetricCount = await page.locator(".provider-usage-metric").count();
+  if (selectedOpenAiMetricCount !== 2) throw new Error(`Expected two selected OpenAI metrics, got ${selectedOpenAiMetricCount}`);
+
+  await page.getByRole("button", { name: "All", exact: true }).click();
+  const allText = await panel.innerText();
+  for (const expected of ["OPENAI", "CLAUDE", "42%", "DEEPSEEK", "USD 19.39"]) {
+    if (!allText.includes(expected)) throw new Error(`All-provider usage is missing ${expected}: ${allText}`);
+  }
+  const allMetricCount = await page.locator(".provider-usage-metric").count();
+  if (allMetricCount !== 4) throw new Error(`Expected four all-provider usage metrics, got ${allMetricCount}`);
 
   await page.getByRole("button", { name: "Select provider usage metrics" }).click();
   const selector = page.getByLabel("Provider usage metric selection");
@@ -1822,15 +1955,26 @@ async function verifyProviderUsagePanel(browser) {
   const deepSeekToggle = page.locator(".provider-usage-selector label").filter({ hasText: "DEEPSEEK" }).locator('input[type="checkbox"]');
   await deepSeekToggle.uncheck();
   const filteredMetricCount = await page.locator(".provider-usage-metric").count();
-  if (filteredMetricCount !== 2) throw new Error(`Provider usage metric selection did not filter rows: ${filteredMetricCount}`);
+  if (filteredMetricCount !== 3) throw new Error(`Provider usage metric selection did not filter rows: ${filteredMetricCount}`);
 
   await page.reload({ waitUntil: "networkidle" });
   await page.getByLabel("AI provider usage").waitFor();
+  await page.getByRole("button", { name: "All", exact: true }).click();
   const persistedMetricCount = await page.locator(".provider-usage-metric").count();
-  if (persistedMetricCount !== 2) throw new Error(`Provider usage selection did not persist: ${persistedMetricCount}`);
+  if (persistedMetricCount !== 3) throw new Error(`Provider usage selection did not persist: ${persistedMetricCount}`);
+
+  await page.getByRole("button", { name: "Code" }).click();
+  const backendSelect = page.locator('.code-options-row select[title="Choose the code backend for this node-anchored run."]');
+  await backendSelect.selectOption("claude-subscription");
+  await page.getByRole("button", { name: "Selected", exact: true }).waitFor();
+  const claudeText = await panel.innerText();
+  const selectedClaudeMetricCount = await page.locator(".provider-usage-metric").count();
+  if (selectedClaudeMetricCount !== 1 || !claudeText.includes("CLAUDE") || !claudeText.includes("42%")) {
+    throw new Error(`Claude Pro selection did not isolate its allowance: ${claudeText}`);
+  }
 
   await context.close();
-  return { initialMetricCount, filteredMetricCount, persistedMetricCount };
+  return { selectedOpenAiMetricCount, allMetricCount, filteredMetricCount, persistedMetricCount, selectedClaudeMetricCount };
 }
 
 async function verifyIosTouchSuppression(browser) {
@@ -3338,9 +3482,22 @@ try {
     const localDeveloperMode = await runStep("localDeveloperMode", () => verifyLocalDeveloperModeSurface(browser));
     console.log("Local developer mode verification passed");
     console.log({ localDeveloperMode });
+  } else if (process.argv[2] === "provider-usage") {
+    const providerUsage = await runStep("providerUsage", () => verifyProviderUsagePanel(browser));
+    console.log("Provider usage verification passed");
+    console.log({ providerUsage });
+  } else if (process.argv[2] === "notification") {
+    const notificationSnoozeActions = await runStep("notificationSnoozeActions", () => verifyNotificationSnoozeActions(browser));
+    console.log("Notification verification passed");
+    console.log({ notificationSnoozeActions });
+  } else if (process.argv[2] === "search") {
+    const nodeSearch = await runStep("nodeSearch", () => verifyNodeSearch(browser));
+    console.log("Node search UI verification passed");
+    console.log({ nodeSearch });
   } else {
     const desktop = await runStep("desktopViewport", () => verifyViewport(browser, "desktop", { width: 1440, height: 920 }));
     const localeSwitching = await runStep("localeSwitching", () => verifyLocaleSwitching(browser));
+    const nodeSearch = await runStep("nodeSearch", () => verifyNodeSearch(browser));
     await runStep("layoutModeSwitch", () => verifyLayoutModeSwitch(browser));
     const calendarLayout = await runStep("calendarLayout", () => verifyCalendarLayout(browser));
     const localDeveloperMode = await runStep("localDeveloperMode", () => verifyLocalDeveloperModeSurface(browser));
@@ -3379,7 +3536,7 @@ try {
     const mobile = await runStep("mobileViewport", () => verifyViewport(browser, "mobile", { width: 390, height: 844 }));
     const mobileLandscape = await runStep("mobileLandscapeViewport", () => verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 }));
     console.log("UI verification passed");
-    console.log({ desktop, calendarLayout, localDeveloperMode, notificationSnoozeActions, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, agentRecovery, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileCanvasInterruptionRecovery, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, iosTouchSuppression, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+    console.log({ desktop, nodeSearch, calendarLayout, localDeveloperMode, notificationSnoozeActions, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, agentRecovery, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileCanvasInterruptionRecovery, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, iosTouchSuppression, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
   }
 } finally {
   await browser.close();

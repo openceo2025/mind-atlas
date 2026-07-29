@@ -58,6 +58,20 @@ const coreSourceMessages = {
   "menu.import": "Import",
   "menu.importOutline": "Import text outline",
   "menu.importOutline.detail": "Markdown headings and lists",
+  "menu.searchNodes": "Search all nodes",
+  "menu.searchNodes.detail": "Titles and body text / Ctrl+F",
+  "search.title": "Search all nodes",
+  "search.description": "Find text in every node title and body.",
+  "search.placeholder": "Search text or regular expression",
+  "search.regex": "Regular expression",
+  "search.caseSensitive": "Case sensitive",
+  "search.resultCount": "{count, plural, one {# result} other {# results}}",
+  "search.noResults": "No matching nodes.",
+  "search.field.title": "Title",
+  "search.field.body": "Body",
+  "search.field.summary": "Summary",
+  "search.field.tags": "Tags",
+  "search.field.metadata": "Metadata",
   "menu.background": "Background",
   "menu.background.black": "Black",
   "menu.background.white": "White",
@@ -622,10 +636,28 @@ const coreJapaneseMessages: Partial<Record<CoreMessageId, string>> = {
   "node.untitled": "ここに入力",
 };
 
+const searchJapaneseMessages: Partial<Record<keyof typeof coreSourceMessages, string>> = {
+  "menu.searchNodes": "全ノードを検索",
+  "menu.searchNodes.detail": "タイトルと本文 / Ctrl+F",
+  "search.title": "全ノードを検索",
+  "search.description": "すべてのノードのタイトルと本文を検索します。",
+  "search.placeholder": "検索語または正規表現",
+  "search.regex": "正規表現",
+  "search.caseSensitive": "大文字と小文字を区別",
+  "search.resultCount": "{count}件",
+  "search.noResults": "一致するノードはありません。",
+  "search.field.title": "タイトル",
+  "search.field.body": "本文",
+  "search.field.summary": "要約",
+  "search.field.tags": "タグ",
+  "search.field.metadata": "メタデータ",
+};
+
 export const sourceMessages = { ...coreSourceMessages, ...generatedUiSourceMessages, ...generatedExpressionSourceMessages } as const;
 export type MessageId = keyof typeof sourceMessages;
 export const japaneseMessages: Partial<Record<MessageId, string>> = {
   ...coreJapaneseMessages,
+  ...searchJapaneseMessages,
   ...generatedUiJapaneseMessages,
   ...generatedExpressionJapaneseMessages,
 };

@@ -1,5 +1,5 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CalendarDays, CloudDownload, CloudUpload, CreditCard, Download, FileText, GitBranch, Github, GraduationCap, History, Info, Languages, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CalendarDays, CloudDownload, CloudUpload, CreditCard, Download, FileText, GitBranch, Github, GraduationCap, History, Info, Languages, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Search, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
 import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { createAboutDemoNotebook, getAboutDemoAttachmentPreviewUrls, getAboutDemoLayoutMode, getAboutDemoNotification, getAboutDemoOverviewFocusRequest, getAboutDemoSelectedNodeId, readAboutDemoConfig } from "./aboutDemo";
@@ -9,12 +9,14 @@ import { fetchAnalyticsAvailability, startAnalyticsLifecycle, trackProductEvent 
 import { copyContextMarkdown, formatContextCopyStats } from "./context/contextCopy";
 import { Minimap } from "./components/Minimap";
 import { OutlineEditor } from "./components/OutlineEditor";
+import { AgentRunWorkspaceHost } from "./components/agentRun/AgentRunWorkspaceHost";
 import { UniverseCanvas } from "./components/UniverseCanvas";
 import { HOSTED_SERVICE_SESSION_REFRESH_EVENT, REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_BIRTH_UNAVAILABLE_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "./events";
 import { detectImportFormat, importExternalNotebookFile, importMarkdownText } from "./notebookImport";
 import { createAtlasImageShareData, createAtlasShareImage } from "./notebookImageShare";
 import { createNotebookJsonPackage, createNotebookPackage, importNotebookPackage, type NotebookPackageResult } from "./notebookPackage";
 import { createSharedNotebookLink, readHostedShareTokenFromUrl, readSharedNotebookFromUrl, removeSharedNotebookHash } from "./notebookShare";
+import { searchAtlasNodes } from "./search/nodeSearch";
 import { createTextOnlyNotebookRoot, textOnlyNotebookSizeBytes } from "./notebookTextOnly";
 import { createNotebookFromTemplate, NOTEBOOK_TEMPLATES, type NotebookTemplateId } from "./notebookTemplates";
 import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
@@ -240,6 +242,7 @@ export default function App() {
   const [contextCopyStatus, setContextCopyStatus] = useState("");
   const [layoutBirthUnavailableMessage, setLayoutBirthUnavailableMessage] = useState("");
   const [textImportOpen, setTextImportOpen] = useState(false);
+  const [nodeSearchOpen, setNodeSearchOpen] = useState(false);
   const [textImportValue, setTextImportValue] = useState("");
   const [mergePreview, setMergePreview] = useState<MergePreviewState | null>(null);
   const [sharedNotebookRoot, setSharedNotebookRoot] = useState<AtlasNode | null>(null);
@@ -414,6 +417,7 @@ export default function App() {
     setVoiceSettingsOpen(false);
     setRestoreHistoryOpen(false);
     setCloudLoadOpen(false);
+    setNodeSearchOpen(false);
     setTextImportOpen(false);
     setMergePreview(null);
     setSharedNotebookRoot(null);
@@ -1702,6 +1706,39 @@ export default function App() {
   }, [aboutDemoConfig, atlasRoot, currentCloudNotebook, hostedAuthenticated, publicServiceMode, saveNotebookNow, t]);
 
   useEffect(() => {
+    const handleSearchShortcut = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        event.shiftKey ||
+        (!event.ctrlKey && !event.metaKey) ||
+        event.key.toLowerCase() !== "f" ||
+        aboutDemoConfig ||
+        !onboarding.showMainChrome
+      ) {
+        return;
+      }
+      event.preventDefault();
+      setNodeSearchOpen(true);
+      setMenuOpen(false);
+    };
+
+    window.addEventListener("keydown", handleSearchShortcut, { capture: true });
+    return () => window.removeEventListener("keydown", handleSearchShortcut, { capture: true });
+  }, [aboutDemoConfig, onboarding.showMainChrome]);
+
+  useEffect(() => {
+    if (!nodeSearchOpen) return;
+    const handleSearchEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setNodeSearchOpen(false);
+    };
+    document.addEventListener("keydown", handleSearchEscape, true);
+    return () => document.removeEventListener("keydown", handleSearchEscape, true);
+  }, [nodeSearchOpen]);
+
+  useEffect(() => {
     const handleHistoryShortcut = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.metaKey || !event.ctrlKey) return;
       if (isEditableShortcutTarget(event.target)) return;
@@ -1973,6 +2010,13 @@ export default function App() {
               <span className="context-menu-section-title">{t("menu.files")}</span>
               <button type="button" onClick={handleInitialize}>
                 <RotateCcw size={15} /> {t("menu.newSpace")}
+              </button>
+              <button type="button" onClick={() => { setNodeSearchOpen(true); setMenuOpen(false); }}>
+                <Search size={15} />
+                <span>
+                  {t("menu.searchNodes")}
+                  <small>{t("menu.searchNodes.detail")}</small>
+                </span>
               </button>
               <button type="button" onClick={handleExportLight}>
                 <Download size={15} />
@@ -2314,6 +2358,8 @@ export default function App() {
           ) : null}
         </section>
       ) : null}
+      {/* Local-only Agent Run Workspace. Hosted public mode never renders it. */}
+      {publicServiceMode ? null : <AgentRunWorkspaceHost />}
       {outlineEditorOpen ? (
         <OutlineEditor
           root={outlineEditorRoot}
@@ -2333,6 +2379,16 @@ export default function App() {
           onAppendChildren={handleAppendAsChildren}
           onPreviewMerge={handleOpenPreviewMerge}
           onClose={() => setTextImportOpen(false)}
+        />
+      ) : null}
+      {nodeSearchOpen ? (
+        <NodeSearchDialog
+          root={atlasRoot}
+          onFocus={(nodeId) => {
+            focusNode(nodeId);
+            setNodeSearchOpen(false);
+          }}
+          onClose={() => setNodeSearchOpen(false)}
         />
       ) : null}
       {mergePreview ? (
@@ -2649,6 +2705,119 @@ function formatHostedDate(value?: string) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function NodeSearchDialog({
+  root,
+  onFocus,
+  onClose,
+}: {
+  root: AtlasNode;
+  onFocus: (nodeId: string) => void;
+  onClose: () => void;
+}) {
+  const t = useMessage();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [query, setQuery] = useState("");
+  const [regex, setRegex] = useState(false);
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const result = useMemo(
+    () => searchAtlasNodes(root, { query, regex, caseSensitive, limit: 200 }),
+    [caseSensitive, query, regex, root],
+  );
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const focusFirst = () => {
+    const first = result.matches[0];
+    if (first) onFocus(first.nodeId);
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="node-search-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("search.title")}
+        onMouseDown={(event) => event.stopPropagation()}
+        onKeyDownCapture={(event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }}
+      >
+        <header className="node-search-header">
+          <div>
+            <h2>{t("search.title")}</h2>
+            <p>{t("search.description")}</p>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label={t("common.close")}>
+            <X size={17} />
+          </button>
+        </header>
+        <form
+          className="node-search-controls"
+          onSubmit={(event) => {
+            event.preventDefault();
+            focusFirst();
+          }}
+        >
+          <label className="node-search-input">
+            <Search size={17} aria-hidden="true" />
+            <input
+              ref={inputRef}
+              type="search"
+              autoFocus
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("search.placeholder")}
+              aria-label={t("search.placeholder")}
+              spellCheck={false}
+            />
+          </label>
+          <div className="node-search-options">
+            <label>
+              <input type="checkbox" checked={regex} onChange={(event) => setRegex(event.target.checked)} />
+              <span>{t("search.regex")}</span>
+            </label>
+            <label>
+              <input type="checkbox" checked={caseSensitive} onChange={(event) => setCaseSensitive(event.target.checked)} />
+              <span>{t("search.caseSensitive")}</span>
+            </label>
+            {query.trim() && !result.error ? <strong>{t("search.resultCount", { count: result.total })}</strong> : null}
+          </div>
+        </form>
+        <div className="node-search-results" role="list">
+          {result.error ? <p className="node-search-status is-error">{result.error}</p> : null}
+          {query.trim() && !result.error && !result.matches.length ? (
+            <p className="node-search-status">{t("search.noResults")}</p>
+          ) : null}
+          {result.matches.map((match) => (
+            <button
+              key={match.nodeId}
+              className="node-search-result"
+              type="button"
+              role="listitem"
+              onClick={() => onFocus(match.nodeId)}
+            >
+              <span className="node-search-result-main">
+                <strong>{match.title || t("node.untitled")}</strong>
+                <small>{match.path.join(" / ")}</small>
+              </span>
+              <span className="node-search-result-snippet">
+                <em>{match.field === "title" ? t("search.field.title") : t("search.field.body")}</em>
+                {match.snippet}
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function TextImportModal({
@@ -4494,7 +4663,7 @@ function isTouchLikePointer(event: PointerEvent) {
 
 function shouldAllowNativeTouchScroll(target: EventTarget | null) {
   if (!(target instanceof Element)) return false;
-  return Boolean(target.closest("textarea, .context-menu, .surface-context-menu, .status-context-menu, .reminder-context-menu, .focus-panel, .event-strip, .voice-log-dialog, .notebook-history-dialog, .text-import-dialog, .merge-preview-dialog, .cloud-load-dialog, .voice-settings-dialog, .outline-editor-panel, .mobile-workspace-panel"));
+  return Boolean(target.closest("textarea, .context-menu, .surface-context-menu, .status-context-menu, .reminder-context-menu, .focus-panel, .event-strip, .voice-log-dialog, .node-search-dialog, .notebook-history-dialog, .text-import-dialog, .merge-preview-dialog, .cloud-load-dialog, .voice-settings-dialog, .outline-editor-panel, .mobile-workspace-panel"));
 }
 
 function shouldBridgeAboutDemoScroll(target: EventTarget | null) {

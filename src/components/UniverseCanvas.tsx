@@ -5445,7 +5445,12 @@ function getGeneratedLayoutFocusView(
     (frame.bounds.minY + frame.bounds.maxY) / 2,
     fallbackZ,
   );
-  const target = focusNodeId === root.id ? boundsCenter : focusPosition ? new Vector3(...focusPosition) : boundsCenter;
+  const target =
+    layoutMode === "calendar" || focusNodeId === root.id
+      ? boundsCenter
+      : focusPosition
+        ? new Vector3(...focusPosition)
+        : boundsCenter;
   const width = frame.bounds.maxX - frame.bounds.minX + NOTEBOOK_NODE_RADIUS * 7;
   const height = frame.bounds.maxY - frame.bounds.minY + NOTEBOOK_NODE_RADIUS * 8;
   const aspect = Math.max(0.1, viewportWidth / Math.max(1, viewportHeight));

@@ -705,5 +705,19 @@
   "workspace.mobile": "मोबाइल वर्कस्पेस",
   "workspace.operation": "ऑपरेशन",
   "workspace.outline": "आउटलाइन",
-  "workspace.panel": "वर्कस्पेस पैनल"
+  "workspace.panel": "वर्कस्पेस पैनल",
+  "menu.searchNodes": "सभी नोड खोजें",
+  "menu.searchNodes.detail": "शीर्षक और मुख्य पाठ / Ctrl+F",
+  "search.caseSensitive": "अक्षर का केस मिलाएँ",
+  "search.description": "सभी नोड के शीर्षक और मुख्य पाठ में टेक्स्ट खोजें।",
+  "search.field.body": "मुख्य पाठ",
+  "search.field.metadata": "मेटाडेटा",
+  "search.field.summary": "सारांश",
+  "search.field.tags": "टैग",
+  "search.field.title": "शीर्षक",
+  "search.noResults": "कोई मेल खाता नोड नहीं मिला।",
+  "search.placeholder": "खोज टेक्स्ट या रेगुलर एक्सप्रेशन",
+  "search.regex": "रेगुलर एक्सप्रेशन",
+  "search.resultCount": "{count} परिणाम",
+  "search.title": "सभी नोड खोजें"
 }

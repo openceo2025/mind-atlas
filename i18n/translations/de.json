@@ -705,5 +705,19 @@
   "workspace.mobile": "Mobiler Arbeitsbereich",
   "workspace.operation": "Bedienung",
   "workspace.outline": "Gliederung",
-  "workspace.panel": "Arbeitsbereich-Panel"
+  "workspace.panel": "Arbeitsbereich-Panel",
+  "menu.searchNodes": "Alle Knoten durchsuchen",
+  "menu.searchNodes.detail": "Titel und Inhalt / Ctrl+F",
+  "search.caseSensitive": "Groß-/Kleinschreibung beachten",
+  "search.description": "Durchsucht Titel und Inhalt aller Knoten nach Text.",
+  "search.field.body": "Inhalt",
+  "search.field.metadata": "Metadaten",
+  "search.field.summary": "Zusammenfassung",
+  "search.field.tags": "Tags",
+  "search.field.title": "Titel",
+  "search.noResults": "Keine passenden Knoten.",
+  "search.placeholder": "Suchtext oder regulärer Ausdruck",
+  "search.regex": "Regulärer Ausdruck",
+  "search.resultCount": "{count, plural, one {# Ergebnis} other {# Ergebnisse}}",
+  "search.title": "Alle Knoten durchsuchen"
 }

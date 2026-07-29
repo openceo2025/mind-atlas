@@ -278,6 +278,7 @@ function sanitizeCodexSettings(value: unknown): CodexSettings | undefined {
       ? (value.sandbox as CodexSandboxMode)
       : "workspace-write",
     workspace: safeString(value.workspace, ""),
+    workspaceMode: value.workspaceMode === "worktree" ? "worktree" : "shared",
     webSearch: true,
     skipGitRepoCheck: false,
     timeoutMs: safeInteger(value.timeoutMs, 60 * 60 * 1000),
@@ -310,6 +311,8 @@ function sanitizeClaudeSettings(value: unknown): ClaudeSettings | undefined {
       ? (value.permissionMode as ClaudePermissionMode)
       : "default",
     workspace: safeString(value.workspace, ""),
+    workspaceMode: value.workspaceMode === "worktree" ? "worktree" : "shared",
+    browser: value.authMode === "subscription" && value.browser === true,
     timeoutMs: safeInteger(value.timeoutMs, 60 * 60 * 1000),
     continueMode: value.continueMode === "new" ? "new" : "auto",
     resumeSessionId: safeString(value.resumeSessionId, ""),

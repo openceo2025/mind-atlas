@@ -705,5 +705,19 @@
   "workspace.mobile": "Ruang kerja seluler",
   "workspace.operation": "Operasi",
   "workspace.outline": "Kerangka",
-  "workspace.panel": "Panel ruang kerja"
+  "workspace.panel": "Panel ruang kerja",
+  "menu.searchNodes": "Cari semua node",
+  "menu.searchNodes.detail": "Judul dan isi / Ctrl+F",
+  "search.caseSensitive": "Bedakan huruf besar-kecil",
+  "search.description": "Cari teks di judul dan isi semua node.",
+  "search.field.body": "Isi",
+  "search.field.metadata": "Metadata",
+  "search.field.summary": "Ringkasan",
+  "search.field.tags": "Tag",
+  "search.field.title": "Judul",
+  "search.noResults": "Tidak ada node yang cocok.",
+  "search.placeholder": "Teks pencarian atau ekspresi reguler",
+  "search.regex": "Ekspresi reguler",
+  "search.resultCount": "{count} hasil",
+  "search.title": "Cari semua node"
 }

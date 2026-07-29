@@ -705,5 +705,19 @@
   "workspace.mobile": "모바일 작업 공간",
   "workspace.operation": "작업",
   "workspace.outline": "개요",
-  "workspace.panel": "작업 공간 패널"
+  "workspace.panel": "작업 공간 패널",
+  "menu.searchNodes": "모든 노드 검색",
+  "menu.searchNodes.detail": "제목과 본문 / Ctrl+F",
+  "search.caseSensitive": "대소문자 구분",
+  "search.description": "모든 노드의 제목과 본문에서 텍스트를 찾습니다.",
+  "search.field.body": "본문",
+  "search.field.metadata": "메타데이터",
+  "search.field.summary": "요약",
+  "search.field.tags": "태그",
+  "search.field.title": "제목",
+  "search.noResults": "일치하는 노드가 없습니다.",
+  "search.placeholder": "검색어 또는 정규 표현식",
+  "search.regex": "정규 표현식",
+  "search.resultCount": "{count}개 결과",
+  "search.title": "모든 노드 검색"
 }

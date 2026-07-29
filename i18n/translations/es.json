@@ -705,5 +705,19 @@
   "workspace.mobile": "Espacio de trabajo móvil",
   "workspace.operation": "Operación",
   "workspace.outline": "Esquema",
-  "workspace.panel": "Panel del espacio de trabajo"
+  "workspace.panel": "Panel del espacio de trabajo",
+  "menu.searchNodes": "Buscar en todos los nodos",
+  "menu.searchNodes.detail": "Títulos y contenido / Ctrl+F",
+  "search.caseSensitive": "Distinguir mayúsculas y minúsculas",
+  "search.description": "Busca texto en los títulos y el contenido de todos los nodos.",
+  "search.field.body": "Contenido",
+  "search.field.metadata": "Metadatos",
+  "search.field.summary": "Resumen",
+  "search.field.tags": "Etiquetas",
+  "search.field.title": "Título",
+  "search.noResults": "No hay nodos coincidentes.",
+  "search.placeholder": "Texto de búsqueda o expresión regular",
+  "search.regex": "Expresión regular",
+  "search.resultCount": "{count, plural, one {# resultado} other {# resultados}}",
+  "search.title": "Buscar en todos los nodos"
 }

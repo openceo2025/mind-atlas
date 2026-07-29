@@ -1,12 +1,22 @@
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
+
+// Local-only agent runtime. These modules must never be imported by
+// `server/mind-atlas-service.mjs`; `npm run verify:hosted-service` asserts it.
+import { createAgentRuntimeRoutes } from "./agent-runtime/bridge-routes.mjs";
+import { createEvidenceStore } from "./agent-runtime/evidence-store.mjs";
+import { checkAgentWorkspace } from "./agent-runtime/workspace-policy.mjs";
+import { createHandoffCoordinator } from "./agent-runtime/handoff-coordinator.mjs";
+import { createAgentRunStore } from "./agent-runtime/run-journal.mjs";
+import { createAgentRuntimeManager } from "./agent-runtime/runtime-manager.mjs";
 
 loadLocalEnvFiles();
 
@@ -190,6 +200,151 @@ function resolveOpenClawBin(configuredBin) {
   return value;
 }
 
+// --- Local agent runtime (Codex app-server / Claude stream-json) -------------
+const agentRuntimeDir = resolve(process.env.MIND_ATLAS_AGENT_RUNTIME_DIR ?? join(process.cwd(), "server-data", "agent-runtime"));
+const codexRuntimePreference = normalizeRuntimePreference(process.env.MIND_ATLAS_CODEX_RUNTIME, ["auto", "app-server", "exec"]);
+const claudeRuntimePreference = normalizeRuntimePreference(process.env.MIND_ATLAS_CLAUDE_RUNTIME, ["auto", "stream-json", "json"]);
+const agentAtlasMcpEnabled = process.env.MIND_ATLAS_ATLAS_MCP !== "false";
+const atlasMcpServerScript = fileURLToPath(new URL("./agent-runtime/atlas-mcp-server.mjs", import.meta.url));
+
+const agentRunStore = createAgentRunStore({
+  baseDir: agentRuntimeDir,
+  instanceId: bridgeInstanceId,
+  maxEventBytes: readPositiveIntEnv("MIND_ATLAS_AGENT_EVENT_MAX_BYTES", 104_857_600),
+  maxRunOutputBytes: readPositiveIntEnv("MIND_ATLAS_AGENT_RUN_MAX_OUTPUT_BYTES", 10_485_760),
+  retentionDays: readPositiveIntEnv("MIND_ATLAS_AGENT_EVENT_RETENTION_DAYS", 30),
+  replayLimit: readPositiveIntEnv("MIND_ATLAS_AGENT_SSE_REPLAY_LIMIT", 5000),
+});
+
+const agentRuntimeManager = createAgentRuntimeManager({
+  store: agentRunStore,
+  clientInfo: { name: "mind_atlas", title: "Mind Atlas", version: "0.1.1" },
+  codexRoutePreference: codexRuntimePreference,
+  claudeRoutePreference: claudeRuntimePreference,
+  atlasMcp: { enabled: agentAtlasMcpEnabled, serverScript: atlasMcpServerScript },
+  codex: {
+    enabled: !codexDisabled,
+    workspace: normalizeProcessCwd(codexWorkspace),
+    env: process.env,
+    resolveCommand: () => (codexUseWsl
+      ? { command: "wsl", args: [codexBin, "app-server"] }
+      : { command: codexBin, args: ["app-server"] }),
+  },
+  claude: {
+    enabled: !claudeDisabled,
+    workspace: normalizeProcessCwd(claudeWorkspace),
+    buildCommand: (args) => buildClaudeCommand(args),
+    buildEnv: (settings) => buildClaudeEnv(normalizeClaudeSettings(settings ?? {}, settings?.model ?? "", null)),
+  },
+  // The proven `codex exec` / `claude -p --output-format json` paths stay
+  // available as the automatic fallback for both providers.
+  legacyRunner: (request) => createAiResponse(buildLegacyAiPayload(request)),
+});
+
+const agentEvidenceStore = createEvidenceStore({
+  baseDir: join(agentRuntimeDir, "evidence"),
+  maxBytes: readPositiveIntEnv("MIND_ATLAS_AGENT_EVIDENCE_MAX_BYTES", 20 * 1024 * 1024),
+});
+
+const agentHandoffCoordinator = createHandoffCoordinator({
+  store: agentRunStore,
+  manager: agentRuntimeManager,
+  codexCommand: () => (codexUseWsl ? { command: "wsl", args: [codexBin] } : { command: codexBin, args: [] }),
+  claudeCommand: (args) => buildClaudeCommand(args),
+  probeCodexDeepLink: () => hasCodexDeepLinkHandler(),
+});
+
+const handleAgentRuntimeRequest = createAgentRuntimeRoutes({
+  manager: agentRuntimeManager,
+  handoff: agentHandoffCoordinator,
+  isAllowedOrigin: (origin) => isBridgeOriginAllowed(origin),
+  isAllowedWorkspace: (workspace) => isAgentWorkspaceAllowed(workspace),
+});
+
+function normalizeRuntimePreference(value, allowed) {
+  const text = String(value ?? "auto").trim().toLowerCase();
+  // Unknown values fail closed to the documented safe route.
+  return allowed.includes(text) ? text : "auto";
+}
+
+function buildLegacyAiPayload(request) {
+  return {
+    provider: request.provider,
+    prompt: request.prompt,
+    agentPrompt: request.prompt,
+    model: request.model,
+    context: {},
+    contextText: "",
+    ...(request.provider === "codex"
+      ? {
+        codex: {
+          workspace: request.workspace,
+          model: request.model,
+          reasoningEffort: request.effort,
+          sandbox: request.sandboxMode,
+          clientRunId: request.clientRunId,
+          requestNodeId: request.requestNodeId,
+          sourceNodeId: request.sourceNodeId,
+          resumeThreadId: request.session?.threadId ?? "",
+          continueMode: request.sessionMode === "new" ? "new" : "auto",
+        },
+      }
+      : {
+        claude: {
+          ...request.claudeSettings,
+          workspace: request.workspace,
+          model: request.model,
+          clientRunId: request.clientRunId,
+          requestNodeId: request.requestNodeId,
+          sourceNodeId: request.sourceNodeId,
+          resumeSessionId: request.session?.sessionId ?? "",
+          forkSession: true,
+          continueMode: request.sessionMode === "new" ? "new" : "auto",
+        },
+      }),
+  };
+}
+
+function isBridgeOriginAllowed(origin) {
+  const configuredOrigins = process.env.MIND_ATLAS_ALLOWED_ORIGIN;
+  const allowedOrigins = (configuredOrigins ?? defaultAllowedOrigins)
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (allowedOrigins.includes("*")) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  return !configuredOrigins && isDefaultAllowedDevOrigin(origin);
+}
+
+/**
+ * Workspace policy for agent runs. The rules live in
+ * `scripts/agent-runtime/workspace-policy.mjs` so they are covered by
+ * `npm run verify:agent-runtime`.
+ */
+function isAgentWorkspaceAllowed(workspace) {
+  return checkAgentWorkspace(workspace, {
+    workRoots: parseStringList(process.env.MIND_ATLAS_AGENT_WORK_ROOTS, []),
+    defaultRoots: [codexWorkspace, claudeWorkspace, process.cwd()],
+  });
+}
+
+function hasCodexDeepLinkHandler() {
+  // Verified on this machine: `codex://` is declared without a shell open
+  // command, so no application handles the URL. Never claim continuity from a
+  // protocol declaration alone.
+  if (process.platform !== "win32") return false;
+  try {
+    const result = spawnSync("reg", ["query", "HKCU\\SOFTWARE\\Classes\\codex\\shell\\open\\command"], {
+      windowsHide: true,
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    return result.status === 0 && /REG_SZ/.test(String(result.stdout ?? ""));
+  } catch {
+    return false;
+  }
+}
+
 const server = createBridgeServer(async (request, response) => {
   setCors(request, response);
 
@@ -202,6 +357,26 @@ const server = createBridgeServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
 
   try {
+    if (request.method === "POST" && url.pathname === "/api/agent-evidence") {
+      // Local-only: stores one file so a provider can receive it through a real
+      // typed transport instead of a filename in the prompt.
+      if (!isBridgeOriginAllowed(stringOr(request.headers.origin, ""))) {
+        sendJson(response, 403, { error: "Origin is not allowed to upload local agent evidence." });
+        return;
+      }
+      const formData = await readFormData(request);
+      const file = formData.get("file");
+      if (!file || typeof file === "string") throw new BridgeError(400, "file is required");
+      const record = await agentEvidenceStore.save({
+        buffer: Buffer.from(await file.arrayBuffer()),
+        fileName: typeof file.name === "string" ? file.name : "evidence",
+        mimeType: typeof file.type === "string" ? file.type : "application/octet-stream",
+      });
+      sendJson(response, 200, record);
+      return;
+    }
+
+    if (await handleAgentRuntimeRequest(request, response, url)) return;
     if (request.method === "GET" && url.pathname === "/health") {
       sendJson(response, 200, {
         ok: true,
@@ -406,6 +581,21 @@ server.on("error", (error) => {
   process.exit(1);
 });
 
+agentRuntimeManager.init().then((state) => {
+  console.log(`Agent runtime: codex=${codexRuntimePreference}, claude=${claudeRuntimePreference}, dir=${agentRuntimeDir}`);
+  if (state.recovered) console.log(`Agent runtime recovered ${state.recovered} interrupted run(s).`);
+}).catch((error) => {
+  console.warn(`[bridge] agent runtime failed to initialize: ${error instanceof Error ? error.message : error}`);
+});
+
+process.on("exit", () => {
+  try {
+    agentRuntimeManager.close();
+  } catch {
+    // best effort shutdown
+  }
+});
+
 server.listen(port, host, () => {
   console.log(`Mind Atlas bridge listening on ${bridgeProtocol}://${host}:${port}`);
   console.log(openAiApiKey ? `OpenAI upstream: ${openAiBaseUrl}` : "OpenAI key not set; mock text responses are enabled.");
@@ -603,6 +793,154 @@ function safeJournalText(value, maxLength) {
   return text.length <= maxLength ? text : text.slice(0, maxLength);
 }
 
+/**
+ * Run a node-anchored Codex / Claude Code request through the streaming agent
+ * runtime while returning the same `AiResponseResult` shape as the legacy
+ * routes. Everything downstream of `/api/ai/respond` - result nodes, the root
+ * AI Partner log, the run journal, recovery and ACK - keeps working unchanged,
+ * and the browser gains a live run to supervise.
+ */
+async function createAgentRuntimeBackedResponse({ payload, provider, prompt, agentPrompt, agentDeltaPrompt, startedAt }) {
+  const settings = provider === "codex" ? (payload?.codex ?? {}) : (payload?.claude ?? {});
+  const sessionPlan = payload?.session ?? {};
+  const sessionMode = sessionPlan.action === "new" || settings.continueMode === "new"
+    ? "new"
+    : provider === "codex" ? "resume" : "fork";
+  const resumeId = provider === "codex"
+    ? stringOr(settings.resumeThreadId, "")
+    : stringOr(settings.resumeSessionId, "");
+  const workspace = stringOr(settings.workspace, provider === "codex" ? codexWorkspace : claudeWorkspace);
+  const workspaceCheck = isAgentWorkspaceAllowed(workspace);
+  if (!workspaceCheck.ok) throw new BridgeError(400, workspaceCheck.detail ?? "Workspace is not allowed.");
+
+  // Resumed turns already hold the branch history, so only the delta is sent.
+  const effectivePrompt = sessionMode !== "new" && agentDeltaPrompt ? agentDeltaPrompt : (agentPrompt || prompt);
+
+  const started = await agentRuntimeManager.startRun({
+    provider,
+    clientRunId: stringOr(settings.clientRunId, ""),
+    requestNodeId: stringOr(settings.requestNodeId, ""),
+    sourceNodeId: stringOr(settings.sourceNodeId, ""),
+    workspace,
+    workspaceMode: settings.workspaceMode === "worktree" ? "worktree" : "shared",
+    prompt: effectivePrompt,
+    title: prompt.slice(0, 200),
+    model: stringOr(payload?.model, stringOr(settings.model, provider === "codex" ? codexModel : claudeModel)),
+    effort: stringOr(settings.reasoningEffort, ""),
+    sandboxMode: stringOr(settings.sandbox, ""),
+    approvalPolicy: "on-request",
+    permissionMode: stringOr(settings.permissionMode, ""),
+    sessionMode: resumeId ? sessionMode : "new",
+    session: resumeId ? (provider === "codex" ? { threadId: resumeId } : { sessionId: resumeId }) : null,
+    claudeSettings: provider === "claude" ? settings : {},
+    browser: provider === "claude" && settings.authMode === "subscription" && settings.browser === true,
+    atlasSnapshot: payload?.atlasSnapshot ?? null,
+    evidence: Array.isArray(payload?.evidence) ? payload.evidence.slice(0, 20) : [],
+  });
+  if (!started?.manifest) throw new BridgeError(502, "The agent runtime could not start this run.");
+  const runId = started.manifest.runId;
+
+  const terminal = await waitForAgentRuntimeTerminal(runId, provider === "codex" ? codexTimeoutMs : claudeTimeoutMs);
+  const manifest = terminal.manifest;
+  const final = terminal.final ?? {};
+  const durationMs = Date.now() - startedAt;
+  const runtimeMetadata = {
+    agentRuntimeRunId: runId,
+    agentRuntimeRoute: manifest.route,
+    agentRuntimeWorkspace: stringOr(manifest.workspace, workspace),
+    agentRuntimeSourceWorkspace: stringOr(manifest.sourceWorkspace, workspace),
+    agentRuntimeWorkspaceMode: manifest.workspaceMode === "worktree" ? "worktree" : "shared",
+    agentRuntimeGit: manifest.git
+      ? {
+          gitRoot: stringOr(manifest.git.gitRoot, ""),
+          repositoryName: stringOr(manifest.git.repositoryName, ""),
+          repositoryId: stringOr(manifest.git.repositoryId, ""),
+          commonGitDir: stringOr(manifest.git.commonGitDir, ""),
+          branch: stringOr(manifest.git.branch, ""),
+          head: stringOr(manifest.git.head, ""),
+          dirtyCount: numberOrUndefined(manifest.git.dirtyCount) ?? 0,
+        }
+      : null,
+  };
+
+  // A fallback-route run was produced by the legacy `codex exec` / `claude -p`
+  // path. Return that result unchanged so the richer artifacts it builds - the
+  // Codex details node, generated attachments, log paths - are not lost.
+  if (final.legacyResult && typeof final.legacyResult === "object") {
+    return {
+      ...final.legacyResult,
+      ...runtimeMetadata,
+      usage: { ...(final.legacyResult.usage ?? {}), durationMs },
+    };
+  }
+
+  const text = stringOr(final.text, "");
+  const errorText = stringOr(final.error, "");
+  if (!text && errorText && manifest.status === "failed") {
+    throw new BridgeError(502, errorText);
+  }
+  const label = provider === "codex" ? "Codex" : "Claude Code";
+  const body = [
+    text || `${label} produced no final message.`,
+    manifest.status === "interrupted" ? "\n\n(Interrupted before the provider finished.)" : "",
+    errorText ? `\n\n${errorText}` : "",
+  ].join("").trim();
+  const output = normalizeAiOutput({
+    title: manifest.status === "completed" ? `${label} result` : `${label} ${manifest.status}`,
+    body,
+    summary: (text || errorText || `${label} run ${manifest.status}.`).split("\n").find(Boolean)?.slice(0, 220) ?? `${label} run ${manifest.status}.`,
+    suggestedStatus: "needs_review",
+    tags: provider === "codex" ? ["codex", "code"] : ["claude", "code"],
+  }, prompt);
+
+  return {
+    id: randomUUID(),
+    provider,
+    model: stringOr(manifest.model, ""),
+    output,
+    ...runtimeMetadata,
+    ...(provider === "codex"
+      ? { codexThreadId: manifest.session?.threadId || undefined }
+      : { claudeSessionId: manifest.session?.sessionId || undefined }),
+    sessionInfo: {
+      action: manifest.session?.action ?? "new",
+      resumeId: resumeId || undefined,
+      fellBack: Boolean(manifest.session?.fellBack),
+      resolvedId: manifest.session?.threadId || manifest.session?.sessionId || undefined,
+    },
+    rawText: text,
+    usage: { durationMs },
+  };
+}
+
+function waitForAgentRuntimeTerminal(runId, timeoutMs) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    let settled = false;
+    const finish = async (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe();
+      if (error) {
+        rejectPromise(error);
+        return;
+      }
+      resolvePromise(await agentRuntimeManager.describeRun(runId));
+    };
+    const timer = setTimeout(() => {
+      void agentRuntimeManager.interrupt(runId).catch(() => {});
+      void finish(new BridgeError(504, `Agent run timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    const unsubscribe = agentRuntimeManager.subscribe(runId, (event) => {
+      if (event.kind === "lifecycle" && event.final === true) void finish(null);
+    });
+    // The run may already have finished between start and subscribe.
+    void agentRuntimeManager.describeRun(runId).then((description) => {
+      if (description?.final) void finish(null);
+    }).catch(() => {});
+  });
+}
+
 async function createAiResponse(payload) {
   const startedAt = Date.now();
   const requestId = randomUUID();
@@ -638,6 +976,11 @@ async function createAiResponse(payload) {
   }
 
   if (provider === "codex") {
+    // Rich runtime is opt-in per request so the proven `codex exec` path stays
+    // reachable without a restart. The result shape is identical either way.
+    if (payload?.useAgentRuntime === true) {
+      return await createAgentRuntimeBackedResponse({ payload, provider, prompt, agentPrompt, agentDeltaPrompt, startedAt });
+    }
     return await createCodexResponse({
       prompt,
       context,
@@ -661,6 +1004,9 @@ async function createAiResponse(payload) {
   }
 
   if (provider === "claude") {
+    if (payload?.useAgentRuntime === true) {
+      return await createAgentRuntimeBackedResponse({ payload, provider, prompt, agentPrompt, agentDeltaPrompt, startedAt });
+    }
     return await createClaudeCodeResponse({
       prompt,
       context,
@@ -1125,11 +1471,12 @@ async function createCodexOptionsResponse() {
 
   try {
     const models = await readCodexModels();
+    const availableModels = mergeCodexModelOptions(models, fallback.models);
     const value = {
       ...fallback,
-      models: models.length ? models : fallback.models,
+      models: availableModels,
       defaultModel: codexModel || models[0]?.model || fallback.defaultModel,
-      defaultReasoningEffort: resolveDefaultReasoningEffort(models.length ? models : fallback.models, codexReasoningEffort),
+      defaultReasoningEffort: resolveDefaultReasoningEffort(availableModels, codexReasoningEffort),
     };
     codexOptionsCache = { createdAt: Date.now(), value };
     return value;
@@ -1137,6 +1484,18 @@ async function createCodexOptionsResponse() {
     codexOptionsCache = { createdAt: Date.now(), value: fallback };
     return fallback;
   }
+}
+
+function mergeCodexModelOptions(discoveredModels, fallbackModels) {
+  const merged = [];
+  const seen = new Set();
+  for (const option of [...discoveredModels, ...fallbackModels]) {
+    const model = String(option?.model ?? "").trim();
+    if (!model || seen.has(model)) continue;
+    seen.add(model);
+    merged.push(option);
+  }
+  return merged;
 }
 
 function createChatOptionsResponse() {
@@ -1204,19 +1563,96 @@ async function createProviderUsageResponse(forceRefresh = false) {
   const cacheIsFresh = providerUsageCache && Date.now() - providerUsageCache.createdAt < 45_000;
   if (!forceRefresh && cacheIsFresh) return providerUsageCache.value;
 
-  const [openAiMetrics, deepSeekMetrics] = await Promise.all([
+  const [openAiMetrics, claudeMetrics, deepSeekMetrics] = await Promise.all([
     createOpenAiRateLimitMetrics(),
+    createClaudePlanMetrics(),
     createDeepSeekBalanceMetrics(),
   ]);
   const value = {
     fetchedAt: new Date().toISOString(),
     metrics: [
       ...openAiMetrics,
+      ...claudeMetrics,
       ...deepSeekMetrics,
+      createUnavailableProviderMetric(
+        "anthropic-api-balance",
+        "anthropic",
+        "ANTHROPIC",
+        "balance",
+        "API BALANCE",
+        "api",
+        "Anthropic does not expose an organization credit balance endpoint",
+      ),
     ],
   };
   providerUsageCache = { createdAt: Date.now(), value };
   return value;
+}
+
+async function createClaudePlanMetrics() {
+  const events = await agentRuntimeManager.latestUsageEvents({
+    provider: "claude",
+    scope: "account_plan",
+    authMode: "subscription",
+  }).catch(() => []);
+  const metrics = events
+    .map((event) => createClaudePlanMetric(event?.usage ?? {}))
+    .filter(Boolean);
+  if (metrics.length) return metrics;
+  return [
+    createUnavailableProviderMetric(
+      "claude-plan-allowance",
+      "claude",
+      "CLAUDE",
+      "rate_limit",
+      "PLAN",
+      "claude-stream",
+      "Run Claude Code with the subscription route once to receive the plan allowance reported by Claude Code",
+    ),
+  ];
+}
+
+function createClaudePlanMetric(usage) {
+  const rawUtilization = numberOrUndefined(usage?.utilization);
+  if (rawUtilization === undefined) return null;
+  const usedPercent = clampNumber(rawUtilization <= 1 ? rawUtilization * 100 : rawUtilization, 0, 100);
+  const remainingPercent = clampNumber(100 - usedPercent, 0, 100);
+  const rateLimitType = String(usage?.rateLimitType || "plan");
+  return {
+    id: `claude-plan-${rateLimitType.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`,
+    vendor: "claude",
+    vendorLabel: "CLAUDE",
+    kind: "rate_limit",
+    label: formatClaudeRateLimitLabel(rateLimitType),
+    available: true,
+    displayValue: `${Math.round(remainingPercent)}%`,
+    value: remainingPercent,
+    unit: "%",
+    barPercent: remainingPercent,
+    resetAt: providerResetToIso(usage?.resetsAt),
+    detail: `Claude Code subscription/SDK allowance remaining; status ${String(usage?.status || "unknown")}`,
+    source: "claude-stream",
+    defaultVisible: true,
+  };
+}
+
+function formatClaudeRateLimitLabel(value) {
+  const normalized = String(value || "").replace(/[-_]+/g, " ").trim().toUpperCase();
+  if (!normalized || normalized === "PLAN") return "PLAN";
+  return normalized
+    .replace(/\bFIVE HOUR\b/g, "5H")
+    .replace(/\bSEVEN DAY\b/g, "7D");
+}
+
+function providerResetToIso(value) {
+  const numeric = numberOrUndefined(value);
+  if (numeric !== undefined) {
+    const milliseconds = numeric > 10_000_000_000 ? numeric : numeric * 1000;
+    const date = new Date(milliseconds);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+  }
+  const date = new Date(String(value ?? ""));
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
 
 async function createOpenAiRateLimitMetrics() {
@@ -2145,6 +2581,9 @@ async function runClaudeCode(prompt, settings) {
   if (settings.permissionMode && settings.permissionMode !== "default") {
     args.push("--permission-mode", settings.permissionMode);
   }
+  if (settings.authMode === "subscription" && settings.browser === true) {
+    args.push("--chrome");
+  }
   if (settings.resumeSessionId) {
     args.push("--resume", settings.resumeSessionId);
     // Forking on resume keeps every stored session id an immutable snapshot of
@@ -2338,6 +2777,7 @@ function normalizeClaudeSettings(input, model, context) {
     reasoningEffort: normalizeClaudeReasoningEffort(input?.reasoningEffort),
     permissionMode: normalizeClaudePermissionMode(input?.permissionMode),
     workspace,
+    browser: input?.authMode === "subscription" && input?.browser === true,
     timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input.timeoutMs) : claudeTimeoutMs,
     continueMode,
     resumeSessionId: continueMode === "new" ? "" : stringOr(input?.resumeSessionId, ""),

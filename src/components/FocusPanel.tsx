@@ -11,6 +11,7 @@ import {
   Image as ImageIcon,
   Mic,
   Paintbrush,
+  PanelRightOpen,
   Paperclip,
   Presentation,
   X,
@@ -39,6 +40,7 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
   const updateNodeAppearance = useAtlasStore((state) => state.updateNodeAppearance);
   const setNodeReminder = useAtlasStore((state) => state.setNodeReminder);
   const clearNodeReminder = useAtlasStore((state) => state.clearNodeReminder);
+  const openAgentWorkspaceRun = useAtlasStore((state) => state.openAgentWorkspaceRun);
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
   const selectedNode = findNode(atlasRoot, selectedNodeId) ?? atlasRoot;
   const isRoot = selectedNode.id === atlasRoot.id;
@@ -227,6 +229,17 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
             <FileText size={14} />
             <span>{<I18nText id="ui.focusPanel.editor.9d99465" />}</span>
           </div>
+          {selectedNode.agentExecution?.runtimeRunId ? (
+            <button
+              className="icon-button panel-tool-button"
+              type="button"
+              onClick={() => openAgentWorkspaceRun(selectedNode.agentExecution?.runtimeRunId)}
+              aria-label="Open the agent run for this node"
+              title="Open agent run"
+            >
+              <PanelRightOpen size={17} />
+            </button>
+          ) : null}
           <div className="panel-menu-anchor">
             <button
               className={`icon-button panel-tool-button reminder-tool-button ${selectedNode.reminderAt && !selectedNode.reminderFiredAt ? "is-live" : ""}`}

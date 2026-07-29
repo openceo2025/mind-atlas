@@ -689,5 +689,19 @@
   "workspace.mobile": "モバイルワークスペース",
   "workspace.operation": "操作",
   "workspace.outline": "アウトライン",
-  "workspace.panel": "ワークスペースパネル"
+  "workspace.panel": "ワークスペースパネル",
+  "menu.searchNodes": "全ノードを検索",
+  "menu.searchNodes.detail": "タイトルと本文 / Ctrl+F",
+  "search.caseSensitive": "大文字と小文字を区別",
+  "search.description": "すべてのノードのタイトルと本文を検索します。",
+  "search.field.body": "本文",
+  "search.field.metadata": "メタデータ",
+  "search.field.summary": "要約",
+  "search.field.tags": "タグ",
+  "search.field.title": "タイトル",
+  "search.noResults": "一致するノードはありません。",
+  "search.placeholder": "検索語または正規表現",
+  "search.regex": "正規表現",
+  "search.resultCount": "{count}件",
+  "search.title": "全ノードを検索"
 }

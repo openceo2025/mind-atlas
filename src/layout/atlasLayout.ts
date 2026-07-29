@@ -36,6 +36,9 @@ const FOCUSED_NODE_CAMERA_DISTANCE = 300;
 const NOTEBOOK_NODE_RADIUS = 28;
 const MIN_CHILD_SCREEN_SEPARATION_RADII = 3.4;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+const PHYLLOTAXIS_COLLISION_ANGLE_RATIO = 0.7;
+const PHYLLOTAXIS_COLLISION_FALLBACK_STEPS = 96;
+const PHYLLOTAXIS_COLLISION_ANGLE_MIN = 0.09;
 const FOCUS_LAYOUT_PLANE_Z = -1320;
 const TREE_ACTIVE_Y = 92;
 const TREE_DESKTOP_X_GAP = 220;
@@ -229,18 +232,113 @@ export function stabilizePhyllotaxisPositions(tree: AtlasNode): AtlasNode {
 
   const visit = (node: AtlasNode, path: AtlasNode[]): AtlasNode => {
     const siblingCount = node.children.length;
-    const children = node.children.map((child) => {
+    const occupiedWorldPositions: Vec3[] = [];
+    const children = node.children.map((child, index) => {
       const worldPosition = worldPositions.get(child.id);
-      const position = child.position ?? (worldPosition
-        ? getStoredPositionForWorldDirection(path, worldPosition, path.length, siblingCount)
-        : undefined);
+      if (child.position && worldPosition) {
+        occupiedWorldPositions.push(worldPosition);
+        return visit(child, [...path, child]);
+      }
+
+      const autoWorldPosition = worldPosition
+        ? resolveCollisionAvoidedChildPosition(path, index, siblingCount, occupiedWorldPositions, worldPositions)
+        : undefined;
+      const position = autoWorldPosition ? getStoredPositionForWorldDirection(path, autoWorldPosition, path.length, siblingCount) : undefined;
       const stableChild = !child.position && position ? { ...child, position } : child;
+      if (stableChild.position && autoWorldPosition) {
+        occupiedWorldPositions.push(autoWorldPosition);
+      } else if (worldPosition) {
+        occupiedWorldPositions.push(worldPosition);
+      }
       return visit(stableChild, [...path, stableChild]);
     });
     return children.some((child, index) => child !== node.children[index]) ? { ...node, children } : node;
   };
 
   return visit(tree, [tree]);
+}
+
+function resolveCollisionAvoidedChildPosition(
+  parentPath: AtlasNode[],
+  childIndex: number,
+  siblingCount: number,
+  occupiedWorldPositions: Vec3[],
+  worldPositions: Map<string, Vec3>,
+) {
+  const parent = parentPath.at(-1);
+  const childDepth = parentPath.length;
+  if (!parent) return undefined;
+  if (childIndex < 0) return undefined;
+
+  const occupiedDirections = occupiedWorldPositions
+    .map((position) => normalize(position))
+    .filter((direction) => direction.every(Number.isFinite));
+  const parentDirection: Vec3 = childDepth <= 1
+    ? [0, 0, 1]
+    : normalize(worldPositions.get(parent.id) ?? [0, 0, 1]);
+  const collisionAngle = Math.max(PHYLLOTAXIS_COLLISION_ANGLE_MIN, getCollisionAngleForSiblingDepth(childDepth, siblingCount) * PHYLLOTAXIS_COLLISION_ANGLE_RATIO);
+
+  for (let attempt = 0; attempt <= PHYLLOTAXIS_COLLISION_FALLBACK_STEPS; attempt += 1) {
+    const candidateIndex = childIndex + attempt;
+    const candidateDirection = childDepth <= 1
+      ? getPhyllotaxisTopLevelDirection(candidateIndex)
+      : getPhyllotaxisChildDirection(parentDirection, childDepth, siblingCount, candidateIndex, parent.id);
+    const candidateWorld = scale(candidateDirection, getShellRadius(childDepth));
+    const canUse = occupiedDirections.every((occupied) => {
+      const dotProduct = Math.min(1, Math.max(-1, candidateDirection[0] * occupied[0] + candidateDirection[1] * occupied[1] + candidateDirection[2] * occupied[2]));
+      const angle = Math.acos(dotProduct);
+      return angle >= collisionAngle;
+    });
+    if (canUse) return candidateWorld;
+  }
+
+  return getStoredOrClosestWorldPosition(parentDirection, childDepth, siblingCount, childIndex, parent.id, occupiedDirections);
+}
+
+function getStoredOrClosestWorldPosition(
+  parentDirection: Vec3,
+  childDepth: number,
+  siblingCount: number,
+  startIndex: number,
+  parentId: string,
+  occupied: Vec3[],
+) {
+  const attempts = PHYLLOTAXIS_COLLISION_FALLBACK_STEPS * 2;
+  let bestWorld = [0, 0, 0] as Vec3;
+  let bestScore = -1;
+  const collisionAngle = Math.max(
+    PHYLLOTAXIS_COLLISION_ANGLE_MIN,
+    getCollisionAngleForSiblingDepth(childDepth, siblingCount) * PHYLLOTAXIS_COLLISION_ANGLE_RATIO,
+  );
+
+  for (let attempt = 0; attempt <= attempts; attempt += 1) {
+    const candidateIndex = startIndex + attempt;
+    const candidateDirection = childDepth <= 1
+      ? getPhyllotaxisTopLevelDirection(candidateIndex)
+      : getPhyllotaxisChildDirection(parentDirection, childDepth, siblingCount, candidateIndex, parentId);
+    let minAngle = Number.POSITIVE_INFINITY;
+    for (const existing of occupied) {
+      const dotProduct = Math.min(1, Math.max(-1, candidateDirection[0] * existing[0] + candidateDirection[1] * existing[1] + candidateDirection[2] * existing[2]));
+      const angle = Math.acos(dotProduct);
+      minAngle = Math.min(minAngle, angle);
+    }
+    if (minAngle < 0) minAngle = 0;
+    if (minAngle >= collisionAngle) {
+      return scale(candidateDirection, getShellRadius(childDepth));
+    }
+    const score = minAngle === Number.POSITIVE_INFINITY ? collisionAngle : minAngle;
+    if (score > bestScore) {
+      bestScore = score;
+      bestWorld = scale(candidateDirection, getShellRadius(childDepth));
+    }
+  }
+
+  return bestWorld;
+}
+
+function getCollisionAngleForSiblingDepth(childDepth: number, siblingCount: number) {
+  const spread = childDepth <= 1 ? getManualChildSpreadLimit(childDepth, siblingCount) : getChildSpread(childDepth, siblingCount);
+  return Math.min(Math.PI / 2, Math.max(spread * 0.4, PHYLLOTAXIS_COLLISION_ANGLE_MIN * 2));
 }
 
 export function getNodeWorldPositionFromPath(path: AtlasNode[], overrides: AtlasPositionOverrides = collectPositionOverrides(path[0])): Vec3 {

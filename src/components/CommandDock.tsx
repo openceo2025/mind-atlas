@@ -7,10 +7,19 @@ import { startVoicePartnerSession, type RealtimeClientEvent, type RealtimeVoiceS
 import { runTextPartnerTurn } from "../ai/textPartnerClient";
 import { buildVoiceLogContext } from "../ai/voiceLogContext";
 import { getAboutDemoChatOptions, readAboutDemoConfig } from "../aboutDemo";
+import { getAgentCapabilities, inspectAgentWorkspace, type AgentWorkspaceInfo } from "../agentRuntime/runtimeClient";
+import type { AgentCapabilitiesResult } from "../agentRuntime/types";
 import { CONTEXT_BUDGET_PRESETS, buildContextPlan } from "../context/contextEngine";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
 import { isHostedServiceMode } from "../hosted/serviceClient";
-import { buildAiNodeContextWithAttachments, findInheritedAiDialogSettings, findNode, normalizeAiContextOptions, useAtlasStore } from "../store/atlasStore";
+import {
+  buildAiNodeContextWithAttachments,
+  findInheritedAgentWorkspaceBinding,
+  findInheritedAiDialogSettings,
+  findNode,
+  normalizeAiContextOptions,
+  useAtlasStore,
+} from "../store/atlasStore";
 import { clearPersistedCommandDraft, loadPersistedUiState, persistUiStatePatch } from "../uiPersistence";
 import { ProviderUsagePanel } from "./ProviderUsagePanel";
 import type {
@@ -111,6 +120,7 @@ export function CommandDock() {
   const setNodeStatus = useAtlasStore((state) => state.setNodeStatus);
   const forceNewAgentSession = useAtlasStore((state) => state.forceNewAgentSession);
   const requestNewAgentSession = useAtlasStore((state) => state.requestNewAgentSession);
+  const bindAgentWorkspaceToSelectedNode = useAtlasStore((state) => state.bindAgentWorkspaceToSelectedNode);
   const selectedNode = findNode(atlasRoot, selectedNodeId);
   const effectiveAiContextOptions = PUBLIC_SERVICE_MODE
     ? { ...aiContextOptions, scope: "path-children" as AiContextScope }
@@ -119,6 +129,10 @@ export function CommandDock() {
   const [chatOptions, setChatOptions] = useState<ChatOptionsResult | null>(null);
   const [openClawOptions, setOpenClawOptions] = useState<OpenClawOptionsResult | null>(null);
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
+  const [agentWorkspaceInfo, setAgentWorkspaceInfo] = useState<AgentWorkspaceInfo | null>(null);
+  const [agentWorkspaceLoading, setAgentWorkspaceLoading] = useState(false);
+  const [agentWorkspaceError, setAgentWorkspaceError] = useState("");
+  const [agentCapabilities, setAgentCapabilities] = useState<AgentCapabilitiesResult | null>(null);
   const contextOptionsForRun = useMemo(
     () => normalizeAiContextOptions({ ...effectiveAiContextOptions, selectedNodeIds: multiSelectedNodeIds }),
     [effectiveAiContextOptions, multiSelectedNodeIds],
@@ -170,6 +184,18 @@ export function CommandDock() {
       : (["default"] as ChatReasoningEffort[]);
   const codeBackendSelection: CodeBackendSelection =
     mode === "codex" ? "codex" : claudeSettings.authMode === "subscription" ? "claude-subscription" : "claude-api";
+  const selectedUsageVendor =
+    mode === "codex"
+      ? "openai"
+      : mode === "claude"
+        ? claudeSettings.authMode === "subscription"
+          ? "claude"
+          : claudeSettings.baseUrl.includes("deepseek")
+            ? "deepseek"
+            : "anthropic"
+        : mode === "chat"
+          ? chatSettings.service
+          : "";
   const claudeModelPresets = claudeSettings.authMode === "subscription" ? CLAUDE_SUBSCRIPTION_MODEL_PRESETS : CLAUDE_API_MODEL_PRESETS;
   const selectedClaudePreset = getClaudePresetId(claudeSettings.model, claudeSettings.baseUrl, claudeModelPresets);
   const claudeEfforts = codexOptions?.claudeReasoningEfforts?.length ? codexOptions.claudeReasoningEfforts : CLAUDE_REASONING_EFFORTS;
@@ -178,6 +204,105 @@ export function CommandDock() {
     : [{ model: "", displayName: "OpenClaw default" }];
 
   const selectedNodeTitle = selectedNode?.title.trim() || "Mind Atlas";
+  const agentWorkspacePath =
+    mode === "codex" ? codexSettings.workspace.trim() : mode === "claude" ? claudeSettings.workspace.trim() : "";
+  const inheritedAgentWorkspace = useMemo(
+    () => findInheritedAgentWorkspaceBinding(atlasRoot, selectedNodeId),
+    [atlasRoot, selectedNodeId],
+  );
+  const agentWorkspaceMatches = Boolean(
+    agentWorkspaceInfo?.available
+    && inheritedAgentWorkspace?.gitRoot
+    && (
+      inheritedAgentWorkspace.repositoryId && agentWorkspaceInfo.repositoryId
+        ? inheritedAgentWorkspace.repositoryId === agentWorkspaceInfo.repositoryId
+        : normalizeWorkspacePath(inheritedAgentWorkspace.gitRoot) === normalizeWorkspacePath(agentWorkspaceInfo.gitRoot)
+    ),
+  );
+  const agentModeNeedsWorkspace = mode === "codex" || mode === "claude";
+  const selectedWorkspaceMode = mode === "codex" ? codexSettings.workspaceMode : mode === "claude" ? claudeSettings.workspaceMode : "shared";
+  const dirtySourceBlocksWorktree = Boolean(
+    selectedWorkspaceMode === "worktree"
+    && agentWorkspaceInfo?.dirtyCount
+    && !agentWorkspaceInfo.managedMissionWorktree,
+  );
+  const agentRepositoryBlockReason = dirtySourceBlocksWorktree
+    ? "Commit or stash source-checkout changes before creating a mission worktree."
+    : agentWorkspaceError
+      || (inheritedAgentWorkspace
+        ? `Repository mismatch: this branch is bound to ${inheritedAgentWorkspace.repositoryName}.`
+        : "Bind this Atlas branch to the inspected repository before sending.");
+  const agentRepositoryReady = !agentModeNeedsWorkspace || (agentWorkspaceMatches && !dirtySourceBlocksWorktree);
+  const selectedClaudeCapability = agentCapabilities?.providers.find((provider) => provider.provider === "claude");
+  const claudeBrowserSupported = Boolean(
+    mode === "claude"
+    && claudeSettings.authMode === "subscription"
+    && selectedClaudeCapability?.supports.browser,
+  );
+  const claudeBrowserReason = claudeBrowserSupported
+    ? "Use the installed Claude in Chrome integration for this run."
+    : selectedClaudeCapability?.unavailableReasons.browser
+      || "Checking whether this Claude Code route supports browser control.";
+
+  useEffect(() => {
+    if (!agentModeNeedsWorkspace || !agentWorkspacePath || PUBLIC_SERVICE_MODE) {
+      setAgentWorkspaceInfo(null);
+      setAgentWorkspaceLoading(false);
+      setAgentWorkspaceError("");
+      return undefined;
+    }
+    let cancelled = false;
+    setAgentWorkspaceLoading(true);
+    setAgentWorkspaceError("");
+    const timer = window.setTimeout(() => {
+      void inspectAgentWorkspace(agentWorkspacePath)
+        .then((info) => {
+          if (cancelled) return;
+          setAgentWorkspaceInfo(info);
+          setAgentWorkspaceError(info.available ? "" : info.detail || "This path is not a Git repository.");
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setAgentWorkspaceInfo(null);
+          setAgentWorkspaceError(error instanceof Error ? error.message : String(error));
+        })
+        .finally(() => {
+          if (!cancelled) setAgentWorkspaceLoading(false);
+        });
+    }, 240);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [agentModeNeedsWorkspace, agentWorkspacePath]);
+
+  useEffect(() => {
+    if (
+      PUBLIC_SERVICE_MODE
+      || mode !== "claude"
+      || !agentWorkspaceInfo?.available
+    ) {
+      setAgentCapabilities(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void getAgentCapabilities({
+        workspace: agentWorkspaceInfo.resolvedWorkspace || agentWorkspaceInfo.gitRoot,
+        authMode: claudeSettings.authMode,
+      })
+        .then((result) => {
+          if (!cancelled) setAgentCapabilities(result);
+        })
+        .catch(() => {
+          if (!cancelled) setAgentCapabilities(null);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [mode, agentWorkspaceInfo?.resolvedWorkspace, agentWorkspaceInfo?.gitRoot, claudeSettings.authMode]);
 
   useEffect(() => {
     return () => {
@@ -327,15 +452,22 @@ export function CommandDock() {
           if (!alive) return;
           setCodexOptions(options);
           const current = useAtlasStore.getState();
-          if (findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId)?.codexSettings) return;
-          setCodexSettings({
-            model: options.defaultModel,
-            reasoningEffort: options.defaultReasoningEffort,
-            sandbox: options.defaultSandbox,
-            fullAccessApproved: options.defaultSandbox === "danger-full-access",
-            workspace: options.defaultWorkspace,
-            timeoutMs: options.defaultTimeoutMs,
-          });
+          const inherited = findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId);
+          if (!inherited?.codexSettings) {
+            setCodexSettings({
+              model: options.defaultModel,
+              reasoningEffort: options.defaultReasoningEffort,
+              sandbox: options.defaultSandbox,
+              fullAccessApproved: options.defaultSandbox === "danger-full-access",
+              workspace: options.defaultWorkspace,
+              timeoutMs: options.defaultTimeoutMs,
+            });
+          } else if (!inherited.codexSettings.workspace.trim()) {
+            setCodexSettings({ workspace: options.defaultWorkspace });
+          }
+          if (!inherited?.claudeSettings?.workspace.trim()) {
+            setClaudeSettings({ workspace: options.defaultWorkspace });
+          }
         })
         .catch(() => {
           if (alive) setCodexOptions(null);
@@ -368,8 +500,12 @@ export function CommandDock() {
     if (aboutDemoConfig) return;
     const trimmed = value.trim();
     if (!trimmed) return;
-    if (mode === "codex" && !codexSettings.workspace.trim()) {
+    if (agentModeNeedsWorkspace && !agentWorkspacePath) {
       setVoiceError(formatAppMessage("status.realtime.workRootRequired"));
+      return;
+    }
+    if (agentModeNeedsWorkspace && !agentRepositoryReady) {
+      setVoiceError(agentRepositoryBlockReason);
       return;
     }
     setVoiceError("");
@@ -390,7 +526,18 @@ export function CommandDock() {
       return;
     }
     // Agent CLI requests stay on the node-anchored path and do not receive Mind Atlas tool access.
-    void runAiOnSelectedNode(trimmed, isChatCommandMode(mode) ? (mode === "openai" || mode === "local" ? mode : "chat") : mode, contextOptionsForRun);
+    try {
+      await runAiOnSelectedNode(
+        trimmed,
+        isChatCommandMode(mode) ? (mode === "openai" || mode === "local" ? mode : "chat") : mode,
+        contextOptionsForRun,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setVoiceError(message);
+      setValue(trimmed);
+      latestCommandDraftRef.current = { value: trimmed, mode };
+    }
   };
 
   const ensureVoicePartnerSession = async () => {
@@ -864,10 +1011,13 @@ export function CommandDock() {
       : contextPlan
         ? `Auto context ~${formatTokenEstimate(contextPlan.stats.estimatedTokens)} tokens / ${contextPlan.stats.conversationTurnCount} turns / ${selectedCount} selected`
         : "Auto context";
-  const codexWorkRootMissing = mode === "codex" && !codexSettings.workspace.trim();
+  const codexWorkRootMissing = agentModeNeedsWorkspace && !agentWorkspacePath;
+  const agentRepositoryBlocked = agentModeNeedsWorkspace && !codexWorkRootMissing && !agentRepositoryReady;
   const statusText =
     codexWorkRootMissing
-      ? "Codex Work root required"
+      ? `${modeLabel(mode)} Work root required`
+      : agentRepositoryBlocked
+        ? (agentWorkspaceLoading ? "Inspecting repository..." : agentRepositoryBlockReason)
       : voiceError || (voiceButtonState !== "idle" ? voiceStatusLabel(voiceButtonState) : micLive ? `Voice Partner ${voiceState}` : PUBLIC_SERVICE_MODE ? `AI / ${selectedNode?.status ?? "waiting"}` : `${modeLabel(mode)} / ${selectedNode?.status ?? "waiting"}`);
 
   return (
@@ -942,7 +1092,7 @@ export function CommandDock() {
           }
         />
       </label>
-      <button className="send-button" type="submit" aria-label={formatAppMessage("ui.commandDock.sendInstruction.797c542")} disabled={!value.trim() || codexWorkRootMissing}>
+      <button className="send-button" type="submit" aria-label={formatAppMessage("ui.commandDock.sendInstruction.797c542")} disabled={!value.trim() || codexWorkRootMissing || agentRepositoryBlocked}>
         <SendHorizonal size={18} />
       </button>
       {contextPreviewOpen && contextPlan ? (
@@ -1065,6 +1215,7 @@ export function CommandDock() {
                   authMode: backend === "claude-subscription" ? "subscription" : "api",
                   model: "",
                   baseUrl: "",
+                  browser: false,
                   resumeSessionId: "",
                   forkSession: false,
                 });
@@ -1146,6 +1297,19 @@ export function CommandDock() {
               placeholder={formatAppMessage("ui.commandDock.workspaceFromSelectedNodeOr.f430333")}
             />
           </label>
+          <label className="context-option-field">
+            <span>Workspace</span>
+            <select
+              value={codexSettings.workspaceMode ?? "shared"}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setCodexSettings({ workspaceMode: event.target.value === "worktree" ? "worktree" : "shared" })}
+              title="Run in the current checkout or create an isolated Git worktree for this mission."
+            >
+              <option value="shared">Current checkout</option>
+              <option value="worktree">Mission worktree</option>
+            </select>
+          </label>
           <AgentSessionControl
             forceNew={forceNewAgentSession}
             onChange={requestNewAgentSession}
@@ -1217,6 +1381,35 @@ export function CommandDock() {
               placeholder={formatAppMessage("ui.commandDock.optionalProjectPath.6fcecc8")}
             />
           </label>
+          <label className="context-option-field">
+            <span>Workspace</span>
+            <select
+              value={claudeSettings.workspaceMode ?? "shared"}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => setCommandInputEditing(false)}
+              onChange={(event) => setClaudeSettings({ workspaceMode: event.target.value === "worktree" ? "worktree" : "shared" })}
+              title="Run in the current checkout or create an isolated Git worktree for this mission."
+            >
+              <option value="shared">Current checkout</option>
+              <option value="worktree">Mission worktree</option>
+            </select>
+          </label>
+          {claudeSettings.authMode === "subscription" ? (
+            <label className="context-option-field" title={claudeBrowserReason}>
+              <span>Browser</span>
+              <span className="codex-check-control">
+                <input
+                  type="checkbox"
+                  checked={claudeSettings.browser === true}
+                  disabled={!claudeBrowserSupported}
+                  onFocus={() => setCommandInputEditing(true)}
+                  onBlur={() => setCommandInputEditing(false)}
+                  onChange={(event) => setClaudeSettings({ browser: event.target.checked })}
+                  aria-label="Use Claude in Chrome for this run"
+                />
+              </span>
+            </label>
+          ) : null}
           <AgentSessionControl
             forceNew={forceNewAgentSession}
             onChange={requestNewAgentSession}
@@ -1235,6 +1428,36 @@ export function CommandDock() {
           />
             </>
           )}
+        </div>
+      ) : null}
+      {agentModeNeedsWorkspace ? (
+        <div className={`agent-repository-guard ${agentWorkspaceMatches ? "is-ready" : "is-blocked"}`}>
+          <div>
+            <strong>{agentWorkspaceLoading ? "Inspecting repository..." : agentWorkspaceInfo?.repositoryName || "Repository not verified"}</strong>
+            <span title={agentWorkspaceInfo?.gitRoot || agentWorkspacePath}>
+              {agentWorkspaceInfo?.available
+                ? `${agentWorkspaceInfo.branch || "detached"} @ ${(agentWorkspaceInfo.head || "").slice(0, 10)} - ${agentWorkspaceInfo.dirtyCount} changed - ${agentWorkspaceInfo.gitRoot}`
+                : agentWorkspaceError || agentWorkspacePath || "Choose a work root"}
+            </span>
+          </div>
+          {agentWorkspaceInfo?.available && !agentWorkspaceMatches ? (
+            <button
+              type="button"
+              className="agent-btn"
+              onClick={() => {
+                bindAgentWorkspaceToSelectedNode({
+                  gitRoot: agentWorkspaceInfo.gitRoot,
+                  repositoryName: agentWorkspaceInfo.repositoryName,
+                  repositoryId: agentWorkspaceInfo.repositoryId,
+                  boundAt: new Date().toISOString(),
+                });
+                setVoiceError("");
+              }}
+            >
+              {inheritedAgentWorkspace ? "Rebind this branch" : "Bind this branch"}
+            </button>
+          ) : null}
+          {agentWorkspaceMatches ? <span className="agent-repository-ready">Bound</span> : null}
         </div>
       ) : null}
       {mode === "openclaw" ? (
@@ -1273,7 +1496,7 @@ export function CommandDock() {
           />
         </div>
       ) : null}
-      {mode !== "note" && !PUBLIC_SERVICE_MODE ? <ProviderUsagePanel /> : null}
+      {mode !== "note" && !PUBLIC_SERVICE_MODE ? <ProviderUsagePanel selectedVendor={selectedUsageVendor} /> : null}
     </form>
   );
 }
@@ -1633,6 +1856,10 @@ function getClaudePresetId(
   const normalizedModel = model.trim();
   const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
   return presets.find((preset) => preset.model === normalizedModel && preset.baseUrl === normalizedBaseUrl)?.id ?? "custom";
+}
+
+function normalizeWorkspacePath(value: string) {
+  return value.trim().replace(/[\\/]+$/, "").toLowerCase();
 }
 
 function isCommandMode(value: unknown): value is CommandMode {

@@ -4,6 +4,7 @@ import {
   normalizeAiContextOptions,
   useAtlasStore,
 } from "../store/atlasStore";
+import { rankAtlasNodes, searchAtlasNodes } from "../search/nodeSearch";
 import type { AiContextScope, AiExecutionMode, AtlasNode, RealtimeToolDefinition, WebSearchResult, WorkStatus } from "../types";
 
 export interface VoiceToolCall {
@@ -89,40 +90,68 @@ const toolSpecs: VoiceToolSpec[] = [
   {
     type: "function",
     name: "search_nodes",
-    description: "Search notebook nodes by title, body, summary, tags, status, or provider metadata.",
+    description: "Search all notebook nodes with exact text or a safe regular expression. Use this when wording, names, ids, tags, or patterns must match precisely.",
     parameters: objectSchema({
       query: { type: "string", description: "Search text." },
+      regex: { type: "boolean", description: "Treat query as a regular expression. Default false." },
+      case_sensitive: { type: "boolean", description: "Use case-sensitive matching. Default false." },
       limit: { type: "number", description: "Maximum number of matches. Default 10." },
     }, ["query"]),
     handler: (args) => {
-      const query = stringArg(args, "query").toLowerCase();
       const limit = clampNumber(numberArg(args, "limit", 10), 1, 30);
       const state = useAtlasStore.getState();
-      const matches: Array<{ score: number; node: AtlasNode; path: string[] }> = [];
-      visitNode(state.atlasRoot, [], (node, path) => {
-        const text = [
-          node.title,
-          node.subtitle,
-          node.body,
-          node.summary,
-          node.nextDecision,
-          node.status,
-          node.provider ?? "",
-          node.runMode ?? "",
-          node.tags.join(" "),
-        ].join("\n").toLowerCase();
-        if (!text.includes(query)) return;
-        const titleHit = node.title.toLowerCase().includes(query) ? 4 : 0;
-        matches.push({ score: titleHit + Math.min(3, text.split(query).length - 1), node, path: [...path, node.title] });
+      const result = searchAtlasNodes(state.atlasRoot, {
+        query: stringArg(args, "query"),
+        regex: booleanArg(args, "regex"),
+        caseSensitive: booleanArg(args, "case_sensitive"),
+        includeMetadata: true,
+        limit,
       });
-      matches.sort((left, right) => right.score - left.score);
-      return ok(`Found ${matches.length} matching node(s).`, {
-        matches: matches.slice(0, limit).map((match) => ({
-          id: match.node.id,
-          title: match.node.title,
-          status: match.node.status,
-          summary: match.node.summary,
+      if (result.error) return fail(result.error);
+      return ok(`Found ${result.total} matching node(s); returning ${result.matches.length}.`, {
+        total: result.total,
+        matches: result.matches.map((match) => ({
+          id: match.nodeId,
+          title: match.title,
           path: match.path,
+          matchedField: match.field,
+          snippet: match.snippet,
+        })),
+      });
+    },
+  },
+  {
+    type: "function",
+    name: "semantic_search_nodes",
+    description: "Rank all notebook nodes by local text relevance without sending the whole atlas or calling an embedding service. Supply related concepts or synonyms when the user's wording may differ from the notebook. Returns only bounded top snippets and node ids.",
+    parameters: objectSchema({
+      query: { type: "string", description: "The user's search concept." },
+      concepts: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: 12,
+        description: "Optional related words, translations, abbreviations, or synonyms inferred from the request.",
+      },
+      limit: { type: "number", description: "Maximum number of ranked matches. Default 10." },
+    }, ["query"]),
+    handler: (args) => {
+      const state = useAtlasStore.getState();
+      const result = rankAtlasNodes(state.atlasRoot, {
+        query: stringArg(args, "query"),
+        concepts: stringArrayArg(args, "concepts"),
+        limit: clampNumber(numberArg(args, "limit", 10), 1, 30),
+      });
+      if (result.error) return fail(result.error);
+      return ok(`Ranked ${result.total} relevant node(s); returning ${result.matches.length}.`, {
+        total: result.total,
+        method: "local_weighted_text_relevance",
+        matches: result.matches.map((match) => ({
+          id: match.nodeId,
+          title: match.title,
+          path: match.path,
+          matchedField: match.field,
+          snippet: match.snippet,
+          score: match.score,
         })),
       });
     },
@@ -319,7 +348,7 @@ const toolSpecs: VoiceToolSpec[] = [
     type: "function",
     name: "run_ai_from_active_node",
     description:
-      "Run a separate node-anchored Chat/OpenAI/Local AI job from the active node. This creates AI request/result celestial nodes under the active node and is NOT for answering the current global conversation. Do not use this for Codex, OpenClaw, or Claude Code; those agent CLI modes are intentionally excluded from Mind Atlas tool orchestration. Use only when the user explicitly asks to delegate a tool-capable chat model to a specific node context or create a persistent node-based chat result. Do not use this tool for listing, picking up, summarizing, inspecting, searching, checking notifications, or answering from existing Mind Atlas state; use search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and answer directly instead.",
+      "Run a separate node-anchored Chat/OpenAI/Local AI job from the active node. This creates AI request/result celestial nodes under the active node and is NOT for answering the current global conversation. Do not use this for Codex, OpenClaw, or Claude Code; those agent CLI modes are intentionally excluded from Mind Atlas tool orchestration. Use only when the user explicitly asks to delegate a tool-capable chat model to a specific node context or create a persistent node-based chat result. Do not use this tool for listing, picking up, summarizing, inspecting, searching, checking notifications, or answering from existing Mind Atlas state; use search_nodes or semantic_search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and answer directly instead.",
     parameters: objectSchema({
       prompt: {
         type: "string",
@@ -355,7 +384,7 @@ const toolSpecs: VoiceToolSpec[] = [
           [
             "run_ai_from_active_node was not executed because it creates AI request/result notebook nodes.",
             "Use it only when the user explicitly asks for a separate node-anchored AI run or persistent node-based AI result.",
-            "For picking up nodes, listing tasks, summarizing state, inspecting notifications, or answering the current AI Partner conversation, use search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and then answer directly in AI Partner log.",
+            "For picking up nodes, listing tasks, summarizing state, inspecting notifications, or answering the current AI Partner conversation, use search_nodes or semantic_search_nodes, get_notifications, summarize_notifications, get_atlas_state_summary, and then answer directly in AI Partner log.",
           ].join("\n"),
         );
       }
@@ -662,14 +691,14 @@ function nodeSummary(node: AtlasNode) {
   };
 }
 
-function visitNode(node: AtlasNode, path: string[], visitor: (node: AtlasNode, path: string[]) => void) {
-  visitor(node, path);
-  node.children.forEach((child) => visitNode(child, [...path, node.title], visitor));
-}
-
 function stringArg(args: Record<string, unknown>, key: string, fallback = "") {
   const value = args[key];
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function booleanArg(args: Record<string, unknown>, key: string, fallback = false) {
+  const value = args[key];
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function optionalString(args: Record<string, unknown>, key: string) {

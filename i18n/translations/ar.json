@@ -705,5 +705,19 @@
   "workspace.mobile": "مساحة العمل على الهاتف",
   "workspace.operation": "التشغيل",
   "workspace.outline": "المخطط",
-  "workspace.panel": "لوحة مساحة العمل"
+  "workspace.panel": "لوحة مساحة العمل",
+  "menu.searchNodes": "البحث في جميع العقد",
+  "menu.searchNodes.detail": "العناوين والمحتوى / Ctrl+F",
+  "search.caseSensitive": "مطابقة حالة الأحرف",
+  "search.description": "ابحث عن نص في عناوين جميع العقد ومحتواها.",
+  "search.field.body": "المحتوى",
+  "search.field.metadata": "البيانات الوصفية",
+  "search.field.summary": "الملخص",
+  "search.field.tags": "الوسوم",
+  "search.field.title": "العنوان",
+  "search.noResults": "لا توجد عقد مطابقة.",
+  "search.placeholder": "نص البحث أو تعبير نمطي",
+  "search.regex": "تعبير نمطي",
+  "search.resultCount": "{count} نتيجة",
+  "search.title": "البحث في جميع العقد"
 }

@@ -175,13 +175,246 @@ Node-anchored AI requests are assembled by one shared context engine
   work through the legacy context-JSON path.
 - Verify with `npm run verify:context-engine` (plus the standard checks).
 
+## Local Agent Runtime (local developer mode only)
+
+Codex and Claude Code runs started from Code mode go through a streaming agent
+runtime instead of a single batch process. This surface is `local-only`: the
+hosted service does not import `scripts/agent-runtime/`, and the browser
+workspace is gated behind `isAgentRuntimeAvailable()`, which is false whenever
+`VITE_MIND_ATLAS_PUBLIC_SERVICE=true`.
+
+Machine-verified capability evidence lives in
+[local-agent-poc-results.md](local-agent-poc-results.md). Nothing in this
+section is claimed from provider documentation alone.
+
+### Routes
+
+| Provider | Rich route | Fallback route |
+| --- | --- | --- |
+| Codex | `codex app-server` over stdio JSON-RPC | `codex exec --json` |
+| Claude Code | `claude -p --output-format stream-json --verbose --include-partial-messages` | `claude -p --output-format json` |
+
+`MIND_ATLAS_CODEX_RUNTIME` / `MIND_ATLAS_CLAUDE_RUNTIME` accept `auto`
+(default), the rich route name, or the fallback name. `auto` probes the rich
+route and falls back automatically; the reason is emitted as a
+`route_fallback` warning event on the run. Unknown values fail closed to
+`auto`. No runtime route switch happens in the middle of a provider turn.
+
+### Endpoints
+
+```text
+GET  /api/agent-capabilities
+GET  /api/agent-workspace/inspect?workspace=<path>
+GET  /api/agent-runs
+POST /api/agent-runs
+GET  /api/agent-runs/by-client/:clientRunId
+GET  /api/agent-runs/:runId
+GET  /api/agent-runs/:runId/events          Server-Sent Events, Last-Event-ID replay
+POST /api/agent-runs/:runId/steer
+POST /api/agent-runs/:runId/interrupt
+POST /api/agent-runs/:runId/compact
+POST /api/agent-runs/:runId/approvals/:requestId
+POST /api/agent-runs/:runId/user-input/:requestId
+POST /api/agent-runs/:runId/handoff
+POST /api/agent-runs/:runId/reclaim
+POST /api/agent-runs/:runId/checkpoint
+POST /api/agent-runs/:runId/revert-checkpoint
+POST /api/agent-runs/:runId/remove-worktree
+POST /api/agent-runtime/cleanup
+GET  /api/agent-runtime/inbox
+POST /api/agent-runtime/ack
+```
+
+Mutating routes reject a request whose `Origin` is not in
+`MIND_ATLAS_ALLOWED_ORIGIN`. A browser cannot forge `Origin`, so that check plus
+the loopback bind is the real boundary against a hostile page.
+
+### Workspace policy
+
+By default an agent run may target **any existing directory**, because running
+agents across many local repositories is the point of local developer mode. A
+small deny-list still applies as a guardrail against a mistyped or
+model-suggested work root:
+
+- a whole drive (`C:\`, `/`);
+- your home directory itself (it holds provider credentials);
+- `.codex`, `.claude`, `.ssh`, `.aws`, `.gnupg` and similar credential folders;
+- system directories (`%SystemRoot%`, `%ProgramFiles%`, `%ProgramData%`,
+  `/etc`, `/usr`, `/bin`, `/sbin`, `/System`);
+- paths that do not exist.
+
+Setting `MIND_ATLAS_AGENT_WORK_ROOTS` switches to hardened mode: only those
+roots, the configured Codex/Claude work roots, the bridge working directory,
+and paths inside them are allowed. The deny-list still applies on top.
+
+The rules live in `scripts/agent-runtime/workspace-policy.mjs` and are covered
+by `npm run verify:agent-runtime`.
+
+Before a Code request can start, the current Atlas branch must be explicitly
+bound to the inspected Git repository. The guard compares a stable identity
+derived from `git rev-parse --git-common-dir`, not a folder name, so a linked
+worktree still matches its source repository while an unrelated checkout is
+blocked. Each manifest records the source checkout, actual execution directory,
+repository identity, branch, HEAD, and initial dirty-file snapshot.
+
+The optional **Mission worktree** mode requires a clean source checkout and
+creates an isolated branch/worktree below
+`server-data/agent-runtime/worktrees/`. Follow-up nodes reuse that worktree.
+Once a run is terminal, the user may explicitly checkpoint the run-attributed
+files, revert that checkpoint with confirmation, or remove a clean worktree.
+There is no implicit stash, reset, commit, revert, or worktree removal.
+
+### Parallel runs
+
+Concurrent runs in different work roots are supported and isolated: each has its
+own manifest, event stream, and provider session. Separate mission worktrees
+also permit parallel missions in one repository. The Agent Run Workspace shows
+a switcher when more than one local run is active, so a second run does not
+replace the one you are watching. Shared checkouts and the **same existing
+mission worktree** still allow only one writer at a time.
+
+`POST /api/ai/respond` still drives node-anchored runs. When the browser sends
+`useAgentRuntime: true`, the bridge executes the request through the runtime
+and returns the same `AiResponseResult` shape plus `agentRuntimeRunId` and
+`agentRuntimeRoute`. Result nodes, root AI Partner log routing, the legacy run
+journal, recovery, and ACK are unchanged. The browser resolves the live run
+through `/api/agent-runs/by-client/:clientRunId` while the request is pending.
+
+### Durable storage
+
+```text
+server-data/agent-runtime/
+  runs/<run-id>/manifest.json     written before any provider process starts
+  runs/<run-id>/events.jsonl      appended before each event is broadcast
+  runs/<run-id>/final.json        bounded terminal record
+  runs/<run-id>/diagnostics.log   bounded provider diagnostics
+  sessions/<provider-session-key>.json
+  handoffs/<handoff-id>.json
+```
+
+`server-data/agent-run-inbox` remains the compatibility recovery path. Closing
+the workspace only hides it; the Agent runs launcher, recent-run switcher, and
+result-node action reopen the same durable run. On startup a run left
+non-terminal by a previous bridge process is marked
+`interrupted` with a recoverable final record. Retention removes only
+acknowledged terminal runs. Tokens, auth headers, environment values, and
+common secret patterns are redacted before anything is journaled or broadcast.
+
+### Capabilities
+
+`GET /api/agent-capabilities` returns runtime-discovered models, reasoning
+efforts, permission profiles, sandbox modes, tools, MCP servers, skills, and a
+`supports` map. Anything not proven by the runtime is `false` with a reason in
+`unavailableReasons`. Codex effort values come from `model/list`, so provider
+levels added later (for example `max` or `ultra`) appear without a Mind Atlas
+change. The Capabilities tab exposes the runtime-reported models, efforts,
+tools, skills, MCP servers, slash commands, subagent definitions, and support
+reasons. Steer, Compact, and browser controls stay disabled unless that exact
+route reports support.
+
+### Context accounting
+
+Three separate metrics, never merged:
+
+1. Mind Atlas injection - a script-aware preflight estimate, always labelled an
+   estimate. Japanese, Chinese, and code are weighted separately instead of
+   using one character divisor.
+2. Provider session - `thread/tokenUsage/updated.modelContextWindow` for Codex
+   and `result.modelUsage[model].contextWindow` plus `result.usage` for Claude.
+   Remaining context is shown only when both used tokens and the window are
+   known.
+3. Account allowance - Claude `rate_limit_event`. This is not the context
+   window and is displayed separately. Its utilization also feeds the
+   Claude-selected usage bar after a subscription run reports it. The label is
+   deliberately "Claude Code subscription/SDK allowance", because programmatic
+   Claude Code usage must not be presented as a guaranteed clone of a consumer
+   app's gauge.
+
+### Read-only Atlas tools
+
+When `MIND_ATLAS_ATLAS_MCP` is not `false`, a Claude run receives an additive
+`--mcp-config` pointing at `scripts/agent-runtime/atlas-mcp-server.mjs` with a
+run-scoped sanitized notebook snapshot. The user's own MCP servers are kept
+(`--strict-mcp-config` is deliberately not used). Tools:
+`search_nodes`, `semantic_search_nodes`, `get_node`, `get_branch`,
+`get_children`, `get_atlas_outline`. All are read-only, and
+`semantic_search_nodes` reports `scoringMode: "lexical+ngram"` with
+`degraded: true` because no embedding backend is configured - it never claims
+to be vector search. The matcher is the same pure implementation used by the
+human Ctrl+F search. Codex is not auto-configured with this server because that
+would require mutating provider configuration.
+
+### Evidence and multimodal input
+
+Image and PDF attachments on the active node and its ancestors are uploaded to
+`POST /api/agent-evidence`, stored content-addressed under
+`server-data/agent-runtime/evidence/`, and passed to the run as typed evidence.
+`MIND_ATLAS_AGENT_EVIDENCE_MAX_BYTES` caps a single file (20 MB by default) and
+oversized files are rejected before the run starts.
+
+Transport is decided from the runtime's reported capabilities and recorded on
+the run as an `evidence_transport` event with a per-item status:
+
+- `attached` - Codex receives the bytes as a typed `localImage` input. Verified
+  live: the model described the contents of `public/og-image.png`.
+- `referenced` - only the local path was sent, plus an explicit prompt block
+  stating the file was **not** attached and the model must open it with its own
+  file-reading tool. This is what Claude print mode gets today.
+- `unsupported` - the selected model or runtime cannot receive the file at all.
+
+Mind Atlas never implies a file was seen when only its path was sent.
+
+### Browser capability
+
+Detection reads the installed CLI's own option list. The verified Claude Code
+build exposes `--chrome`, so a direct Claude plan route reports
+`supports.browser: true` and a run can opt in with `browser: true`, which adds
+`--chrome` to that invocation only. Anthropic API and DeepSeek routes report
+`false` with the reason that Claude in Chrome requires direct plan
+authentication. Codex reports `false` because this app-server session
+advertises no browser tool. Nothing is enabled without that runtime evidence.
+
+### Native handoff and session ownership
+
+Ownership is `mind_atlas -> transferring -> native -> reconciling ->
+mind_atlas`. A handoff is refused while a turn is active, the handoff record is
+durable before any external process starts, and a failed launch returns
+ownership to Mind Atlas. Only an explicit reclaim leaves `native`.
+
+- Codex: `codex resume <thread-id>` in a terminal at the run workspace. This
+  was verified to continue an app-server thread with full history. The
+  `codex://threads/<id>` deep link is probed at runtime and stays disabled when
+  no URL handler is registered.
+- Claude subscription: `claude --resume <session-id>` in a terminal. `/desktop`
+  is advertised only when the installed build reports that command; on the
+  verified build it does not, so Desktop continuity is never claimed.
+- Claude API / DeepSeek: no native session continuity. These routes receive the
+  handoff package (workspace, branch, HEAD, dirty files, diff, request, answer,
+  tests, Atlas nodes, evidence paths) with credentials excluded.
+
+### Verification
+
+```powershell
+npm run verify:agent-runtime
+```
+
+Covers redaction, run state transitions, journal durability and replay,
+idempotency, output budgets, interrupted-run recovery, retention safety,
+fake-provider runs, ownership and handoff sanitization, the Atlas tools, the
+context estimator including Japanese, and Markdown/link safety. It uses fake
+providers only, so it never makes a paid provider call.
+
+The Agent Run Workspace UI is a local-only developer surface and is
+intentionally English-only; its strings are recorded in
+`i18n/hardcoded-baseline.json` rather than the translated catalog.
+
 ## Current AI Surface
 
 - The command dock supports Chat, Code, OpenClaw, and Note modes.
-- The AI modes include a compact selectable usage panel. OpenAI Codex 5-hour and 7-day remaining percentages come from `codex app-server` `account/rateLimits/read`; DeepSeek balance comes from `GET /user/balance`. Anthropic's Claude Console organization-credit value has no public balance API and is not shown. The panel selection is browser-local and supports multiple metrics.
+- The AI modes include a compact usage panel. The Selected view automatically follows the Code backend being edited; All exposes the browser-local multi-metric selection. OpenAI Codex 5-hour and 7-day remaining percentages come from `codex app-server` `account/rateLimits/read`; DeepSeek balance comes from `GET /user/balance`; Claude subscription/SDK allowance comes from the latest durable Claude Code `rate_limit_event` carrying utilization. Anthropic's Claude Console organization-credit value has no public balance API and remains an explicit unavailable metric.
 - Chat is the shared non-agent conversation entry. It can target OpenAI, Opus/Anthropic, DeepSeek, or Local from one service/model/effort settings row.
 - Code is the shared workspace-aware CLI entry. Its first setting chooses Codex, Claude Code API, or Claude Code Pro, then shows that backend's compact settings. Codex exposes model, effort, sandbox, work root, and thread controls. Claude Code exposes preset, effort, permission mode, and work root controls.
-- Claude Code API uses the bridge's configured Anthropic or DeepSeek API credentials and may incur usage-based API charges. Claude Code Pro runs the same native Windows Claude Code executable, but the bridge removes API keys, provider base URLs, and Bedrock/Vertex/Foundry overrides from the child process. It therefore requires `claude auth login` with a Claude Pro or Max account and consumes that account's shared Claude/Claude Code subscription allowance. The bridge deliberately does not invent a percentage gauge because Claude Code does not expose a stable machine-readable Pro quota endpoint; inspect usage in Claude or with Claude Code's `/status`.
+- Claude Code API uses the bridge's configured Anthropic or DeepSeek API credentials and may incur usage-based API charges. Claude Code Pro runs the same native Windows Claude Code executable, but the bridge removes API keys, provider base URLs, and Bedrock/Vertex/Foundry overrides from the child process. It therefore requires `claude auth login` with a Claude Pro or Max account. When Claude Code emits a machine-readable `rate_limit_event.utilization`, Mind Atlas journals and shows that reported subscription/SDK allowance; before such an event it honestly shows unavailable. It does not infer a value or merge that allowance with context-window usage.
 - A user request is saved as a child notebook node first. The provider result is saved as a child of that request.
 - Codex, Claude Code, and OpenClaw requests are also written to a local durable run journal before execution. The browser acknowledges a journal entry only after the normal result or error has been stored. On startup, page resume, and a 60-second poll, an unacknowledged result is restored into its still-running request branch. If that branch no longer exists, the request and result are preserved in the AI Partner log with an unread notification. A bridge restart turns an unfinished journal entry into an explicit interrupted result instead of leaving an indefinite running node. Verify this contract with `npm run verify:agent-recovery`.
 - From the root surface, Chat requests are written to the AI Partner log instead of creating notebook nodes. With an active node, Chat creates the same request/result child branch as before.

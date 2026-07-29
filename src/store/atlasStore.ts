@@ -9,6 +9,9 @@ import { isAboutDemoMode } from "../aboutDemo";
 import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme";
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
 import { acknowledgeAgentRuns, getAgentRunInbox, getBridgeUrl, getBridgeUrlCandidates, recoverCodexRun, requestAiResponse, requestGitPush } from "../ai/bridgeClient";
+import { inspectAgentWorkspace, isAgentRuntimeAvailable } from "../agentRuntime/runtimeClient";
+import { materializeEvidence } from "../agentRuntime/evidence";
+import { accountAtlasInjection, type AtlasInjectionAccounting } from "../agentRuntime/contextAccounting";
 import {
   NOTEBOOK_FIRST_SHELL_RADIUS,
   NOTEBOOK_SHELL_GAP,
@@ -66,7 +69,9 @@ import type {
   AiProvider,
   AiRun,
   AiUsage,
+  AgentExecutionMetadata,
   AgentRunInboxItem,
+  AgentWorkspaceBinding,
   AtlasEvent,
   AtlasNodeAction,
   AtlasNode,
@@ -123,6 +128,7 @@ const DEFAULT_CODEX_SETTINGS: CodexSettings = {
   reasoningEffort: "medium",
   sandbox: "workspace-write",
   workspace: "",
+  workspaceMode: "shared",
   webSearch: true,
   skipGitRepoCheck: false,
   timeoutMs: 60 * 60 * 1000,
@@ -144,6 +150,8 @@ const DEFAULT_CLAUDE_SETTINGS: ClaudeSettings = {
   reasoningEffort: "default",
   permissionMode: "default",
   workspace: "",
+  workspaceMode: "shared",
+  browser: false,
   timeoutMs: 60 * 60 * 1000,
   continueMode: "auto",
   resumeSessionId: "",
@@ -234,6 +242,18 @@ interface AtlasStore {
   historyFuture: HistoryEntry[];
   workAreas: WorkArea[];
   aiRuns: Record<string, AiRun>;
+  /** Local-only: client run id whose Agent Run Workspace is open. */
+  agentWorkspaceRunId: string;
+  /** Local-only: durable runtime run explicitly selected in the workspace. */
+  agentWorkspaceSelectedRunId: string;
+  /** Closing the workspace hides it without forgetting the selected run. */
+  agentWorkspaceVisible: boolean;
+  /** Local-only: exactly what Mind Atlas injected into that run. */
+  agentWorkspaceInjection: AtlasInjectionAccounting | null;
+  setAgentWorkspaceRunId: (clientRunId: string) => void;
+  openAgentWorkspaceRun: (runtimeRunId?: string) => void;
+  hideAgentWorkspace: () => void;
+  bindAgentWorkspaceToSelectedNode: (binding: AgentWorkspaceBinding) => void;
   notificationPulses: NotificationPulse[];
   unreadNotifications: Record<string, UnreadNotification>;
   notificationSnoozePrompt: NotificationSnoozePrompt | null;
@@ -366,6 +386,10 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   selected: { kind: "node", id: "atlas-root" },
   selectedNodeId: "atlas-root",
   multiSelectedNodeIds: [],
+  agentWorkspaceRunId: "",
+  agentWorkspaceSelectedRunId: "",
+  agentWorkspaceVisible: false,
+  agentWorkspaceInjection: null,
   aiContextOptions: DEFAULT_AI_CONTEXT_OPTIONS,
   forceNewAgentSession: false,
   chatSettings: DEFAULT_CHAT_SETTINGS,
@@ -453,6 +477,33 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   },
 
   clearMultiSelection: () => set({ multiSelectedNodeIds: [], cameraFocusNodeId: null }),
+  setAgentWorkspaceRunId: (clientRunId) => set({
+    agentWorkspaceRunId: clientRunId,
+    agentWorkspaceSelectedRunId: "",
+    agentWorkspaceVisible: Boolean(clientRunId),
+    ...(clientRunId ? {} : { agentWorkspaceInjection: null }),
+  }),
+  openAgentWorkspaceRun: (runtimeRunId = "") => set((state) => ({
+    agentWorkspaceSelectedRunId: runtimeRunId || state.agentWorkspaceSelectedRunId,
+    agentWorkspaceVisible: true,
+  })),
+  hideAgentWorkspace: () => set({ agentWorkspaceVisible: false }),
+  bindAgentWorkspaceToSelectedNode: (binding) => {
+    set((state) => {
+      const atlasRoot = updateNodeById(state.atlasRoot, state.selectedNodeId, (node) => ({
+        ...node,
+        agentWorkspaceBinding: {
+          gitRoot: binding.gitRoot,
+          repositoryName: binding.repositoryName,
+          repositoryId: binding.repositoryId,
+          boundAt: binding.boundAt || new Date().toISOString(),
+        },
+        updatedAt: new Date().toISOString(),
+      }));
+      persistNotebook(atlasRoot);
+      return { ...pushHistory(state), atlasRoot };
+    });
+  },
 
   requestNewAgentSession: (enabled = true) => {
     set({ forceNewAgentSession: enabled });
@@ -1738,6 +1789,68 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const forceNewSession = state.forceNewAgentSession;
     const session = resolveAgentSessionForRun(state.atlasRoot, sourceNodeId, mode, requestAiDialogSettings, forceNewSession);
     if (forceNewSession) set({ forceNewAgentSession: false });
+    const codexSettingsForRun = mode === "codex" && session
+      ? buildCodexSettingsForRun(requestAiDialogSettings.codexSettings, sourcePath, session)
+      : undefined;
+    const openClawSettingsForRun = mode === "openclaw" && session
+      ? buildOpenClawSettingsForRun(requestAiDialogSettings.openClawSettings, session)
+      : undefined;
+    const claudeSettingsForRun = mode === "claude" && session
+      ? buildClaudeSettingsForRun(requestAiDialogSettings.claudeSettings, sourcePath, session)
+      : undefined;
+    const useAgentRuntime = (mode === "codex" || mode === "claude") && isAgentRuntimeAvailable();
+    const requestedAgentWorkspace = codexSettingsForRun?.workspace ?? claudeSettingsForRun?.workspace ?? "";
+    let agentExecution: AgentExecutionMetadata | undefined;
+
+    if (useAgentRuntime) {
+      if (!requestedAgentWorkspace) {
+        throw new Error(`${modeLabel(mode)} needs an explicit work root before it can run.`);
+      }
+      const inspected = await inspectAgentWorkspace(requestedAgentWorkspace);
+      if (!inspected.available || !inspected.gitRoot) {
+        throw new Error(inspected.detail || "The selected work root is not a Git repository.");
+      }
+      const binding = findInheritedAgentWorkspaceBinding(state.atlasRoot, sourceNodeId);
+      if (!binding) {
+        throw new Error(`Bind this Atlas branch to ${inspected.repositoryName || inspected.gitRoot} before sending the request.`);
+      }
+      const bindingIdentity = binding.repositoryId || normalizeWorkspaceKey(binding.gitRoot);
+      const inspectedIdentity = inspected.repositoryId || normalizeWorkspaceKey(inspected.gitRoot);
+      if (bindingIdentity !== inspectedIdentity) {
+        throw new Error(
+          `Repository mismatch: this Atlas branch is bound to ${binding.repositoryName || binding.gitRoot}, `
+          + `but the work root resolves to ${inspected.repositoryName || inspected.gitRoot}. Rebind explicitly before running.`,
+        );
+      }
+      const workspaceMode = (codexSettingsForRun?.workspaceMode ?? claudeSettingsForRun?.workspaceMode) === "worktree" ? "worktree" : "shared";
+      if (workspaceMode === "worktree" && inspected.dirtyCount > 0 && !inspected.managedMissionWorktree) {
+        throw new Error("Commit or stash source-checkout changes before creating a mission worktree; Git does not copy those changes.");
+      }
+      // A clean source checkout in mission mode creates a new isolated
+      // worktree, so another mission in the same repository may run in
+      // parallel. Shared checkouts and follow-ups inside an existing managed
+      // mission worktree still require one writer at a time.
+      if (workspaceMode === "shared" || inspected.managedMissionWorktree) {
+        const conflict = mode === "codex"
+          ? findActiveCodexRunForWorkspace(get().aiRuns, inspected.gitRoot, runId)
+          : findActiveClaudeRunForWorkspace(get().aiRuns, inspected.gitRoot, runId);
+        if (conflict) {
+          throw new Error(`${modeLabel(mode)} is already running for this execution directory: ${inspected.gitRoot}\nActive run: ${conflict.id}`);
+        }
+      }
+      agentExecution = {
+        clientRunId: runId,
+        requestedWorkspace: requestedAgentWorkspace,
+        sourceWorkspace: inspected.resolvedWorkspace || requestedAgentWorkspace,
+        workspaceMode,
+        gitRoot: inspected.gitRoot,
+        repositoryName: inspected.repositoryName,
+        repositoryId: inspected.repositoryId,
+        gitBranch: inspected.branch,
+        gitHead: inspected.head,
+        recordedAt: new Date().toISOString(),
+      };
+    }
     const requestNode = createAiRequestNode(sourceNodeId, sourceParent.children.length, runId, mode, trimmed, {
       aiDialogSettings: requestAiDialogSettings,
       codexThreadId:
@@ -1752,6 +1865,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       openClawLogPath: inferOpenClawLogPathFromNodePath(sourcePath),
       claudeLogPath: inferClaudeLogPathFromNodePath(sourcePath),
       claudeSessionId: mode === "claude" ? (session?.action === "continue" ? session.resumeId : undefined) : inferClaudeSessionIdFromNodePath(sourcePath),
+      agentExecution,
       usedNodeIds,
     });
 
@@ -1773,6 +1887,18 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       status: "running",
       prompt: trimmed,
       startedAt,
+      workspace: codexSettingsForRun?.workspace ?? openClawSettingsForRun?.workspace ?? claudeSettingsForRun?.workspace,
+      agentRuntimeWorkspaceMode: agentExecution?.workspaceMode,
+      agentRuntimeSourceWorkspace: agentExecution?.sourceWorkspace,
+      agentRuntimeGit: agentExecution
+        ? {
+            gitRoot: agentExecution.gitRoot,
+            repositoryName: agentExecution.repositoryName,
+            repositoryId: agentExecution.repositoryId,
+            branch: agentExecution.gitBranch,
+            head: agentExecution.gitHead,
+          }
+        : null,
     };
     let activeRun = initialRun;
 
@@ -1802,21 +1928,6 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       const plan = buildContextPlan(state.atlasRoot, sourceNodeId, { ...budget, pinnedNodeIds: state.multiSelectedNodeIds });
       const context = buildSlimLegacyContext(state.atlasRoot, sourceNodeId);
       if (!plan || !context) throw new Error("AI context could not be built.");
-      const codexSettingsForRun = mode === "codex" && session ? buildCodexSettingsForRun(requestAiDialogSettings.codexSettings, sourcePath, session) : undefined;
-      const openClawSettingsForRun = mode === "openclaw" && session ? buildOpenClawSettingsForRun(requestAiDialogSettings.openClawSettings, session) : undefined;
-      const claudeSettingsForRun = mode === "claude" && session ? buildClaudeSettingsForRun(requestAiDialogSettings.claudeSettings, sourcePath, session) : undefined;
-      if (mode === "codex" && codexSettingsForRun) {
-        const conflict = findActiveCodexRunForWorkspace(get().aiRuns, codexSettingsForRun.workspace, runId);
-        if (conflict) {
-          throw new Error(`Codex is already running for this work root: ${codexSettingsForRun.workspace || "(default workspace)"}\nActive run: ${conflict.id}`);
-        }
-      }
-      if (mode === "claude" && claudeSettingsForRun) {
-        const conflict = findActiveClaudeRunForWorkspace(get().aiRuns, claudeSettingsForRun.workspace, runId);
-        if (conflict) {
-          throw new Error(`Claude Code is already running for this work root: ${claudeSettingsForRun.workspace || "(default Claude workspace)"}\nActive run: ${conflict.id}`);
-        }
-      }
       activeRun = {
         ...activeRun,
         provider: chatSettingsForRun ? chatProvider(chatSettingsForRun) : activeRun.provider,
@@ -1837,10 +1948,42 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         aiRuns: { ...current.aiRuns, [runId]: activeRun },
       }));
 
+      // Local developer mode routes Codex and Claude Code through the streaming
+      // agent runtime. The result shape is unchanged, so result nodes, the root
+      // AI Partner log, journaling, recovery and ACK all behave as before; the
+      // browser additionally gets a live run to supervise. Hosted mode never
+      // reaches this branch because Code mode is not exposed there.
+      if (useAgentRuntime) {
+        set({
+          agentWorkspaceRunId: runId,
+          agentWorkspaceSelectedRunId: "",
+          agentWorkspaceVisible: true,
+        });
+      }
+      // Image/PDF attachments on the active branch become typed evidence with a
+      // real local path. The bridge decides and reports whether each item was
+      // attached to the model or only referenced by path.
+      const evidence = useAgentRuntime ? await materializeEvidence(state.atlasRoot, sourceNodeId) : [];
+      if (useAgentRuntime) {
+        // Script-aware preflight accounting for the workspace Context tab. It is
+        // labelled an estimate and stays separate from provider-reported usage.
+        set({
+          agentWorkspaceInjection: accountAtlasInjection({
+            contextText: plan.contextText,
+            conversation: plan.conversation,
+            prompt: trimmed,
+            pinnedNodes: state.multiSelectedNodeIds.length,
+            evidenceCount: evidence.length,
+          }),
+        });
+      }
+
       const result = await requestAiResponse({
         prompt: trimmed,
         context,
         contextText: plan.contextText,
+        useAgentRuntime,
+        evidence: evidence.length ? evidence : undefined,
         chatMessages: chatSettingsForRun ? [...plan.conversation, { role: "user", content: trimmed }] : undefined,
         agentPrompt: session ? renderAgentContextPrompt(plan, trimmed) : undefined,
         agentDeltaPrompt: session && session.action !== "new" ? renderAgentDeltaPrompt(state.atlasRoot, sourceNodeId, trimmed) : undefined,
@@ -1873,6 +2016,28 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             }
           : undefined,
       });
+      const completedAgentExecution: AgentExecutionMetadata | undefined = agentExecution
+        ? {
+            ...agentExecution,
+            runtimeRunId: result.agentRuntimeRunId,
+            route: result.agentRuntimeRoute,
+            resolvedWorkspace: result.agentRuntimeWorkspace || agentExecution.resolvedWorkspace,
+            sourceWorkspace: result.agentRuntimeSourceWorkspace || agentExecution.sourceWorkspace,
+            workspaceMode: result.agentRuntimeWorkspaceMode ?? agentExecution.workspaceMode,
+            gitRoot: result.agentRuntimeGit?.gitRoot || agentExecution.gitRoot,
+            repositoryName: result.agentRuntimeGit?.repositoryName || agentExecution.repositoryName,
+            repositoryId: result.agentRuntimeGit?.repositoryId || agentExecution.repositoryId,
+            gitBranch: result.agentRuntimeGit?.branch || agentExecution.gitBranch,
+            gitHead: result.agentRuntimeGit?.head || agentExecution.gitHead,
+            recordedAt: new Date().toISOString(),
+          }
+        : undefined;
+      const completedAiDialogSettings = withResolvedAgentWorkspace(
+        requestNode.aiDialogSettings,
+        mode,
+        result.agentRuntimeWorkspace,
+        result.agentRuntimeWorkspaceMode,
+      );
       notifyLocalOutputTruncated(result.provider === "local" ? "local" : mode, result.usage);
       let responseNodeId = "";
       let generatedAttachmentBlobs: Array<{ attachment: NodeAttachment; blob: Blob }> = [];
@@ -1880,7 +2045,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         const parent = findNode(current.atlasRoot, requestNode.id);
         if (!parent) return current;
         const completedAt = new Date().toISOString();
-        const generatedChildren = result.codexNodes?.length
+        const generatedChildrenBase = result.codexNodes?.length
           ? createCodexGeneratedNodeTrees(
               requestNode.id,
               parent.children.length,
@@ -1893,7 +2058,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
               result.codexLogPath,
               sourcePath.length + 1,
               parent.id,
-              parent.aiDialogSettings,
+              completedAiDialogSettings ?? parent.aiDialogSettings,
               collectNodeIdSet(current.atlasRoot),
             )
           : [
@@ -1907,17 +2072,21 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
                 result.output,
                 result.usage,
                 {
-                  aiDialogSettings: parent.aiDialogSettings,
+                  aiDialogSettings: completedAiDialogSettings ?? parent.aiDialogSettings,
                   codexThreadId: result.codexThreadId ?? parent.codexThreadId,
                   codexLogPath: result.codexLogPath ?? parent.codexLogPath,
                   openClawSessionKey: result.openClawSessionKey ?? parent.openClawSessionKey,
                   openClawLogPath: result.openClawLogPath ?? parent.openClawLogPath,
                   claudeLogPath: result.claudeLogPath ?? parent.claudeLogPath,
                   claudeSessionId: result.claudeSessionId ?? parent.claudeSessionId,
+                  agentExecution: completedAgentExecution,
                   usedNodeIds: collectNodeIdSet(current.atlasRoot),
                 },
               ),
             ];
+        const generatedChildren = generatedChildrenBase.map((child) => (
+          completedAgentExecution ? { ...child, agentExecution: completedAgentExecution } : child
+        ));
         const generatedAttachments = createGeneratedAttachmentRecords(generatedChildren[0]?.id ?? requestNode.id, result.generatedAttachments ?? [], completedAt);
         generatedAttachmentBlobs = generatedAttachments.blobs;
         const children = generatedChildren.map((child, index) =>
@@ -1954,6 +2123,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           openClawLogPath: result.openClawLogPath ?? node.openClawLogPath,
           claudeLogPath: result.claudeLogPath ?? node.claudeLogPath,
           claudeSessionId: result.claudeSessionId ?? node.claudeSessionId,
+          agentExecution: completedAgentExecution ?? node.agentExecution,
           children: [...node.children, ...children],
           }),
         ));
@@ -1987,6 +2157,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
               responseNodeId,
               usage: result.usage,
               workspace: codexSettingsForRun?.workspace ?? openClawSettingsForRun?.workspace ?? claudeSettingsForRun?.workspace,
+              agentRuntimeRunId: result.agentRuntimeRunId,
+              agentRuntimeRoute: result.agentRuntimeRoute,
+              agentRuntimeSourceWorkspace: result.agentRuntimeSourceWorkspace,
+              agentRuntimeWorkspaceMode: result.agentRuntimeWorkspaceMode,
+              agentRuntimeGit: result.agentRuntimeGit,
               codexThreadId: result.codexThreadId,
               codexLogPath: result.codexLogPath,
               openClawSessionKey: result.openClawSessionKey,
@@ -1996,6 +2171,12 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
               sessionInfo: result.sessionInfo ?? session,
             },
           },
+          ...(result.agentRuntimeRunId
+            ? {
+                agentWorkspaceSelectedRunId: result.agentRuntimeRunId,
+                agentWorkspaceVisible: true,
+              }
+            : {}),
         };
       });
       void Promise.all(generatedAttachmentBlobs.map(({ attachment, blob }) => saveStoredAttachmentBlob(attachment, blob))).catch((error) => {
@@ -2795,10 +2976,12 @@ async function initializeNotebookPersistence() {
         notebookPersistenceError: "",
       };
     });
+    releaseNotebookSavesAfterInitialization();
     await useAtlasStore.getState().refreshNotebookSnapshots();
     await useAtlasStore.getState().restoreAttachmentPreviews();
     scheduleMissingTitleMaintenance(MISSING_TITLE_MAINTENANCE_STARTUP_DELAY_MS);
   } catch (error) {
+    discardNotebookSavesAfterInitializationFailure();
     const message = notebookPersistenceErrorMessage("Notebook persistence could not start.", error);
     console.error(message, error);
     useAtlasStore.setState({ notebookPersistenceStatus: "error", notebookPersistenceError: message });
@@ -2826,6 +3009,15 @@ export function findNode(root: AtlasNode, id: string): AtlasNode | undefined {
 export function findInheritedAiDialogSettings(root: AtlasNode, id: string): AiDialogSettings | undefined {
   const path = findNodePath(root, id);
   return path ? findAiDialogSettingsInPath(path) : undefined;
+}
+
+export function findInheritedAgentWorkspaceBinding(root: AtlasNode, id: string): AgentWorkspaceBinding | undefined {
+  const path = findNodePath(root, id);
+  if (!path) return undefined;
+  for (const node of path.slice().reverse()) {
+    if (node.agentWorkspaceBinding?.gitRoot) return node.agentWorkspaceBinding;
+  }
+  return undefined;
 }
 
 export function buildAiNodeContext(root: AtlasNode, selectedNodeId: string, optionsInput: AiContextScope | Partial<AiContextOptions> = "focused"): AiNodeContext | null {
@@ -3055,6 +3247,10 @@ function persistNotebook(root: AtlasNode): Promise<void> {
   }
   queuedNotebookSaveRoot = root;
   scheduleMissingTitleMaintenance();
+  if (!notebookPersistenceInitialized) {
+    notebookSaveRequestedDuringInitialization = true;
+    return waitForNotebookSaveIdle();
+  }
   if (!notebookSaveRunning) {
     notebookSaveRunning = true;
     void flushQueuedNotebookSave();
@@ -3067,8 +3263,32 @@ const MISSING_TITLE_MAINTENANCE_STARTUP_DELAY_MS = 1_200;
 
 let queuedNotebookSaveRoot: AtlasNode | null = null;
 let notebookSaveRunning = false;
+let notebookPersistenceInitialized = false;
+let notebookSaveRequestedDuringInitialization = false;
 let missingTitleMaintenanceTimer: number | null = null;
 let notebookSaveWaiters: Array<() => void> = [];
+
+function releaseNotebookSavesAfterInitialization() {
+  notebookPersistenceInitialized = true;
+  if (!notebookSaveRequestedDuringInitialization) {
+    queuedNotebookSaveRoot = null;
+    resolveNotebookSaveWaiters();
+    return;
+  }
+  notebookSaveRequestedDuringInitialization = false;
+  queuedNotebookSaveRoot = useAtlasStore.getState().atlasRoot;
+  if (!notebookSaveRunning) {
+    notebookSaveRunning = true;
+    void flushQueuedNotebookSave();
+  }
+}
+
+function discardNotebookSavesAfterInitializationFailure() {
+  notebookPersistenceInitialized = true;
+  notebookSaveRequestedDuringInitialization = false;
+  queuedNotebookSaveRoot = null;
+  resolveNotebookSaveWaiters();
+}
 
 async function flushQueuedNotebookSave() {
   try {
@@ -3714,6 +3934,7 @@ function createNotebookNode(
     openClawLogPath?: string;
     claudeLogPath?: string;
     claudeSessionId?: string;
+    agentExecution?: AgentExecutionMetadata;
     usedNodeIds?: Set<string>;
   } = {},
 ): AtlasNode {
@@ -3746,6 +3967,7 @@ function createNotebookNode(
     openClawLogPath: options.openClawLogPath,
     claudeLogPath: options.claudeLogPath,
     claudeSessionId: options.claudeSessionId,
+    agentExecution: options.agentExecution,
     children: [],
   };
 }
@@ -3765,6 +3987,7 @@ function createAiRequestNode(
     openClawLogPath?: string;
     claudeLogPath?: string;
     claudeSessionId?: string;
+    agentExecution?: AgentExecutionMetadata;
     usedNodeIds?: Set<string>;
   } = {},
 ): AtlasNode {
@@ -3800,6 +4023,7 @@ function createAiRequestNode(
     openClawLogPath: options.openClawLogPath,
     claudeLogPath: options.claudeLogPath,
     claudeSessionId: options.claudeSessionId,
+    agentExecution: options.agentExecution,
     position: options.position,
     children: [],
   };
@@ -3823,6 +4047,7 @@ function createAiResponseNode(
     openClawLogPath?: string;
     claudeLogPath?: string;
     claudeSessionId?: string;
+    agentExecution?: AgentExecutionMetadata;
     usedNodeIds?: Set<string>;
   } = {},
 ): AtlasNode {
@@ -3862,6 +4087,7 @@ function createAiResponseNode(
     openClawLogPath: options.openClawLogPath,
     claudeLogPath: options.claudeLogPath,
     claudeSessionId: options.claudeSessionId,
+    agentExecution: options.agentExecution,
     position: options.position,
     children: [],
   };
@@ -4479,6 +4705,34 @@ function createCurrentAiDialogSettings(
   };
 }
 
+function withResolvedAgentWorkspace(
+  settings: AiDialogSettings | undefined,
+  mode: AiExecutionMode,
+  resolvedWorkspace: string | undefined,
+  workspaceMode: "shared" | "worktree" | undefined,
+) {
+  const workspace = resolvedWorkspace?.trim();
+  if (!settings || !workspace || (mode !== "codex" && mode !== "claude")) return settings;
+  if (mode === "codex") {
+    return {
+      ...settings,
+      codexSettings: sanitizeStoredCodexSettings({
+        ...settings.codexSettings,
+        workspace,
+        workspaceMode: workspaceMode === "worktree" ? "worktree" : "shared",
+      }),
+    };
+  }
+  return {
+    ...settings,
+    claudeSettings: sanitizeStoredClaudeSettings({
+      ...settings.claudeSettings,
+      workspace,
+      workspaceMode: workspaceMode === "worktree" ? "worktree" : "shared",
+    }),
+  };
+}
+
 function removeCodexRetryResultChildren(children: AtlasNode[]) {
   return children.filter((child) => !(child.provider === "codex" && child.aiRunId?.startsWith("codex-approval-")));
 }
@@ -4633,6 +4887,7 @@ function normalizeCodexSettings(settings: Partial<CodexSettings>): CodexSettings
     reasoningEffort: normalizeReasoningEffort(settings.reasoningEffort),
     sandbox,
     workspace: (settings.workspace ?? "").trim(),
+    workspaceMode: settings.workspaceMode === "worktree" ? "worktree" : "shared",
     webSearch: true,
     skipGitRepoCheck: false,
     timeoutMs: clampInteger(settings.timeoutMs ?? DEFAULT_CODEX_SETTINGS.timeoutMs, 30_000, 120 * 60_000),
@@ -4674,6 +4929,8 @@ function normalizeClaudeSettings(settings: Partial<ClaudeSettings>): ClaudeSetti
     reasoningEffort: normalizeClaudeReasoningEffort(settings.reasoningEffort),
     permissionMode: normalizeClaudePermissionMode(settings.permissionMode),
     workspace: (settings.workspace ?? "").trim(),
+    workspaceMode: settings.workspaceMode === "worktree" ? "worktree" : "shared",
+    browser: settings.authMode === "subscription" && settings.browser === true,
     timeoutMs: clampInteger(settings.timeoutMs ?? DEFAULT_CLAUDE_SETTINGS.timeoutMs, 30_000, 120 * 60_000),
     continueMode,
     resumeSessionId: continueMode === "new" ? "" : (settings.resumeSessionId ?? "").trim(),

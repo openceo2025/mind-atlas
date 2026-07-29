@@ -705,5 +705,19 @@
   "workspace.mobile": "行動工作區",
   "workspace.operation": "操作",
   "workspace.outline": "大綱",
-  "workspace.panel": "工作區面板"
+  "workspace.panel": "工作區面板",
+  "menu.searchNodes": "搜尋所有節點",
+  "menu.searchNodes.detail": "標題和內文 / Ctrl+F",
+  "search.caseSensitive": "區分大小寫",
+  "search.description": "在所有節點的標題和內文中尋找文字。",
+  "search.field.body": "內文",
+  "search.field.metadata": "中繼資料",
+  "search.field.summary": "摘要",
+  "search.field.tags": "標籤",
+  "search.field.title": "標題",
+  "search.noResults": "沒有相符的節點。",
+  "search.placeholder": "搜尋文字或正規表示式",
+  "search.regex": "正規表示式",
+  "search.resultCount": "{count} 個結果",
+  "search.title": "搜尋所有節點"
 }

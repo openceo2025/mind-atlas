@@ -152,6 +152,7 @@ export type CodexReasoningEffort = ReasoningEffort;
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
 export type CodexContinueMode = "auto" | "new";
+export type AgentWorkspaceMode = "shared" | "worktree";
 
 export type OpenClawThinkingLevel = ReasoningEffort;
 
@@ -164,6 +165,7 @@ export interface CodexSettings {
   reasoningEffort: CodexReasoningEffort;
   sandbox: CodexSandboxMode;
   workspace: string;
+  workspaceMode?: AgentWorkspaceMode;
   webSearch: boolean;
   skipGitRepoCheck: boolean;
   timeoutMs: number;
@@ -195,6 +197,8 @@ export interface ClaudeSettings {
   reasoningEffort: ClaudeReasoningEffort;
   permissionMode: ClaudePermissionMode;
   workspace: string;
+  workspaceMode?: AgentWorkspaceMode;
+  browser?: boolean;
   timeoutMs: number;
   continueMode?: CodexContinueMode;
   resumeSessionId?: string;
@@ -410,6 +414,19 @@ export interface AiRun {
   usage?: AiUsage;
   contextStats?: AiContextStats;
   workspace?: string;
+  agentRuntimeRunId?: string;
+  agentRuntimeRoute?: string;
+  agentRuntimeSourceWorkspace?: string;
+  agentRuntimeWorkspaceMode?: AgentWorkspaceMode;
+  agentRuntimeGit?: {
+    gitRoot?: string;
+    repositoryName?: string;
+    repositoryId?: string;
+    commonGitDir?: string;
+    branch?: string;
+    head?: string;
+    dirtyCount?: number;
+  } | null;
   codexThreadId?: string;
   codexLogPath?: string;
   openClawSessionKey?: string;
@@ -500,8 +517,24 @@ export interface AiResponsePayload {
   agentPrompt?: string;
   agentDeltaPrompt?: string;
   session?: AgentSessionInfo;
+  // Local-only: route Codex / Claude Code through the streaming agent runtime
+  // instead of the batch `codex exec` / `claude -p --output-format json` path.
+  // The response shape is identical either way.
+  useAgentRuntime?: boolean;
+  // Local-only: typed evidence files already written to disk by the bridge.
+  evidence?: AgentEvidenceInput[];
   // Node anchored AI runs must stay limited to the explicit node context.
   // Do not add AI Partner log, voice summary, or other global history here.
+}
+
+export interface AgentEvidenceInput {
+  id: string;
+  kind: string;
+  displayName: string;
+  localPath: string;
+  mimeType: string;
+  size: number;
+  sourceNodeId?: string;
 }
 
 export interface ChatContextMessage {
@@ -550,6 +583,21 @@ export interface AiResponseResult {
   claudeLogPath?: string;
   claudeSessionId?: string;
   sessionInfo?: AgentSessionInfo;
+  /** Local-only: id of the streaming runtime run backing this result. */
+  agentRuntimeRunId?: string;
+  agentRuntimeRoute?: string;
+  agentRuntimeWorkspace?: string;
+  agentRuntimeSourceWorkspace?: string;
+  agentRuntimeWorkspaceMode?: AgentWorkspaceMode;
+  agentRuntimeGit?: {
+    gitRoot?: string;
+    repositoryName?: string;
+    repositoryId?: string;
+    commonGitDir?: string;
+    branch?: string;
+    head?: string;
+    dirtyCount?: number;
+  } | null;
   rawText: string;
   usage?: AiUsage;
 }
@@ -835,12 +883,39 @@ export interface AtlasNode {
   openClawLogPath?: string;
   claudeLogPath?: string;
   claudeSessionId?: string;
+  /** Local-only repository identity inherited down an Atlas branch. */
+  agentWorkspaceBinding?: AgentWorkspaceBinding;
+  /** Local-only immutable execution record for request/result nodes. */
+  agentExecution?: AgentExecutionMetadata;
   usage?: AiUsage;
   action?: AtlasNodeAction;
   aiDialogSettings?: AiDialogSettings;
   reminderAt?: string;
   reminderFiredAt?: string;
   children: AtlasNode[];
+}
+
+export interface AgentWorkspaceBinding {
+  gitRoot: string;
+  repositoryName: string;
+  repositoryId?: string;
+  boundAt: string;
+}
+
+export interface AgentExecutionMetadata {
+  clientRunId: string;
+  runtimeRunId?: string;
+  route?: string;
+  requestedWorkspace: string;
+  resolvedWorkspace?: string;
+  sourceWorkspace?: string;
+  workspaceMode: AgentWorkspaceMode;
+  gitRoot?: string;
+  repositoryName?: string;
+  repositoryId?: string;
+  gitBranch?: string;
+  gitHead?: string;
+  recordedAt: string;
 }
 
 export type Selection =
