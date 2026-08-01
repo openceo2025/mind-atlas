@@ -429,16 +429,16 @@ try {
     }
     // Vite serves the source fallback locally; production follows the checked localized href above.
     await page.goto(`${appUrl}/about.html`, { waitUntil: "domcontentloaded" });
-    await page.getByRole("heading", { name: "Mind Atlas", exact: true }).waitFor();
-    await page.getByRole("heading", { name: "小説を書く", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "ChatGPTで調べたことを、会話のまま埋もれさせない。", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "調べたことを整理する", exact: true }).waitFor();
     if ((await page.locator(".demo-window iframe").count()) !== 3) throw new Error("About page should expose three embedded Mind Atlas examples.");
-    if ((await page.locator(".view-controls button").count()) !== 4) throw new Error("About page should expose four novel view buttons.");
+    if ((await page.locator(".view-controls button").count()) !== 4) throw new Error("About page should expose four research view buttons.");
     await page.getByRole("heading", { name: "使い方を選ぶ" }).waitFor();
     if ((await page.locator(".plan-card").count()) !== 3) throw new Error("About page should expose three plan cards.");
     await page.getByText("テキストのみクラウドへ保存できます").waitFor();
     await page.getByText("推定困難な短い公開リンクで共有できます").waitFor();
-    await page.frameLocator("#novel-frame").locator("canvas").waitFor();
-    const aboutWheelFocusState = await page.frameLocator("#novel-frame").locator("canvas").evaluate(async (canvas) => {
+    await page.frameLocator("#research-frame").locator("canvas").waitFor();
+    const aboutWheelFocusState = await page.frameLocator("#research-frame").locator("canvas").evaluate(async (canvas) => {
       const appShell = document.querySelector(".app-shell");
       const before = appShell?.getAttribute("data-focus-panel") ?? "";
       for (let index = 0; index < 6; index += 1) {
@@ -455,11 +455,11 @@ try {
       throw new Error(`About embedded wheel should not auto-focus nodes: ${JSON.stringify(aboutWheelFocusState)}`);
     }
     await page.getByRole("button", { name: /MindMap/ }).click();
-    await page.frameLocator("#novel-frame").locator(".app-shell.is-about-demo-view-mind-map").waitFor();
+    await page.frameLocator("#research-frame").locator(".app-shell.is-about-demo-view-mind-map").waitFor();
     await page.getByRole("button", { name: /Tree/ }).click();
-    await page.frameLocator("#novel-frame").locator(".app-shell.is-about-demo-view-tree").waitFor();
+    await page.frameLocator("#research-frame").locator(".app-shell.is-about-demo-view-tree").waitFor();
     await page.getByRole("button", { name: /Editor/ }).click();
-    await page.frameLocator("#novel-frame").locator(".outline-editor-shell").waitFor();
+    await page.frameLocator("#research-frame").locator(".outline-editor-shell").waitFor();
     await page.getByRole("heading", { name: /旅行計画を立てる/ }).scrollIntoViewIfNeeded();
     const travelFrame = page.frameLocator('iframe[title="Mind Atlas travel planning example"]');
     await travelFrame.locator("canvas").waitFor();
@@ -574,47 +574,57 @@ async function verifyAboutEmbeddedTouchScroll(browser) {
   try {
     const page = await context.newPage();
     await page.goto(`${appUrl}/about.html`, { waitUntil: "domcontentloaded" });
-    await page.getByRole("heading", { name: "小説を書く", exact: true }).scrollIntoViewIfNeeded();
-    await page.frameLocator("#novel-frame").locator("canvas").waitFor();
+    await page.getByRole("heading", { name: "調べたことを整理する", exact: true }).scrollIntoViewIfNeeded();
+    const researchFrame = page.frameLocator("#research-frame");
+    await researchFrame.locator("canvas").waitFor();
+    const touchLayer = page.locator('.demo-touch-layer[data-frame-id="research-frame"]');
+    await touchLayer.waitFor({ state: "visible" });
+    const nodeLabel = researchFrame.locator('.space-title-preview[data-node-id="about-research-options"]');
+    await nodeLabel.waitFor({ state: "visible" });
+    let nodeBox = await nodeLabel.boundingBox();
+    if (!nodeBox) throw new Error("Could not locate research node through the embedded frame.");
+    const viewportHeight = page.viewportSize()?.height ?? 844;
+    const nodeCenterY = nodeBox.y + nodeBox.height / 2;
+    if (nodeCenterY > viewportHeight - 48 || nodeCenterY < 48) {
+      await page.evaluate((deltaY) => window.scrollBy({ top: deltaY, behavior: "instant" }), nodeCenterY - viewportHeight * 0.68);
+      await page.waitForTimeout(100);
+      nodeBox = await nodeLabel.boundingBox();
+      if (!nodeBox) throw new Error("Research node left the viewport after parent page scrolling.");
+    }
+    await page.mouse.click(nodeBox.x + nodeBox.width / 2, nodeBox.y + nodeBox.height / 2);
+    await researchFrame.locator('.app-shell[data-focus-panel="open"]').waitFor();
+
     const before = await page.evaluate(() => window.scrollY);
-    const pointerState = await page.frameLocator("#novel-frame").locator("canvas").evaluate(async (canvas) => {
-      const dispatch = (type, y) => {
-        const event = new PointerEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          pointerId: 44,
-          pointerType: "touch",
-          isPrimary: true,
-          clientX: 180,
-          clientY: y,
-          screenX: 180,
-          screenY: y,
-        });
-        canvas.dispatchEvent(event);
-        return event.defaultPrevented;
-      };
-      dispatch("pointerdown", 520);
-      const prevented = [];
-      for (const y of [480, 440, 400, 360]) {
-        prevented.push(dispatch("pointermove", y));
-        await new Promise((resolve) => setTimeout(resolve, 24));
-      }
-      dispatch("pointerup", 360);
-      await new Promise((resolve) => setTimeout(resolve, 120));
-      return {
-        appShell: document.querySelector(".app-shell")?.getAttribute("data-about-demo") ?? "",
-        prevented,
-      };
+    const layerBox = await touchLayer.boundingBox();
+    if (!layerBox) throw new Error("Could not locate the parent-owned demo touch layer.");
+    const x = Math.round(layerBox.x + layerBox.width * 0.5);
+    const startY = Math.round(layerBox.y + layerBox.height * 0.72);
+    const client = await context.newCDPSession(page);
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y: startY, id: 91, radiusX: 4, radiusY: 4, force: 1 }],
     });
-    await page.waitForTimeout(180);
+    for (const delta of [38, 78, 118, 158, 198]) {
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x, y: startY - delta, id: 91, radiusX: 4, radiusY: 4, force: 1 }],
+      });
+      await page.waitForTimeout(28);
+    }
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await page.waitForTimeout(220);
     const after = await page.evaluate(() => window.scrollY);
+    const pointerState = await touchLayer.evaluate((layer) => ({
+      touchAction: getComputedStyle(layer).touchAction,
+      pointerEvents: getComputedStyle(layer).pointerEvents,
+    }));
     if (after <= before + 60) {
       throw new Error(`About embedded touch scroll did not move the parent page enough: ${JSON.stringify({ before, after, pointerState })}`);
     }
-    if (!pointerState.prevented.some(Boolean)) {
-      throw new Error(`About embedded touch scroll did not prevent iframe gesture defaults: ${JSON.stringify(pointerState)}`);
+    if (pointerState.touchAction !== "pan-y" || pointerState.pointerEvents === "none") {
+      throw new Error(`About demo touch layer does not delegate vertical gestures to the page: ${JSON.stringify(pointerState)}`);
     }
-    return { before, after, delta: after - before, pointerState };
+    return { before, after, delta: after - before, nodeTapForwarded: true, pointerState };
   } finally {
     await context.close();
   }

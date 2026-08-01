@@ -20,6 +20,12 @@ import { searchAtlasNodes } from "./search/nodeSearch";
 import { createTextOnlyNotebookRoot, textOnlyNotebookSizeBytes } from "./notebookTextOnly";
 import { createNotebookFromTemplate, NOTEBOOK_TEMPLATES, type NotebookTemplateId } from "./notebookTemplates";
 import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
+import {
+  createTutorialPracticeNotebook,
+  getTutorialPracticeOverview,
+  TUTORIAL_PRACTICE_ROOT_ID,
+  TUTORIAL_PRACTICE_TARGET_ID,
+} from "./onboarding/tutorialNotebook";
 import type { OutlineNodeInput } from "./outline/atlasOutline";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
 import { getAtlasLayoutModeLabel, isAtlasLayoutMode, type AtlasLayoutMode } from "./layout/atlasLayout";
@@ -86,7 +92,6 @@ const MOBILE_KEYBOARD_OPEN_THRESHOLD_PX = 150;
 const MOBILE_KEYBOARD_PREPARE_MS = 1200;
 const MOBILE_KEYBOARD_OPEN_SETTLE_MS = 280;
 const MOBILE_KEYBOARD_CLOSING_MS = 320;
-const MOBILE_KEYBOARD_SETTLE_DELAYS_MS = [80, 180, 360, 700, 1100, 1500] as const;
 const MOBILE_KEYBOARD_PROFILE_EVENT = "mind-atlas-mobile-keyboard-profile";
 
 function notebookAnalyticsMetrics(root: AtlasNode) {
@@ -201,6 +206,8 @@ export default function App() {
   const analyticsLastMeaningfulAtRef = useRef(0);
   const analyticsLastUserInputAtRef = useRef(0);
   const analyticsTutorialStartedRef = useRef(false);
+  const tutorialPracticeAppliedRef = useRef("");
+  const tutorialTrackedStepsRef = useRef(new Set<string>());
   const explicitSaveRunningRef = useRef(false);
   const publicServiceMode = isHostedServiceMode();
   useEffect(() => {
@@ -307,7 +314,7 @@ export default function App() {
   const focusPanelOpen = outlineEditorOpen || selectedNodeId !== atlasRoot.id;
   const operationTargets = useMemo(() => getOperationTargets(selectedPath), [selectedPath]);
   const tutorialFallbackChildParentId =
-    showTutorialOperationFallback && selectedNodeId === atlasRoot.id ? atlasRoot.children[0]?.id ?? selectedNodeId : selectedNodeId;
+    showTutorialOperationFallback ? TUTORIAL_PRACTICE_TARGET_ID : selectedNodeId;
   const tutorialFallbackChildParentPath = useMemo(
     () => findNodePath(atlasRoot, tutorialFallbackChildParentId) ?? selectedPath,
     [atlasRoot, selectedPath, tutorialFallbackChildParentId],
@@ -320,10 +327,16 @@ export default function App() {
         shortcut: "Tab",
         icon: <GitBranch size={18} />,
         onClick: () => {
-          const childId = addChildNode(tutorialFallbackChildParentId);
+          const tutorialChildStep = onboarding.tutorialStep === "childNodeCreated";
+          const childId = addChildNode(tutorialFallbackChildParentId, "", { requestEdit: !tutorialChildStep });
           if (childId) {
-            requestBodyEdit(childId);
-            setMobilePanelTab("editor");
+            if (!tutorialChildStep) {
+              requestBodyEdit(childId);
+              setMobilePanelTab("editor");
+            } else if (!tutorialTrackedStepsRef.current.has("add_child")) {
+              tutorialTrackedStepsRef.current.add("add_child");
+              trackProductEvent("tutorial_step_completed", { step: "add_child" });
+            }
             emitOnboardingEvent("child-node-created", { childDepth: tutorialFallbackChildParentPath.length });
           }
         },
@@ -392,6 +405,7 @@ export default function App() {
       operationTargets.nextSiblingId,
       operationTargets.parentId,
       operationTargets.previousSiblingId,
+      onboarding.tutorialStep,
       requestBodyEdit,
       tutorialFallbackChildParentId,
       tutorialFallbackChildParentPath.length,
@@ -652,6 +666,64 @@ export default function App() {
     if (!persistedUiState?.layoutMode) return;
     setLayoutMode(persistedUiState.layoutMode);
   }, [persistedUiState, setLayoutMode]);
+
+  useEffect(() => {
+    if (aboutDemoConfig || notebookPersistenceStatus !== "ready" || !onboarding.shouldInitializePracticeAtlas) return;
+    const applicationKey = `${locale}:${TUTORIAL_PRACTICE_ROOT_ID}`;
+    if (tutorialPracticeAppliedRef.current === applicationKey) return;
+    tutorialPracticeAppliedRef.current = applicationKey;
+
+    const tutorialRoot = createTutorialPracticeNotebook(t);
+    const overview = getTutorialPracticeOverview(tutorialRoot);
+    analyticsIgnoreNextNotebookRef.current = true;
+    importNotebook(tutorialRoot, tutorialRoot.title, {}, {
+      selectedNodeId: TUTORIAL_PRACTICE_ROOT_ID,
+      requestTitleEdit: false,
+    });
+    setLayoutMode("phyllotaxis");
+    setMobilePanelTab("editor");
+    setMobileWorkspacePanelRevealed(false);
+    useAtlasStore.setState((state) => ({
+      titleEditRequestId: null,
+      bodyEditRequestId: null,
+      focusRequest: {
+        ...overview,
+        nonce: (state.focusRequest?.nonce ?? 0) + 1,
+      },
+    }));
+    onboarding.markPracticeAtlasReady();
+  }, [
+    aboutDemoConfig,
+    importNotebook,
+    locale,
+    notebookPersistenceStatus,
+    onboarding.markPracticeAtlasReady,
+    onboarding.shouldInitializePracticeAtlas,
+    setLayoutMode,
+    t,
+  ]);
+
+  useEffect(() => {
+    if (onboarding.tutorialStep !== "selectNode" || selectedNodeId !== TUTORIAL_PRACTICE_TARGET_ID) return;
+    onboarding.markPracticeNodeSelected();
+    setMobilePanelTab("editor");
+    if (!tutorialTrackedStepsRef.current.has("select_node")) {
+      tutorialTrackedStepsRef.current.add("select_node");
+      trackProductEvent("tutorial_step_completed", { step: "select_node" });
+    }
+  }, [onboarding.markPracticeNodeSelected, onboarding.tutorialStep, selectedNodeId]);
+
+  const handleTutorialNodeTextEdited = useCallback(
+    (nodeId: string) => {
+      if (onboarding.tutorialStep !== "editNode" || nodeId !== TUTORIAL_PRACTICE_TARGET_ID) return;
+      onboarding.markPracticeNodeEdited();
+      if (!tutorialTrackedStepsRef.current.has("edit_node")) {
+        tutorialTrackedStepsRef.current.add("edit_node");
+        trackProductEvent("tutorial_step_completed", { step: "edit_node" });
+      }
+    },
+    [onboarding.markPracticeNodeEdited, onboarding.tutorialStep],
+  );
 
   useEffect(() => {
     if (!onboarding.showRootPulse || layoutMode === "phyllotaxis") return;
@@ -1626,6 +1698,9 @@ export default function App() {
     setTutorialStartSpaceDueAt(null);
     setTutorialCompletionStep(null);
     setStartSpaceOpen(false);
+    tutorialPracticeAppliedRef.current = "";
+    tutorialTrackedStepsRef.current.clear();
+    analyticsTutorialStartedRef.current = false;
     onboarding.startTutorialMode();
     setOutlineEditorOpen(false);
     setOutlineEditorRootId(null);
@@ -1910,7 +1985,12 @@ export default function App() {
       />
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
       {onboarding.message ? (
-        <div className="onboarding-message" role="status" aria-live="polite">
+        <div
+          className="onboarding-message tutorial-step-message"
+          data-tutorial-step={onboarding.tutorialStep ?? undefined}
+          role="status"
+          aria-live="polite"
+        >
           {onboarding.message}
         </div>
       ) : null}
@@ -2349,7 +2429,11 @@ export default function App() {
             </div>
           ) : null}
           <div className="mobile-panel-slot mobile-editor-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "editor"}>
-            <FocusPanel theme={theme} attachmentsEnabled={attachmentsEnabled} />
+            <FocusPanel
+              theme={theme}
+              attachmentsEnabled={attachmentsEnabled}
+              onNodeTextEdited={handleTutorialNodeTextEdited}
+            />
           </div>
           {mobileOperationPanelTabAvailable ? (
             <div className="mobile-panel-slot mobile-operation-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "operation"}>
@@ -4029,6 +4113,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
   const keyboardOpeningStartedAtRef = useRef<number | null>(null);
   const keyboardClosingStartedAtRef = useRef<number | null>(null);
   const lastKeyboardBottomOffsetRef = useRef(0);
+  const keyboardSessionBottomOffsetRef = useRef(0);
   const lastKeyboardLayoutSignatureRef = useRef("");
 
   useEffect(() => {
@@ -4087,6 +4172,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
       keyboardClosingStartedAtRef.current = null;
       keyboardOverlayPreparedUntilRef.current = 0;
       lastKeyboardBottomOffsetRef.current = 0;
+      keyboardSessionBottomOffsetRef.current = 0;
       lastKeyboardLayoutSignatureRef.current = layoutSignature;
       setVirtualKeyboardOverlay(false);
       clearKeyboardPanelSizeLock();
@@ -4145,19 +4231,11 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
     };
 
     const scheduleGeometrySettledUpdate = () => {
-      if (keyboardPhaseRef.current === "idle") {
-        scheduleViewportUpdate();
-        return;
-      }
-      if (geometrySettleTimeoutId !== null) window.clearTimeout(geometrySettleTimeoutId);
-      geometrySettleTimeoutId = window.setTimeout(() => {
-        geometrySettleTimeoutId = null;
-        scheduleViewportUpdate();
-      }, 120);
-    };
-
-    const scheduleSettledUpdates = () => {
-      MOBILE_KEYBOARD_SETTLE_DELAYS_MS.forEach((delay) => scheduleViewportUpdate(delay));
+      // Mobile browsers emit several visualViewport values while the keyboard animates.
+      // The keyboard session uses one locked safe area, so these intermediate frames
+      // must not resize the Three.js canvas.
+      if (keyboardPhaseRef.current !== "idle") return;
+      scheduleViewportUpdate();
     };
 
     const getKeyboardOverlayTarget = (target: EventTarget | null) => {
@@ -4186,8 +4264,12 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
       rememberStableHeight();
       lockKeyboardPanelSizeForKeyboardOverlay();
       setVirtualKeyboardOverlay(false);
-      scheduleViewportUpdate();
-      scheduleSettledUpdates();
+      const stableHeight = stableHeightRef.current ?? readKeyboardViewport().stableHeight;
+      if (keyboardSessionBottomOffsetRef.current <= 0) {
+        keyboardSessionBottomOffsetRef.current = getFallbackKeyboardBottomOffset(stableHeight);
+      }
+      applyKeyboardViewportState("opening", stableHeight, keyboardSessionBottomOffsetRef.current);
+      scheduleViewportUpdate(MOBILE_KEYBOARD_OPEN_SETTLE_MS);
     };
 
     const updateViewportHeight = () => {
@@ -4228,18 +4310,10 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
         return;
       }
 
-      const fallbackKeyboardBottomOffset =
-        phase === "opening" || viewport.measuredKeyboardBottomOffset < MOBILE_KEYBOARD_OPEN_THRESHOLD_PX
-          ? getFallbackKeyboardBottomOffset(viewport.stableHeight)
-          : 0;
-      const closingKeyboardBottomOffset =
-        phase === "closing" ? Math.max(viewport.measuredKeyboardBottomOffset, lastKeyboardBottomOffsetRef.current) : 0;
-      let keyboardBottomOffset = Math.max(viewport.measuredKeyboardBottomOffset, fallbackKeyboardBottomOffset, closingKeyboardBottomOffset);
-      if (phase === "open" && previousPhase === "open" && lastKeyboardBottomOffsetRef.current > 0) {
-        const measuredDelta = Math.abs(keyboardBottomOffset - lastKeyboardBottomOffsetRef.current);
-        if (measuredDelta < 64) keyboardBottomOffset = lastKeyboardBottomOffsetRef.current;
+      if (keyboardSessionBottomOffsetRef.current <= 0) {
+        keyboardSessionBottomOffsetRef.current = getFallbackKeyboardBottomOffset(viewport.stableHeight);
       }
-      applyKeyboardViewportState(phase, viewport.stableHeight, keyboardBottomOffset);
+      applyKeyboardViewportState(phase, viewport.stableHeight, keyboardSessionBottomOffsetRef.current);
     };
 
     const updateViewportHeightAfterOrientation = () => {
@@ -4248,6 +4322,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
       keyboardOpeningStartedAtRef.current = null;
       keyboardClosingStartedAtRef.current = null;
       keyboardOverlayPreparedUntilRef.current = 0;
+      keyboardSessionBottomOffsetRef.current = 0;
       applyIdleViewportState(readViewport().visualHeight);
       scheduleViewportUpdate(80);
       scheduleViewportUpdate(360);
@@ -4570,24 +4645,13 @@ function DatasetTitleInput({
 }
 
 function usePreventBrowserViewportGestures(bridgeAboutDemoScroll = false) {
-  const aboutDemoTouchYRef = useRef<number | null>(null);
-  const aboutDemoPointerRef = useRef<{ pointerId: number; y: number } | null>(null);
-
   useEffect(() => {
     const preventDefault = (event: Event) => event.preventDefault();
     const preventViewportTouchMove = (event: TouchEvent) => {
       if (bridgeAboutDemoScroll && shouldBridgeAboutDemoScroll(event.target)) {
-        if (aboutDemoPointerRef.current) {
-          event.preventDefault();
-          return;
-        }
-        const centerY = getTouchCenterY(event.touches);
-        const previousY = aboutDemoTouchYRef.current;
-        if (previousY !== null && centerY !== null) {
-          postAboutDemoParentScroll(previousY - centerY);
-        }
-        aboutDemoTouchYRef.current = centerY;
-        event.preventDefault();
+        // The parent landing page owns mobile vertical gestures through a
+        // transparent touch layer. Do not turn iframe touchmove into a second,
+        // competing scroll implementation.
         return;
       }
       if (shouldAllowNativeTouchScroll(event.target)) return;
@@ -4601,64 +4665,20 @@ function usePreventBrowserViewportGestures(bridgeAboutDemoScroll = false) {
       }
       if (event.ctrlKey) event.preventDefault();
     };
-    const rememberAboutDemoPointerStart = (event: PointerEvent) => {
-      if (!bridgeAboutDemoScroll || !isTouchLikePointer(event) || !shouldBridgeAboutDemoScroll(event.target)) return;
-      aboutDemoPointerRef.current = { pointerId: event.pointerId, y: event.clientY };
-      aboutDemoTouchYRef.current = null;
-    };
-    const bridgeAboutDemoPointerMove = (event: PointerEvent) => {
-      const current = aboutDemoPointerRef.current;
-      if (!bridgeAboutDemoScroll || !current || current.pointerId !== event.pointerId) return;
-      const deltaY = current.y - event.clientY;
-      current.y = event.clientY;
-      postAboutDemoParentScroll(deltaY);
-      if (event.cancelable) event.preventDefault();
-    };
-    const clearAboutDemoPointer = (event: PointerEvent) => {
-      const current = aboutDemoPointerRef.current;
-      if (!current || current.pointerId !== event.pointerId) return;
-      aboutDemoPointerRef.current = null;
-    };
-    const rememberAboutDemoTouchStart = (event: TouchEvent) => {
-      if (!bridgeAboutDemoScroll || !shouldBridgeAboutDemoScroll(event.target)) return;
-      if (aboutDemoPointerRef.current) return;
-      aboutDemoTouchYRef.current = getTouchCenterY(event.touches);
-    };
-    const clearAboutDemoTouch = () => {
-      aboutDemoTouchYRef.current = null;
-    };
 
     document.addEventListener("gesturestart", preventDefault, { passive: false, capture: true });
     document.addEventListener("gesturechange", preventDefault, { passive: false, capture: true });
     document.addEventListener("gestureend", preventDefault, { passive: false, capture: true });
-    document.addEventListener("pointerdown", rememberAboutDemoPointerStart, { passive: true, capture: true });
-    document.addEventListener("pointermove", bridgeAboutDemoPointerMove, { passive: false, capture: true });
-    document.addEventListener("pointerup", clearAboutDemoPointer, { capture: true });
-    document.addEventListener("pointercancel", clearAboutDemoPointer, { capture: true });
-    document.addEventListener("touchstart", rememberAboutDemoTouchStart, { passive: true, capture: true });
     document.addEventListener("touchmove", preventViewportTouchMove, { passive: false, capture: true });
-    document.addEventListener("touchend", clearAboutDemoTouch, { capture: true });
-    document.addEventListener("touchcancel", clearAboutDemoTouch, { capture: true });
     window.addEventListener("wheel", preventCtrlWheelZoom, { passive: false, capture: true });
     return () => {
       document.removeEventListener("gesturestart", preventDefault, { capture: true });
       document.removeEventListener("gesturechange", preventDefault, { capture: true });
       document.removeEventListener("gestureend", preventDefault, { capture: true });
-      document.removeEventListener("pointerdown", rememberAboutDemoPointerStart, { capture: true });
-      document.removeEventListener("pointermove", bridgeAboutDemoPointerMove, { capture: true });
-      document.removeEventListener("pointerup", clearAboutDemoPointer, { capture: true });
-      document.removeEventListener("pointercancel", clearAboutDemoPointer, { capture: true });
-      document.removeEventListener("touchstart", rememberAboutDemoTouchStart, { capture: true });
       document.removeEventListener("touchmove", preventViewportTouchMove, { capture: true });
-      document.removeEventListener("touchend", clearAboutDemoTouch, { capture: true });
-      document.removeEventListener("touchcancel", clearAboutDemoTouch, { capture: true });
       window.removeEventListener("wheel", preventCtrlWheelZoom, { capture: true });
     };
   }, [bridgeAboutDemoScroll]);
-}
-
-function isTouchLikePointer(event: PointerEvent) {
-  return event.pointerType === "touch" || event.pointerType === "pen";
 }
 
 function shouldAllowNativeTouchScroll(target: EventTarget | null) {
@@ -4669,16 +4689,6 @@ function shouldAllowNativeTouchScroll(target: EventTarget | null) {
 function shouldBridgeAboutDemoScroll(target: EventTarget | null) {
   if (!(target instanceof Element)) return true;
   return !target.closest("textarea, input, select, button, a");
-}
-
-function getTouchCenterY(touches: TouchList) {
-  if (!touches.length) return null;
-  let total = 0;
-  for (let index = 0; index < touches.length; index += 1) {
-    const touch = touches.item(index);
-    if (touch) total += touch.clientY;
-  }
-  return total / touches.length;
 }
 
 function postAboutDemoParentScroll(deltaY: number) {

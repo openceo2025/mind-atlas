@@ -34,6 +34,7 @@ import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_BIRTH_U
 import { buildContextCopy, CONTEXT_COPY_PRESETS, copyContextMarkdown, type ContextCopyPreset } from "../context/contextCopy";
 import { nodeTreeHasAttachments, readNodeClipboard, writeNodeClipboard } from "../nodeClipboard";
 import { emitOnboardingEvent, getOnboardingCurrentSpaceStep } from "../onboarding/useOnboarding";
+import { TUTORIAL_PRACTICE_TARGET_ID } from "../onboarding/tutorialNotebook";
 import type { AtlasTheme } from "../theme";
 import { isPersistedCameraPose, persistUiStatePatch, type PersistedCameraPose } from "../uiPersistence";
 import type { AtlasNode, NotificationPulse, NotificationPulseKind } from "../types";
@@ -472,9 +473,10 @@ export function UniverseCanvas({
           if (siblingId) store.requestBodyEdit(siblingId);
         } else {
           const parentPath = findNodePath(store.atlasRoot, shortcutOriginNodeId);
-          const childId = store.addChildNode(shortcutOriginNodeId);
+          const tutorialChildStep = getOnboardingCurrentSpaceStep() === "childNodeCreated";
+          const childId = store.addChildNode(shortcutOriginNodeId, "", { requestEdit: !tutorialChildStep });
           if (childId) {
-            store.requestBodyEdit(childId);
+            if (!tutorialChildStep) store.requestBodyEdit(childId);
             emitOnboardingEvent("child-node-created", { childDepth: parentPath?.length ?? 1 });
           }
         }
@@ -635,7 +637,7 @@ function getNodeKeyboardShortcutOriginId(target: EventTarget | null, spaceEditor
   }
   if (isInteractiveShortcutTarget(target)) return null;
   if (selectedNodeId === store.atlasRoot.id && getOnboardingCurrentSpaceStep() === "childNodeCreated") {
-    return store.atlasRoot.children[0]?.id ?? selectedNodeId;
+    return findNode(store.atlasRoot, TUTORIAL_PRACTICE_TARGET_ID)?.id ?? selectedNodeId;
   }
   return selectedNodeId;
 }

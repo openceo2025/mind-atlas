@@ -1318,52 +1318,42 @@ async function verifyMobileTutorialRootBirth(browser) {
   const page = await context.newPage();
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
-  await page.locator(".onboarding-center-pulse").waitFor();
-  await page.waitForTimeout(420);
+  const targetNode = page.locator('[data-node-id="tutorial-practice-answer"]');
+  await targetNode.waitFor({ state: "visible" });
+  await page.getByText("Tap the pulsing node", { exact: false }).waitFor();
 
   const beforeCount = await readPersistedNodeCount(page);
-  if (beforeCount > 1) {
-    throw new Error(`Fresh mobile tutorial should not start with user nodes: count=${beforeCount}`);
+  if (beforeCount !== 4) {
+    throw new Error(`Fresh mobile tutorial should start with a root and three practice nodes: count=${beforeCount}`);
   }
 
-  const box = await page.locator("canvas").boundingBox();
-  if (!box) throw new Error("Could not locate mobile tutorial canvas.");
-  const x = Math.round(box.x + box.width / 2);
-  const y = Math.round(box.y + box.height / 2);
-  const client = await context.newCDPSession(page);
-  await client.send("Input.dispatchTouchEvent", {
-    type: "touchStart",
-    touchPoints: [{ x, y, id: 1, radiusX: 3, radiusY: 3, force: 1 }],
-  });
-  await page.waitForTimeout(1850);
-  await client.send("Input.dispatchTouchEvent", {
-    type: "touchEnd",
-    touchPoints: [],
-  });
-
-  await page.waitForFunction(
-    () => {
-      const progressRaw = window.localStorage.getItem("mind-atlas-onboarding-v1");
-      const notebookRaw = window.localStorage.getItem("mind-atlas-notebook-v2");
-      if (!progressRaw || !notebookRaw) return false;
-      const progress = JSON.parse(progressRaw);
-      const root = JSON.parse(notebookRaw);
-      return progress.rootNodeCreated === true && (root.children?.length ?? 0) >= 1;
-    },
-    undefined,
-    { timeout: 6000 },
-  );
-  const afterCount = await readPersistedNodeCount(page);
-  if (afterCount <= beforeCount) {
-    throw new Error(`Mobile tutorial touch long press did not create the first node: before=${beforeCount}, after=${afterCount}`);
+  if (await page.locator(".onboarding-center-pulse").count()) {
+    throw new Error("The redesigned tutorial must not show the old empty-space long-press target.");
   }
-  const pulseCount = await page.locator(".onboarding-center-pulse").count();
-  if (pulseCount > 0) {
-    throw new Error("Mobile tutorial root pulse remained after first-node creation.");
+  await targetNode.tap();
+  await page.waitForFunction(() => JSON.parse(window.localStorage.getItem("mind-atlas-onboarding-v1") || "{}").practiceNodeSelected === true);
+  const bodyInput = page.locator('.mobile-editor-slot[aria-hidden="false"] .node-body-input');
+  await bodyInput.waitFor();
+  await bodyInput.fill("I compared the useful parts of the answer.");
+  await page.waitForFunction(() => JSON.parse(window.localStorage.getItem("mind-atlas-onboarding-v1") || "{}").practiceNodeEdited === true);
+  await page.getByText("Add a child with the Tab button", { exact: false }).waitFor();
+  await page.locator(".operation-panel:visible").getByRole("button", { name: /Add child/ }).click();
+  await page.waitForFunction(() => {
+    const progress = JSON.parse(window.localStorage.getItem("mind-atlas-onboarding-v1") || "{}");
+    return progress.version === 2 && progress.childNodeCreated === true && progress.spaceBasicsCompleted === true;
+  });
+  let afterCount = await readPersistedNodeCount(page);
+  const persistenceDeadline = Date.now() + 5_000;
+  while (afterCount !== beforeCount + 1 && Date.now() < persistenceDeadline) {
+    await page.waitForTimeout(100);
+    afterCount = await readPersistedNodeCount(page);
+  }
+  if (afterCount !== beforeCount + 1) {
+    throw new Error(`Mobile tutorial did not add exactly one child node: before=${beforeCount}, after=${afterCount}`);
   }
 
   await context.close();
-  return { beforeCount, afterCount };
+  return { beforeCount, afterCount, steps: ["select_node", "edit_node", "add_child"] };
 }
 
 async function verifyMobileGeneratedLayoutVisibility(browser) {
@@ -2143,7 +2133,7 @@ async function verifyMobileEditorKeyboardOverlay(browser) {
   if (overlayState.panelRect.y < 0 || overlayState.panelRect.y + overlayState.panelRect.height > overlayState.viewportHeight + 1) {
     throw new Error(`Editor keyboard overlay panel escaped the visible viewport: ${JSON.stringify(overlayState)}`);
   }
-  if (overlayState.profileEventCount > 3 || overlayState.shellResizeCount > 3) {
+  if (overlayState.profileEventCount > 1 || overlayState.shellResizeCount > 2) {
     throw new Error(`Editor keyboard overlay produced repeated layout recentering: ${JSON.stringify(overlayState)}`);
   }
   if (overlayState.bodyUserSelect !== "text") {
@@ -2776,15 +2766,18 @@ async function verifyTutorialModeMenuActions(browser) {
     const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
     if (!raw) return false;
     const progress = JSON.parse(raw);
-    return progress.firstRun === true && progress.rootNodeCreated === false && progress.aiUnlocked === false;
+    return progress.version === 2 && progress.firstRun === true && progress.practiceAtlasReady === true && progress.aiUnlocked === false;
   });
   await clickPage.waitForFunction(() => {
     const notebookRaw = window.localStorage.getItem("mind-atlas-notebook-v2");
-    if (!notebookRaw) return true;
+    if (!notebookRaw) return false;
     const root = JSON.parse(notebookRaw);
-    return (root.children?.length ?? 0) === 0;
+    return root.id === "tutorial-practice-root" && (root.children?.length ?? 0) === 3;
   });
-  await clickPage.locator(".onboarding-center-pulse").waitFor();
+  await clickPage.locator('[data-node-id="tutorial-practice-answer"]').waitFor({ state: "visible" });
+  if (await clickPage.locator(".onboarding-center-pulse").count()) {
+    throw new Error("Tutorial mode still rendered the old empty-space long-press target.");
+  }
   const tutorialLayoutMode = await clickPage.evaluate(() => {
     const raw = window.localStorage.getItem("mind-atlas-ui-state-v1");
     return raw ? JSON.parse(raw).layoutMode : null;
@@ -2792,47 +2785,19 @@ async function verifyTutorialModeMenuActions(browser) {
   if (tutorialLayoutMode !== "phyllotaxis") {
     throw new Error(`Tutorial mode should reset tree layout to phyllotaxis, got ${tutorialLayoutMode}`);
   }
-  const canvasBox = await clickPage.locator("canvas").boundingBox();
-  if (!canvasBox) throw new Error("Could not locate tutorial canvas after tree reset.");
-  let tutorialNodeCreated = false;
-  for (const [xRatio, yRatio] of [[0.5, 0.5], [0.58, 0.46], [0.42, 0.54]]) {
-    await clickPage.mouse.move(canvasBox.x + canvasBox.width * xRatio, canvasBox.y + canvasBox.height * yRatio);
-    await clickPage.mouse.down();
-    await clickPage.waitForTimeout(1720);
-    await clickPage.mouse.up();
-    try {
-      await clickPage.waitForFunction(() => {
-        const progressRaw = window.localStorage.getItem("mind-atlas-onboarding-v1");
-        const notebookRaw = window.localStorage.getItem("mind-atlas-notebook-v2");
-        if (!progressRaw || !notebookRaw) return false;
-        const progress = JSON.parse(progressRaw);
-        const root = JSON.parse(notebookRaw);
-        return progress.rootNodeCreated === true && (root.children?.length ?? 0) >= 1;
-      }, undefined, { timeout: 3500 });
-      tutorialNodeCreated = true;
-      break;
-    } catch {
-      // R3F can occasionally drop one synthetic pointer sequence in a long browser suite.
-    }
-  }
-  if (!tutorialNodeCreated) throw new Error("Tutorial root node was not created after three long-press attempts.");
+
+  await clickPage.locator('[data-node-id="tutorial-practice-answer"]').click();
+  await clickPage.waitForFunction(() => JSON.parse(window.localStorage.getItem("mind-atlas-onboarding-v1") || "{}").practiceNodeSelected === true);
+  const tutorialBodyInput = clickPage.locator(".node-body-input:visible");
+  await tutorialBodyInput.fill("Edited during tutorial verification.");
+  await clickPage.waitForFunction(() => JSON.parse(window.localStorage.getItem("mind-atlas-onboarding-v1") || "{}").practiceNodeEdited === true);
   const completionStartedAt = Date.now();
-  for (const detail of [
-    { type: "pan" },
-    { type: "zoom" },
-    { type: "node-drag" },
-    { type: "child-node-created", childDepth: 2 },
-  ]) {
-    await clickPage.evaluate((eventDetail) => {
-      window.dispatchEvent(new CustomEvent("mindatlas:onboarding-event", { detail: eventDetail }));
-    }, detail);
-    await clickPage.waitForTimeout(120);
-  }
+  await clickPage.locator(".operation-panel:visible").getByRole("button", { name: /Add child/ }).click();
   await clickPage.waitForFunction(() => {
     const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
     if (!raw) return false;
     const progress = JSON.parse(raw);
-    return progress.childNodeCreated === true && progress.spaceBasicsCompleted === true;
+    return progress.version === 2 && progress.childNodeCreated === true && progress.spaceBasicsCompleted === true;
   });
   const tutorialCompleteDialog = clickPage.getByRole("alertdialog", { name: "Tutorial complete" });
   const tutorialNextDialog = clickPage.getByRole("alertdialog", { name: "How would you like to begin?" });

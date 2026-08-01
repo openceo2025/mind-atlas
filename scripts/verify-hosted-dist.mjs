@@ -54,9 +54,9 @@ for (const locale of ["en", "ja"]) {
     assert.ok(html.includes('property="og:image" content="https://mind-atlas.org/og-image.png"'), `localized page is missing Open Graph metadata: ${locale}/${page}.html`);
   }
 }
-assert.ok(fs.readFileSync(path.join(distDir, "en", "about.html"), "utf8").includes("Write a novel"), "English introduction copy is missing");
-assert.ok(fs.readFileSync(path.join(distDir, "ja", "about.html"), "utf8").includes("小説を書く"), "Japanese introduction copy is missing");
-assert.ok(fs.readFileSync(path.join(distDir, "es", "about.html"), "utf8").includes("aboutDemo=novel&amp;aboutView=atlas&amp;locale=es"), "Spanish introduction does not pass its locale to the embedded demo");
+assert.ok(fs.readFileSync(path.join(distDir, "en", "about.html"), "utf8").includes("Don't let what you found with ChatGPT get buried in the conversation."), "English introduction value proposition is missing");
+assert.ok(fs.readFileSync(path.join(distDir, "ja", "about.html"), "utf8").includes("ChatGPTで調べたことを、会話のまま埋もれさせない。"), "Japanese introduction value proposition is missing");
+assert.ok(fs.readFileSync(path.join(distDir, "es", "about.html"), "utf8").includes("aboutDemo=research&amp;aboutView=atlas&amp;locale=es"), "Spanish introduction does not pass its locale to the embedded demo");
 assert.ok(fs.readFileSync(path.join(distDir, "ar", "about.html"), "utf8").includes("aboutDemo=app&amp;aboutView=atlas&amp;locale=ar"), "Arabic introduction does not pass its locale to the embedded demo");
 
 console.log("Hosted public dist verification passed");

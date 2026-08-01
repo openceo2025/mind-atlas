@@ -212,6 +212,22 @@ button {
   animation: onboarding-message-in 480ms ease both;
 }
 
+.tutorial-step-message {
+  top: calc(70px + env(safe-area-inset-top));
+  bottom: auto;
+  width: min(430px, calc(100vw - 28px));
+  padding: 12px 16px;
+  border: 1px solid rgba(216, 245, 109, 0.36);
+  border-radius: 8px;
+  background: rgba(7, 16, 13, 0.88);
+  color: rgba(248, 252, 238, 0.94);
+  font-size: 15px;
+  line-height: 1.45;
+  text-shadow: none;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(14px);
+}
+
 @keyframes onboarding-pulse {
   0%,
   100% {
@@ -4544,6 +4560,13 @@ button:disabled,
   text-shadow: 0 1px 10px rgba(255, 255, 255, 0.9);
 }
 
+.app-shell[data-theme="light"] .tutorial-step-message {
+  border-color: rgba(55, 91, 42, 0.26);
+  background: rgba(250, 252, 245, 0.92);
+  color: #213024;
+  text-shadow: none;
+}
+
 .app-shell[data-theme="light"] .dataset-title-input {
   color: #15243a;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
@@ -6246,10 +6269,8 @@ button:disabled,
     height: var(--keyboard-panel-effective-height);
     max-height: var(--keyboard-panel-available-height);
     pointer-events: none;
-    transition:
-      opacity 620ms cubic-bezier(0.22, 1, 0.36, 1),
-      transform 620ms cubic-bezier(0.22, 1, 0.36, 1);
-    animation: mobile-panel-rise-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    transition: none;
+    animation: none;
   }
 
   :root[data-keyboard-overlay-input="true"] .mobile-workspace-panel.is-single-editor {

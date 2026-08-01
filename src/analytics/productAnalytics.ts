@@ -6,6 +6,7 @@ export type ProductEventName =
   | "about_demo_interacted"
   | "app_opened"
   | "tutorial_started"
+  | "tutorial_step_completed"
   | "tutorial_completed"
   | "tutorial_skipped"
   | "template_selected"

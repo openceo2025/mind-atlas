@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "sourceLocale": "en",
   "targetLocale": "fr",
-  "sourceCatalogHash": "b20b65b736619347f8e3f074122153c5e9dd603ecb4293c40de4c47af866e0e1",
+  "sourceCatalogHash": "780ef0afcc7c3bafd9eacfcf640e3459167500a8add98141d28540be98ef14fb",
   "glossaryVersion": 1,
   "instructions": [
     "Edit only translation values.",
@@ -12,10 +12,60 @@
     "Return valid UTF-8 JSON without markdown fences."
   ],
   "messages": {
+    "analytics.consent.accept": {
+      "source": "Allow analytics",
+      "sourceHash": "d14a82812b9737f761415bdcab6eaf075edaea51a0a30e833b123b0b53c83024",
+      "translation": "Autoriser l’analyse"
+    },
+    "analytics.consent.decline": {
+      "source": "No thanks",
+      "sourceHash": "ff479575e2c6679c7fca8cde50c8a996fc821302e9049849939f236a8ceabf66",
+      "translation": "Non merci"
+    },
+    "analytics.consent.label": {
+      "source": "Analytics preference",
+      "sourceHash": "11ff3577d0071c7debd14387588eebb7051068c46c752a0be1298d0df688b4f8",
+      "translation": "Préférence d’analyse"
+    },
+    "analytics.consent.message": {
+      "source": "Help improve Mind Atlas with privacy-preserving anonymous usage analytics. Notebook text, AI prompts, email addresses, and IP addresses are not stored in product analytics.",
+      "sourceHash": "19387c1d46777774272f9a0494d45523aeee8f4a7a2266ed9bf9442b667c28a1",
+      "translation": "Aidez à améliorer Mind Atlas grâce à des statistiques d’utilisation anonymes et respectueuses de la vie privée. Les textes, prompts IA, e-mails et adresses IP ne sont pas stockés dans l’analyse produit."
+    },
+    "analytics.consent.privacy": {
+      "source": "Privacy policy",
+      "sourceHash": "2020c2b7e713ecaf91131a83ecf1d3ff28b725a28278c9f2ce5b485be17bef67",
+      "translation": "Politique de confidentialité"
+    },
     "app.aiFeatures": {
       "source": "AI features",
       "sourceHash": "01e2609eb960da96285b2b1eadae51632548159a4c042a104f76069ff9505d51",
       "translation": "Fonctions d’IA"
+    },
+    "app.cloudAccountDescription": {
+      "source": "Sign in with Google to save your Mind Atlas data to the cloud and create public share links. Google sign-in alone never starts a paid subscription.",
+      "sourceHash": "b5baf121553a582160fe73ddfcb38f060916ad4f35e510cdca2ec5798565de72",
+      "translation": "Connectez-vous avec Google pour enregistrer vos données Mind Atlas dans le cloud et créer des liens de partage publics. La connexion Google seule ne déclenche jamais un abonnement payant."
+    },
+    "app.cloudAccountFeatures": {
+      "source": "Cloud save & sharing",
+      "sourceHash": "def066c22f292ddee39cf8c4099687a443692090371c7b4de50215af40b65e23",
+      "translation": "Enregistrement et partage cloud"
+    },
+    "app.cloudAccountStatus": {
+      "source": "Sign in with Google to use cloud saves and share links.",
+      "sourceHash": "e61e88b81c101a139fda579d7587e44c48d36a23751ce6a2d7366e291e2a9560",
+      "translation": "Connectez-vous avec Google pour enregistrer dans le cloud et créer des liens de partage."
+    },
+    "app.cloudSaveFeature": {
+      "source": "Save data to the cloud",
+      "sourceHash": "bbe26f7a573f454ddb3b4225e2365d2e32fced33587f6fb0140f4b748076ba1a",
+      "translation": "Enregistrer les données dans le cloud"
+    },
+    "app.cloudSaveFeatureDetail": {
+      "source": "Continue from another device with the same Google account.",
+      "sourceHash": "9d13675903f75b2f90293c45a8b635fd052526ba53d4468f7967d655d0061b00",
+      "translation": "Continuez sur un autre appareil avec le même compte Google."
     },
     "app.openMenu": {
       "source": "Open atlas menu",
@@ -32,10 +82,65 @@
       "sourceHash": "0f16e57c4940c6d0f5356fcc272f7717ae398683cda9cd7a2b1faa0a0bc28582",
       "translation": "Partager l’image de l’atlas"
     },
+    "app.shareLinkFeature": {
+      "source": "Create share links",
+      "sourceHash": "6749fa3069ac4f22939230e4da79d098a5d8383ca512678b0094b46730007044",
+      "translation": "Créer des liens de partage"
+    },
+    "app.shareLinkFeatureDetail": {
+      "source": "Anyone with the link can view the shared Mind Atlas.",
+      "sourceHash": "afd1ad153d677df82e02665abcf41df6444c340c4065149280043bb75a099f19",
+      "translation": "Toute personne disposant du lien peut consulter le Mind Atlas partagé."
+    },
     "app.tutorial.skip": {
       "source": "Skip tutorial",
       "sourceHash": "32af200d1d13e8dd5fc8e04ae820a98b602f3fbd2656680f5bd54ae209b0935a",
       "translation": "Passer le tutoriel"
+    },
+    "cloud.currentSummary": {
+      "source": "Open now: {name}",
+      "sourceHash": "96e802ef2b923c6c7125da334d88dc0e88bd639138081f503501cbe646e0ba90",
+      "translation": "Fichier ouvert : {name}"
+    },
+    "cloud.discardAndOpen": {
+      "source": "Discard and open",
+      "sourceHash": "e92c0c14857a5fb28c24c1f550734d96c4783c1c042e1367545981fddd2ef0ed",
+      "translation": "Ignorer et ouvrir"
+    },
+    "cloud.files": {
+      "source": "Cloud files",
+      "sourceHash": "0419a9f33c34aa6f3b6739d9d1741650566c329d010a02f5e41d1eced1840b77",
+      "translation": "Fichiers cloud"
+    },
+    "cloud.openNow": {
+      "source": "Open now",
+      "sourceHash": "de4f4b82e130e6176c964a7d5ee6a1515109596b9cd1837c1f159277811d2ad6",
+      "translation": "Ouvert maintenant"
+    },
+    "cloud.overwriteCurrentOnly": {
+      "source": "Only the currently open cloud file can be overwritten.",
+      "sourceHash": "3ccf9010a7740c9320447f8a92e1475d3719cc38616cf8a4f7b6d730fdac22d2",
+      "translation": "Seul le fichier cloud actuellement ouvert peut être écrasé."
+    },
+    "cloud.saveAndOpen": {
+      "source": "Save and open",
+      "sourceHash": "4553e946ae6e0a1fb38520907e80cef965a72d31d505dbc85bdf13754241cfae",
+      "translation": "Enregistrer et ouvrir"
+    },
+    "cloud.unsaved": {
+      "source": "Unsaved changes",
+      "sourceHash": "845632ba0e82512c909c9cd0d73bfec5d0b290b1d3abea5c2297e0b0aee6323f",
+      "translation": "Modifications non enregistrées"
+    },
+    "cloud.unsavedSwitchBody": {
+      "source": "\"{current}\" has unsaved changes. Opening \"{next}\" will replace the current workspace.",
+      "sourceHash": "4ac358c0574b0e4c0560a1852e1948fcb73e5b8a12010f3dd257ce40a0e75c85",
+      "translation": "« {current} » contient des modifications non enregistrées. Ouvrir « {next} » remplacera l’espace de travail actuel."
+    },
+    "cloud.unsavedSwitchTitle": {
+      "source": "Save changes before opening another cloud file?",
+      "sourceHash": "48fe370656515e00d908a253385e05b33c2cdc3b548fcba4ca0e049e3401bed2",
+      "translation": "Enregistrer les modifications avant d’ouvrir un autre fichier cloud ?"
     },
     "common.auto": {
       "source": "Use device language",
@@ -66,6 +171,11 @@
       "source": "Off",
       "sourceHash": "c28594288f43c97c76a8a96a75020f26b41701355d7d8028a74eb8e39688e99c",
       "translation": "Désactivé"
+    },
+    "common.ok": {
+      "source": "OK",
+      "sourceHash": "5791a4122cbdafa9f86de429262605328421de376b087b67928c692e6c1ea24e",
+      "translation": "OK"
     },
     "common.on": {
       "source": "On",
@@ -140,7 +250,7 @@
     "dynamic.collapsedDescendants": {
       "source": " / {count, plural, one {# descendant hidden} other {# descendants hidden}}",
       "sourceHash": "ed853a1987fa9f860a1397febeaaccf3d67d41a8cbca219b4330019c549eaedd",
-      "translation": " / {count, plural, one {# descendant masqué} other {# descendants masqués}}"
+      "translation": "/ {count, plural, one {# descendant masqué} other {# descendants masqués}}"
     },
     "dynamic.contextCopyStats": {
       "source": "{tokens} tokens / {nodes, plural, one {# node} other {# nodes}}{truncated}",
@@ -170,7 +280,7 @@
     "dynamic.contextTruncated": {
       "source": " / truncated",
       "sourceHash": "a5d4fd66cb20c56d55c31a58406cab18a464b0c450a5ff1a71a70446eeb4183f",
-      "translation": " / tronqué"
+      "translation": "/ tronqué"
     },
     "dynamic.decrease": {
       "source": "Decrease {label}",
@@ -245,7 +355,7 @@
     "dynamic.summarized": {
       "source": " ({count} summarized)",
       "sourceHash": "171b8f560373871b73e02589edb23cd5b16341a5b0c78c627546aac9b4a4cb94",
-      "translation": " ({count} résumé(s))"
+      "translation": "({count} résumé(s))"
     },
     "dynamic.tokenEstimateShort": {
       "source": "~{count} tok",
@@ -440,7 +550,7 @@
     "label.history.durable": {
       "source": " / durable",
       "sourceHash": "c1580fd8d0fc2f42205d20d20e7baa49c3f158ad086b14e91f005430b15bd36e",
-      "translation": " / durable"
+      "translation": "/ durable"
     },
     "label.history.loading": {
       "source": "Loading snapshots",
@@ -471,6 +581,11 @@
       "source": "{count, plural, one {# snapshot} other {# snapshots}}{durable, select, yes { / durable} other {}}",
       "sourceHash": "08eea63ffc89d639d8bf8854a862efe6726ea6474f14a66a2bb4440fae49e6b2",
       "translation": "{count, plural, one {# instantané} other {# instantanés}}{durable, select, yes { / durable} other {}}"
+    },
+    "label.layout.calendar": {
+      "source": "Calendar",
+      "sourceHash": "d9f098e9a33c6965f6e53c3cfff83eb0dd0cb9c0d86969d10332c1679c0598d7",
+      "translation": "Calendrier"
     },
     "label.layout.mindAtlas": {
       "source": "Mind Atlas",
@@ -521,6 +636,16 @@
       "source": "Claude Code",
       "sourceHash": "93d3b41b038c5825f936143ed570f99d44f57e0d707b6dc541afe89eebb215e2",
       "translation": "Claude Code"
+    },
+    "label.mode.claudeCodeApi": {
+      "source": "Claude Code API",
+      "sourceHash": "142879c4d6e9022201e7ea5e1694d24b10c3dcc098ba70b724ad7378d991ed05",
+      "translation": "Claude Code API"
+    },
+    "label.mode.claudeCodePro": {
+      "source": "Claude Code Pro",
+      "sourceHash": "8c8f5766478ca9e14333430377e92c886c00a7adf08263784a90872b11caf58b",
+      "translation": "Claude Code Pro"
     },
     "label.mode.codex": {
       "source": "Codex",
@@ -917,6 +1042,16 @@
       "sourceHash": "21271f70ba841f105dc1c72e849d26af3443432ad0eec88038614b6c390ccae2",
       "translation": "Restaurer depuis l’historique"
     },
+    "menu.searchNodes": {
+      "source": "Search all nodes",
+      "sourceHash": "ecd0af6ac1b88b723cf509d9fc06d06dbd9d6d7cdb55fc9ea92bff2b1bcb41bb",
+      "translation": "Rechercher dans tous les nœuds"
+    },
+    "menu.searchNodes.detail": {
+      "source": "Titles and body text / Ctrl+F",
+      "sourceHash": "bc52dcd269033c6e42ed69f66fb06a0c47486e1c928a78a2eda11274fd65e556",
+      "translation": "Titres et contenu / Ctrl+F"
+    },
     "menu.source": {
       "source": "Source code & legal",
       "sourceHash": "35c6558c0e74bca871010583cb5ef90a2eae67ad33093729183127ae52b2cabf",
@@ -976,6 +1111,61 @@
       "source": "Congratulations. You have mastered the basic Mind Atlas controls.",
       "sourceHash": "d86e55d38073893ee55cf00d2e3f7d404aeb24e2ac9102a1c4ffca3491deb8b1",
       "translation": "Félicitations. Vous maîtrisez les commandes de base de Mind Atlas."
+    },
+    "onboarding.practice.actionBody": {
+      "source": "Turn what you learned into one concrete next step.",
+      "sourceHash": "bb344386549001db5b7c9dacffd24ebfb8aa26734b9e908a92aee3bf0ea9c7ff",
+      "translation": "Transformez ce que vous avez appris en une prochaine étape concrète."
+    },
+    "onboarding.practice.actionTitle": {
+      "source": "Next action",
+      "sourceHash": "e6310d44d5d703417411d6a4a8d3a21cecbf1381cafda6f0648fb4d4ce5c0d82",
+      "translation": "Prochaine action"
+    },
+    "onboarding.practice.addChild": {
+      "source": "3 of 3 · Add a child with the Tab button.",
+      "sourceHash": "f8dc637a2d2a3b646330208b5d21278a0b7051161aeb221c018e88a69bb2faa9",
+      "translation": "3 sur 3 · Ajoutez un nœud enfant avec le bouton Tab."
+    },
+    "onboarding.practice.answerBody": {
+      "source": "Keep the useful part of the answer here.",
+      "sourceHash": "f03c61b4f9d60dbafd4220ac3c3a024fec9795515e57ce91957ac63beb776df2",
+      "translation": "Conservez ici la partie utile de la réponse."
+    },
+    "onboarding.practice.answerTitle": {
+      "source": "AI answer",
+      "sourceHash": "c1cc3fa2f48780752a68c15d760f35e268560b3e07fa92404eaf36595ba82757",
+      "translation": "Réponse de l’IA"
+    },
+    "onboarding.practice.atlasBody": {
+      "source": "Keep answers, your own thinking, and the next action in one view.",
+      "sourceHash": "dbe5fc93b54de3d46bea667c9c433443a5cb72abed1f074d36d722ba93b08682",
+      "translation": "Regroupez les réponses, vos propres réflexions et la prochaine action dans une seule vue."
+    },
+    "onboarding.practice.atlasTitle": {
+      "source": "What I learned with AI",
+      "sourceHash": "29f5f196b0440f837e94600a42626eca6076508a2fa8edeb5baa5c28e4f337fd",
+      "translation": "Ce que j’ai appris avec l’IA"
+    },
+    "onboarding.practice.editNode": {
+      "source": "2 of 3 · Change its title or body in the Editor.",
+      "sourceHash": "5c9f3bce5513782776fead503bff6383a3187e42928f1d52bc326da86ee10b25",
+      "translation": "2 sur 3 · Modifiez son titre ou son texte dans l’Editor."
+    },
+    "onboarding.practice.selectNode": {
+      "source": "1 of 3 · Tap the pulsing node.",
+      "sourceHash": "53be614617c9a0597c78dd51dc64ee62e318da822f02e41e9a1264ddf4e4868c",
+      "translation": "1 sur 3 · Touchez le nœud qui pulse."
+    },
+    "onboarding.practice.thoughtBody": {
+      "source": "Write what you think, not just what the AI said.",
+      "sourceHash": "a1473cf736f4c3eb4552dd929aeb83a9c8b0c500d3b6ad37ae01966b0c538e55",
+      "translation": "Écrivez ce que vous pensez, pas seulement ce que l’IA a dit."
+    },
+    "onboarding.practice.thoughtTitle": {
+      "source": "My notes",
+      "sourceHash": "5bda8ac7042f89d4bb255cb26a220adb4086c55378c93b6efc5af6ce48d410e1",
+      "translation": "Mes notes"
     },
     "onboarding.root.answer": {
       "source": "Press and hold the space to create your first node.",
@@ -1077,40 +1267,45 @@
       "sourceHash": "a9059c50f22b7800e0723b4ad69ad3dd1af49590d70b9208310e6549cd47a760",
       "translation": "Essayer Mind Atlas"
     },
-    "page.about.hero": {
-      "source": "Mind Atlas",
-      "sourceHash": "030d6b66704c3f0a506d2ff60c670b21f1dab86452856f277da7ee899ac38e36",
-      "translation": "Mind Atlas"
+    "page.about.hero.cta": {
+      "source": "Organize it now",
+      "sourceHash": "c1538c69160d92ecdc798e1c8723798f9f7a72def3072f6af8f89bb4ff3b7a28",
+      "translation": "Organiser maintenant"
+    },
+    "page.about.hero.detail": {
+      "source": "Connect AI answers, your notes, decisions, and next actions as nodes, then see them together in one view.",
+      "sourceHash": "79b43541dbea77eac5800d51d3f7cc90650b374ccb6d528dc16a93c63438875a",
+      "translation": "Reliez les réponses de l’IA, vos notes, vos décisions et vos prochaines actions sous forme de nœuds, puis visualisez-les ensemble."
+    },
+    "page.about.hero.flow.action": {
+      "source": "Next actions",
+      "sourceHash": "f058425acba873facacc0b56932a7c56f02c1cf66702aa8b41e5e715abb92e18",
+      "translation": "Prochaines actions"
+    },
+    "page.about.hero.flow.answer": {
+      "source": "AI answers",
+      "sourceHash": "90e3ad4c3470f9bfe9c6170ce37f1f446488cec14d5aa6fa9153689a829dcc7e",
+      "translation": "Réponses de l’IA"
+    },
+    "page.about.hero.flow.notes": {
+      "source": "My notes",
+      "sourceHash": "e9b1ed415dfdb5966fed5d024ad587b7991444c1dfadf51e25ef895b499d33fb",
+      "translation": "Mes notes"
+    },
+    "page.about.hero.kicker": {
+      "source": "Take your thinking out of the chat",
+      "sourceHash": "84baae24e06a2c5e8415ba89ab716ef65b521b3c18fbb550be9f4808324f7b62",
+      "translation": "Sortez vos idées de la conversation"
+    },
+    "page.about.hero.title": {
+      "source": "Don't let what you found with ChatGPT get buried in the conversation.",
+      "sourceHash": "b6f10d7c48b8595dab255b232912ec53a35029a69cee04bee7f2fa470ecf3b9c",
+      "translation": "Ne laissez pas ce que vous avez trouvé avec ChatGPT se perdre dans la conversation."
     },
     "page.about.metaDescription": {
-      "source": "Explore interactive Mind Atlas examples for novel writing, trip planning, and app development.",
-      "sourceHash": "82fb840e17295be54f631682749ff99716997082d94daaca750c11863cca11c7",
-      "translation": "Découvrez des exemples interactifs de Mind Atlas pour écrire un roman, planifier un voyage et développer une application."
-    },
-    "page.about.novel.title": {
-      "source": "Write a novel",
-      "sourceHash": "61476e1d72743b7172bfc7396286e05a8ad3edc4941d29da4bbec0f2affcacde",
-      "translation": "Écrire un roman"
-    },
-    "page.about.novel.view.atlas": {
-      "source": "Mind Atlas",
-      "sourceHash": "554688493be285ce67b1e207dbf0f4615ab83332ed7c0c9cb55bc1437ef4cf53",
-      "translation": "Mind Atlas"
-    },
-    "page.about.novel.view.editor": {
-      "source": "Editor",
-      "sourceHash": "2e4dfaf09dd8a0d6513de5531d4478ff17a741e4e88c0e8360d2c51407f939ae",
-      "translation": "Éditeur"
-    },
-    "page.about.novel.view.mindmap": {
-      "source": "Mind map",
-      "sourceHash": "b0a6ef83fde40f379f74a60cb5bc9e16ea1059ff4b42702842726bb847890ffa",
-      "translation": "Carte mentale"
-    },
-    "page.about.novel.view.tree": {
-      "source": "Tree",
-      "sourceHash": "187d9824393d7cf49bc837c183e9f3b9357de5dfaf8f263895ee4141a0e055ac",
-      "translation": "Arbre"
+      "source": "Explore Mind Atlas by organizing AI answers, your notes, decisions, and next actions in one view.",
+      "sourceHash": "4993c72f58940811ea950a67bebac2a66a53aecab3f4b33d3d85e806f2dda501",
+      "translation": "Explorez Mind Atlas en organisant les réponses de l’IA, vos notes, vos décisions et vos prochaines actions dans une seule vue."
     },
     "page.about.plans.anonymous.item1": {
       "source": "Use the core features directly in your browser",
@@ -1196,6 +1391,31 @@
       "source": "Choose how you use it",
       "sourceHash": "c331b81fd389a7b2945d4406e013fe69362c5869ed2a065edcac47d752b3fffb",
       "translation": "Choisissez votre façon de l’utiliser"
+    },
+    "page.about.research.title": {
+      "source": "Organize what you found",
+      "sourceHash": "cb22765a82b5abbf94b16cf988e695cf95347a7af59e69c180222aaf185239f0",
+      "translation": "Organisez ce que vous avez trouvé"
+    },
+    "page.about.research.view.atlas": {
+      "source": "Mind Atlas",
+      "sourceHash": "e6033b7bbf506551aea7138692854b69233620486ec8354d146420732de75829",
+      "translation": "Mind Atlas"
+    },
+    "page.about.research.view.editor": {
+      "source": "Editor",
+      "sourceHash": "7383c795b8466ff5bb9e9e151c1f57d4c7a8ab2bea77d1e731a8d761e50ac074",
+      "translation": "Éditeur"
+    },
+    "page.about.research.view.mindmap": {
+      "source": "Mind map",
+      "sourceHash": "c717d8771a0796cf609d8c0bebff2b058b7c1ec359c7e4584ba79c540d4d5cb0",
+      "translation": "Carte mentale"
+    },
+    "page.about.research.view.tree": {
+      "source": "Tree",
+      "sourceHash": "efa051cb6a5d9bbf4fe71634e9af55fcddec097e394e808bea4b237d212bd37d",
+      "translation": "Arbre"
     },
     "page.about.title": {
       "source": "Mind Atlas",
@@ -1378,9 +1598,9 @@
       "translation": "7. Cookies"
     },
     "page.privacy.sections.6.paragraphs.0": {
-      "source": "Mind Atlas uses cookies to maintain sign-in sessions. In the hosted service, session cookies are used for authentication, security, and subscription-state checks.",
-      "sourceHash": "a8743377738a27574f73698c3d912f4e89167310b6c538815d45990d7ab34439",
-      "translation": "Mind Atlas utilise des cookies pour maintenir les sessions de connexion. Dans le service hébergé, les cookies de session servent à l’authentification, à la sécurité et aux vérifications de l’état de l’abonnement."
+      "source": "Mind Atlas uses cookies to maintain sign-in sessions. In the hosted service, session cookies are used for authentication, security, and subscription-state checks. Product analytics uses random identifiers held only in memory for the lifetime of the current page and does not store analytics identifiers in cookies, localStorage, or sessionStorage. Reloading the page creates new identifiers. Product analytics does not store notebook text, AI prompts, email addresses, Google account IDs, share tokens, IP addresses, or complete URLs. Raw nginx analytics logs are retained for 14 days; after that, only irreversible daily aggregates are retained.",
+      "sourceHash": "01fde4dd3d93537d0942d4e865ec2ebfba4c4aee1687260992d4aeb5a15d509c",
+      "translation": "Mind Atlas utilise des cookies pour maintenir les sessions de connexion. Dans le service hébergé, les cookies de session servent à l’authentification, à la sécurité et aux vérifications de l’état de l’abonnement. L’analyse produit utilise des identifiants aléatoires uniquement en mémoire tant que la page actuelle reste ouverte et ne les stocke ni dans des cookies, ni dans localStorage, ni dans sessionStorage. Le rechargement crée de nouveaux identifiants. Elle ne conserve ni texte de carnet, ni prompt IA, ni e-mail, ni identifiant Google, ni jeton de partage, ni adresse IP, ni URL complète. Les journaux nginx bruts sont conservés 14 jours, puis seuls des agrégats quotidiens irréversibles sont gardés."
     },
     "page.privacy.sections.7.heading": {
       "source": "8. Retention and deletion",
@@ -1418,9 +1638,9 @@
       "translation": "Politique de confidentialité"
     },
     "page.privacy.updated": {
-      "source": "Last updated: 2026-07-01",
-      "sourceHash": "a4aaeb01402f13e136b219e3e6a4f6544279f9c526128305aaeb405d736a5988",
-      "translation": "Dernière mise à jour : 2026-07-01"
+      "source": "Last updated: 2026-07-15",
+      "sourceHash": "1c8f71cedaae6b5a392b1ab78e59bbdcfd5b4cc7c4125b99dbc2e50b8e57ede7",
+      "translation": "Dernière mise à jour : 2026-07-15"
     },
     "page.terms.lead": {
       "source": "These Terms govern use of the Mind Atlas web service, free notebook features, Google sign-in, cloud notebooks, billing, and AI features.",
@@ -1672,10 +1892,70 @@
       "sourceHash": "8fd697c4c315f7c961cd576d52cec5d5d25469fc43f23ed9f5b5706ba7be3ea8",
       "translation": "Dernière mise à jour : 2026-07-01"
     },
+    "search.caseSensitive": {
+      "source": "Case sensitive",
+      "sourceHash": "960f5b8337fa0204cb5e94254204c08b264a54ce4b639dbadf7d768b9f81f636",
+      "translation": "Respecter la casse"
+    },
+    "search.description": {
+      "source": "Find text in every node title and body.",
+      "sourceHash": "e5e715a6001b31560520a197fb0160451d64d1a05a7b6d3f80e0e250f3a2d857",
+      "translation": "Recherchez du texte dans les titres et le contenu de tous les nœuds."
+    },
+    "search.field.body": {
+      "source": "Body",
+      "sourceHash": "64a67e0b8c29cbad4e2877e474aec2ca6b51d96503f3e7616df590ba30292e90",
+      "translation": "Contenu"
+    },
+    "search.field.metadata": {
+      "source": "Metadata",
+      "sourceHash": "b76d1e4ad398c74a03635c1f5dff4b3b226036ffd4c48e2c6c9249fea2abec05",
+      "translation": "Métadonnées"
+    },
+    "search.field.summary": {
+      "source": "Summary",
+      "sourceHash": "7a95af4358214b3d475171b7296e8d5eeb40d7ad5ad2627c5687920b221221e9",
+      "translation": "Résumé"
+    },
+    "search.field.tags": {
+      "source": "Tags",
+      "sourceHash": "9489e14e6ea3634fa44cc04c1b4a8b2b1800e69b26a06e5cc9012a72262cd9e3",
+      "translation": "Étiquettes"
+    },
+    "search.field.title": {
+      "source": "Title",
+      "sourceHash": "f61f86ce3ef06511171d6ec6146eb49f1ad2cb2d15674c78ceffc596c68d8987",
+      "translation": "Titre"
+    },
+    "search.noResults": {
+      "source": "No matching nodes.",
+      "sourceHash": "60ac489440644003fa672421b6328f6e7ab9654872fbd7f299ca9edab64ed1e4",
+      "translation": "Aucun nœud correspondant."
+    },
+    "search.placeholder": {
+      "source": "Search text or regular expression",
+      "sourceHash": "1dd040f2228c66c6b69540cb0e94a416e6988f42c916ec8ebe398901a0ca76f4",
+      "translation": "Texte ou expression régulière"
+    },
+    "search.regex": {
+      "source": "Regular expression",
+      "sourceHash": "3bd15a50fd77ca89b24b3cc370b68544946165087a9d19c31dd8e7ecc72faf36",
+      "translation": "Expression régulière"
+    },
+    "search.resultCount": {
+      "source": "{count, plural, one {# result} other {# results}}",
+      "sourceHash": "687d42940e5ac4f6d8e7451b93167be499416eb3d40bf18dccd8647c49f5a9a1",
+      "translation": "{count, plural, one {# résultat} other {# résultats}}"
+    },
+    "search.title": {
+      "source": "Search all nodes",
+      "sourceHash": "34bb99c3b1d268305bda657c3165b5740a3c26bc725f2c2d7b75f9f5be10ebc7",
+      "translation": "Rechercher dans tous les nœuds"
+    },
     "service.authRequired": {
-      "source": "Google login is required. Sign in from AI features at the top right.",
-      "sourceHash": "b74cfcb431cdd64811ed597b755c7b7a114282986e172b5a40fc2e0b1aa2953f",
-      "translation": "La connexion Google est requise. Connectez-vous depuis les fonctionnalités IA en haut à droite."
+      "source": "Google login is required. Sign in from Cloud save & sharing at the top right.",
+      "sourceHash": "5bb6492defa548ad7169b1b85893c34677e5308b0372f6997e2fc611fe1a93eb",
+      "translation": "La connexion Google est requise. Connectez-vous depuis Enregistrement et partage cloud en haut à droite."
     },
     "service.badRequest": {
       "source": "Review the request. The input, model, or attachment may not match the current public settings.",
@@ -1902,6 +2182,11 @@
       "sourceHash": "8dd1f22ad8fbc36bd5ec7c7d19c53bf9e588ffc9e2255afcca80c8585b1b9675",
       "translation": "Mobile uniquement sur cet appareil"
     },
+    "status.notebook.savedLocally": {
+      "source": "Saved locally.",
+      "sourceHash": "cd5301c2d73ee5ffd46b0309147a0cb470507c78d944a28154df3a41d175da5c",
+      "translation": "Enregistré localement."
+    },
     "status.realtime.workRootRequired": {
       "source": "Set the Codex work root before sending.",
       "sourceHash": "3283bd8238aead01d6ce737e75f460302d9d28b0f14e0c9d6cfdee5d22d58a60",
@@ -1991,6 +2276,36 @@
       "source": "Plan a trip",
       "sourceHash": "6cc591070a88757a83c020c16b62f78850d4cf1ab116b76f08ad964adfb407ce",
       "translation": "Planifier un voyage"
+    },
+    "tutorial.complete.detail": {
+      "source": "You are ready to start using Mind Atlas.",
+      "sourceHash": "351d1acd4ad4cbf4de6b5c0604977ac68dd206e04060b838a39e5ad2daf2c18f",
+      "translation": "Vous êtes prêt à utiliser Mind Atlas."
+    },
+    "tutorial.complete.title": {
+      "source": "Tutorial complete",
+      "sourceHash": "91bb8e8f6d12f3b4e377ee538de35aad5c19cdf05a6cebc7940fb546a9b1aece",
+      "translation": "Tutoriel terminé"
+    },
+    "tutorial.next.continue": {
+      "source": "Continue with these nodes",
+      "sourceHash": "50a81f447f41d5af65f1537cfe85db6b0a9507cb520123de4f5ca8f9710e5deb",
+      "translation": "Continuer avec ces nœuds"
+    },
+    "tutorial.next.detail": {
+      "source": "Keep the nodes you just created, or start from a template.",
+      "sourceHash": "6a1ee05c509108fbc9e6447ef19b348b0849cb8a1272f10272fb3f8cbacd9865",
+      "translation": "Conservez les nœuds que vous venez de créer ou partez d’un modèle."
+    },
+    "tutorial.next.template": {
+      "source": "Use a template",
+      "sourceHash": "1c134d5294be00c7182d77162ebab543e89b353e2d24bfbbd1abe07e011eef36",
+      "translation": "Utiliser un modèle"
+    },
+    "tutorial.next.title": {
+      "source": "How would you like to begin?",
+      "sourceHash": "cfbc228bc956088154554f4b4aa24fff12a995fd69a85a91c8ec9e1385af5430",
+      "translation": "Comment souhaitez-vous commencer ?"
     },
     "ui.app.100GrantedEachBillingPeriod.753b157": {
       "source": "100% granted each billing period",

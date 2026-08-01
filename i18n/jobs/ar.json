@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "sourceLocale": "en",
   "targetLocale": "ar",
-  "sourceCatalogHash": "b20b65b736619347f8e3f074122153c5e9dd603ecb4293c40de4c47af866e0e1",
+  "sourceCatalogHash": "780ef0afcc7c3bafd9eacfcf640e3459167500a8add98141d28540be98ef14fb",
   "glossaryVersion": 1,
   "instructions": [
     "Edit only translation values.",
@@ -12,10 +12,60 @@
     "Return valid UTF-8 JSON without markdown fences."
   ],
   "messages": {
+    "analytics.consent.accept": {
+      "source": "Allow analytics",
+      "sourceHash": "d14a82812b9737f761415bdcab6eaf075edaea51a0a30e833b123b0b53c83024",
+      "translation": "السماح بالتحليلات"
+    },
+    "analytics.consent.decline": {
+      "source": "No thanks",
+      "sourceHash": "ff479575e2c6679c7fca8cde50c8a996fc821302e9049849939f236a8ceabf66",
+      "translation": "لا شكرًا"
+    },
+    "analytics.consent.label": {
+      "source": "Analytics preference",
+      "sourceHash": "11ff3577d0071c7debd14387588eebb7051068c46c752a0be1298d0df688b4f8",
+      "translation": "تفضيل التحليلات"
+    },
+    "analytics.consent.message": {
+      "source": "Help improve Mind Atlas with privacy-preserving anonymous usage analytics. Notebook text, AI prompts, email addresses, and IP addresses are not stored in product analytics.",
+      "sourceHash": "19387c1d46777774272f9a0494d45523aeee8f4a7a2266ed9bf9442b667c28a1",
+      "translation": "ساعد في تحسين Mind Atlas عبر تحليلات استخدام مجهولة تراعي الخصوصية. لا تُخزَّن نصوص الدفاتر أو مطالبات الذكاء الاصطناعي أو البريد الإلكتروني أو عناوين IP في تحليلات المنتج."
+    },
+    "analytics.consent.privacy": {
+      "source": "Privacy policy",
+      "sourceHash": "2020c2b7e713ecaf91131a83ecf1d3ff28b725a28278c9f2ce5b485be17bef67",
+      "translation": "سياسة الخصوصية"
+    },
     "app.aiFeatures": {
       "source": "AI features",
       "sourceHash": "01e2609eb960da96285b2b1eadae51632548159a4c042a104f76069ff9505d51",
       "translation": "ميزات الذكاء الاصطناعي"
+    },
+    "app.cloudAccountDescription": {
+      "source": "Sign in with Google to save your Mind Atlas data to the cloud and create public share links. Google sign-in alone never starts a paid subscription.",
+      "sourceHash": "b5baf121553a582160fe73ddfcb38f060916ad4f35e510cdca2ec5798565de72",
+      "translation": "سجّل الدخول باستخدام Google لحفظ بيانات Mind Atlas في السحابة وإنشاء روابط مشاركة عامة. تسجيل الدخول باستخدام Google وحده لا يبدأ اشتراكًا مدفوعًا ولا يفرض أي رسوم."
+    },
+    "app.cloudAccountFeatures": {
+      "source": "Cloud save & sharing",
+      "sourceHash": "def066c22f292ddee39cf8c4099687a443692090371c7b4de50215af40b65e23",
+      "translation": "الحفظ والمشاركة السحابية"
+    },
+    "app.cloudAccountStatus": {
+      "source": "Sign in with Google to use cloud saves and share links.",
+      "sourceHash": "e61e88b81c101a139fda579d7587e44c48d36a23751ce6a2d7366e291e2a9560",
+      "translation": "سجّل الدخول باستخدام Google لاستخدام الحفظ السحابي وروابط المشاركة."
+    },
+    "app.cloudSaveFeature": {
+      "source": "Save data to the cloud",
+      "sourceHash": "bbe26f7a573f454ddb3b4225e2365d2e32fced33587f6fb0140f4b748076ba1a",
+      "translation": "حفظ البيانات في السحابة"
+    },
+    "app.cloudSaveFeatureDetail": {
+      "source": "Continue from another device with the same Google account.",
+      "sourceHash": "9d13675903f75b2f90293c45a8b635fd052526ba53d4468f7967d655d0061b00",
+      "translation": "تابع العمل على جهاز آخر باستخدام حساب Google نفسه."
     },
     "app.openMenu": {
       "source": "Open atlas menu",
@@ -32,10 +82,65 @@
       "sourceHash": "0f16e57c4940c6d0f5356fcc272f7717ae398683cda9cd7a2b1faa0a0bc28582",
       "translation": "مشاركة صورة الأطلس"
     },
+    "app.shareLinkFeature": {
+      "source": "Create share links",
+      "sourceHash": "6749fa3069ac4f22939230e4da79d098a5d8383ca512678b0094b46730007044",
+      "translation": "إنشاء روابط مشاركة"
+    },
+    "app.shareLinkFeatureDetail": {
+      "source": "Anyone with the link can view the shared Mind Atlas.",
+      "sourceHash": "afd1ad153d677df82e02665abcf41df6444c340c4065149280043bb75a099f19",
+      "translation": "يمكن لأي شخص لديه الرابط عرض Mind Atlas المشترك."
+    },
     "app.tutorial.skip": {
       "source": "Skip tutorial",
       "sourceHash": "32af200d1d13e8dd5fc8e04ae820a98b602f3fbd2656680f5bd54ae209b0935a",
       "translation": "تخطي البرنامج التعليمي"
+    },
+    "cloud.currentSummary": {
+      "source": "Open now: {name}",
+      "sourceHash": "96e802ef2b923c6c7125da334d88dc0e88bd639138081f503501cbe646e0ba90",
+      "translation": "الملف المفتوح: {name}"
+    },
+    "cloud.discardAndOpen": {
+      "source": "Discard and open",
+      "sourceHash": "e92c0c14857a5fb28c24c1f550734d96c4783c1c042e1367545981fddd2ef0ed",
+      "translation": "تجاهل وفتح"
+    },
+    "cloud.files": {
+      "source": "Cloud files",
+      "sourceHash": "0419a9f33c34aa6f3b6739d9d1741650566c329d010a02f5e41d1eced1840b77",
+      "translation": "ملفات السحابة"
+    },
+    "cloud.openNow": {
+      "source": "Open now",
+      "sourceHash": "de4f4b82e130e6176c964a7d5ee6a1515109596b9cd1837c1f159277811d2ad6",
+      "translation": "مفتوح الآن"
+    },
+    "cloud.overwriteCurrentOnly": {
+      "source": "Only the currently open cloud file can be overwritten.",
+      "sourceHash": "3ccf9010a7740c9320447f8a92e1475d3719cc38616cf8a4f7b6d730fdac22d2",
+      "translation": "لا يمكن الاستبدال إلا للملف السحابي المفتوح حاليًا."
+    },
+    "cloud.saveAndOpen": {
+      "source": "Save and open",
+      "sourceHash": "4553e946ae6e0a1fb38520907e80cef965a72d31d505dbc85bdf13754241cfae",
+      "translation": "حفظ وفتح"
+    },
+    "cloud.unsaved": {
+      "source": "Unsaved changes",
+      "sourceHash": "845632ba0e82512c909c9cd0d73bfec5d0b290b1d3abea5c2297e0b0aee6323f",
+      "translation": "تغييرات غير محفوظة"
+    },
+    "cloud.unsavedSwitchBody": {
+      "source": "\"{current}\" has unsaved changes. Opening \"{next}\" will replace the current workspace.",
+      "sourceHash": "4ac358c0574b0e4c0560a1852e1948fcb73e5b8a12010f3dd257ce40a0e75c85",
+      "translation": "يحتوي \"{current}\" على تغييرات غير محفوظة. سيؤدي فتح \"{next}\" إلى استبدال مساحة العمل الحالية."
+    },
+    "cloud.unsavedSwitchTitle": {
+      "source": "Save changes before opening another cloud file?",
+      "sourceHash": "48fe370656515e00d908a253385e05b33c2cdc3b548fcba4ca0e049e3401bed2",
+      "translation": "هل تريد حفظ التغييرات قبل فتح ملف سحابي آخر؟"
     },
     "common.auto": {
       "source": "Use device language",
@@ -67,6 +172,11 @@
       "sourceHash": "c28594288f43c97c76a8a96a75020f26b41701355d7d8028a74eb8e39688e99c",
       "translation": "متوقف"
     },
+    "common.ok": {
+      "source": "OK",
+      "sourceHash": "5791a4122cbdafa9f86de429262605328421de376b087b67928c692e6c1ea24e",
+      "translation": "OK"
+    },
     "common.on": {
       "source": "On",
       "sourceHash": "3a8d498a3ca46d6a520c049f7e746b578025efca1066e7b54eb64697c0308564",
@@ -85,52 +195,52 @@
     "dialog.cloud.deleteConfirm": {
       "source": "Delete \"{name}\" from cloud storage?",
       "sourceHash": "164cfacaeb29d74b289ae644ad762a81325bd1bd01445d09920ef44f6a18e05d",
-      "translation": "حذف \"{name}\" من التخزين السحابي؟"
+      "translation": "هل تريد حذف \"{name}\" من التخزين السحابي؟"
     },
     "dialog.cloud.localSaved": {
       "source": "Cloud save completed.\n\nSaved file: {name}",
       "sourceHash": "b7f7b4a7579a1fb9c9749066afa957ca0c6dabf294551612ae806e350cc57d93",
-      "translation": "اكتمل الحفظ السحابي.\n\nالملف المحفوظ: {name}"
+      "translation": "اكتمل الحفظ في السحابة.\n\nالملف المحفوظ: {name}"
     },
     "dialog.cloud.oldSavesDeleted": {
       "source": "Old saves deleted: {count}",
       "sourceHash": "4727d0206615403a4a394bba80622fa6975c6a9a227ed56124aa03504a3d7a6d",
-      "translation": "المحفوظات القديمة المحذوفة: {count}"
+      "translation": "تم حذف الحفظات القديمة: {count}"
     },
     "dialog.cloud.overwriteConfirm": {
       "source": "Overwrite \"{name}\" with the current atlas?",
       "sourceHash": "bf9b8843366e3a72053f502e7e7b693d7b20d484257e81d985f99c21fa971ccf",
-      "translation": "استبدال \"{name}\" بالأطلس الحالي؟"
+      "translation": "هل تريد استبدال \"{name}\" بالأطلس الحالي؟"
     },
     "dialog.cloud.saved": {
       "source": "Saved to the cloud.\n\n{name}{detail}",
       "sourceHash": "ebe54da3a41f809c497194698710c711d0464d0664a1802b0495e61acf8ce961",
-      "translation": "تم الحفظ في السحابة.\n\n{name}{detail}"
+      "translation": "حُفظ في السحابة.\n\n{name}{detail}"
     },
     "dialog.cloud.tooLarge": {
       "source": "This notebook is too large to save to the cloud. Reduce the amount of text.",
       "sourceHash": "d9fa0b70e213261a0eb974a93a0fb466979e7c32d1a6ca8abb611ccb8551a394",
-      "translation": "هذا الدفتر كبير جدًا بحيث لا يمكن حفظه في السحابة. قلّل كمية النص."
+      "translation": "دفتر الملاحظات كبير جدًا ولا يمكن حفظه في السحابة. قلل كمية النص."
     },
     "dialog.history.restoreConfirm": {
       "source": "Restore \"{title}\" from {date}? The current notebook will be saved in history first.",
       "sourceHash": "1acbc8726a779efbfefbb10f849a951fa8f3a87fa4e3ee601ecf1593c5e8042b",
-      "translation": "استعادة \"{title}\" من {date}؟ سيُحفظ الدفتر الحالي في السجل أولاً."
+      "translation": "هل تريد استعادة \"{title}\" من {date}؟ سيتم حفظ دفتر الملاحظات الحالي في السجل أولاً."
     },
     "dialog.packageFallback": {
       "source": "{error}\n\nA JSON-only Mind Atlas package can still preserve the notebook text and structure.\nAttachment files will not be embedded in that fallback package.\n\nCreate the JSON-only package instead?",
       "sourceHash": "425f980c4577d4dea2f55c551430a8658017ffe30510abb5df8af6b40417023f",
-      "translation": "{error}\n\nيمكن لحزمة Mind Atlas بنسق JSON فقط الحفاظ على نص الدفتر وبنيته.\nلن تُضمّن ملفات المرفقات في حزمة الاسترجاع هذه.\n\nإنشاء حزمة JSON فقط بدلاً من ذلك؟"
+      "translation": "{error}\n\nحزمة Mind Atlas بنسق JSON فقط يمكنها الحفاظ على نص وبنية دفتر الملاحظات.\nلن يتم تضمين ملفات المرفقات في حزمة الاستبدال تلك.\n\nهل تريد إنشاء الحزمة بنسق JSON فقط بدلاً من ذلك؟"
     },
     "dialog.packageJsonOnly": {
       "source": "Created a JSON-only Mind Atlas package. Notebook text is preserved, but attachment files are not embedded.",
       "sourceHash": "5f2c43f47f66093baa78a123ab1cc795bb97ee9befcb5495091f853e4facb549",
-      "translation": "تم إنشاء حزمة Mind Atlas بنسق JSON فقط. النص محفوظ، لكن ملفات المرفقات غير مضمنة."
+      "translation": "تم إنشاء حزمة Mind Atlas بنسق JSON فقط. تم الحفاظ على نص دفتر الملاحظات، ولكن ملفات المرفقات غير مضمنة."
     },
     "dialog.packageMissingAttachments": {
       "source": "{count, plural, one {# attachment} other {# attachments}} could not be included because this browser session only has their metadata.",
       "sourceHash": "1648b7e0198581334168bc85f3a49adb1cd5d050a828e0c45292c12c1cf82a03",
-      "translation": "تعذر تضمين {count, plural, one {# مرفق} other {# مرفقات}} لأن جلسة المتصفح هذه تحتوي على بياناتها الوصفية فقط."
+      "translation": "{count, plural, one {# مرفق} other {# مرفقات}} لا يمكن تضمينها لأن جلسة المتصفح هذه تحتوي فقط على بياناتها الوصفية."
     },
     "dynamic.aiPartnerReplies": {
       "source": "{count, plural, one {# AI Partner reply} other {# AI Partner replies}}",
@@ -140,12 +250,12 @@
     "dynamic.collapsedDescendants": {
       "source": " / {count, plural, one {# descendant hidden} other {# descendants hidden}}",
       "sourceHash": "ed853a1987fa9f860a1397febeaaccf3d67d41a8cbca219b4330019c549eaedd",
-      "translation": " / {count, plural, one {# عنصر فرعي مخفي} other {# عناصر فرعية مخفية}}"
+      "translation": "/ {count, plural, one {# سليل مخفي} other {# سليل مخفي}}"
     },
     "dynamic.contextCopyStats": {
       "source": "{tokens} tokens / {nodes, plural, one {# node} other {# nodes}}{truncated}",
       "sourceHash": "0ab2d9b439a2ed9ac27235b0783b8e50885a15f1704693351a3dd653e981c794",
-      "translation": "{tokens} رمز / {nodes, plural, one {# عقدة} other {# عقد}}{truncated}"
+      "translation": "{tokens} توكن / {nodes, plural, one {# عقدة} other {# عقد}}{truncated}"
     },
     "dynamic.contextNone": {
       "source": "No context",
@@ -155,7 +265,7 @@
     "dynamic.contextPreviewTitle": {
       "source": "{context}. Click to preview exactly what will be sent.",
       "sourceHash": "486071027485ff7f0e1a8976abf632c6a42933f0e56b70b1c6926c6e9763c747",
-      "translation": "{context}. انقر لمعاينة ما سيُرسل بالضبط."
+      "translation": "{context}. انقر لمعاينة ما سيتم إرساله بالضبط."
     },
     "dynamic.contextShort": {
       "source": "ctx",
@@ -165,12 +275,12 @@
     "dynamic.contextStats": {
       "source": "~{tokens} tokens / {nodes, plural, one {# node} other {# nodes}} / {turns, plural, one {# conversation turn} other {# conversation turns}}{summary}{trimmed}",
       "sourceHash": "54316baa55516fa6220c5f366f9c385801efb6c41a777690a4f56d75df5ca14e",
-      "translation": "~{tokens} رمز / {nodes, plural, one {# عقدة} other {# عقد}} / {turns, plural, one {# محادثة} other {# محادثات}}{summary}{trimmed}"
+      "translation": "~{tokens} توكن / {nodes, plural, one {# عقدة} other {# عقد}} / {turns, plural, one {# جولة محادثة} other {# جولات محادثة}}{summary}{trimmed}"
     },
     "dynamic.contextTruncated": {
       "source": " / truncated",
       "sourceHash": "a5d4fd66cb20c56d55c31a58406cab18a464b0c450a5ff1a71a70446eeb4183f",
-      "translation": " / مقتطع"
+      "translation": "/ مقتطع"
     },
     "dynamic.decrease": {
       "source": "Decrease {label}",
@@ -180,7 +290,7 @@
     "dynamic.deleteNodeWithChildren": {
       "source": "Delete \"{title}\" and {count, plural, one {# child node} other {# child nodes}}? You can restore it with Undo.",
       "sourceHash": "8c594f7cc9c2873cfef86598283eca8c70bc94330b32afc75fecd97f390c9220",
-      "translation": "حذف \"{title}\" و{count, plural, one {# عقدة فرعية} other {# عقد فرعية}}؟ يمكنك الاستعادة باستخدام التراجع."
+      "translation": "هل تريد حذف \"{title}\" و{count, plural, one {# عقدة فرعية} other {# عقد فرعية}}؟ يمكنك استعادتها باستخدام تراجع."
     },
     "dynamic.focusNode": {
       "source": "Focus {title}",
@@ -230,7 +340,7 @@
     "dynamic.pastReminderConfirm": {
       "source": "The selected reminder time is in the past:\n\n{date}\n\nThis notification may fire immediately. Set it anyway?",
       "sourceHash": "d3f77c0b036014bc47c0b18a627e8c9a000cc9f74f3d5c94df790808b9c09171",
-      "translation": "الوقت المحدد للتذكير في الماضي:\n\n{date}\n\nقد يتم هذا الإشعار فورًا. هل تريد تعيينه على أي حال؟"
+      "translation": "وقت التذكير المحدد في الماضي:\n\n{date}\n\nقد يتم تفعيل هذا الإشعار فورًا. هل تريد تعيينه على أي حال؟"
     },
     "dynamic.reminder": {
       "source": "Reminder: {date}",
@@ -245,17 +355,17 @@
     "dynamic.summarized": {
       "source": " ({count} summarized)",
       "sourceHash": "171b8f560373871b73e02589edb23cd5b16341a5b0c78c627546aac9b4a4cb94",
-      "translation": " ({count} ملخّصة)"
+      "translation": "({count} ملخّصة)"
     },
     "dynamic.tokenEstimateShort": {
       "source": "~{count} tok",
       "sourceHash": "64839f6881139b99e7c5caeac199c6265fd04233b4bf6f7586e3b919e81c5e1f",
-      "translation": "~{count} رمز"
+      "translation": "~{count} توكن"
     },
     "error.appendChildren": {
       "source": "Appending children failed.",
       "sourceHash": "1dd7db1c08020fb301d6df2fb7f5f915e4b002e802c7339c54bcdb8742bc34b7",
-      "translation": "فشل إضافة العقد الفرعية."
+      "translation": "فشل إلحاق العقد الفرعية."
     },
     "error.bridge.checkSettings": {
       "source": "If reloading the page does not help, check the bridge or network settings.",
@@ -305,12 +415,12 @@
     "error.lightExport": {
       "source": "Text-only export failed.",
       "sourceHash": "5979417dc0fc5faced915f2e712443c0da9fa7398d7fef34440a21496e4a01ba",
-      "translation": "فشل التصدير النصي فقط."
+      "translation": "فشل تصدير النص فقط."
     },
     "error.notebookImport": {
       "source": "Notebook import failed.",
       "sourceHash": "eba9a84a4b0a40fd578328c864fa68266df0124e0fe3626b201ce1194cd0007b",
-      "translation": "فشل استيراد الدفتر."
+      "translation": "فشل استيراد دفتر الملاحظات."
     },
     "error.packageExport": {
       "source": "Package export failed.",
@@ -345,7 +455,7 @@
     "error.sharedLinkRead": {
       "source": "The shared Mind Atlas link could not be read.",
       "sourceHash": "4283c7fa68420a72dae135b03996eeafc18fbd77476361992b3904c9ce7b8fd1",
-      "translation": "تعذر قراءة رابط Mind Atlas المشترك."
+      "translation": "تعذرت قراءة رابط Mind Atlas المشترك."
     },
     "label.ai.attentionShort": {
       "source": "Review",
@@ -360,27 +470,27 @@
     "label.ai.checking": {
       "source": "Checking AI usage",
       "sourceHash": "f59c8353652478023c8b37b6cef332a870d5b48f4218726d6f133b40a45596d0",
-      "translation": "فحص استخدام الذكاء الاصطناعي"
+      "translation": "جارٍ التحقق من استخدام الذكاء الاصطناعي"
     },
     "label.ai.checkingShort": {
       "source": "Checking",
       "sourceHash": "ace8b51c9ce7920cd06d746a615e9b56f71867fbc8f630136b01534a15397860",
-      "translation": "جارٍ الفحص"
+      "translation": "جارٍ التحقق"
     },
     "label.ai.exhausted": {
       "source": "AI token balance for this billing period is 0%",
       "sourceHash": "3f7aa045154cc8321c8834a07620cbc3f1ed8e07f7a8df1a83adeafe37128f23",
-      "translation": "رصيد رموز الذكاء الاصطناعي لفترة الفوترة هذه 0٪"
+      "translation": "رصيد رموز الذكاء الاصطناعي لفترة الفوترة هذه هو 0%"
     },
     "label.ai.freeNotebook": {
       "source": "The notebook is free. Sign in to subscribe to AI features.",
       "sourceHash": "1a2863ed38ad5358689ab55bd2d27f09b329e21b987a52680f5d62a73ccff684",
-      "translation": "الدفتر مجاني. سجّل الدخول للاشتراك في ميزات الذكاء الاصطناعي."
+      "translation": "دفتر الملاحظات مجاني. سجّل الدخول للاشتراك في ميزات الذكاء الاصطناعي."
     },
     "label.ai.notSubscribed": {
       "source": "AI features are not subscribed",
       "sourceHash": "f871b7ae097325b546e4a6d3ce0583828951f461713bdf9faf55adbdd63ad1e9",
-      "translation": "ميزات الذكاء الاصطناعي غير مشترك فيها"
+      "translation": "ميزات الذكاء الاصطناعي غير مشترك بها"
     },
     "label.ai.notSubscribedShort": {
       "source": "Not subscribed",
@@ -395,7 +505,7 @@
     "label.ai.renewalSync": {
       "source": "Checking the next AI token renewal date",
       "sourceHash": "60dfd8904296246746a9d79c90ca0311ed14e811877a811ae4818d3c9878a60d",
-      "translation": "فحص تاريخ تجديد رموز الذكاء الاصطناعي التالي"
+      "translation": "جارٍ التحقق من تاريخ تجديد رموز الذكاء الاصطناعي التالي"
     },
     "label.ai.signedOutShort": {
       "source": "Signed out",
@@ -430,37 +540,37 @@
     "label.effort.none": {
       "source": "None",
       "sourceHash": "9d6e2b97928e5b01474b309a891902f6abb96c861afd0eb24579746737ebf7e3",
-      "translation": "بدون"
+      "translation": "لا شيء"
     },
     "label.effort.providerDefault": {
       "source": "Provider default",
       "sourceHash": "0817511fc31fe7c8d2bf8e3a6ff2e8bcd729c6fd71fee7fcda21ee54c7b82163",
-      "translation": "افتراضي المزوّد"
+      "translation": "الافتراضي للمزود"
     },
     "label.history.durable": {
       "source": " / durable",
       "sourceHash": "c1580fd8d0fc2f42205d20d20e7baa49c3f158ad086b14e91f005430b15bd36e",
-      "translation": " / دائم"
+      "translation": "/ دائم"
     },
     "label.history.loading": {
       "source": "Loading snapshots",
       "sourceHash": "e3080a79b08335b88cf60590d80f603803598b92fc746e603df14ed8b7d69fc0",
-      "translation": "جارٍ تحميل اللقطات"
+      "translation": "تحميل اللقطات"
     },
     "label.history.loadingLocal": {
       "source": "Loading local notebook history",
       "sourceHash": "6195f5dab73831810285fb3fb66fad8695e192e15b44f090e7d76feb751269fb",
-      "translation": "جارٍ تحميل سجل الدفتر المحلي"
+      "translation": "تحميل سجل دفتر الملاحظات المحلي"
     },
     "label.history.needsAttention": {
       "source": "Notebook persistence needs attention",
       "sourceHash": "60973f29698922ababa4b2437326d9512179c0945b91f57f8122c48512aeab84",
-      "translation": "استمرارية الدفتر تحتاج إلى انتباه"
+      "translation": "استمرارية دفتر الملاحظات تحتاج إلى انتباه"
     },
     "label.history.retainedSnapshots": {
       "source": "{count, plural, one {# retained snapshot} other {# retained snapshots}}",
       "sourceHash": "4bc47e82f13a8ce24d56de924cb218f113a49a3e93e5d94e2eb169450fb3bf7f",
-      "translation": "{count, plural, one {# لقطة محفوظة} other {# لقطات محفوظة}}"
+      "translation": "{count, plural, one {# لقطة محفوظة} other {# لقطة محفوظة}}"
     },
     "label.history.saveError": {
       "source": "Save error",
@@ -471,6 +581,11 @@
       "source": "{count, plural, one {# snapshot} other {# snapshots}}{durable, select, yes { / durable} other {}}",
       "sourceHash": "08eea63ffc89d639d8bf8854a862efe6726ea6474f14a66a2bb4440fae49e6b2",
       "translation": "{count, plural, one {# لقطة} other {# لقطات}}{durable, select, yes { / دائم} other {}}"
+    },
+    "label.layout.calendar": {
+      "source": "Calendar",
+      "sourceHash": "d9f098e9a33c6965f6e53c3cfff83eb0dd0cb9c0d86969d10332c1679c0598d7",
+      "translation": "التقويم"
     },
     "label.layout.mindAtlas": {
       "source": "Mind Atlas",
@@ -490,7 +605,7 @@
     "label.layout.tree": {
       "source": "Tree",
       "sourceHash": "3041e2766b69fd046ff7e0fe5cb910fbc64b5f28b75cfdb20d79d50b22c81868",
-      "translation": "شجرة"
+      "translation": "شجري"
     },
     "label.mobile.blocked": {
       "source": "Blocked",
@@ -500,7 +615,7 @@
     "label.mobile.only": {
       "source": "Mobile only",
       "sourceHash": "b08896edff31c745eb13999f1e23d405d186113090945c46dec0ed390569f9b2",
-      "translation": "هاتف محمول فقط"
+      "translation": "الجوال فقط"
     },
     "label.mobile.tapToEnable": {
       "source": "Tap to enable",
@@ -515,12 +630,22 @@
     "label.mode.chat": {
       "source": "Chat",
       "sourceHash": "188a96ce8de0367330ba4b5505e48054f25dc9e920e3bd7955e98542350f5138",
-      "translation": "Chat"
+      "translation": "دردشة"
     },
     "label.mode.claudeCode": {
       "source": "Claude Code",
       "sourceHash": "93d3b41b038c5825f936143ed570f99d44f57e0d707b6dc541afe89eebb215e2",
       "translation": "Claude Code"
+    },
+    "label.mode.claudeCodeApi": {
+      "source": "Claude Code API",
+      "sourceHash": "142879c4d6e9022201e7ea5e1694d24b10c3dcc098ba70b724ad7378d991ed05",
+      "translation": "Claude Code API"
+    },
+    "label.mode.claudeCodePro": {
+      "source": "Claude Code Pro",
+      "sourceHash": "8c8f5766478ca9e14333430377e92c886c00a7adf08263784a90872b11caf58b",
+      "translation": "Claude Code Pro"
     },
     "label.mode.codex": {
       "source": "Codex",
@@ -550,7 +675,7 @@
     "label.mode.realtime": {
       "source": "Realtime",
       "sourceHash": "05b481d90fb36c5a7b9c0e2d070053729f0b972dace178b71abc8f51aa9265fd",
-      "translation": "Realtime"
+      "translation": "الوقت الفعلي"
     },
     "label.notification.claudeCode": {
       "source": "Claude Code notification",
@@ -565,7 +690,7 @@
     "label.notification.completed": {
       "source": "Completed notification",
       "sourceHash": "216c8e08e5a0bf91be740ca4a1e862ab4ee2976a5906696783990a6ad124b5cd",
-      "translation": "إشعار اكتمال"
+      "translation": "إشعار الإكمال"
     },
     "label.notification.cost": {
       "source": "Cost notification",
@@ -585,7 +710,7 @@
     "label.notification.review": {
       "source": "Review notification",
       "sourceHash": "ae4fb32dfe21169104e5b206a1559961a0928bd2658c6bc5a9565f0364fd8c54",
-      "translation": "إشعار مراجعة"
+      "translation": "إشعار المراجعة"
     },
     "label.permission.acceptEdits": {
       "source": "Accept edits",
@@ -605,7 +730,7 @@
     "label.permission.plan": {
       "source": "Plan",
       "sourceHash": "59579b5cddcb21e12626fa98dbf818bdf622f2bddb5f1cab97322d1d6b700fdb",
-      "translation": "تخطيط"
+      "translation": "خطة"
     },
     "label.permission.trusted": {
       "source": "Trusted",
@@ -635,7 +760,7 @@
     "label.role.user": {
       "source": "User",
       "sourceHash": "42f194e779ad66a01afec2d713be97834cbf4491fb393a65c5d5a2b24deaa72c",
-      "translation": "مستخدم"
+      "translation": "المستخدم"
     },
     "label.role.voicePartner": {
       "source": "Voice Partner",
@@ -680,7 +805,7 @@
     "label.status.needsReview": {
       "source": "Needs review",
       "sourceHash": "50fd9cf41a3f24a1a55ee6c8bcc5d0dcae402090acd54968260f702d42f05b8a",
-      "translation": "يحتاج مراجعة"
+      "translation": "بحاجة للمراجعة"
     },
     "label.status.running": {
       "source": "Running",
@@ -695,7 +820,7 @@
     "label.voice.connecting": {
       "source": "Voice Partner connecting",
       "sourceHash": "16061b389a1f2bc17c755a43a86d149446ddad4f293a7ef3a48b838e01a05776",
-      "translation": "Voice Partner يتصل"
+      "translation": "جارٍ اتصال Voice Partner"
     },
     "label.voice.listening": {
       "source": "Voice Partner listening",
@@ -720,7 +845,7 @@
     "label.voice.transcribing": {
       "source": "Transcribing",
       "sourceHash": "84b442adde6b6264986752574987d1f3c1974ab81218e77f7db9a6cd3d8f2b09",
-      "translation": "جارٍ التفريغ النصي"
+      "translation": "جارٍ النسخ"
     },
     "label.vr.tilt": {
       "source": "On / tilt to pan",
@@ -917,6 +1042,16 @@
       "sourceHash": "21271f70ba841f105dc1c72e849d26af3443432ad0eec88038614b6c390ccae2",
       "translation": "استعادة من السجل"
     },
+    "menu.searchNodes": {
+      "source": "Search all nodes",
+      "sourceHash": "ecd0af6ac1b88b723cf509d9fc06d06dbd9d6d7cdb55fc9ea92bff2b1bcb41bb",
+      "translation": "البحث في جميع العقد"
+    },
+    "menu.searchNodes.detail": {
+      "source": "Titles and body text / Ctrl+F",
+      "sourceHash": "bc52dcd269033c6e42ed69f66fb06a0c47486e1c928a78a2eda11274fd65e556",
+      "translation": "العناوين والمحتوى / Ctrl+F"
+    },
     "menu.source": {
       "source": "Source code & legal",
       "sourceHash": "35c6558c0e74bca871010583cb5ef90a2eae67ad33093729183127ae52b2cabf",
@@ -925,7 +1060,7 @@
     "menu.source.detail": {
       "source": "© 2026 · AGPL-3.0-only · redistribution / no warranty",
       "sourceHash": "eeee0efa24fa1883fd5bb6d6a29f0abf28f3a6a823e552ae2b05705cc9dcecbb",
-      "translation": "© 2026 · AGPL-3.0-only · إعادة توزيع / بدون ضمان"
+      "translation": "© 2026 · AGPL-3.0-only · redistribution / no warranty"
     },
     "menu.textEditor": {
       "source": "Text editor",
@@ -970,12 +1105,67 @@
     "onboarding.ai.unlocked": {
       "source": "Congratulations. Every Mind Atlas feature is unlocked. Use it as your partner for riding the waves of cognition and judgment in the AI era ahead.",
       "sourceHash": "ecdc49eb2ac0823ac0e4c336a7c538a72d0881f150ce62e8137883b37141d3ac",
-      "translation": "تهانينا. جميع ميزات Mind Atlas مفتوحة الآن. استخدمه كشريكك لركوب أمواج الإدراك والحكم في عصر الذكاء الاصطناعي القادم."
+      "translation": "تهانينا. تم فتح جميع ميزات Mind Atlas. استخدمه كشريك لك لركوب أمواج الإدراك والحكم في عصر الذكاء الاصطناعي القادم."
     },
     "onboarding.basic.complete": {
       "source": "Congratulations. You have mastered the basic Mind Atlas controls.",
       "sourceHash": "d86e55d38073893ee55cf00d2e3f7d404aeb24e2ac9102a1c4ffca3491deb8b1",
       "translation": "تهانينا. لقد أتقنت عناصر التحكم الأساسية في Mind Atlas."
+    },
+    "onboarding.practice.actionBody": {
+      "source": "Turn what you learned into one concrete next step.",
+      "sourceHash": "bb344386549001db5b7c9dacffd24ebfb8aa26734b9e908a92aee3bf0ea9c7ff",
+      "translation": "حوّل ما تعلمته إلى خطوة تالية عملية ومحددة."
+    },
+    "onboarding.practice.actionTitle": {
+      "source": "Next action",
+      "sourceHash": "e6310d44d5d703417411d6a4a8d3a21cecbf1381cafda6f0648fb4d4ce5c0d82",
+      "translation": "الإجراء التالي"
+    },
+    "onboarding.practice.addChild": {
+      "source": "3 of 3 · Add a child with the Tab button.",
+      "sourceHash": "f8dc637a2d2a3b646330208b5d21278a0b7051161aeb221c018e88a69bb2faa9",
+      "translation": "3 من 3 · أضف عقدة فرعية باستخدام زر Tab."
+    },
+    "onboarding.practice.answerBody": {
+      "source": "Keep the useful part of the answer here.",
+      "sourceHash": "f03c61b4f9d60dbafd4220ac3c3a024fec9795515e57ce91957ac63beb776df2",
+      "translation": "احتفظ هنا بالجزء المفيد من الإجابة."
+    },
+    "onboarding.practice.answerTitle": {
+      "source": "AI answer",
+      "sourceHash": "c1cc3fa2f48780752a68c15d760f35e268560b3e07fa92404eaf36595ba82757",
+      "translation": "إجابة الذكاء الاصطناعي"
+    },
+    "onboarding.practice.atlasBody": {
+      "source": "Keep answers, your own thinking, and the next action in one view.",
+      "sourceHash": "dbe5fc93b54de3d46bea667c9c433443a5cb72abed1f074d36d722ba93b08682",
+      "translation": "احتفظ بالإجابات وأفكارك والخطوة التالية في عرض واحد."
+    },
+    "onboarding.practice.atlasTitle": {
+      "source": "What I learned with AI",
+      "sourceHash": "29f5f196b0440f837e94600a42626eca6076508a2fa8edeb5baa5c28e4f337fd",
+      "translation": "ما تعلمته بمساعدة الذكاء الاصطناعي"
+    },
+    "onboarding.practice.editNode": {
+      "source": "2 of 3 · Change its title or body in the Editor.",
+      "sourceHash": "5c9f3bce5513782776fead503bff6383a3187e42928f1d52bc326da86ee10b25",
+      "translation": "2 من 3 · غيّر عنوانها أو نصها في Editor."
+    },
+    "onboarding.practice.selectNode": {
+      "source": "1 of 3 · Tap the pulsing node.",
+      "sourceHash": "53be614617c9a0597c78dd51dc64ee62e318da822f02e41e9a1264ddf4e4868c",
+      "translation": "1 من 3 · اضغط على العقدة النابضة."
+    },
+    "onboarding.practice.thoughtBody": {
+      "source": "Write what you think, not just what the AI said.",
+      "sourceHash": "a1473cf736f4c3eb4552dd929aeb83a9c8b0c500d3b6ad37ae01966b0c538e55",
+      "translation": "اكتب ما تفكر فيه، وليس فقط ما قاله الذكاء الاصطناعي."
+    },
+    "onboarding.practice.thoughtTitle": {
+      "source": "My notes",
+      "sourceHash": "5bda8ac7042f89d4bb255cb26a220adb4086c55378c93b6efc5af6ce48d410e1",
+      "translation": "ملاحظاتي"
     },
     "onboarding.root.answer": {
       "source": "Press and hold the space to create your first node.",
@@ -1000,7 +1190,7 @@
     "onboarding.space.cameraResetMobile": {
       "source": "Tap the MindAtlas breadcrumb at the top right to return to the initial camera view.",
       "sourceHash": "faaeea64d14e429ee0f784135e637d74d89873b0e1c28aff7e02779fc78c1ea2",
-      "translation": "اضغط على مسار MindAtlas في أعلى اليمين للعودة إلى عرض الكاميرا الأولي."
+      "translation": "انقر على مسار MindAtlas في أعلى اليمين للعودة إلى عرض الكاميرا الأولي."
     },
     "onboarding.space.childNode": {
       "source": "Quickly drag a node, then keep holding until the creation effect completes.",
@@ -1077,40 +1267,45 @@
       "sourceHash": "a9059c50f22b7800e0723b4ad69ad3dd1af49590d70b9208310e6549cd47a760",
       "translation": "جرّب Mind Atlas"
     },
-    "page.about.hero": {
-      "source": "Mind Atlas",
-      "sourceHash": "030d6b66704c3f0a506d2ff60c670b21f1dab86452856f277da7ee899ac38e36",
-      "translation": "Mind Atlas"
+    "page.about.hero.cta": {
+      "source": "Organize it now",
+      "sourceHash": "c1538c69160d92ecdc798e1c8723798f9f7a72def3072f6af8f89bb4ff3b7a28",
+      "translation": "نظّمها الآن"
+    },
+    "page.about.hero.detail": {
+      "source": "Connect AI answers, your notes, decisions, and next actions as nodes, then see them together in one view.",
+      "sourceHash": "79b43541dbea77eac5800d51d3f7cc90650b374ccb6d528dc16a93c63438875a",
+      "translation": "اربط إجابات الذكاء الاصطناعي وملاحظاتك وقراراتك وخطواتك التالية كعقد، وشاهدها معًا في عرض واحد."
+    },
+    "page.about.hero.flow.action": {
+      "source": "Next actions",
+      "sourceHash": "f058425acba873facacc0b56932a7c56f02c1cf66702aa8b41e5e715abb92e18",
+      "translation": "الخطوات التالية"
+    },
+    "page.about.hero.flow.answer": {
+      "source": "AI answers",
+      "sourceHash": "90e3ad4c3470f9bfe9c6170ce37f1f446488cec14d5aa6fa9153689a829dcc7e",
+      "translation": "إجابات الذكاء الاصطناعي"
+    },
+    "page.about.hero.flow.notes": {
+      "source": "My notes",
+      "sourceHash": "e9b1ed415dfdb5966fed5d024ad587b7991444c1dfadf51e25ef895b499d33fb",
+      "translation": "ملاحظاتي"
+    },
+    "page.about.hero.kicker": {
+      "source": "Take your thinking out of the chat",
+      "sourceHash": "84baae24e06a2c5e8415ba89ab716ef65b521b3c18fbb550be9f4808324f7b62",
+      "translation": "أخرج أفكارك من المحادثة"
+    },
+    "page.about.hero.title": {
+      "source": "Don't let what you found with ChatGPT get buried in the conversation.",
+      "sourceHash": "b6f10d7c48b8595dab255b232912ec53a35029a69cee04bee7f2fa470ecf3b9c",
+      "translation": "لا تدع ما وجدته باستخدام ChatGPT يضيع داخل المحادثة."
     },
     "page.about.metaDescription": {
-      "source": "Explore interactive Mind Atlas examples for novel writing, trip planning, and app development.",
-      "sourceHash": "82fb840e17295be54f631682749ff99716997082d94daaca750c11863cca11c7",
-      "translation": "استكشف أمثلة Mind Atlas التفاعلية لكتابة الروايات وتخطيط الرحلات وتطوير التطبيقات."
-    },
-    "page.about.novel.title": {
-      "source": "Write a novel",
-      "sourceHash": "61476e1d72743b7172bfc7396286e05a8ad3edc4941d29da4bbec0f2affcacde",
-      "translation": "اكتب رواية"
-    },
-    "page.about.novel.view.atlas": {
-      "source": "Mind Atlas",
-      "sourceHash": "554688493be285ce67b1e207dbf0f4615ab83332ed7c0c9cb55bc1437ef4cf53",
-      "translation": "Mind Atlas"
-    },
-    "page.about.novel.view.editor": {
-      "source": "Editor",
-      "sourceHash": "2e4dfaf09dd8a0d6513de5531d4478ff17a741e4e88c0e8360d2c51407f939ae",
-      "translation": "محرر"
-    },
-    "page.about.novel.view.mindmap": {
-      "source": "Mind map",
-      "sourceHash": "b0a6ef83fde40f379f74a60cb5bc9e16ea1059ff4b42702842726bb847890ffa",
-      "translation": "خريطة ذهنية"
-    },
-    "page.about.novel.view.tree": {
-      "source": "Tree",
-      "sourceHash": "187d9824393d7cf49bc837c183e9f3b9357de5dfaf8f263895ee4141a0e055ac",
-      "translation": "شجرة"
+      "source": "Explore Mind Atlas by organizing AI answers, your notes, decisions, and next actions in one view.",
+      "sourceHash": "4993c72f58940811ea950a67bebac2a66a53aecab3f4b33d3d85e806f2dda501",
+      "translation": "استكشف Mind Atlas عبر تنظيم إجابات الذكاء الاصطناعي وملاحظاتك وقراراتك وخطواتك التالية في عرض واحد."
     },
     "page.about.plans.anonymous.item1": {
       "source": "Use the core features directly in your browser",
@@ -1196,6 +1391,31 @@
       "source": "Choose how you use it",
       "sourceHash": "c331b81fd389a7b2945d4406e013fe69362c5869ed2a065edcac47d752b3fffb",
       "translation": "اختر طريقة استخدامه"
+    },
+    "page.about.research.title": {
+      "source": "Organize what you found",
+      "sourceHash": "cb22765a82b5abbf94b16cf988e695cf95347a7af59e69c180222aaf185239f0",
+      "translation": "نظّم ما وجدته"
+    },
+    "page.about.research.view.atlas": {
+      "source": "Mind Atlas",
+      "sourceHash": "e6033b7bbf506551aea7138692854b69233620486ec8354d146420732de75829",
+      "translation": "Mind Atlas"
+    },
+    "page.about.research.view.editor": {
+      "source": "Editor",
+      "sourceHash": "7383c795b8466ff5bb9e9e151c1f57d4c7a8ab2bea77d1e731a8d761e50ac074",
+      "translation": "محرر"
+    },
+    "page.about.research.view.mindmap": {
+      "source": "Mind map",
+      "sourceHash": "c717d8771a0796cf609d8c0bebff2b058b7c1ec359c7e4584ba79c540d4d5cb0",
+      "translation": "خريطة ذهنية"
+    },
+    "page.about.research.view.tree": {
+      "source": "Tree",
+      "sourceHash": "efa051cb6a5d9bbf4fe71634e9af55fcddec097e394e808bea4b237d212bd37d",
+      "translation": "شجرة"
     },
     "page.about.title": {
       "source": "Mind Atlas",
@@ -1378,9 +1598,9 @@
       "translation": "7. ملفات تعريف الارتباط"
     },
     "page.privacy.sections.6.paragraphs.0": {
-      "source": "Mind Atlas uses cookies to maintain sign-in sessions. In the hosted service, session cookies are used for authentication, security, and subscription-state checks.",
-      "sourceHash": "a8743377738a27574f73698c3d912f4e89167310b6c538815d45990d7ab34439",
-      "translation": "يستخدم Mind Atlas ملفات تعريف الارتباط للحفاظ على جلسات تسجيل الدخول. وفي الخدمة المستضافة، تُستخدم ملفات تعريف ارتباط الجلسة للمصادقة والأمان والتحقق من حالة الاشتراك."
+      "source": "Mind Atlas uses cookies to maintain sign-in sessions. In the hosted service, session cookies are used for authentication, security, and subscription-state checks. Product analytics uses random identifiers held only in memory for the lifetime of the current page and does not store analytics identifiers in cookies, localStorage, or sessionStorage. Reloading the page creates new identifiers. Product analytics does not store notebook text, AI prompts, email addresses, Google account IDs, share tokens, IP addresses, or complete URLs. Raw nginx analytics logs are retained for 14 days; after that, only irreversible daily aggregates are retained.",
+      "sourceHash": "01fde4dd3d93537d0942d4e865ec2ebfba4c4aee1687260992d4aeb5a15d509c",
+      "translation": "يستخدم Mind Atlas ملفات تعريف الارتباط للحفاظ على جلسات تسجيل الدخول. وفي الخدمة المستضافة، تُستخدم ملفات تعريف ارتباط الجلسة للمصادقة والأمان والتحقق من حالة الاشتراك. تستخدم تحليلات المنتج معرّفات عشوائية في الذاكرة فقط طوال مدة بقاء الصفحة الحالية مفتوحة، ولا تخزن معرّفات التحليلات في ملفات تعريف الارتباط أو localStorage أو sessionStorage. تؤدي إعادة تحميل الصفحة إلى إنشاء معرّفات جديدة. ولا تخزن نصوص الدفاتر أو مطالبات الذكاء الاصطناعي أو البريد الإلكتروني أو معرّفات Google أو رموز المشاركة أو عناوين IP أو عناوين URL الكاملة. تُحفظ سجلات nginx الخام لمدة 14 يومًا، ثم تبقى فقط التجميعات اليومية غير القابلة للعكس."
     },
     "page.privacy.sections.7.heading": {
       "source": "8. Retention and deletion",
@@ -1418,9 +1638,9 @@
       "translation": "سياسة الخصوصية"
     },
     "page.privacy.updated": {
-      "source": "Last updated: 2026-07-01",
-      "sourceHash": "a4aaeb01402f13e136b219e3e6a4f6544279f9c526128305aaeb405d736a5988",
-      "translation": "آخر تحديث: 2026-07-01"
+      "source": "Last updated: 2026-07-15",
+      "sourceHash": "1c8f71cedaae6b5a392b1ab78e59bbdcfd5b4cc7c4125b99dbc2e50b8e57ede7",
+      "translation": "آخر تحديث: 2026-07-15"
     },
     "page.terms.lead": {
       "source": "These Terms govern use of the Mind Atlas web service, free notebook features, Google sign-in, cloud notebooks, billing, and AI features.",
@@ -1672,10 +1892,70 @@
       "sourceHash": "8fd697c4c315f7c961cd576d52cec5d5d25469fc43f23ed9f5b5706ba7be3ea8",
       "translation": "آخر تحديث: 2026-07-01"
     },
+    "search.caseSensitive": {
+      "source": "Case sensitive",
+      "sourceHash": "960f5b8337fa0204cb5e94254204c08b264a54ce4b639dbadf7d768b9f81f636",
+      "translation": "مطابقة حالة الأحرف"
+    },
+    "search.description": {
+      "source": "Find text in every node title and body.",
+      "sourceHash": "e5e715a6001b31560520a197fb0160451d64d1a05a7b6d3f80e0e250f3a2d857",
+      "translation": "ابحث عن نص في عناوين جميع العقد ومحتواها."
+    },
+    "search.field.body": {
+      "source": "Body",
+      "sourceHash": "64a67e0b8c29cbad4e2877e474aec2ca6b51d96503f3e7616df590ba30292e90",
+      "translation": "المحتوى"
+    },
+    "search.field.metadata": {
+      "source": "Metadata",
+      "sourceHash": "b76d1e4ad398c74a03635c1f5dff4b3b226036ffd4c48e2c6c9249fea2abec05",
+      "translation": "البيانات الوصفية"
+    },
+    "search.field.summary": {
+      "source": "Summary",
+      "sourceHash": "7a95af4358214b3d475171b7296e8d5eeb40d7ad5ad2627c5687920b221221e9",
+      "translation": "الملخص"
+    },
+    "search.field.tags": {
+      "source": "Tags",
+      "sourceHash": "9489e14e6ea3634fa44cc04c1b4a8b2b1800e69b26a06e5cc9012a72262cd9e3",
+      "translation": "الوسوم"
+    },
+    "search.field.title": {
+      "source": "Title",
+      "sourceHash": "f61f86ce3ef06511171d6ec6146eb49f1ad2cb2d15674c78ceffc596c68d8987",
+      "translation": "العنوان"
+    },
+    "search.noResults": {
+      "source": "No matching nodes.",
+      "sourceHash": "60ac489440644003fa672421b6328f6e7ab9654872fbd7f299ca9edab64ed1e4",
+      "translation": "لا توجد عقد مطابقة."
+    },
+    "search.placeholder": {
+      "source": "Search text or regular expression",
+      "sourceHash": "1dd040f2228c66c6b69540cb0e94a416e6988f42c916ec8ebe398901a0ca76f4",
+      "translation": "نص البحث أو تعبير نمطي"
+    },
+    "search.regex": {
+      "source": "Regular expression",
+      "sourceHash": "3bd15a50fd77ca89b24b3cc370b68544946165087a9d19c31dd8e7ecc72faf36",
+      "translation": "تعبير نمطي"
+    },
+    "search.resultCount": {
+      "source": "{count, plural, one {# result} other {# results}}",
+      "sourceHash": "687d42940e5ac4f6d8e7451b93167be499416eb3d40bf18dccd8647c49f5a9a1",
+      "translation": "{count} نتيجة"
+    },
+    "search.title": {
+      "source": "Search all nodes",
+      "sourceHash": "34bb99c3b1d268305bda657c3165b5740a3c26bc725f2c2d7b75f9f5be10ebc7",
+      "translation": "البحث في جميع العقد"
+    },
     "service.authRequired": {
-      "source": "Google login is required. Sign in from AI features at the top right.",
-      "sourceHash": "b74cfcb431cdd64811ed597b755c7b7a114282986e172b5a40fc2e0b1aa2953f",
-      "translation": "تسجيل الدخول عبر Google مطلوب. سجّل الدخول من ميزات الذكاء الاصطناعي في أعلى اليمين."
+      "source": "Google login is required. Sign in from Cloud save & sharing at the top right.",
+      "sourceHash": "5bb6492defa548ad7169b1b85893c34677e5308b0372f6997e2fc611fe1a93eb",
+      "translation": "تسجيل الدخول باستخدام Google مطلوب. سجّل الدخول من الحفظ والمشاركة السحابية في أعلى اليمين."
     },
     "service.badRequest": {
       "source": "Review the request. The input, model, or attachment may not match the current public settings.",
@@ -1690,7 +1970,7 @@
     "service.cloudNotebookTooLarge": {
       "source": "This notebook is too large to save to the cloud. Reduce the amount of text.",
       "sourceHash": "92cef7bf8c7946e0507a008f0b4a93963d248d6d72c1560fd2698edef828f7db",
-      "translation": "هذا الدفتر كبير جدًا بحيث لا يمكن حفظه في السحابة. قلّل كمية النص."
+      "translation": "دفتر الملاحظات كبير جدًا ولا يمكن حفظه في السحابة. قلل كمية النص."
     },
     "service.creditExhausted": {
       "source": "You have used all AI tokens for this billing period. AI requests resume on the next renewal date.",
@@ -1715,22 +1995,22 @@
     "service.pricingNotConfigured": {
       "source": "Usage pricing has not been configured for this model, so the public safety policy has stopped the request.",
       "sourceHash": "e25c456c0566931eda2d742926264c58bf5566fdea39161c5165e086cc292a0e",
-      "translation": "لم يتم تكوين تسعير الاستخدام لهذا النموذج، لذلك أوقفت سياسة الأمان العامة الطلب."
+      "translation": "لم يتم تكوين تسعير الاستخدام لهذا النموذج، لذلك أوقفت سياسة الأمان العام الطلب."
     },
     "service.providerUnavailable": {
       "source": "The AI service could not be reached. Wait a moment or try another model.",
       "sourceHash": "5a12fb6a03b609d4d23582abc4205c07e9cdb6c102134ee0cc52cd46302f186b",
-      "translation": "تعذر الوصول إلى خدمة الذكاء الاصطناعي. انتظر لحظة أو جرّب نموذجًا آخر."
+      "translation": "تعذر الوصول إلى خدمة الذكاء الاصطناعي. انتظر لحظة أو جرب نموذجًا آخر."
     },
     "service.requestTooLarge": {
       "source": "This input is too large. Reduce the selected nodes, attachments, or audio length and try again.",
       "sourceHash": "7733edb95c445e400af3cbaa20dfc494aea78b0783285b2d58ed960f3f32dfe5",
-      "translation": "هذا الإدخال كبير جدًا. قلّل العقد المحددة أو المرفقات أو طول الصوت وحاول مرة أخرى."
+      "translation": "هذا الإدخال كبير جدًا. قلل العقد المحددة أو المرفقات أو طول الصوت وحاول مرة أخرى."
     },
     "service.subscriptionRequired": {
       "source": "AI features are available after subscribing. You can keep using the notebook for free.",
       "sourceHash": "4b3e0dd70f83e00e2de333fbb4d9265c9b8ba59c87c0d18dd2163ce17291d595",
-      "translation": "ميزات الذكاء الاصطناعي متاحة بعد الاشتراك. يمكنك الاستمرار في استخدام الدفتر مجانًا."
+      "translation": "ميزات الذكاء الاصطناعي متاحة بعد الاشتراك. يمكنك الاستمرار في استخدام دفتر الملاحظات مجانًا."
     },
     "startSpace.close": {
       "source": "Close start choices",
@@ -1815,7 +2095,7 @@
     "status.cloud.loginRequired": {
       "source": "Google login is required for cloud sharing.",
       "sourceHash": "78ea88e95c0bfb7aa57b6125ee37bc89f4dbedfefcbe6aa4074f7e44ea9bdb52",
-      "translation": "تسجيل الدخول عبر Google مطلوب للمشاركة السحابية."
+      "translation": "تسجيل الدخول باستخدام Google مطلوب للمشاركة السحابية."
     },
     "status.cloud.overwriting": {
       "source": "Overwriting...",
@@ -1835,7 +2115,7 @@
     "status.cloud.renamed": {
       "source": "Renamed: {name}",
       "sourceHash": "9bde272a01c501951772b23a8f0a298948f2a6c99cbf55e6cb366e6c2737171e",
-      "translation": "تمت إعادة التسمية: {name}"
+      "translation": "أعيدت التسمية: {name}"
     },
     "status.cloud.saved": {
       "source": "Saved: {name}",
@@ -1880,7 +2160,7 @@
     "status.copy.copied": {
       "source": "Copied {stats}",
       "sourceHash": "dfd082692f810ffdf81a3f473c041fe1f7f2bbf1c204a0366d55b3aad3dcf2a3",
-      "translation": "تم النسخ {stats}"
+      "translation": "تم النسخ: {stats}"
     },
     "status.device.unsupported": {
       "source": "Unsupported on this device",
@@ -1900,12 +2180,17 @@
     "status.mobile.only": {
       "source": "Mobile only on this device",
       "sourceHash": "8dd1f22ad8fbc36bd5ec7c7d19c53bf9e588ffc9e2255afcca80c8585b1b9675",
-      "translation": "هاتف محمول فقط على هذا الجهاز"
+      "translation": "الجوال فقط على هذا الجهاز"
+    },
+    "status.notebook.savedLocally": {
+      "source": "Saved locally.",
+      "sourceHash": "cd5301c2d73ee5ffd46b0309147a0cb470507c78d944a28154df3a41d175da5c",
+      "translation": "تم الحفظ محليًا."
     },
     "status.realtime.workRootRequired": {
       "source": "Set the Codex work root before sending.",
       "sourceHash": "3283bd8238aead01d6ce737e75f460302d9d28b0f14e0c9d6cfdee5d22d58a60",
-      "translation": "عيّن مجلد عمل Codex قبل الإرسال."
+      "translation": "اضبط جذر عمل Codex قبل الإرسال."
     },
     "status.share.creatingEmbeddedUrl": {
       "source": "Creating embedded-data URL...",
@@ -1915,7 +2200,7 @@
     "status.share.embeddedUrlCopied": {
       "source": "Embedded-data URL copied. {characters} URL characters / {nodes, plural, one {# node} other {# nodes}}.",
       "sourceHash": "59a7ed660040010eb56bc7045157ea96b645a52668ed9d6bc74d8ae99bd3686c",
-      "translation": "تم نسخ عنوان URL ببيانات مضمنة. {characters} حرف / {nodes, plural, one {# عقدة} other {# عقد}}."
+      "translation": "تم نسخ عنوان URL ببيانات مضمنة. {characters} حرف لـ URL / {nodes, plural, one {# عقدة} other {# عقد}}."
     },
     "status.share.imageDownloaded": {
       "source": "Share image downloaded.",
@@ -1992,10 +2277,40 @@
       "sourceHash": "6cc591070a88757a83c020c16b62f78850d4cf1ab116b76f08ad964adfb407ce",
       "translation": "خطط لرحلة"
     },
+    "tutorial.complete.detail": {
+      "source": "You are ready to start using Mind Atlas.",
+      "sourceHash": "351d1acd4ad4cbf4de6b5c0604977ac68dd206e04060b838a39e5ad2daf2c18f",
+      "translation": "أنت جاهز الآن لبدء استخدام Mind Atlas."
+    },
+    "tutorial.complete.title": {
+      "source": "Tutorial complete",
+      "sourceHash": "91bb8e8f6d12f3b4e377ee538de35aad5c19cdf05a6cebc7940fb546a9b1aece",
+      "translation": "اكتمل البرنامج التعليمي"
+    },
+    "tutorial.next.continue": {
+      "source": "Continue with these nodes",
+      "sourceHash": "50a81f447f41d5af65f1537cfe85db6b0a9507cb520123de4f5ca8f9710e5deb",
+      "translation": "المتابعة بهذه العُقد"
+    },
+    "tutorial.next.detail": {
+      "source": "Keep the nodes you just created, or start from a template.",
+      "sourceHash": "6a1ee05c509108fbc9e6447ef19b348b0849cb8a1272f10272fb3f8cbacd9865",
+      "translation": "احتفظ بالعُقد التي أنشأتها للتو، أو ابدأ من قالب."
+    },
+    "tutorial.next.template": {
+      "source": "Use a template",
+      "sourceHash": "1c134d5294be00c7182d77162ebab543e89b353e2d24bfbbd1abe07e011eef36",
+      "translation": "استخدام قالب"
+    },
+    "tutorial.next.title": {
+      "source": "How would you like to begin?",
+      "sourceHash": "cfbc228bc956088154554f4b4aa24fff12a995fd69a85a91c8ec9e1385af5430",
+      "translation": "كيف تريد أن تبدأ؟"
+    },
     "ui.app.100GrantedEachBillingPeriod.753b157": {
       "source": "100% granted each billing period",
       "sourceHash": "a9d7d99aa8b3a4af91955c1db7402d1e871d892ea6ee52263bf4e6365646890d",
-      "translation": "100٪ ممنوحة كل فترة فوترة"
+      "translation": "100% مُمنَحة كل فترة فوترة"
     },
     "ui.app.acceptIncoming.b506f76": {
       "source": "Accept incoming",
@@ -2005,7 +2320,7 @@
     "ui.app.ai.c7cd197": {
       "source": "AI",
       "sourceHash": "043523a835942e50a3954f82ea6e4c3bdc88feeed6178d065e7d2bfd6aaeb869",
-      "translation": "AI"
+      "translation": "الذكاء الاصطناعي"
     },
     "ui.app.aiFeatures.8149424": {
       "source": "AI features",
@@ -2035,7 +2350,7 @@
     "ui.app.aiRequest.752b5a1": {
       "source": "AI request",
       "sourceHash": "1e934c8326b3f08252d0da0a2bd210ce1f1175411ae8369dca4b83989e3cce62",
-      "translation": "طلب ذكاء اصطناعي"
+      "translation": "طلب الذكاء الاصطناعي"
     },
     "ui.app.aiTokenBalance.016ef19": {
       "source": "AI token balance",
@@ -2045,7 +2360,7 @@
     "ui.app.appendAsChildren.a7c96eb": {
       "source": "Append as children",
       "sourceHash": "399eafd0a4758d8cda93e43edc1e884c2de8b52c80c29075e171b427644fe289",
-      "translation": "إضافة كعقد فرعية"
+      "translation": "إلحاق كعقد فرعية"
     },
     "ui.app.applyMerge.6308788": {
       "source": "Apply merge",
@@ -2090,12 +2405,12 @@
     "ui.app.chooseAServerPackage.23147b3": {
       "source": "choose a server package",
       "sourceHash": "c741c859b09d4f3df9fb9e8fdba96e6d2e43aeac68c2f447157c4e1d4a830d7f",
-      "translation": "اختر حزمة خادم"
+      "translation": "اختيار حزمة خادم"
     },
     "ui.app.chooseCurrentOrIncomingText.42a85bc": {
       "source": "Choose current or incoming text per node block before applying.",
       "sourceHash": "9b2939091ec9a5f5b523473c27d559c332e7d5b88d6784a11ace9840e219fd7e",
-      "translation": "اختر النص الحالي أو الوارد لكل عقدة قبل التطبيق."
+      "translation": "اختر النص الحالي أو الوارد لكل كتلة عقدة قبل التطبيق."
     },
     "ui.app.clearAiPartnerLog.566017c": {
       "source": "Clear AI Partner log",
@@ -2105,7 +2420,7 @@
     "ui.app.clearTheLocalAiPartner.74ecd9c": {
       "source": "Clear the local AI Partner log?",
       "sourceHash": "363b2ffed686c76ea62190f7c36e58252aabeb6bbc09b3c3c93df8d672c44de7",
-      "translation": "مسح سجل AI Partner المحلي؟"
+      "translation": "هل تريد مسح سجل AI Partner المحلي؟"
     },
     "ui.app.closeAiPartnerLog.889d998": {
       "source": "Close AI Partner log",
@@ -2120,7 +2435,7 @@
     "ui.app.closeCloudLoader.e2381d8": {
       "source": "Close cloud loader",
       "sourceHash": "7ac7c79e433741888b1e92b9f6fe3a6a9b0105a30c461252e76d2d7ee22d239d",
-      "translation": "إغلاق محمّل السحابة"
+      "translation": "إغلاق محمل السحابة"
     },
     "ui.app.closeMergePreview.3c2fdef": {
       "source": "Close merge preview",
@@ -2130,7 +2445,7 @@
     "ui.app.closeNotebookHistory.84b445f": {
       "source": "Close notebook history",
       "sourceHash": "e31a782c0a368ba9fa459496c74de378577d648d7c332eb66db8a6885c79e23f",
-      "translation": "إغلاق سجل الدفتر"
+      "translation": "إغلاق سجل دفتر الملاحظات"
     },
     "ui.app.closeSharedAtlasImport.dc949d9": {
       "source": "Close shared atlas import",
@@ -2150,7 +2465,7 @@
     "ui.app.cloudFileActions.72433a6": {
       "source": "Cloud file actions",
       "sourceHash": "77e4af20b41c7746eb5014a966dc8e6fc65dc31efee3f4b2b82216d25b2ea4f6",
-      "translation": "إجراءات الملف السحابي"
+      "translation": "إجراءات الملفات السحابية"
     },
     "ui.app.cloudNotebookCopies.1f91ff1": {
       "source": "Cloud notebook copies",
@@ -2190,7 +2505,7 @@
     "ui.app.editor.127052c": {
       "source": "Editor",
       "sourceHash": "14741dfe8000a272ce04d23e45554cf6f3770d1b8541861ff6f83f993c2183c0",
-      "translation": "محرر"
+      "translation": "المحرر"
     },
     "ui.app.entries.6c074e4": {
       "source": "entries",
@@ -2220,7 +2535,7 @@
     "ui.app.importingWillReplaceTheCurrent.4aa2bfe": {
       "source": "Importing will replace the current universe in this browser. Node IDs and metadata are regenerated on import.",
       "sourceHash": "489a03b46e33795dabea7633748843b192df99e3adbeda993e7135e1207ef833",
-      "translation": "سيؤدي الاستيراد إلى استبدال الكون الحالي في هذا المتصفح. سيتم إعادة إنشاء معرفات العقد والبيانات الوصفية عند الاستيراد."
+      "translation": "الاستيراد سيستبدل الكون الحالي في هذا المتصفح. يتم إعادة إنشاء معرفات العقد والبيانات الوصفية عند الاستيراد."
     },
     "ui.app.importSharedAtlas.82f80a3": {
       "source": "Import shared atlas",
@@ -2305,7 +2620,7 @@
     "ui.app.mobileWorkspace.35daa52": {
       "source": "Mobile workspace",
       "sourceHash": "3fd6da67df74fa0a98c2dc61b4420054fd823f3683d0d1a43ae3e351b8d7f477",
-      "translation": "مساحة عمل الهاتف المحمول"
+      "translation": "مساحة العمل على الهاتف"
     },
     "ui.app.nextRenewal.04e732d": {
       "source": "Next renewal:",
@@ -2340,17 +2655,17 @@
     "ui.app.noNotebookSnapshotsYetMake.790ea77": {
       "source": "No notebook snapshots yet. Make an edit and Mind Atlas will save history automatically.",
       "sourceHash": "90043e18945a197ce6571485ed564594650e67ff727e6c4a5e15aeb3fbf66a32",
-      "translation": "لا توجد لقطات دفاتر بعد. قم بتحرير وسيحفظ Mind Atlas السجل تلقائيًا."
+      "translation": "لا توجد لقطات لدفتر الملاحظات بعد. قم بتحرير وسيحفظ Mind Atlas السجل تلقائيًا."
     },
     "ui.app.notebookTemplates.b6a2c8e": {
       "source": "Notebook templates",
       "sourceHash": "a41ee4933af1f2ebf82f5536d1ce1d6bfd20715ef8a8aa1dfc7e4b7046a6a781",
-      "translation": "قوالب الدفاتر"
+      "translation": "قوالب دفاتر الملاحظات"
     },
     "ui.app.operation.c7a1622": {
       "source": "Operation",
       "sourceHash": "95a80aabe8ed1785816e7d04c63e8106c8800edee4f111e6f896c48070f3f250",
-      "translation": "عملية"
+      "translation": "التشغيل"
     },
     "ui.app.overwrite.d7bec6b": {
       "source": "Overwrite",
@@ -2365,7 +2680,7 @@
     "ui.app.pressTheMicrophoneOnceAnd.980ef6c": {
       "source": "Press the microphone once and stop to transcribe speech into text with low usage. Press and hold it for real-time AI conversation; the button turns red. Keep holding while you speak, and AI replies with audio. Realtime uses more of your allowance. Change the voice from Voice settings in the menu.",
       "sourceHash": "f6cb60a5d7c588ecef12aeac52b8ae989d555399830008e3f967f852be94c85d",
-      "translation": "اضغط على الميكروفون مرة واحدة وتوقف لتفريغ الكلام إلى نص باستخدام استخدام منخفض. اضغط مع الاستمرار للمحادثة الفورية مع الذكاء الاصطناعي؛ يتحول الزر إلى الأحمر. استمر في الضغط أثناء التحدث، ويرد الذكاء الاصطناعي بالصوت. تستخدم المحادثة الفورية رصيدًا أكبر. يمكنك تغيير الصوت من إعدادات الصوت في القائمة."
+      "translation": "اضغط على الميكروفون مرة واحدة وتوقف لنسخ الكلام إلى نص باستهلاك منخفض. اضغط مع الاستمرار للمحادثة التفاعلية في الوقت الفعلي مع الذكاء الاصطناعي؛ سيتحول الزر إلى اللون الأحمر. استمر في الضغط أثناء التحدث، وسيرد الذكاء الاصطناعي بالصوت. الاستخدام التفاعلي يستهلك المزيد من رصيدك. يمكنك تغيير الصوت من إعدادات الصوت في القائمة."
     },
     "ui.app.previewMerge.113d7f4": {
       "source": "Preview merge",
@@ -2380,12 +2695,12 @@
     "ui.app.readOnly.d5d8899": {
       "source": "/ read-only",
       "sourceHash": "96407811bd76cc712bf2c3f8b6206fbc5899beb07ec4a8c33f2af093d00d6b08",
-      "translation": " / للقراءة فقط"
+      "translation": "/ للقراءة فقط"
     },
     "ui.app.realtimeModel.dc77751": {
       "source": "Realtime model",
       "sourceHash": "dc876d6e57f08582f91d70448bd43a9289217e097be50f6592cb5a94d7fa029c",
-      "translation": "نموذج Realtime"
+      "translation": "نموذج الوقت الفعلي"
     },
     "ui.app.redoCtrlY.d812f8d": {
       "source": "Redo (Ctrl+Y)",
@@ -2405,7 +2720,7 @@
     "ui.app.refreshNotebookHistory.f80e50c": {
       "source": "Refresh notebook history",
       "sourceHash": "14766c7853b7ceb4d09a7a09dc87e49baeec4f19a70e3e793552c49cba003dd7",
-      "translation": "تحديث سجل الدفتر"
+      "translation": "تحديث سجل دفتر الملاحظات"
     },
     "ui.app.rename.974d17f": {
       "source": "Rename",
@@ -2475,12 +2790,12 @@
     "ui.app.serverNotebookFolder.b9a7320": {
       "source": "Server notebook folder",
       "sourceHash": "b0bdb30ba4323d5d3e9c5ba9eb5ea9f5934059692bcc471ef3796096bb846624",
-      "translation": "مجلد دفاتر الخادم"
+      "translation": "مجلد دفاتر الملاحظات على الخادم"
     },
     "ui.app.shared.f6ca971": {
       "source": "/ shared",
       "sourceHash": "71053cd0bb21d8def420fe15eff3c7610f74e5bd06fbf5dcf47a3db37203724c",
-      "translation": " / مشترك"
+      "translation": "/ مشترك"
     },
     "ui.app.sharedMindAtlas.5a0a271": {
       "source": "Shared Mind Atlas",
@@ -2505,7 +2820,7 @@
     "ui.app.subscribeForUs10Per.ec14079": {
       "source": "Subscribe for US$10 per month",
       "sourceHash": "51ae3a052eebd3e1c6dea7470010706eebb60a315236c40738fc44e68439ff21",
-      "translation": "اشترك مقابل 10 دولارات أمريكية شهريًا"
+      "translation": "اشترك بمبلغ US$10 شهريًا"
     },
     "ui.app.texteditor.0e3c5aa": {
       "source": "TextEditor",
@@ -2515,7 +2830,7 @@
     "ui.app.theArrowShapedSendButton.74bf26f": {
       "source": "The arrow-shaped Send button sends your input to the selected AI and uses your AI token balance. If you send from a selected node, that node's context is included and the reply is added as a child node. If no node is selected, the reply returns to the AI Partner log.",
       "sourceHash": "2f05f6be94309f88d6948be5b8662213e9fda7a685366c9bd658f736a32717b7",
-      "translation": "زر الإرسال الذي يشبه السهم يرسل إدخالك إلى الذكاء الاصطناعي المحدد ويستخدم رصيد رموز الذكاء الاصطناعي الخاص بك. إذا أرسلت من عقدة محددة، يتم تضمين سياق تلك العقدة ويُضاف الرد كعقدة فرعية. إذا لم يتم تحديد عقدة، يعود الرد إلى سجل AI Partner."
+      "translation": "زر الإرسال على شكل سهم يرسل إدخالك إلى الذكاء الاصطناعي المحدد ويستخدم رصيد رموز الذكاء الاصطناعي الخاص بك. إذا أرسلت من عقدة محددة، يتم تضمين سياق تلك العقدة وتُضاف الرد كعقدة فرعية. إذا لم يتم تحديد عقدة، يعود الرد إلى سجل AI Partner."
     },
     "ui.app.theHostedServiceCannotImport.a105a9c": {
       "source": "The hosted service cannot import packages containing images or video. Use .mindatlas, Markdown, OPML, or FreeMind.",
@@ -2525,12 +2840,12 @@
     "ui.app.theNotebookWorksWithoutSigning.de5cd82": {
       "source": "The notebook works without signing in. AI features require Google sign-in and a monthly subscription.",
       "sourceHash": "a01e87e0660d03b36d8aa83dfacf143c9ac1188486eb8d03b672f9dfb49756ad",
-      "translation": "يعمل الدفتر من دون تسجيل الدخول. تتطلب ميزات الذكاء الاصطناعي تسجيل الدخول عبر Google واشتراكًا شهريًا."
+      "translation": "يعمل دفتر الملاحظات بدون تسجيل الدخول. تتطلب ميزات الذكاء الاصطناعي تسجيل الدخول باستخدام Google واشتراكًا شهريًا."
     },
     "ui.app.thisLinkContainsTitlesBody.c73dc1e": {
       "source": "This link contains titles, body text, positions, colors, textures, and tree structure only.",
       "sourceHash": "8171938e429d5bbb43ab4d3b0391037e227ebdf479e724ae5b58b8acbd12ff3b",
-      "translation": "يحتوي هذا الرابط على العناوين والنص والمواضع والألوان والأنسجة وهيكل الشجرة فقط."
+      "translation": "يحتوي هذا الرابط على العناوين والنصوص والمواقع والألوان والأنسجة والبنية الشجرية فقط."
     },
     "ui.app.tool.0042dcc": {
       "source": "tool:",
@@ -2540,12 +2855,12 @@
     "ui.app.tutorialModeWillEraseThe.4f40f19": {
       "source": "Tutorial mode will erase the current local atlas and restart the guided first-run flow. Continue?",
       "sourceHash": "a1d9d1037b8d5f893c6d93befb73d494aa9901f568edb47db38621f642d9a80c",
-      "translation": "سيؤدي الوضع التعليمي إلى مسح الأطلس المحلي الحالي وإعادة تشغيل الدليل الأولي. هل تريد المتابعة؟"
+      "translation": "الوضع التعليمي سيمسح الأطلس المحلي الحالي ويعيد تشغيل دليل الاستخدام الأولي. هل تريد المتابعة؟"
     },
     "ui.app.unchanged.646983b": {
       "source": "Unchanged",
       "sourceHash": "f6577aeeaf74c22f39ba69d5f42b145961bffc480fcd9d942741389ff197a617",
-      "translation": "بدون تغيير"
+      "translation": "لم يتغير"
     },
     "ui.app.unreadNotifications.f2695f5": {
       "source": "Unread notifications",
@@ -2560,7 +2875,7 @@
     "ui.app.us10Month.25ec82a": {
       "source": "US$10 / month",
       "sourceHash": "fad40ac6aff61c9a193af30c965546e8a770f6d087adf39f83a26dd2f2739e35",
-      "translation": "10 دولارات / شهر"
+      "translation": "US$10 شهريًا"
     },
     "ui.app.usageGuide.1809d14": {
       "source": "Usage guide",
@@ -2590,7 +2905,7 @@
     "ui.commandDock.ai.3b06fd0": {
       "source": "AI",
       "sourceHash": "c2405228cbb2b6d59acd637d35e658efa0723b82c83ff10117c1b219007a7d94",
-      "translation": "AI"
+      "translation": "الذكاء الاصطناعي"
     },
     "ui.commandDock.aiContextPreview.f27df14": {
       "source": "AI context preview",
@@ -2640,7 +2955,7 @@
     "ui.commandDock.autoContinuesOrForksThe.be524d9": {
       "source": "Auto continues or forks the agent session recorded on this branch. New forces a fresh session for the next run only.",
       "sourceHash": "2f92d6523bc48d4b46115ceccf77633950ff583d50892a994f256aade196270c",
-      "translation": "تستمر أو تتفرع الجلسة التلقائية المسجلة على هذا الفرع. New تفرض جلسة جديدة للتشغيل التالي فقط."
+      "translation": "تلقائي يواصل أو يتفرع من جلسة الوكيل المسجلة على هذا الفرع. جديد يفرض جلسة جديدة للتشغيل التالي فقط."
     },
     "ui.commandDock.chatFromThisLocation.03514a3": {
       "source": "Chat from this location",
@@ -2655,7 +2970,7 @@
     "ui.commandDock.chooseTheCodeBackendFor.2b5180b": {
       "source": "Choose the code backend for this node-anchored run.",
       "sourceHash": "42fd00723801ba3949da3d605518a5e59aed5cc37aaac218c1068b414db47459",
-      "translation": "اختر الواجهة الخلفية للبرمجة لهذا التشغيل المرتبط بالعقدة."
+      "translation": "اختر الواجهة الخلفية البرمجية لهذا التشغيل المرتبط بالعقدة."
     },
     "ui.commandDock.claudeCode.432aa3f": {
       "source": "Claude Code",
@@ -2665,17 +2980,17 @@
     "ui.commandDock.claudeCodeEffortLeaveDefault.8357b80": {
       "source": "Claude Code --effort. Leave default to let the bridge and CLI decide.",
       "sourceHash": "6fe5188f25e11a998901dcda88e1b50bf2d8215d6550f5082d901f30584ff01b",
-      "translation": "--effort في Claude Code. اترك افتراضيًا ليدع الجسر وCLI يقرران."
+      "translation": "Claude Code --effort. اترك الافتراضي ليتخذ الجسر وCLI القرار."
     },
     "ui.commandDock.claudeCodePermissionModeThis.83aebfd": {
       "source": "Claude Code --permission-mode. This is not the same as Codex OS sandboxing.",
       "sourceHash": "1897c6aeeb6a26ac8c94fa1c45d4f4e8f85a91809d843af4261862999d1bc8a0",
-      "translation": "--permission-mode في Claude Code. هذا ليس نفس حماية Codex OS."
+      "translation": "Claude Code --permission-mode. هذا ليس مثل العزل في Codex OS."
     },
     "ui.commandDock.claudeCodeProviderAndModel.01362ae": {
       "source": "Claude Code provider and model preset",
       "sourceHash": "ad63c4eb523c42dd99f8cd80e0e411ace9c1977f8dae959de41fa2d2e3d14811",
-      "translation": "إعداد مزوّد ونموذج Claude Code"
+      "translation": "الإعداد المسبق لمزود Claude Code ونموذجه"
     },
     "ui.commandDock.closeContextPreview.eb189c5": {
       "source": "Close context preview",
@@ -2765,7 +3080,7 @@
     "ui.commandDock.preset.a4b55c6": {
       "source": "Preset",
       "sourceHash": "162a1b12adf79b0ce33f19a94857ddd9a62ad4fe5fa1dbc56ca8531ab947234a",
-      "translation": "إعداد مسبق"
+      "translation": "الإعداد المسبق"
     },
     "ui.commandDock.previewTheAutoAssembledAi.78a3c87": {
       "source": "Preview the auto-assembled AI context",
@@ -2785,7 +3100,7 @@
     "ui.commandDock.sandbox.a511d77": {
       "source": "Sandbox",
       "sourceHash": "98aa9977b840b1d233e2e33b2e669325773fd3cb9492f766e4ae61b1ae409d26",
-      "translation": "بيئة محمية"
+      "translation": "بيئة اختبارية"
     },
     "ui.commandDock.sendInstruction.797c542": {
       "source": "Send instruction",
@@ -2815,7 +3130,7 @@
     "ui.commandDock.trimmedToBudget.c9aeaa4": {
       "source": "/ trimmed to budget",
       "sourceHash": "c20cbe8accc864e9480006161487eb526a295cc2eeb0b8c6f49b3069ede1c61f",
-      "translation": " / مقتطع حسب الميزانية"
+      "translation": "/ مقتطع حسب الميزانية"
     },
     "ui.commandDock.trusted.e48f61e": {
       "source": "trusted",
@@ -2825,7 +3140,7 @@
     "ui.commandDock.user.761c4c4": {
       "source": "User",
       "sourceHash": "b38a2de2c791dd6836e25c1900e4508148bab52a63efc25cb247a550e0ea0aa9",
-      "translation": "مستخدم"
+      "translation": "المستخدم"
     },
     "ui.commandDock.voicePartnerPushToTalk.4a830b4": {
       "source": "Voice Partner push-to-talk or dictation",
@@ -2835,7 +3150,7 @@
     "ui.commandDock.workRoot.4eeba87": {
       "source": "Work root",
       "sourceHash": "0e0c2068cebc760fa462bd67401a9df726076f3216465af1cf6a0b3b1137cd65",
-      "translation": "مجلد العمل"
+      "translation": "جذر العمل"
     },
     "ui.commandDock.workspace.27b549c": {
       "source": "workspace",
@@ -2860,12 +3175,12 @@
     "ui.focusPanel.1d.0a6d11e": {
       "source": "+1d",
       "sourceHash": "64084c6eeaf4d7a7582260ceaafc072f46510189a4063380776a3ba30ebe0a02",
-      "translation": "+يوم"
+      "translation": "+1ي"
     },
     "ui.focusPanel.atlasMemo.b78ca47": {
       "source": "Atlas memo.",
       "sourceHash": "62a144bae6de281d844888ba5c73f67cee6350eac7dc1537bfaf0f308ec37be3",
-      "translation": "مذكرة الأطلس."
+      "translation": "مذكرة أطلس."
     },
     "ui.focusPanel.attachFile.56c4761": {
       "source": "Attach file",
@@ -2880,7 +3195,7 @@
     "ui.focusPanel.bands.2c9011b": {
       "source": "Bands",
       "sourceHash": "0c9e8744d5fe7026f841d42aa3a5882b6db2b06a79e124c1c884f33f4fb7786b",
-      "translation": "أشرطة"
+      "translation": "نطاقات"
     },
     "ui.focusPanel.cell.008b6bc": {
       "source": "Cell",
@@ -2900,7 +3215,7 @@
     "ui.focusPanel.color.18eb1f5": {
       "source": "Color",
       "sourceHash": "3a03484633756e1a87936a465cfa0274dcc0d9ebf69afc595dea698abcd38bc7",
-      "translation": "لون"
+      "translation": "اللون"
     },
     "ui.focusPanel.confirmEditing.c59b1e6": {
       "source": "Confirm editing",
@@ -2915,37 +3230,37 @@
     "ui.focusPanel.current.414194e": {
       "source": "Current",
       "sourceHash": "b341499f1a92613a5c0d55b59ddfc595d6332a96a1166aa75ca6fb7159d21e67",
-      "translation": "حالي"
+      "translation": "الحالي"
     },
     "ui.focusPanel.date.5c8a1a4": {
       "source": "Date",
       "sourceHash": "a0f90bc73a981920ccbbbc3773fa51ed8e13dbb859f65398430a3f1b8f69123a",
-      "translation": "تاريخ"
+      "translation": "التاريخ"
     },
     "ui.focusPanel.editor.9d99465": {
       "source": "Editor",
       "sourceHash": "9e2cd9cb6c4afac7d2b8fd32e8c346b33a2073284d2908a425c96669396895f6",
-      "translation": "محرر"
+      "translation": "المحرر"
     },
     "ui.focusPanel.f.ad8d3ac": {
       "source": "F",
       "sourceHash": "da3608daae49cef03027261e681b3988d1f497d7fcd83ed44eaf1fd47a2ff899",
-      "translation": "ت"
+      "translation": "ج"
     },
     "ui.focusPanel.focusedContext.924c0f6": {
       "source": "Focused context",
       "sourceHash": "529bd69889a0dca566e7856197c60c7fabd30845ad137b32df7369bd4f801ccc",
-      "translation": "السياق المركز"
+      "translation": "السياق المركّز عليه"
     },
     "ui.focusPanel.freckles.9a5cf56": {
       "source": "Freckles",
       "sourceHash": "6e9b9e256e7568a6fcba481b817c6c7ce7479545fbe1bde0d574ac33f95eee54",
-      "translation": "نمش"
+      "translation": "نمنم"
     },
     "ui.focusPanel.m.6a73fe5": {
       "source": "M",
       "sourceHash": "c72b1956aa895d715398ed0685c610be43cdb53deadcb93c04280ceb68d0e36b",
-      "translation": "م"
+      "translation": "س"
     },
     "ui.focusPanel.memoDetailsOrContext.0f619ba": {
       "source": "Memo, details, or context.",
@@ -2995,7 +3310,7 @@
     "ui.focusPanel.noReminder.3a15176": {
       "source": "No reminder",
       "sourceHash": "3f457eaf04fb664e994a133d56d6fa62e8f10e45422bcb99846f45e71f54c38a",
-      "translation": "لا تذكير"
+      "translation": "لا يوجد تذكير"
     },
     "ui.focusPanel.now.95aec20": {
       "source": "Now",
@@ -3060,7 +3375,7 @@
     "ui.focusPanel.speckled.476d6ee": {
       "source": "Speckled",
       "sourceHash": "82fa5e13bb8e79916d16ee94194e8f20f212206f68f304d3d232e2fbe768400a",
-      "translation": "مرقّط"
+      "translation": "مرقش"
     },
     "ui.focusPanel.storedAsMetadata.0e06182": {
       "source": "Stored as metadata:",
@@ -3070,17 +3385,17 @@
     "ui.focusPanel.t.618eec3": {
       "source": "T",
       "sourceHash": "16ff0fb5a037e86089dff81c4b1bc85fef319366317cb4ed1fcd614134ced394",
-      "translation": "ن"
+      "translation": "ر"
     },
     "ui.focusPanel.texture.1bcaf49": {
       "source": "Texture",
       "sourceHash": "ff3255e3e592ae00bef5deb612c219d07c7b77b3e74a34fb5defc011ca5b5ce1",
-      "translation": "نسيج"
+      "translation": "النسيج"
     },
     "ui.focusPanel.w.0ecfe2c": {
       "source": "W",
       "sourceHash": "4737a439acac4e21768b2bc11c0a97192bb2dc363d2db2c123b45baaa496b929",
-      "translation": "م"
+      "translation": "أ"
     },
     "ui.minimap.universeMinimap.fb99fc8": {
       "source": "Universe minimap",
@@ -3090,7 +3405,7 @@
     "ui.outlineEditor.addChild.eb18105": {
       "source": "Add child",
       "sourceHash": "b31379c9b59f37985e3068d8467aed0f7a6bcc9f995a1068efc41648157280e6",
-      "translation": "إضافة عقدة فرعية"
+      "translation": "إضافة فرعي"
     },
     "ui.outlineEditor.addChildNode.9ac1af1": {
       "source": "Add child node",
@@ -3100,7 +3415,7 @@
     "ui.outlineEditor.addSibling.d0210ae": {
       "source": "Add sibling",
       "sourceHash": "b5fcddcd751b2698aa2f7eccc4aaaa9534b8f4db85a2db59e0179d181557c236",
-      "translation": "إضافة عقدة شقيقة"
+      "translation": "إضافة شقيق"
     },
     "ui.outlineEditor.addSiblingNode.4b7e5f1": {
       "source": "Add sibling node",
@@ -3165,7 +3480,7 @@
     "ui.outlineEditor.indentNode.cea22b8": {
       "source": "Indent node",
       "sourceHash": "3b8dffd286fd2b49594b16e648437c4b2df2a1e23b89be4232a40321b426fad2",
-      "translation": "زيادة المسافة البادئة"
+      "translation": "زيادة مسافة العقدة"
     },
     "ui.outlineEditor.mindAtlasOutlineEditor.9063b07": {
       "source": "Mind Atlas outline editor",
@@ -3175,12 +3490,12 @@
     "ui.outlineEditor.moveNodeDown.4e79f57": {
       "source": "Move node down",
       "sourceHash": "35d558b0e66ce186bd201e59e472572613e27797657b7cdd10ac7b7523328822",
-      "translation": "تحريك العقدة لأسفل"
+      "translation": "نقل العقدة لأسفل"
     },
     "ui.outlineEditor.moveNodeUp.3ecda81": {
       "source": "Move node up",
       "sourceHash": "00d131bfdcb36f9c436e2bc22fb019ac80f5f12dfa60286649e6aab82767c5d0",
-      "translation": "تحريك العقدة لأعلى"
+      "translation": "نقل العقدة لأعلى"
     },
     "ui.outlineEditor.nodeBody.68bf85f": {
       "source": "Node body",
@@ -3195,12 +3510,12 @@
     "ui.outlineEditor.outdentNode.30df0cf": {
       "source": "Outdent node",
       "sourceHash": "2b2bc2a07b18dcf1eca3c73e84b1535c8a90d49a4019f5cc6de2be8ce7e670af",
-      "translation": "تقليل المسافة البادئة"
+      "translation": "تقليل مسافة العقدة"
     },
     "ui.outlineEditor.outlineEditControls.a18584b": {
       "source": "Outline edit controls",
       "sourceHash": "5cabe11afef09c0fb73c8708a79ce48ccd8e03105bca887d90b67013133b08a8",
-      "translation": "عناصر تحرير المخطط"
+      "translation": "عناصر تحكم تحرير المخطط"
     },
     "ui.outlineEditor.textEditor.7ce32d9": {
       "source": "Text Editor",
@@ -3210,7 +3525,7 @@
     "ui.providerUsagePanel.aiProviderUsage.3b4868f": {
       "source": "AI provider usage",
       "sourceHash": "5dd89feadabd284cfa4ae87c83bd740fa959bb6abf679c6574df79843918d86e",
-      "translation": "استخدام مزوّد الذكاء الاصطناعي"
+      "translation": "استخدام مزود الذكاء الاصطناعي"
     },
     "ui.providerUsagePanel.balance.bd9d2f7": {
       "source": "BALANCE",
@@ -3235,17 +3550,17 @@
     "ui.providerUsagePanel.providerUsageMetricSelection.8b11260": {
       "source": "Provider usage metric selection",
       "sourceHash": "af9dabc04ce53f7042b8b43dc197ce70c465ecbe96fe74662f831535d95b1df3",
-      "translation": "اختيار مقاييس استخدام المزوّد"
+      "translation": "اختيار مقاييس استخدام المزود"
     },
     "ui.providerUsagePanel.refreshProviderUsage.1d40174": {
       "source": "Refresh provider usage",
       "sourceHash": "1ba108ebb87fbd1ed39cecc5af916d2e6260e24784995e0a332911e962e16cc6",
-      "translation": "تحديث استخدام المزوّد"
+      "translation": "تحديث استخدام المزود"
     },
     "ui.providerUsagePanel.refreshProviderUsage.6f8e298": {
       "source": "Refresh provider usage",
       "sourceHash": "866009e65cc153ecf730d19084eae0fa8e09ccaa814508e0919feaf6090ac054",
-      "translation": "تحديث استخدام المزوّد"
+      "translation": "تحديث استخدام المزود"
     },
     "ui.providerUsagePanel.reset.d78ee67": {
       "source": "RESET",
@@ -3255,12 +3570,12 @@
     "ui.providerUsagePanel.selectProviderUsageMetrics.481f1cf": {
       "source": "Select provider usage metrics",
       "sourceHash": "1f746b9195bd3e8591bdc84187779edee5cee0e3a0d5b1e5d9b635b566c1eb56",
-      "translation": "اختيار مقاييس استخدام المزوّد"
+      "translation": "اختيار مقاييس استخدام المزود"
     },
     "ui.providerUsagePanel.selectProviderUsageMetrics.e40b46d": {
       "source": "Select provider usage metrics",
       "sourceHash": "9e525cd8f09f78479c2313c7afef01b8c742511f6486c8b6212ac510b71a621a",
-      "translation": "اختيار مقاييس استخدام المزوّد"
+      "translation": "اختيار مقاييس استخدام المزود"
     },
     "ui.providerUsagePanel.sync.f877560": {
       "source": "SYNC",
@@ -3315,12 +3630,12 @@
     "ui.universeCanvas.moveUpOneLevel.f93496f": {
       "source": "Move up one level",
       "sourceHash": "8482ce6289605686021099ec9120c4a4ea1985ee55adbe6b76d4a7391f47d439",
-      "translation": "الرفع مستوى واحد"
+      "translation": "نقل لأعلى مستوى واحد"
     },
     "ui.universeCanvas.moveUpOneLevelTo.ca47798": {
       "source": "Move up one level to become a sibling of the current parent.",
       "sourceHash": "7d1e2293fb387f76e8a59ff3792a98d1428289e972d146ed5778ccc6e3b32ac7",
-      "translation": "الرفع مستوى واحد ليصبح شقيقًا للأب الحالي."
+      "translation": "نقل لأعلى مستوى واحد ليصبح شقيقًا للأصل الحالي."
     },
     "ui.universeCanvas.node.ff7abe9": {
       "source": "Node",
@@ -3345,7 +3660,7 @@
     "ui.universeCanvas.theClipboardDoesNotContain.00e8362": {
       "source": "The clipboard does not contain object data that Mind Atlas can import.",
       "sourceHash": "09fe13aac155837b140c58e232a20d531c33e62a6b179b33fb68b757c8a81c38",
-      "translation": "الحافظة لا تحتوي على بيانات كائن يمكن لـ Mind Atlas استيرادها."
+      "translation": "لا تحتوي الحافظة على بيانات كائن يمكن لـ Mind Atlas استيرادها."
     },
     "ui.universeCanvas.thisNodeCannotMoveTo.5e3b780": {
       "source": "This node cannot move to a higher level.",
@@ -3355,12 +3670,12 @@
     "ui.universeCanvas.thisSelectionContainsImageOr.340b24f": {
       "source": "This selection contains image or video attachments. The clipboard copy includes attachment metadata, not the files themselves.",
       "sourceHash": "0742c40dcd98abf4ac137551f4483b8c1949b1ffaf62a5c2f0852d32bcaf694c",
-      "translation": "هذا التحديد يحتوي على مرفقات صور أو فيديو. نسخة الحافظة تتضمن البيانات الوصفية للمرفقات، وليس الملفات نفسها."
+      "translation": "يحتوي هذا التحديد على مرفقات صور أو فيديو. نسخة الحافظة تتضمن بيانات وصفية للمرفقات، وليس الملفات نفسها."
     },
     "ui.universeCanvas.tokens.6732ec1": {
       "source": "tokens)",
       "sourceHash": "62b1c4be37fe6d94df24209961fc54862f561f6702fc4a3f2f27a67a163b6b31",
-      "translation": "رموز)"
+      "translation": "توكن)"
     },
     "workspace.ai": {
       "source": "AI",

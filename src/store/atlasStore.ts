@@ -321,7 +321,14 @@ interface AtlasStore {
   addChildNode: (
     parentId: string,
     initialBody?: string,
-    options?: { title?: string; position?: [number, number, number]; insertIndex?: number; focus?: boolean; persist?: boolean },
+    options?: {
+      title?: string;
+      position?: [number, number, number];
+      insertIndex?: number;
+      focus?: boolean;
+      persist?: boolean;
+      requestEdit?: boolean;
+    },
   ) => string | undefined;
   addChildNodes: (parentId: string, nodes: ChildNodeDraft[], options?: { focus?: boolean }) => string[];
   archivePartnerTurn: (archive: PartnerTurnArchive) => { requestNodeId: string; responseNodeId: string } | undefined;
@@ -339,7 +346,12 @@ interface AtlasStore {
   consumeBodyEditRequest: () => void;
   restoreAttachmentPreviews: () => Promise<void>;
   exportNotebook: () => string;
-  importNotebook: (root: AtlasNode, datasetName?: string, attachmentPreviewUrls?: Record<string, string>) => void;
+  importNotebook: (
+    root: AtlasNode,
+    datasetName?: string,
+    attachmentPreviewUrls?: Record<string, string>,
+    options?: { selectedNodeId?: string; requestTitleEdit?: boolean },
+  ) => void;
   applyOutlineSubtree: (rootId: string, outline: OutlineNodeInput, options?: { focusKey?: string }) => void;
   resetNotebook: () => void;
   saveNotebook: () => void;
@@ -996,7 +1008,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         ...pushHistory(state),
         atlasRoot,
         birthMarks: { ...state.birthMarks, [child.id]: performance.now() },
-        titleEditRequestId: options.focus === false ? state.titleEditRequestId : child.id,
+        titleEditRequestId:
+          options.focus === false || options.requestEdit === false ? state.titleEditRequestId : child.id,
       };
     });
     if (options.focus !== false) {
@@ -1466,7 +1479,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   exportNotebook: () => JSON.stringify(sanitizeNotebookForExport(get().atlasRoot, { includeAttachmentAssetPaths: false }), null, 2),
 
-  importNotebook: (root, datasetName, nextAttachmentPreviewUrls = {}) => {
+  importNotebook: (root, datasetName, nextAttachmentPreviewUrls = {}, options = {}) => {
     const current = get();
     Object.values(current.attachmentPreviewUrls).forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
     const normalizedRoot = {
@@ -1475,6 +1488,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     };
     const repair = repairDuplicateNodeIds(normalizedRoot);
     const atlasRoot = repair.root;
+    const requestedSelection = options.selectedNodeId ? findNode(atlasRoot, options.selectedNodeId) : null;
+    const selectedNode = requestedSelection ?? atlasRoot.children[0] ?? atlasRoot;
     if (repair.repairedIds.length) {
       console.warn(`Mind Atlas repaired ${repair.repairedIds.length} duplicate node id(s) during import.`);
     }
@@ -1485,8 +1500,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     set({
       ...pushHistory(current),
       atlasRoot,
-      selected: selectionFromNode(atlasRoot.children[0] ?? atlasRoot),
-      selectedNodeId: atlasRoot.children[0]?.id ?? atlasRoot.id,
+      selected: selectionFromNode(selectedNode),
+      selectedNodeId: selectedNode.id,
       multiSelectedNodeIds: [],
       cameraFocusNodeId: null,
       attachmentPreviewUrls: nextAttachmentPreviewUrls,
@@ -1494,7 +1509,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       unreadNotifications,
       notificationPulses: [],
       notificationSnoozePrompt: null,
-      titleEditRequestId: atlasRoot.children[0]?.id ?? null,
+      titleEditRequestId:
+        options.requestTitleEdit === false || selectedNode.id === atlasRoot.id ? null : selectedNode.id,
       bodyEditRequestId: null,
     });
   },

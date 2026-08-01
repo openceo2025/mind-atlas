@@ -3,7 +3,7 @@ import type { AppLocale } from "./i18n/locales";
 import { deriveAtlasLayoutFrame, type AtlasLayoutMode } from "./layout/atlasLayout";
 import type { AtlasNode, ChatOptionsResult, ChatReasoningEffort, ChatServiceId, ChatServiceOption, NotificationPulseKind, ProviderUsageResult } from "./types";
 
-export type AboutDemoKind = "novel" | "travel" | "app";
+export type AboutDemoKind = "research" | "travel" | "app";
 export type AboutDemoView = "atlas" | "mind-map" | "tree" | "editor";
 
 export interface AboutDemoConfig {
@@ -53,7 +53,7 @@ export function getAboutDemoLayoutMode(config: AboutDemoConfig): AtlasLayoutMode
 export function getAboutDemoSelectedNodeId(config: AboutDemoConfig) {
   if (config.kind === "travel") return "about-travel-root";
   if (config.kind === "app") return "about-app-root";
-  return "about-novel-root";
+  return "about-research-root";
 }
 
 export function getAboutDemoNotification(config: AboutDemoConfig, locale: AppLocale): AboutDemoNotification | null {
@@ -86,7 +86,7 @@ export function createAboutDemoNotebook(kind: AboutDemoKind, locale: AppLocale):
   const copy = aboutDemoCopy(locale);
   if (kind === "travel") return travelNotebook(copy);
   if (kind === "app") return appNotebook(copy);
-  return novelNotebook(copy);
+  return researchNotebook(copy);
 }
 
 export function getAboutDemoChatOptions(locale: AppLocale): ChatOptionsResult {
@@ -121,20 +121,20 @@ export function getAboutDemoProviderUsage(locale: AppLocale): ProviderUsageResul
 }
 
 function normalizeAboutDemoKind(value: string | null): AboutDemoKind | null {
-  return value === "novel" || value === "travel" || value === "app" ? value : null;
+  return value === "research" || value === "travel" || value === "app" ? value : null;
 }
 
 function normalizeAboutDemoView(value: string | null): AboutDemoView {
   return value === "mind-map" || value === "tree" || value === "editor" ? value : "atlas";
 }
 
-function novelNotebook(copy: AboutDemoCopy) {
-  return root("about-novel-root", "novel.root", copy.novelBody, "#d9cc72", copy, [
-    note("about-novel-characters", "novel.characters", copy, { color: "#8bbdd8", texture: "mist", children: [
-      note("about-novel-protagonist", "novel.protagonist", copy, { color: "#79b8df", children: [note("about-novel-goal", "novel.goal", copy, { color: "#8fcff0" })] }),
+function researchNotebook(copy: AboutDemoCopy) {
+  return root("about-research-root", "research.root", copy.researchBody, "#d9cc72", copy, [
+    note("about-research-options", "research.options", copy, { color: "#8bbdd8", texture: "mist", children: [
+      note("about-research-lightweight", "research.lightweight", copy, { color: "#79b8df", children: [note("about-research-price", "research.price", copy, { color: "#8fcff0" })] }),
     ] }),
-    note("about-novel-chapter1", "novel.chapter1", copy, { color: "#d1b34d", texture: "bands", children: [note("about-novel-opening", "novel.opening", copy, { color: "#c8a742" })] }),
-    note("about-novel-chapter2", "novel.chapter2", copy, { color: "#75c7a1", texture: "cell", children: [note("about-novel-turning", "novel.turning", copy, { color: "#64b790" })] }),
+    note("about-research-criteria", "research.criteria", copy, { color: "#d1b34d", texture: "bands", children: [note("about-research-battery", "research.battery", copy, { color: "#c8a742" })] }),
+    note("about-research-findings", "research.findings", copy, { color: "#75c7a1", texture: "cell", children: [note("about-research-next-check", "research.nextCheck", copy, { color: "#64b790" })] }),
   ]);
 }
 

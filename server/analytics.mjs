@@ -8,6 +8,7 @@ export const CLIENT_ANALYTICS_EVENTS = new Set([
   "about_demo_interacted",
   "app_opened",
   "tutorial_started",
+  "tutorial_step_completed",
   "tutorial_completed",
   "tutorial_skipped",
   "template_selected",
@@ -37,6 +38,7 @@ export const SERVER_ANALYTICS_EVENTS = new Set([
 
 const PROPERTY_ALLOWLIST = new Map([
   ["about_demo_interacted", new Set(["demo_kind", "interaction"])],
+  ["tutorial_step_completed", new Set(["step"])],
   ["tutorial_completed", new Set(["duration_ms"])],
   ["tutorial_skipped", new Set(["step"])],
   ["template_selected", new Set(["template_id"])],

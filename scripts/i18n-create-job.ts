@@ -17,9 +17,14 @@ if (![...config.plannedLocales, ...config.runtimeLocales].includes(locale)) {
 
 const source = sortedSourceMessages();
 const existingPath = path.join(rootDir, "i18n", "translations", `${locale}.json`);
-const existing = fs.existsSync(existingPath) ? readJson<Record<string, string>>(existingPath) : locale === "ja"
-  ? { ...japaneseMessages, ...pageSourceMessages("ja") }
-  : {};
+const existingTranslations = fs.existsSync(existingPath) ? readJson<Record<string, string>>(existingPath) : {};
+const existing = {
+  ...existingTranslations,
+  ...(locale === "ja" ? japaneseMessages : {}),
+  // Structured static-page catalogs are already human/model translated per
+  // locale and are the source of truth for page messages.
+  ...pageSourceMessages(locale),
+};
 const glossary = readJson<{ schemaVersion: number }>(path.join(rootDir, "i18n", "glossary.json"));
 const job = {
   schemaVersion: 1,
