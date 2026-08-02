@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { deriveAtlasLayout, deriveAtlasLayoutFrame, getStoredPositionForWorldDirection, stabilizePhyllotaxisPositions, type Vec3 } from "../src/layout/atlasLayout.ts";
+import { deriveAtlasLayout, deriveAtlasLayoutFrame, getManualChildSpreadLimit, getStoredPositionForWorldDirection, stabilizePhyllotaxisPositions, type Vec3 } from "../src/layout/atlasLayout.ts";
+import { createNotebookFromTemplate } from "../src/notebookTemplates.ts";
 import type { AtlasNode } from "../src/types.ts";
 
 const root = node("atlas-root", "Atlas", [
@@ -111,6 +112,9 @@ assert.ok(focusedMindMapFrame.visibleIds.has("alpha"));
 assert.ok(focusedMindMapFrame.visibleIds.has("atlas-root"), "mind map should show focused parent");
 assert.ok(focusedMindMapFrame.visibleIds.has("beta"), "mind map should show focused siblings near parent context");
 assertMinDistance(focusedMindMapFrame, 46, "mind map visible nodes should not collapse onto each other");
+
+const travelTemplate = createNotebookFromTemplate("travel", "en");
+assertWideTemplatePositions(travelTemplate);
 
 const calendarRoot = node("calendar-root", "Calendar", [
   node("unscheduled", "No reminder"),
@@ -272,6 +276,21 @@ function findNode(tree: AtlasNode, id: string): AtlasNode | null {
 
 function cloneTree(tree: AtlasNode): AtlasNode {
   return JSON.parse(JSON.stringify(tree)) as AtlasNode;
+}
+
+function assertWideTemplatePositions(root: AtlasNode) {
+  const visit = (node: AtlasNode, depth: number) => {
+    node.children.forEach((child) => {
+      assert.ok(child.position, `template child ${child.title} should have a stable phyllotaxis position`);
+      if (depth + 1 > 1) {
+        const limit = getManualChildSpreadLimit(depth + 1, node.children.length);
+        const spreadRatio = Math.hypot(child.position[0], child.position[1]) / limit;
+        assert.ok(spreadRatio >= 0.8, `template child ${child.title} should be visibly separated from its parent`);
+      }
+      visit(child, depth + 1);
+    });
+  };
+  visit(root, 0);
 }
 
 function node(id: string, title: string, children: AtlasNode[] = []): AtlasNode {

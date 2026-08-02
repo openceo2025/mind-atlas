@@ -670,11 +670,28 @@ function getLayoutBounds(positions: Map<string, Vec3>, visibleIds: Set<string>, 
 }
 
 function getPhyllotaxisChildDirection(parentDirection: Vec3, depth: number, siblingCount: number, childIndex: number, parentId: string): Vec3 {
+  return directionFromStoredChildPosition(
+    parentDirection,
+    getPhyllotaxisStoredChildPosition(parentId, depth, siblingCount, childIndex),
+    depth,
+    siblingCount,
+  );
+}
+
+export function getPhyllotaxisStoredChildPosition(
+  parentId: string,
+  depth: number,
+  siblingCount: number,
+  childIndex: number,
+  spread: "default" | "wide" = "default",
+): Vec3 {
+  if (depth <= 1) return getPhyllotaxisTopLevelDirection(childIndex);
   const i = childIndex + 1;
   const angle = seededAngle(parentId) + i * GOLDEN_ANGLE;
   const limit = getManualChildSpreadLimit(depth, siblingCount);
-  const amount = Math.min(limit * 0.94, limit * (0.38 + 0.12 * Math.sqrt(i)));
-  return directionFromStoredChildPosition(parentDirection, [Math.cos(angle) * amount, Math.sin(angle) * amount, 0], depth, siblingCount);
+  const baseSpread = spread === "wide" ? 0.76 : 0.38;
+  const amount = Math.min(limit * 0.94, limit * (baseSpread + 0.12 * Math.sqrt(i)));
+  return [Math.cos(angle) * amount, Math.sin(angle) * amount, 0];
 }
 
 function seededAngle(seed: string) {

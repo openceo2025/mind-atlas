@@ -228,6 +228,38 @@ button {
   backdrop-filter: blur(14px);
 }
 
+.context-copy-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  padding: 9px 10px 9px 14px;
+  border: 1px solid rgba(169, 206, 221, 0.3);
+  border-radius: 8px;
+  background: rgba(7, 16, 18, 0.9);
+  color: rgba(240, 248, 249, 0.92);
+  text-shadow: none;
+  pointer-events: auto;
+}
+
+.context-copy-toast button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  place-items: center;
+  cursor: pointer;
+}
+
+.context-copy-toast button:hover,
+.context-copy-toast button:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+}
+
 @keyframes onboarding-pulse {
   0%,
   100% {
@@ -4565,6 +4597,12 @@ button:disabled,
   background: rgba(250, 252, 245, 0.92);
   color: #213024;
   text-shadow: none;
+}
+
+.app-shell[data-theme="light"] .context-copy-toast {
+  border-color: rgba(55, 91, 112, 0.24);
+  background: rgba(250, 252, 252, 0.94);
+  color: #25353b;
 }
 
 .app-shell[data-theme="light"] .dataset-title-input {

@@ -268,6 +268,17 @@ export default function App() {
   const hostedAccountFeatureLabel = hostedAuthenticated ? t("app.aiFeatures") : t("app.cloudAccountFeatures");
   const aiFeaturesUnlocked = publicServiceMode ? Boolean(hostedSession?.entitlement.aiEnabled) : onboarding.showMainChrome;
   const cloudNotebooksAvailable = publicServiceMode ? hostedAuthenticated : aiFeaturesUnlocked && !publicServiceMode;
+  useEffect(() => {
+    if (!contextCopyStatus) return;
+    const timeoutId = window.setTimeout(() => setContextCopyStatus(""), 5000);
+    return () => window.clearTimeout(timeoutId);
+  }, [contextCopyStatus]);
+
+  useEffect(() => {
+    if (hostedAuthenticated && contextCopyStatus === t("status.cloud.loginRequired")) {
+      setContextCopyStatus("");
+    }
+  }, [contextCopyStatus, hostedAuthenticated, t]);
   const currentCloudFingerprint = useMemo(
     () => (currentCloudNotebook?.id ? cloudNotebookFingerprint(atlasRoot) : ""),
     [atlasRoot, currentCloudNotebook?.id],
@@ -1045,7 +1056,8 @@ export default function App() {
       if (publicServiceMode) {
         if (!hostedAuthenticated) {
           setCloudNotebooks([]);
-      setCloudDirectory(t("menu.googleLoginRequired"));
+          setCloudDirectory("");
+          setCloudQuota(null);
           return;
         }
         const result = await listHostedCloudNotebooks();
@@ -1089,7 +1101,7 @@ export default function App() {
       setShareBusy(true);
       if (publicServiceMode) {
         if (!hostedAuthenticated) {
-      setContextCopyStatus(t("status.cloud.loginRequired"));
+          setContextCopyStatus(t("status.cloud.loginRequired"));
           trackProductEvent("google_login_started", { trigger: "share" }, { immediate: true });
           startHostedGoogleLogin("share");
           return;
@@ -1996,7 +2008,10 @@ export default function App() {
       ) : null}
       {contextCopyStatus ? (
         <div className="onboarding-message context-copy-toast" role="status" aria-live="polite">
-          {contextCopyStatus}
+          <span>{contextCopyStatus}</span>
+          <button type="button" onClick={() => setContextCopyStatus("")} aria-label={t("common.close")} title={t("common.close")}>
+            <X size={15} />
+          </button>
         </div>
       ) : null}
       {layoutBirthUnavailableMessage ? (
@@ -2136,14 +2151,14 @@ export default function App() {
                     <CloudUpload size={15} />
                     <span>
                       {t("menu.cloudSave")}
-                      <small>{cloudStatus || (hostedAuthenticated ? t("menu.cloudSave.detail") : t("menu.googleLoginRequired"))}</small>
+                      <small>{cloudStatus || t("menu.cloudSave.detail")}</small>
                     </span>
                   </button>
                   <button type="button" onClick={handleOpenCloudLoad}>
                     <CloudDownload size={15} />
                     <span>
                       {t("menu.cloudLoad")}
-                      <small>{cloudError || (hostedAuthenticated ? t("menu.cloudLoad.detail") : t("menu.googleLoginRequired"))}</small>
+                      <small>{cloudError || t("menu.cloudLoad.detail")}</small>
                     </span>
                   </button>
                 </>

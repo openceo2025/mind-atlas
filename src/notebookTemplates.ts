@@ -1,5 +1,6 @@
 import type { AvailableLocale } from "./i18n/locales";
 import type { MessageId } from "./i18n/messages";
+import { getPhyllotaxisStoredChildPosition } from "./layout/atlasLayout.ts";
 import type { AtlasNode, PlanetTexture, WorkStatus } from "./types";
 
 export const NOTEBOOK_TEMPLATES = [
@@ -224,7 +225,13 @@ function buildTemplateTree(templateId: NotebookTemplateId, draft: TemplateDraft)
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   let serial = 0;
 
-  const build = (current: TemplateDraft, parentId: string | undefined, depth: number): AtlasNode => {
+  const build = (
+    current: TemplateDraft,
+    parentId: string | undefined,
+    depth: number,
+    siblingIndex = 0,
+    siblingCount = 1,
+  ): AtlasNode => {
     const index = serial;
     serial += 1;
     const id = `template-${templateId}-${unique}-${index}`;
@@ -250,7 +257,10 @@ function buildTemplateTree(templateId: NotebookTemplateId, draft: TemplateDraft)
       createdAt,
       updatedAt: createdAt,
       sourceParentId: parentId,
-      children: (current.children ?? []).map((child) => build(child, id, depth + 1)),
+      position: parentId
+        ? getPhyllotaxisStoredChildPosition(parentId, depth, siblingCount, siblingIndex, "wide")
+        : undefined,
+      children: (current.children ?? []).map((child, childIndex, children) => build(child, id, depth + 1, childIndex, children.length)),
     };
   };
 
