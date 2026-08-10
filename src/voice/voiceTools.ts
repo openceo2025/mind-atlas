@@ -62,7 +62,6 @@ const toolSpecs: VoiceToolSpec[] = [
           workspace: state.codexSettings.workspace,
           webSearch: state.codexSettings.webSearch,
           skipGitRepoCheck: state.codexSettings.skipGitRepoCheck,
-          timeoutMs: state.codexSettings.timeoutMs,
         },
         openClawSettings: {
           model: state.openClawSettings.model,
@@ -77,7 +76,6 @@ const toolSpecs: VoiceToolSpec[] = [
           reasoningEffort: state.claudeSettings.reasoningEffort,
           permissionMode: state.claudeSettings.permissionMode,
           workspace: state.claudeSettings.workspace,
-          timeoutMs: state.claudeSettings.timeoutMs,
         },
         unreadNotifications: Object.values(state.unreadNotifications).map((item) => ({
           nodeId: item.nodeId,

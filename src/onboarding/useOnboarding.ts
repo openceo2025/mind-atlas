@@ -6,11 +6,6 @@ import type { AppLocale } from "../i18n/locales";
 import { ONBOARDING_MESSAGE_IDS, type OnboardingMessageId } from "./localization";
 
 export type OnboardingEventType =
-  | "tutorial-practice-ready"
-  | "tutorial-node-selected"
-  | "tutorial-node-edited"
-  | "child-node-created"
-  // Kept for older callers. These gestures no longer gate tutorial completion.
   | "root-birth-start"
   | "root-node-created"
   | "root-birth-blocked-zoom"
@@ -19,17 +14,18 @@ export type OnboardingEventType =
   | "all-nodes-offscreen"
   | "nodes-onscreen"
   | "zoom"
-  | "node-drag";
+  | "node-drag"
+  | "child-node-created";
 
 export type SpaceStepId = "pan" | "zoom" | "nodeDrag" | "childNodeCreated";
-export type TutorialStepId = "selectNode" | "editNode" | "childNodeCreated";
 
 type OnboardingProgress = {
-  version: 2;
+  version: 1;
   firstRun: boolean;
-  practiceAtlasReady: boolean;
-  practiceNodeSelected: boolean;
-  practiceNodeEdited: boolean;
+  rootNodeCreated: boolean;
+  pan: boolean;
+  zoom: boolean;
+  nodeDrag: boolean;
   childNodeCreated: boolean;
   spaceBasicsCompleted: boolean;
   basicCompleted: boolean;
@@ -43,31 +39,52 @@ export type OnboardingState = {
   locale: AppLocale;
   message: string;
   messageId: OnboardingMessageId | null;
-  tutorialStep: TutorialStepId | null;
   titlePrompt: string;
   showLogoOnly: boolean;
   showMainChrome: boolean;
   showRootPulse: boolean;
   showChildCreationFallback: boolean;
   showAiFeatures: boolean;
-  shouldInitializePracticeAtlas: boolean;
   shouldApplyUniverseTitlePrompt: boolean;
   startTutorialMode: () => void;
   completeTutorial: () => void;
-  markPracticeAtlasReady: () => void;
-  markPracticeNodeSelected: () => void;
-  markPracticeNodeEdited: () => void;
   markUniverseTitlePromptApplied: () => void;
 };
 
 const ONBOARDING_STORAGE_KEY = "mind-atlas-onboarding-v1";
 const NOTEBOOK_STORAGE_KEY = "mind-atlas-notebook-v2";
+const ROOT_DISCOVERY_WAIT_MS = 5000;
+const ROOT_WHITE_HOLE_WAIT_MS = 2000;
+const SPACE_STEP_GRACE_MS = 5000;
+const CHILD_CREATION_FALLBACK_MS = 5000;
+const CAMERA_RESET_HINT_DELAY_MS = 3000;
+const NOTICE_MS = 5000;
+
+type SpacePromptDeadline = {
+  stepId: SpaceStepId;
+  deadlineAt: number;
+};
+
+const SPACE_STEPS: Array<{ id: SpaceStepId; event: OnboardingEventType; messageId: OnboardingMessageId }> = [
+  { id: "pan", event: "pan", messageId: "space.pan" },
+  { id: "zoom", event: "zoom", messageId: "space.zoom" },
+  { id: "nodeDrag", event: "node-drag", messageId: "space.nodeDrag" },
+  { id: "childNodeCreated", event: "child-node-created", messageId: "space.childNode" },
+];
 
 export function useOnboarding(): OnboardingState {
   const { locale } = useMindAtlasLocale();
   const message = useMessage();
   const text = useCallback((id: OnboardingMessageId) => message(ONBOARDING_MESSAGE_IDS[id]), [message]);
   const [progress, setProgress] = useState<OnboardingProgress>(() => loadProgress());
+  const [rootHelpLevel, setRootHelpLevel] = useState<0 | 1 | 2>(0);
+  const [rootDeadlineAt, setRootDeadlineAt] = useState(() => Date.now() + ROOT_DISCOVERY_WAIT_MS);
+  const [spacePromptDeadline, setSpacePromptDeadline] = useState<SpacePromptDeadline | null>(null);
+  const [spacePromptStep, setSpacePromptStep] = useState<SpaceStepId | null>(null);
+  const [noticeMessageId, setNoticeMessageId] = useState<OnboardingMessageId | null>(null);
+  const [childCreationFallbackVisible, setChildCreationFallbackVisible] = useState(false);
+  const [allNodesOffscreen, setAllNodesOffscreen] = useState(false);
+  const [cameraResetHintVisible, setCameraResetHintVisible] = useState(false);
 
   const persistProgress = useCallback((updater: (current: OnboardingProgress) => OnboardingProgress) => {
     setProgress((current) => {
@@ -77,16 +94,6 @@ export function useOnboarding(): OnboardingState {
     });
   }, []);
 
-  const markProgress = useCallback(
-    (key: "practiceAtlasReady" | "practiceNodeSelected" | "practiceNodeEdited") => {
-      persistProgress((current) => (current[key] ? current : { ...current, [key]: true }));
-    },
-    [persistProgress],
-  );
-
-  const markPracticeAtlasReady = useCallback(() => markProgress("practiceAtlasReady"), [markProgress]);
-  const markPracticeNodeSelected = useCallback(() => markProgress("practiceNodeSelected"), [markProgress]);
-  const markPracticeNodeEdited = useCallback(() => markProgress("practiceNodeEdited"), [markProgress]);
   const markUniverseTitlePromptApplied = useCallback(() => {
     persistProgress((current) => (current.titlePromptApplied ? current : { ...current, titlePromptApplied: true }));
   }, [persistProgress]);
@@ -95,66 +102,190 @@ export function useOnboarding(): OnboardingState {
     const next = newUserProgress();
     saveProgress(next);
     setProgress(next);
+    setRootHelpLevel(0);
+    setRootDeadlineAt(Date.now() + ROOT_DISCOVERY_WAIT_MS);
+    setSpacePromptStep(null);
+    setSpacePromptDeadline(null);
+    setNoticeMessageId(null);
+    setChildCreationFallbackVisible(false);
+    setAllNodesOffscreen(false);
+    setCameraResetHintVisible(false);
   }, []);
 
   const completeTutorial = useCallback(() => {
     const completedAt = new Date().toISOString();
     persistProgress((current) => ({
       ...current,
-      practiceAtlasReady: true,
-      practiceNodeSelected: true,
-      practiceNodeEdited: true,
+      rootNodeCreated: true,
+      pan: true,
+      zoom: true,
+      nodeDrag: true,
       childNodeCreated: true,
       spaceBasicsCompleted: true,
       basicCompleted: true,
       completedAt: current.completedAt ?? completedAt,
     }));
+    setRootHelpLevel(0);
+    setSpacePromptStep(null);
+    setSpacePromptDeadline(null);
+    setChildCreationFallbackVisible(false);
+    setAllNodesOffscreen(false);
+    setCameraResetHintVisible(false);
+    setNoticeMessageId("basic.complete");
   }, [persistProgress]);
 
-  const tutorialStep = useMemo(() => getTutorialStep(progress), [progress]);
+  const markSpaceStep = useCallback(
+    (stepId: SpaceStepId) => {
+      persistProgress((current) => (current[stepId] ? current : { ...current, [stepId]: true }));
+    },
+    [persistProgress],
+  );
 
-  const handleTutorialChildCreated = useCallback(() => {
-    const completedAt = new Date().toISOString();
-    persistProgress((current) => {
-      if (!current.firstRun || current.spaceBasicsCompleted || !current.practiceNodeEdited) return current;
-      return {
+  useEffect(() => {
+    const handleOnboardingEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: unknown; childDepth?: unknown }>).detail;
+      const type = detail?.type;
+      if (!isOnboardingEventType(type)) return;
+
+      if (type === "root-birth-start") {
+        if (!progress.firstRun || progress.rootNodeCreated) return;
+        if (rootHelpLevel === 0) setRootDeadlineAt(Date.now() + ROOT_WHITE_HOLE_WAIT_MS);
+        return;
+      }
+
+      if (type === "root-node-created") {
+        persistProgress((current) => (current.rootNodeCreated ? current : { ...current, rootNodeCreated: true }));
+        setRootHelpLevel(0);
+        return;
+      }
+
+      if (type === "root-birth-blocked-zoom") {
+        setNoticeMessageId("root.zoomOutForNodeCreate");
+        return;
+      }
+
+      if (type === "all-nodes-offscreen") {
+        setAllNodesOffscreen(true);
+        return;
+      }
+
+      if (type === "nodes-onscreen" || type === "home-logo-clicked") {
+        setAllNodesOffscreen(false);
+        setCameraResetHintVisible(false);
+        return;
+      }
+
+      if (type === "child-node-created") {
+        if (typeof detail.childDepth !== "number" || detail.childDepth < 2) return;
+        persistProgress((current) => (current.childNodeCreated ? current : { ...current, childNodeCreated: true }));
+        setChildCreationFallbackVisible(false);
+        return;
+      }
+
+      const matchedStep = SPACE_STEPS.find((step) => step.event === type);
+      if (matchedStep) markSpaceStep(matchedStep.id);
+    };
+
+    window.addEventListener(ONBOARDING_EVENT, handleOnboardingEvent);
+    return () => window.removeEventListener(ONBOARDING_EVENT, handleOnboardingEvent);
+  }, [markSpaceStep, persistProgress, progress.firstRun, progress.rootNodeCreated, rootHelpLevel]);
+
+  useEffect(() => {
+    if (!progress.firstRun || progress.rootNodeCreated) return;
+    if (rootHelpLevel === 2) return;
+    const timeout = window.setTimeout(() => {
+      if (rootHelpLevel === 0) {
+        setRootHelpLevel(1);
+        setRootDeadlineAt(Date.now() + ROOT_DISCOVERY_WAIT_MS);
+        return;
+      }
+      setRootHelpLevel(2);
+    }, Math.max(0, rootDeadlineAt - Date.now()));
+    return () => window.clearTimeout(timeout);
+  }, [progress.firstRun, progress.rootNodeCreated, rootDeadlineAt, rootHelpLevel]);
+
+  const firstMissingSpaceStep = useMemo(() => getFirstMissingSpaceStep(progress), [progress]);
+
+  useEffect(() => {
+    if (!progress.firstRun || !progress.rootNodeCreated || progress.spaceBasicsCompleted) return;
+    if (!firstMissingSpaceStep) {
+      const completedAt = new Date().toISOString();
+      persistProgress((current) => ({
         ...current,
-        childNodeCreated: true,
         spaceBasicsCompleted: true,
         basicCompleted: true,
         completedAt: current.completedAt ?? completedAt,
-      };
+      }));
+      setSpacePromptStep(null);
+      setSpacePromptDeadline(null);
+      setNoticeMessageId("space.complete");
+      return;
+    }
+
+    setSpacePromptStep(null);
+    setSpacePromptDeadline({
+      stepId: firstMissingSpaceStep.id,
+      deadlineAt: Date.now() + SPACE_STEP_GRACE_MS,
     });
-  }, [persistProgress]);
+    setChildCreationFallbackVisible(false);
+  }, [firstMissingSpaceStep, persistProgress, progress.firstRun, progress.rootNodeCreated, progress.spaceBasicsCompleted]);
 
-  useTutorialEvents({
-    markPracticeAtlasReady,
-    markPracticeNodeSelected,
-    markPracticeNodeEdited,
-    handleTutorialChildCreated,
-  });
+  useEffect(() => {
+    if (!spacePromptDeadline || !firstMissingSpaceStep || progress.spaceBasicsCompleted) return;
+    if (spacePromptDeadline.stepId !== firstMissingSpaceStep.id) return;
+    const timeout = window.setTimeout(() => {
+      setSpacePromptStep((current) => current ?? firstMissingSpaceStep.id);
+    }, Math.max(0, spacePromptDeadline.deadlineAt - Date.now()));
+    return () => window.clearTimeout(timeout);
+  }, [firstMissingSpaceStep, progress.spaceBasicsCompleted, spacePromptDeadline]);
 
-  const activeMessageId = tutorialMessageId(tutorialStep);
+  useEffect(() => {
+    if (progress.childNodeCreated || progress.spaceBasicsCompleted || spacePromptStep !== "childNodeCreated") {
+      setChildCreationFallbackVisible(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setChildCreationFallbackVisible(true);
+    }, CHILD_CREATION_FALLBACK_MS);
+    return () => window.clearTimeout(timeout);
+  }, [progress.childNodeCreated, progress.spaceBasicsCompleted, spacePromptStep]);
+
+  useEffect(() => {
+    if (!noticeMessageId) return;
+    const timeout = window.setTimeout(() => setNoticeMessageId(null), NOTICE_MS);
+    return () => window.clearTimeout(timeout);
+  }, [noticeMessageId]);
+
+  useEffect(() => {
+    if (!allNodesOffscreen) {
+      setCameraResetHintVisible(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => setCameraResetHintVisible(true), CAMERA_RESET_HINT_DELAY_MS);
+    return () => window.clearTimeout(timeout);
+  }, [allNodesOffscreen]);
+
+  const activeMessageId =
+    noticeMessageId ??
+    rootMessageId(progress, rootHelpLevel) ??
+    (cameraResetHintVisible ? cameraResetMessageId() : null) ??
+    (childCreationFallbackVisible ? "space.childNodeFallback" : null) ??
+    spaceMessageId(firstMissingSpaceStep, spacePromptStep);
   const showMainChrome = !progress.firstRun || progress.spaceBasicsCompleted;
 
   return {
     locale,
     message: activeMessageId ? text(activeMessageId) : "",
     messageId: activeMessageId,
-    tutorialStep,
     titlePrompt: text("title.nameUniverse"),
     showLogoOnly: progress.firstRun && !progress.spaceBasicsCompleted,
     showMainChrome,
-    showRootPulse: false,
-    showChildCreationFallback: tutorialStep === "childNodeCreated",
+    showRootPulse: progress.firstRun && !progress.rootNodeCreated,
+    showChildCreationFallback: childCreationFallbackVisible,
     showAiFeatures: progress.aiUnlocked,
-    shouldInitializePracticeAtlas: progress.firstRun && !progress.practiceAtlasReady,
     shouldApplyUniverseTitlePrompt: progress.firstRun && progress.spaceBasicsCompleted && !progress.titlePromptApplied,
     startTutorialMode,
     completeTutorial,
-    markPracticeAtlasReady,
-    markPracticeNodeSelected,
-    markPracticeNodeEdited,
     markUniverseTitlePromptApplied,
   };
 }
@@ -170,38 +301,11 @@ export function getOnboardingCurrentSpaceStep(): SpaceStepId | null {
   if (!raw) return null;
   try {
     const progress = normalizeProgress(JSON.parse(raw));
-    return getTutorialStep(progress) === "childNodeCreated" ? "childNodeCreated" : null;
+    if (!progress.firstRun || !progress.rootNodeCreated || progress.spaceBasicsCompleted) return null;
+    return getFirstMissingSpaceStep(progress)?.id ?? null;
   } catch {
     return null;
   }
-}
-
-function useTutorialEvents({
-  markPracticeAtlasReady,
-  markPracticeNodeSelected,
-  markPracticeNodeEdited,
-  handleTutorialChildCreated,
-}: {
-  markPracticeAtlasReady: () => void;
-  markPracticeNodeSelected: () => void;
-  markPracticeNodeEdited: () => void;
-  handleTutorialChildCreated: () => void;
-}) {
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handleOnboardingEvent = (event: Event) => {
-      const detail = (event as CustomEvent<{ type?: unknown; childDepth?: unknown }>).detail;
-      if (!isOnboardingEventType(detail?.type)) return;
-      if (detail.type === "tutorial-practice-ready") markPracticeAtlasReady();
-      if (detail.type === "tutorial-node-selected") markPracticeNodeSelected();
-      if (detail.type === "tutorial-node-edited") markPracticeNodeEdited();
-      if (detail.type === "child-node-created" && typeof detail.childDepth === "number" && detail.childDepth >= 2) {
-        handleTutorialChildCreated();
-      }
-    };
-    window.addEventListener(ONBOARDING_EVENT, handleOnboardingEvent);
-    return () => window.removeEventListener(ONBOARDING_EVENT, handleOnboardingEvent);
-  }, [handleTutorialChildCreated, markPracticeAtlasReady, markPracticeNodeEdited, markPracticeNodeSelected]);
 }
 
 function loadProgress(): OnboardingProgress {
@@ -210,13 +314,15 @@ function loadProgress(): OnboardingProgress {
   const raw = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
   if (raw) {
     try {
-      const normalized = normalizeProgress(JSON.parse(raw));
-      saveProgress(normalized);
-      return normalized;
+      return normalizeProgress(JSON.parse(raw));
     } catch {
-      // Fall through to a browser-derived initial state.
+      return createProgressForCurrentBrowser();
     }
   }
+  return createProgressForCurrentBrowser();
+}
+
+function createProgressForCurrentBrowser(): OnboardingProgress {
   const returningUser = Boolean(window.localStorage.getItem(NOTEBOOK_STORAGE_KEY));
   const progress = returningUser ? completedProgress(false) : newUserProgress();
   saveProgress(progress);
@@ -225,11 +331,12 @@ function loadProgress(): OnboardingProgress {
 
 function newUserProgress(): OnboardingProgress {
   return {
-    version: 2,
+    version: 1,
     firstRun: true,
-    practiceAtlasReady: false,
-    practiceNodeSelected: false,
-    practiceNodeEdited: false,
+    rootNodeCreated: false,
+    pan: false,
+    zoom: false,
+    nodeDrag: false,
     childNodeCreated: false,
     spaceBasicsCompleted: false,
     basicCompleted: false,
@@ -242,11 +349,12 @@ function newUserProgress(): OnboardingProgress {
 function completedProgress(firstRun: boolean): OnboardingProgress {
   const now = new Date().toISOString();
   return {
-    version: 2,
+    version: 1,
     firstRun,
-    practiceAtlasReady: true,
-    practiceNodeSelected: true,
-    practiceNodeEdited: true,
+    rootNodeCreated: true,
+    pan: true,
+    zoom: true,
+    nodeDrag: true,
     childNodeCreated: true,
     spaceBasicsCompleted: true,
     basicCompleted: true,
@@ -258,63 +366,72 @@ function completedProgress(firstRun: boolean): OnboardingProgress {
 }
 
 function normalizeProgress(value: unknown): OnboardingProgress {
-  if (!value || typeof value !== "object") return newUserProgress();
-  const partial = value as Record<string, unknown>;
-  const firstRun = partial.firstRun === true;
-  const legacyCompleted = partial.spaceBasicsCompleted === true || partial.basicCompleted === true || !firstRun;
-  const fallback = legacyCompleted ? completedProgress(firstRun) : newUserProgress();
-  if (partial.version !== 2) {
+  if (!value || typeof value !== "object") return createProgressForCurrentBrowser();
+  const stored = value as Record<string, unknown>;
+  if (stored.version === 2) {
+    const firstRun = stored.firstRun === true;
+    const completed = stored.spaceBasicsCompleted === true || stored.basicCompleted === true || !firstRun;
+    const fallback = completed ? completedProgress(firstRun) : newUserProgress();
     return {
       ...fallback,
-      aiUnlocked: partial.aiUnlocked === true || fallback.aiUnlocked,
-      titlePromptApplied: partial.titlePromptApplied === true || fallback.titlePromptApplied,
-      startedAt: typeof partial.startedAt === "string" ? partial.startedAt : fallback.startedAt,
-      completedAt: typeof partial.completedAt === "string" ? partial.completedAt : fallback.completedAt,
+      rootNodeCreated: completed || stored.practiceAtlasReady === true,
+      childNodeCreated: completed || stored.childNodeCreated === true,
+      aiUnlocked: stored.aiUnlocked === true || fallback.aiUnlocked,
+      titlePromptApplied: stored.titlePromptApplied === true || fallback.titlePromptApplied,
+      startedAt: typeof stored.startedAt === "string" ? stored.startedAt : fallback.startedAt,
+      completedAt: typeof stored.completedAt === "string" ? stored.completedAt : fallback.completedAt,
     };
   }
-  return {
+  const partial = value as Partial<OnboardingProgress>;
+  const fallback = partial.firstRun ? newUserProgress() : completedProgress(false);
+  const normalized: OnboardingProgress = {
     ...fallback,
-    firstRun,
-    practiceAtlasReady: partial.practiceAtlasReady === true,
-    practiceNodeSelected: partial.practiceNodeSelected === true,
-    practiceNodeEdited: partial.practiceNodeEdited === true,
-    childNodeCreated: partial.childNodeCreated === true,
-    spaceBasicsCompleted: partial.spaceBasicsCompleted === true,
-    basicCompleted: partial.basicCompleted === true,
-    aiUnlocked: partial.aiUnlocked === true,
-    titlePromptApplied: partial.titlePromptApplied === true,
+    ...partial,
+    version: 1,
     startedAt: typeof partial.startedAt === "string" ? partial.startedAt : fallback.startedAt,
-    completedAt: typeof partial.completedAt === "string" ? partial.completedAt : undefined,
-    version: 2,
+    completedAt: typeof partial.completedAt === "string" ? partial.completedAt : fallback.completedAt,
   };
+  return normalized;
 }
 
 function saveProgress(progress: OnboardingProgress) {
-  if (isAboutDemoMode() || typeof window === "undefined") return;
+  if (isAboutDemoMode()) return;
+  if (typeof window === "undefined") return;
   window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(progress));
 }
 
-function getTutorialStep(progress: OnboardingProgress): TutorialStepId | null {
-  if (!progress.firstRun || progress.spaceBasicsCompleted) return null;
-  if (!progress.practiceNodeSelected) return "selectNode";
-  if (!progress.practiceNodeEdited) return "editNode";
-  if (!progress.childNodeCreated) return "childNodeCreated";
+function getFirstMissingSpaceStep(progress: OnboardingProgress) {
+  for (const step of SPACE_STEPS) {
+    if (!progress[step.id]) return step;
+  }
   return null;
 }
 
-function tutorialMessageId(step: TutorialStepId | null): OnboardingMessageId | null {
-  if (step === "selectNode") return "practice.selectNode";
-  if (step === "editNode") return "practice.editNode";
-  if (step === "childNodeCreated") return "practice.addChild";
+function rootMessageId(progress: OnboardingProgress, helpLevel: 0 | 1 | 2): OnboardingMessageId | null {
+  if (!progress.firstRun || progress.rootNodeCreated) return null;
+  if (helpLevel === 1) return "root.hint";
+  if (helpLevel === 2) return "root.answer";
   return null;
+}
+
+function cameraResetMessageId(): OnboardingMessageId {
+  if (typeof window === "undefined" || typeof document === "undefined") return "space.cameraReset";
+  if (document.documentElement.getAttribute("data-keyboard-overlay-portrait") === "true") return "space.cameraResetMobile";
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const narrowPortrait = window.matchMedia?.("(max-width: 980px) and (orientation: portrait)").matches ?? false;
+  return coarsePointer && narrowPortrait ? "space.cameraResetMobile" : "space.cameraReset";
+}
+
+function spaceMessageId(
+  firstMissingStep: ReturnType<typeof getFirstMissingSpaceStep>,
+  promptStep: SpaceStepId | null,
+): OnboardingMessageId | null {
+  if (!firstMissingStep || firstMissingStep.id !== promptStep) return null;
+  return firstMissingStep.messageId;
 }
 
 function isOnboardingEventType(value: unknown): value is OnboardingEventType {
   return (
-    value === "tutorial-practice-ready" ||
-    value === "tutorial-node-selected" ||
-    value === "tutorial-node-edited" ||
-    value === "child-node-created" ||
     value === "root-birth-start" ||
     value === "root-node-created" ||
     value === "root-birth-blocked-zoom" ||
@@ -323,6 +440,7 @@ function isOnboardingEventType(value: unknown): value is OnboardingEventType {
     value === "all-nodes-offscreen" ||
     value === "nodes-onscreen" ||
     value === "zoom" ||
-    value === "node-drag"
+    value === "node-drag" ||
+    value === "child-node-created"
   );
 }

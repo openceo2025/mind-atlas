@@ -106,7 +106,10 @@ export function createAgentRuntimeRoutes(context) {
       const runs = await manager.listRuns({ limit: 200 });
       const found = runs.find((entry) => entry.clientRunId && entry.clientRunId === clientRunId);
       if (!found) {
-        sendJson(response, 404, { error: "No run for that client run id yet." });
+        // The browser begins attaching while /api/ai/respond is still doing
+        // preflight work. A missing manifest is therefore a normal pending
+        // state, not an HTTP error that should flood DevTools with 404s.
+        sendJson(response, 200, { manifest: null, pending: true });
         return true;
       }
       sendJson(response, 200, { manifest: found });

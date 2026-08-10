@@ -131,7 +131,6 @@ const DEFAULT_CODEX_SETTINGS: CodexSettings = {
   workspaceMode: "shared",
   webSearch: true,
   skipGitRepoCheck: false,
-  timeoutMs: 60 * 60 * 1000,
   continueMode: "auto",
   resumeThreadId: "",
 };
@@ -152,7 +151,6 @@ const DEFAULT_CLAUDE_SETTINGS: ClaudeSettings = {
   workspace: "",
   workspaceMode: "shared",
   browser: false,
-  timeoutMs: 60 * 60 * 1000,
   continueMode: "auto",
   resumeSessionId: "",
   forkSession: false,
@@ -251,6 +249,8 @@ interface AtlasStore {
   /** Local-only: exactly what Mind Atlas injected into that run. */
   agentWorkspaceInjection: AtlasInjectionAccounting | null;
   setAgentWorkspaceRunId: (clientRunId: string) => void;
+  /** Selects a durable run without changing whether the workspace is visible. */
+  selectAgentWorkspaceRun: (runtimeRunId: string) => void;
   openAgentWorkspaceRun: (runtimeRunId?: string) => void;
   hideAgentWorkspace: () => void;
   bindAgentWorkspaceToSelectedNode: (binding: AgentWorkspaceBinding) => void;
@@ -293,6 +293,8 @@ interface AtlasStore {
   requestNewAgentSession: (enabled?: boolean) => void;
   setChatSettings: (patch: Partial<ChatSettings>) => void;
   setCodexSettings: (patch: Partial<CodexSettings>) => void;
+  /** One work root shared by every agent provider on this branch. */
+  setAgentWorkspace: (workspace: string) => void;
   setOpenClawSettings: (patch: Partial<OpenClawSettings>) => void;
   setClaudeSettings: (patch: Partial<ClaudeSettings>) => void;
   loadAiDialogSettingsForNode: (id: string) => void;
@@ -371,6 +373,7 @@ interface AtlasStore {
   focusParentLayer: () => void;
   appendInstruction: (workAreaId: string, content: string) => void;
   addQuickChildFromInput: (prompt: string) => string | undefined;
+  recordAiSubmissionError: (prompt: string, mode: AiExecutionMode, message: string) => void;
   runAiOnSelectedNode: (prompt: string, mode: AiExecutionMode, options?: AiContextScope | Partial<AiContextOptions>) => Promise<void>;
   runNodeAction: (nodeId: string) => Promise<void>;
   recoverCompletedCodexRuns: () => Promise<void>;
@@ -495,6 +498,10 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     agentWorkspaceVisible: Boolean(clientRunId),
     ...(clientRunId ? {} : { agentWorkspaceInjection: null }),
   }),
+  selectAgentWorkspaceRun: (runtimeRunId) => {
+    if (!runtimeRunId) return;
+    set({ agentWorkspaceSelectedRunId: runtimeRunId });
+  },
   openAgentWorkspaceRun: (runtimeRunId = "") => set((state) => ({
     agentWorkspaceSelectedRunId: runtimeRunId || state.agentWorkspaceSelectedRunId,
     agentWorkspaceVisible: true,
@@ -506,6 +513,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         ...node,
         agentWorkspaceBinding: {
           gitRoot: binding.gitRoot,
+          workspaceKind: binding.workspaceKind,
           repositoryName: binding.repositoryName,
           repositoryId: binding.repositoryId,
           boundAt: binding.boundAt || new Date().toISOString(),
@@ -554,6 +562,18 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     }));
   },
 
+  setAgentWorkspace: (workspace) => {
+    // The work root belongs to the Atlas branch, not to one provider. Codex and
+    // Claude keep separate settings objects, so both are written together;
+    // otherwise switching provider looks like the work root was cleared.
+    set((state) => ({
+      ...withAiDialogSettingsSaved(state, {
+        codexSettings: normalizeCodexSettings({ ...state.codexSettings, workspace }),
+        claudeSettings: normalizeClaudeSettings({ ...state.claudeSettings, workspace }),
+      }),
+    }));
+  },
+
   setOpenClawSettings: (patch) => {
     set((state) => ({
       ...withAiDialogSettingsSaved(state, {
@@ -579,13 +599,25 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   loadAiDialogSettingsForNode: (id) => {
     const path = findNodePath(get().atlasRoot, id);
     const settings = path ? findAiDialogSettingsInPath(path) : undefined;
-    set((state) => ({
-      aiContextOptions: normalizeAiContextOptions(settings?.contextOptions ?? DEFAULT_AI_CONTEXT_OPTIONS),
-      chatSettings: normalizeChatSettings(settings?.chatSettings ?? DEFAULT_CHAT_SETTINGS),
-      codexSettings: normalizeCodexSettings(settings?.codexSettings ?? DEFAULT_CODEX_SETTINGS),
-      openClawSettings: normalizeOpenClawSettings(settings?.openClawSettings ?? DEFAULT_OPENCLAW_SETTINGS),
-      claudeSettings: normalizeClaudeSettings(settings?.claudeSettings ?? DEFAULT_CLAUDE_SETTINGS),
-    }));
+    set((state) => {
+      const codexSettings = normalizeCodexSettings(settings?.codexSettings ?? DEFAULT_CODEX_SETTINGS);
+      const claudeSettings = normalizeClaudeSettings(settings?.claudeSettings ?? DEFAULT_CLAUDE_SETTINGS);
+      // A node that recorded a work root for only one provider must not look
+      // empty under the other, and a node with no work root at all keeps the
+      // one already on screen.
+      const workspace =
+        codexSettings.workspace.trim()
+        || claudeSettings.workspace.trim()
+        || state.codexSettings.workspace.trim()
+        || state.claudeSettings.workspace.trim();
+      return {
+        aiContextOptions: normalizeAiContextOptions(settings?.contextOptions ?? DEFAULT_AI_CONTEXT_OPTIONS),
+        chatSettings: normalizeChatSettings(settings?.chatSettings ?? DEFAULT_CHAT_SETTINGS),
+        codexSettings: { ...codexSettings, workspace },
+        openClawSettings: normalizeOpenClawSettings(settings?.openClawSettings ?? DEFAULT_OPENCLAW_SETTINGS),
+        claudeSettings: { ...claudeSettings, workspace },
+      };
+    });
   },
 
   resetAiDialogSettingsToDefaults: () => {
@@ -1774,6 +1806,98 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
   },
 
+  recordAiSubmissionError: (prompt, mode, message) => {
+    const trimmed = prompt.trim();
+    const detail = message.trim() || `${modeLabel(mode)} could not start this request.`;
+    if (!trimmed) return;
+    const current = get();
+    const sourceNodeId = current.selectedNodeId;
+    const sourcePath = findNodePath(current.atlasRoot, sourceNodeId);
+    const sourceNode = sourcePath?.at(-1);
+    if (!sourcePath || !sourceNode) return;
+    const runId = `ai-run-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+    const completedAt = new Date().toISOString();
+    const inherited = createInheritedAiDialogSettings(
+      sourcePath,
+      current.aiContextOptions,
+      current.chatSettings,
+      current.codexSettings,
+      current.openClawSettings,
+      current.claudeSettings,
+    );
+    const dialogSettings = createCurrentAiDialogSettings(
+      current.aiContextOptions,
+      inherited.chatSettings,
+      inherited.codexSettings,
+      inherited.openClawSettings,
+      inherited.claudeSettings,
+    );
+    const requestNode = createAiRequestNode(sourceNodeId, sourceNode.children.length, runId, mode, trimmed, {
+      aiDialogSettings: dialogSettings,
+      usedNodeIds: collectNodeIdSet(current.atlasRoot),
+    });
+    const errorNode = createAiErrorNode(requestNode.id, runId, mode, detail, {
+      aiDialogSettings: dialogSettings,
+      usedNodeIds: new Set([...collectNodeIdSet(current.atlasRoot), requestNode.id]),
+    });
+    const failedRequest = {
+      ...requestNode,
+      status: "error" as const,
+      nextDecision: detail,
+      propagatedErrorSourceId: errorNode.id,
+      updatedAt: completedAt,
+      children: [errorNode],
+    };
+    set((state) => {
+      const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(state.atlasRoot, sourceNodeId, (node) => ({
+        ...node,
+        status: "error",
+        nextDecision: detail,
+        propagatedErrorSourceId: errorNode.id,
+        updatedAt: completedAt,
+        children: [...node.children, failedRequest],
+      })));
+      persistNotebook(atlasRoot);
+      return {
+        ...pushHistory(state),
+        atlasRoot,
+        birthMarks: {
+          ...state.birthMarks,
+          [requestNode.id]: performance.now(),
+          [errorNode.id]: performance.now(),
+        },
+        notificationPulses: [...state.notificationPulses, createNotificationPulse(errorNode.id, "error", `${modeLabel(mode)} failed`) ],
+        unreadNotifications: markUnreadNotification(
+          state.unreadNotifications,
+          errorNode.id,
+          "error",
+          `${modeLabel(mode)} failed`,
+        ),
+        aiRuns: {
+          ...state.aiRuns,
+          [runId]: {
+            id: runId,
+            nodeId: sourceNodeId,
+            requestNodeId: requestNode.id,
+            responseNodeId: errorNode.id,
+            provider: providerForMode(mode),
+            mode,
+            modelId: mode === "codex"
+              ? dialogSettings.codexSettings.model
+              : mode === "claude"
+                ? dialogSettings.claudeSettings.model
+                : "",
+            status: "error",
+            prompt: trimmed,
+            startedAt: completedAt,
+            completedAt,
+            error: detail,
+          },
+        },
+      };
+    });
+  },
+
   runAiOnSelectedNode: async (prompt, mode, optionsInput) => {
     const trimmed = prompt.trim();
     if (!trimmed) return;
@@ -1823,22 +1947,32 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         throw new Error(`${modeLabel(mode)} needs an explicit work root before it can run.`);
       }
       const inspected = await inspectAgentWorkspace(requestedAgentWorkspace);
-      if (!inspected.available || !inspected.gitRoot) {
-        throw new Error(inspected.detail || "The selected work root is not a Git repository.");
+      const workspaceKind = inspected.available ? "git" : inspected.workspaceAvailable ? "directory" : null;
+      const inspectedWorkspaceRoot = inspected.available ? inspected.gitRoot : inspected.resolvedWorkspace;
+      if (!workspaceKind || !inspectedWorkspaceRoot) {
+        throw new Error(inspected.detail || "The selected work root is not an available directory.");
       }
       const binding = findInheritedAgentWorkspaceBinding(state.atlasRoot, sourceNodeId);
       if (!binding) {
-        throw new Error(`Bind this Atlas branch to ${inspected.repositoryName || inspected.gitRoot} before sending the request.`);
+        throw new Error(`Bind this Atlas branch to ${inspected.repositoryName || inspectedWorkspaceRoot} before sending the request.`);
       }
-      const bindingIdentity = binding.repositoryId || normalizeWorkspaceKey(binding.gitRoot);
-      const inspectedIdentity = inspected.repositoryId || normalizeWorkspaceKey(inspected.gitRoot);
-      if (bindingIdentity !== inspectedIdentity) {
+      const bindingKind = binding.workspaceKind ?? "git";
+      const bindingIdentity = bindingKind === "git" && binding.repositoryId
+        ? binding.repositoryId
+        : normalizeWorkspaceKey(binding.gitRoot);
+      const inspectedIdentity = workspaceKind === "git" && inspected.repositoryId
+        ? inspected.repositoryId
+        : normalizeWorkspaceKey(inspectedWorkspaceRoot);
+      if (bindingKind !== workspaceKind || bindingIdentity !== inspectedIdentity) {
         throw new Error(
-          `Repository mismatch: this Atlas branch is bound to ${binding.repositoryName || binding.gitRoot}, `
-          + `but the work root resolves to ${inspected.repositoryName || inspected.gitRoot}. Rebind explicitly before running.`,
+          `Workspace mismatch: this Atlas branch is bound to ${binding.repositoryName || binding.gitRoot}, `
+          + `but the work root resolves to ${inspected.repositoryName || inspectedWorkspaceRoot}. Rebind explicitly before running.`,
         );
       }
       const workspaceMode = (codexSettingsForRun?.workspaceMode ?? claudeSettingsForRun?.workspaceMode) === "worktree" ? "worktree" : "shared";
+      if (workspaceMode === "worktree" && workspaceKind !== "git") {
+        throw new Error("Mission worktree mode requires a Git repository. Use Current folder for a folder without Git.");
+      }
       if (workspaceMode === "worktree" && inspected.dirtyCount > 0 && !inspected.managedMissionWorktree) {
         throw new Error("Commit or stash source-checkout changes before creating a mission worktree; Git does not copy those changes.");
       }
@@ -1847,11 +1981,12 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       // parallel. Shared checkouts and follow-ups inside an existing managed
       // mission worktree still require one writer at a time.
       if (workspaceMode === "shared" || inspected.managedMissionWorktree) {
+        const executionDirectory = inspected.available ? inspected.gitRoot : inspected.resolvedWorkspace;
         const conflict = mode === "codex"
-          ? findActiveCodexRunForWorkspace(get().aiRuns, inspected.gitRoot, runId)
-          : findActiveClaudeRunForWorkspace(get().aiRuns, inspected.gitRoot, runId);
+          ? findActiveCodexRunForWorkspace(get().aiRuns, executionDirectory, runId)
+          : findActiveClaudeRunForWorkspace(get().aiRuns, executionDirectory, runId);
         if (conflict) {
-          throw new Error(`${modeLabel(mode)} is already running for this execution directory: ${inspected.gitRoot}\nActive run: ${conflict.id}`);
+          throw new Error(`${modeLabel(mode)} is already running for this execution directory: ${executionDirectory}\nActive run: ${conflict.id}`);
         }
       }
       agentExecution = {
@@ -1859,7 +1994,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         requestedWorkspace: requestedAgentWorkspace,
         sourceWorkspace: inspected.resolvedWorkspace || requestedAgentWorkspace,
         workspaceMode,
-        gitRoot: inspected.gitRoot,
+        workspaceKind,
+        gitRoot: inspected.available ? inspected.gitRoot : undefined,
         repositoryName: inspected.repositoryName,
         repositoryId: inspected.repositoryId,
         gitBranch: inspected.branch,
@@ -2203,6 +2339,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           console.warn("Agent run acknowledgement failed", error);
         });
       }
+      notifyProviderUsageChanged();
     } catch (error) {
       const message = error instanceof Error ? error.message : "AI request failed.";
       set((current) => {
@@ -2265,6 +2402,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           console.warn("Agent run acknowledgement failed", acknowledgementError);
         });
       }
+      notifyProviderUsageChanged();
     }
   },
 
@@ -4129,12 +4267,24 @@ function createAiErrorNode(
   const now = new Date().toISOString();
   const seed = `${parentId}-${runId}-error`;
   const codexLimit = mode === "codex" ? describeCodexTokenLimit(message, now) : null;
-  const bridgeFailure = codexLimit ? null : describeBridgeConnectionFailure(mode, message);
-  const title = codexLimit ? "Codex token limit" : bridgeFailure ? "Mind Atlas server unreachable" : `${modeLabel(mode)} error`;
-  const body = codexLimit?.body ?? bridgeFailure?.body ?? message;
-  const summary = codexLimit?.summary ?? bridgeFailure?.summary ?? message;
+  const claudePlanLimit = mode === "claude" ? describeClaudePlanLimit(message) : null;
+  const claudeAuthFailure = mode === "claude" ? describeClaudeAuthenticationFailure(message) : null;
+  const bridgeFailure = codexLimit || claudePlanLimit || claudeAuthFailure ? null : describeBridgeConnectionFailure(mode, message);
+  const title = codexLimit
+    ? "Codex token limit"
+    : claudePlanLimit
+      ? "Claude Code Pro usage limit"
+    : claudeAuthFailure
+      ? "Claude Code authentication expired"
+      : bridgeFailure
+        ? "Mind Atlas server unreachable"
+        : `${modeLabel(mode)} error`;
+  const body = codexLimit?.body ?? claudePlanLimit?.body ?? claudeAuthFailure?.body ?? bridgeFailure?.body ?? message;
+  const summary = codexLimit?.summary ?? claudePlanLimit?.summary ?? claudeAuthFailure?.summary ?? bridgeFailure?.summary ?? message;
   const nextDecision =
     codexLimit?.nextDecision ??
+    claudePlanLimit?.nextDecision ??
+    claudeAuthFailure?.nextDecision ??
     bridgeFailure?.nextDecision ??
     "Inspect bridge configuration, provider status, or retry with a different mode.";
   return {
@@ -4170,9 +4320,85 @@ function createAiErrorNode(
     openClawLogPath: options.openClawLogPath,
     claudeLogPath: options.claudeLogPath,
     claudeSessionId: options.claudeSessionId,
+    reminderAt: claudePlanLimit?.reminderAt,
     position: options.position,
     children: [],
   };
+}
+
+function describeClaudePlanLimit(message: string) {
+  if (!message.toLowerCase().includes("claude code pro usage limit reached")) return null;
+  const resetMatch = message.match(/^(?:Reset at|Allowance reset):\s*(.+)$/im);
+  const resetCandidate = resetMatch?.[1]?.trim() ?? "";
+  const parsedResetAt = resetCandidate ? new Date(resetCandidate) : null;
+  const reminderAt = parsedResetAt && !Number.isNaN(parsedResetAt.getTime())
+    ? parsedResetAt.toISOString()
+    : undefined;
+  const body = [
+    "Claude Code Pro has reached its current usage limit.",
+    "",
+    "This request was preserved, but Claude Code did not return a completed result.",
+    reminderAt ? `Allowance reset: ${reminderAt}` : "Wait for the Claude allowance to reset before retrying.",
+    ...(reminderAt ? ["A Mind Atlas reminder has been set for this reset time."] : []),
+    "",
+    "You can also switch the Code backend to Codex, Claude API, or DeepSeek and send the request again.",
+  ].join("\n");
+  return {
+    body,
+    summary: reminderAt
+      ? `Claude Code Pro usage limit reached. Reset: ${reminderAt}.`
+      : "Claude Code Pro usage limit reached.",
+    nextDecision: reminderAt
+      ? `Retry after ${reminderAt}, or switch the Code backend.`
+      : "Wait for the allowance reset, or switch the Code backend.",
+    reminderAt,
+  };
+}
+
+function describeClaudeAuthenticationFailure(message: string) {
+  if (!message.toLowerCase().includes("oauth access token has been revoked")) return null;
+  const originalError = deduplicateRepeatedErrorLines(message);
+  const body = [
+    "Claude Code Pro authentication recovery did not complete.",
+    "",
+    "Mind Atlas automatically opened PowerShell and ran `claude auth login`, while preserving this request's workspace, model, permission, and prompt settings.",
+    "This error node appears only because that login window was closed, failed, or Claude rejected the refreshed login again.",
+    "",
+    "Manual recovery:",
+    "1. Open PowerShell.",
+    "2. Run `claude auth login`.",
+    "3. Complete sign-in with the Claude Pro or Max account used for Claude Code.",
+    "4. Return to Mind Atlas and retry this request.",
+    "",
+    "If Claude still reports that the token was revoked, run these commands and sign in again:",
+    "`claude auth logout`",
+    "`claude auth login`",
+    "",
+    "A successful sign-in is used by the next request; restarting Mind Atlas is normally unnecessary.",
+    "",
+    "Original error:",
+    originalError,
+  ].join("\n");
+  return {
+    body,
+    summary: "Automatic Claude Code Pro authentication recovery did not complete.",
+    nextDecision: "Run `claude auth login` in PowerShell, complete sign-in, then retry Claude Code.",
+  };
+}
+
+function deduplicateRepeatedErrorLines(message: string) {
+  const seen = new Set<string>();
+  return message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      const key = line.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join("\n");
 }
 
 function describeBridgeConnectionFailure(mode: AiExecutionMode, message: string) {
@@ -4232,6 +4458,11 @@ function notifyLocalOutputTruncated(mode: AiExecutionMode, usage: AiUsage | unde
       "Increase the Local output token limit or ask for a shorter answer if the result is incomplete.",
     ].filter(Boolean).join("\n"),
   );
+}
+
+function notifyProviderUsageChanged() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event("mind-atlas-provider-usage-changed"));
 }
 
 function describeCodexTokenLimit(message: string, nowIso: string) {
@@ -4894,11 +5125,12 @@ function normalizeWorkspaceKey(workspace: string) {
 }
 
 function normalizeCodexSettings(settings: Partial<CodexSettings>): CodexSettings {
+  const { timeoutMs: _legacyTimeoutMs, ...settingsWithoutTimeout } = settings as Partial<CodexSettings> & { timeoutMs?: unknown };
   const sandbox = normalizeCodexSandbox(settings.sandbox, settings.fullAccessApproved);
   const continueMode = settings.continueMode === "new" ? "new" : "auto";
   return {
     ...DEFAULT_CODEX_SETTINGS,
-    ...settings,
+    ...settingsWithoutTimeout,
     model: (settings.model ?? DEFAULT_CODEX_SETTINGS.model).trim() || DEFAULT_CODEX_SETTINGS.model,
     reasoningEffort: normalizeReasoningEffort(settings.reasoningEffort),
     sandbox,
@@ -4906,7 +5138,6 @@ function normalizeCodexSettings(settings: Partial<CodexSettings>): CodexSettings
     workspaceMode: settings.workspaceMode === "worktree" ? "worktree" : "shared",
     webSearch: true,
     skipGitRepoCheck: false,
-    timeoutMs: clampInteger(settings.timeoutMs ?? DEFAULT_CODEX_SETTINGS.timeoutMs, 30_000, 120 * 60_000),
     fullAccessApproved: settings.fullAccessApproved === true,
     continueMode,
     resumeThreadId: continueMode === "new" ? "" : (settings.resumeThreadId ?? "").trim(),
@@ -4935,10 +5166,11 @@ function normalizeOpenClawSettings(settings: Partial<OpenClawSettings>): OpenCla
 }
 
 function normalizeClaudeSettings(settings: Partial<ClaudeSettings>): ClaudeSettings {
+  const { timeoutMs: _legacyTimeoutMs, ...settingsWithoutTimeout } = settings as Partial<ClaudeSettings> & { timeoutMs?: unknown };
   const continueMode = settings.continueMode === "new" ? "new" : "auto";
   return {
     ...DEFAULT_CLAUDE_SETTINGS,
-    ...settings,
+    ...settingsWithoutTimeout,
     authMode: settings.authMode === "subscription" ? "subscription" : "api",
     model: (settings.model ?? "").trim(),
     baseUrl: (settings.baseUrl ?? "").trim().replace(/\/+$/, ""),
@@ -4947,7 +5179,6 @@ function normalizeClaudeSettings(settings: Partial<ClaudeSettings>): ClaudeSetti
     workspace: (settings.workspace ?? "").trim(),
     workspaceMode: settings.workspaceMode === "worktree" ? "worktree" : "shared",
     browser: settings.authMode === "subscription" && settings.browser === true,
-    timeoutMs: clampInteger(settings.timeoutMs ?? DEFAULT_CLAUDE_SETTINGS.timeoutMs, 30_000, 120 * 60_000),
     continueMode,
     resumeSessionId: continueMode === "new" ? "" : (settings.resumeSessionId ?? "").trim(),
     forkSession: settings.forkSession === true,

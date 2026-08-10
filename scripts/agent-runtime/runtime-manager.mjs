@@ -30,7 +30,7 @@ export class AgentRuntimeManager {
    * @param {{
    *   store?: import("./run-journal.mjs").AgentRunStore,
    *   codex?: { enabled: boolean, resolveCommand: () => { command: string, args: string[] }, workspace: string, env?: NodeJS.ProcessEnv },
-   *   claude?: { enabled: boolean, buildCommand: (args: string[]) => { command: string, args: string[] }, buildEnv: (settings: object) => NodeJS.ProcessEnv, workspace: string },
+   *   claude?: { enabled: boolean, buildCommand: (args: string[]) => { command: string, args: string[] }, buildEnv: (settings: object) => NodeJS.ProcessEnv, reauthenticate?: (options: { workspace: string }) => Promise<{ ok: boolean, detail?: string }>, workspace: string },
    *   codexRoutePreference?: "auto"|"app-server"|"exec",
    *   claudeRoutePreference?: "auto"|"stream-json"|"json",
    *   clientInfo?: { name: string, title: string, version: string },
@@ -61,10 +61,11 @@ export class AgentRuntimeManager {
         },
       })
       : null;
-    this.claudeAdapter = options.claude?.enabled
+       this.claudeAdapter = options.claude?.enabled
       ? new ClaudeAdapter({
         buildCommand: options.claude.buildCommand,
         buildEnv: options.claude.buildEnv,
+        reauthenticate: options.claude.reauthenticate,
         workspace: options.claude.workspace,
       })
       : null;
@@ -184,6 +185,9 @@ export class AgentRuntimeManager {
     let runWorkspace = sourceGit.resolvedWorkspace || sourceWorkspace;
     let worktree = null;
     if (workspaceMode === "worktree") {
+      if (!sourceGit.available) {
+        throw new Error("Mission worktree mode requires a Git repository. Use Current folder for a folder without Git.");
+      }
       const managedRoot = resolve(this.store.baseDir, "worktrees");
       const relativeToManaged = sourceGit.resolvedWorkspace ? relative(managedRoot, sourceGit.resolvedWorkspace) : "..";
       const reusingManagedWorktree = Boolean(

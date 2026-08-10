@@ -125,7 +125,7 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings)
 }
 
 function chatSettingsLabel(settings: ChatSettings) {
-  if (settings.service === "anthropic") return settings.model || "Opus";
+  if (settings.service === "anthropic") return settings.model || "Claude";
   if (settings.service === "deepseek") return settings.model || "DeepSeek";
   if (settings.service === "glm") return settings.model || "GLM";
   if (settings.service === "gemini") return settings.model || "Gemini";

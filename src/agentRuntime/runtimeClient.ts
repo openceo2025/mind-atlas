@@ -60,6 +60,10 @@ export async function getAgentCapabilities(options: { refresh?: boolean; workspa
 }
 
 export interface AgentWorkspaceInfo {
+  /** True for any readable directory, including a folder without Git. */
+  workspaceAvailable: boolean;
+  workspaceKind: "git" | "directory" | "unavailable";
+  /** True only when Git metadata and repository identity are available. */
   available: boolean;
   requestedWorkspace: string;
   resolvedWorkspace: string;

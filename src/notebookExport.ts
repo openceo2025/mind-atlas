@@ -1,4 +1,6 @@
 import type {
+  AgentExecutionMetadata,
+  AgentWorkspaceBinding,
   AiContextOptions,
   AiDialogSettings,
   AiExecutionMode,
@@ -101,7 +103,55 @@ export function sanitizeNotebookForExport(node: AtlasNode, options: NotebookExpo
   const aiDialogSettings = sanitizeAiDialogSettings(source.aiDialogSettings);
   if (aiDialogSettings) sanitized.aiDialogSettings = aiDialogSettings;
 
+  // The repository binding gates whether an agent run may start from this
+  // branch. Dropping it here silently re-locks every branch after an export,
+  // package save, or cloud round trip.
+  const agentWorkspaceBinding = sanitizeAgentWorkspaceBinding(source.agentWorkspaceBinding);
+  if (agentWorkspaceBinding) sanitized.agentWorkspaceBinding = agentWorkspaceBinding;
+
+  const agentExecution = sanitizeAgentExecution(source.agentExecution);
+  if (agentExecution) sanitized.agentExecution = agentExecution;
+
   return sanitized;
+}
+
+function sanitizeAgentWorkspaceBinding(value: unknown): AgentWorkspaceBinding | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const source = value as Partial<AgentWorkspaceBinding>;
+  const gitRoot = safeBoundedText(source.gitRoot, "", 1200);
+  if (!gitRoot) return undefined;
+  const binding: AgentWorkspaceBinding = {
+    gitRoot,
+    repositoryName: safeBoundedText(source.repositoryName, "", 240),
+    boundAt: safeDateText(source.boundAt).slice(0, 80),
+  };
+  if (source.workspaceKind === "git" || source.workspaceKind === "directory") {
+    binding.workspaceKind = source.workspaceKind;
+  }
+  const repositoryId = safeBoundedText(source.repositoryId, "", 1200);
+  if (repositoryId) binding.repositoryId = repositoryId;
+  return binding;
+}
+
+function sanitizeAgentExecution(value: unknown): AgentExecutionMetadata | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const source = value as Partial<AgentExecutionMetadata>;
+  const clientRunId = safeBoundedText(source.clientRunId, "", 240);
+  if (!clientRunId) return undefined;
+  const execution: AgentExecutionMetadata = {
+    clientRunId,
+    requestedWorkspace: safeBoundedText(source.requestedWorkspace, "", 1200),
+    workspaceMode: source.workspaceMode === "worktree" ? "worktree" : "shared",
+    recordedAt: safeDateText(source.recordedAt).slice(0, 80),
+  };
+  if (source.workspaceKind === "git" || source.workspaceKind === "directory") {
+    execution.workspaceKind = source.workspaceKind;
+  }
+  for (const key of ["runtimeRunId", "route", "resolvedWorkspace", "sourceWorkspace", "gitRoot", "repositoryName", "repositoryId", "gitBranch", "gitHead"] as const) {
+    const text = safeBoundedText(source[key], "", 1200);
+    if (text) execution[key] = text;
+  }
+  return execution;
 }
 
 export function sanitizeAttachmentForExport(
@@ -281,7 +331,6 @@ function sanitizeCodexSettings(value: unknown): CodexSettings | undefined {
     workspaceMode: value.workspaceMode === "worktree" ? "worktree" : "shared",
     webSearch: true,
     skipGitRepoCheck: false,
-    timeoutMs: safeInteger(value.timeoutMs, 60 * 60 * 1000),
     ...(typeof value.fullAccessApproved === "boolean" ? { fullAccessApproved: value.fullAccessApproved } : {}),
     continueMode: value.continueMode === "new" ? "new" : "auto",
     resumeThreadId: typeof value.resumeThreadId === "string" ? value.resumeThreadId.slice(0, 160) : "",
@@ -313,7 +362,6 @@ function sanitizeClaudeSettings(value: unknown): ClaudeSettings | undefined {
     workspace: safeString(value.workspace, ""),
     workspaceMode: value.workspaceMode === "worktree" ? "worktree" : "shared",
     browser: value.authMode === "subscription" && value.browser === true,
-    timeoutMs: safeInteger(value.timeoutMs, 60 * 60 * 1000),
     continueMode: value.continueMode === "new" ? "new" : "auto",
     resumeSessionId: safeString(value.resumeSessionId, ""),
   };

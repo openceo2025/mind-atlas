@@ -88,7 +88,7 @@ overriding variables already set by the shell.
 - `MIND_ATLAS_CODEX_REASONING_EFFORTS`: fallback comma-separated Codex levels used only when `codex debug models` is unavailable or a manual model list is configured. Live CLI model metadata takes precedence and is deduplicated before the browser receives it.
 - `MIND_ATLAS_CODEX_SANDBOX`: default sandbox. Use `workspace-write`; Full access normally requires an approval button in Mind Atlas.
 - `MIND_ATLAS_CODEX_MODELS`: optional comma-separated model override when `codex debug models` is unavailable.
-- `MIND_ATLAS_CODEX_TIMEOUT_MS`: Codex execution timeout in milliseconds. Defaults to 60 minutes.
+- Code runs started through Codex have no elapsed-time limit in Mind Atlas. They continue until the provider finishes, the user stops them, or the process/bridge exits.
 - `MIND_ATLAS_OPENAI_REASONING_EFFORTS`, `MIND_ATLAS_ANTHROPIC_REASONING_EFFORTS`, `MIND_ATLAS_DEEPSEEK_REASONING_EFFORTS`: comma-separated Chat reasoning levels exposed for each local bridge provider. Provider APIs do not expose one common capability-discovery endpoint, so update these lists when a provider changes its supported levels. Values are forwarded only as safe identifiers; `default` does not send an effort override.
 - `MIND_ATLAS_OPENCLAW_BIN`: OpenClaw executable. Defaults to `openclaw`; on Windows the bridge also auto-detects the user npm OpenClaw entrypoint.
 - `MIND_ATLAS_OPENCLAW_AGENT`: optional OpenClaw agent id. Leave blank to use the OpenClaw default agent.
@@ -102,7 +102,7 @@ overriding variables already set by the shell.
 - `MIND_ATLAS_CLAUDE_DEFAULT_FABLE_MODEL`, `MIND_ATLAS_CLAUDE_DEFAULT_OPUS_MODEL`, `MIND_ATLAS_CLAUDE_DEFAULT_SONNET_MODEL`, `MIND_ATLAS_CLAUDE_DEFAULT_HAIKU_MODEL`, `MIND_ATLAS_CLAUDE_SUBAGENT_MODEL`, `MIND_ATLAS_CLAUDE_EFFORT_LEVEL`: optional Claude Code env overrides. DeepSeek runs automatically fill the recommended V4 Pro / V4 Flash defaults when these are not set.
 - `MIND_ATLAS_CLAUDE_REASONING_EFFORTS`: comma-separated Claude Code `--effort` choices shown in the local command dock. Update it with the installed Claude Code release when Anthropic changes the supported levels.
 - `MIND_ATLAS_CLAUDE_WORKSPACE`: default work root for Claude Code runs.
-- `MIND_ATLAS_CLAUDE_TIMEOUT_MS`: Claude Code execution timeout in milliseconds. Defaults to 60 minutes.
+- Code runs started through Claude Code API, Claude Code Pro, or the DeepSeek Claude-compatible route have no elapsed-time limit in Mind Atlas. Short capability and authentication probes still fail quickly and do not terminate an active agent run.
 
 On Windows, Codex can occasionally fail before command execution with
 `windows sandbox: spawn setup refresh`. When this exact sandbox initialization
@@ -251,13 +251,16 @@ The rules live in `scripts/agent-runtime/workspace-policy.mjs` and are covered
 by `npm run verify:agent-runtime`.
 
 Before a Code request can start, the current Atlas branch must be explicitly
-bound to the inspected Git repository. The guard compares a stable identity
-derived from `git rev-parse --git-common-dir`, not a folder name, so a linked
-worktree still matches its source repository while an unrelated checkout is
-blocked. Each manifest records the source checkout, actual execution directory,
-repository identity, branch, HEAD, and initial dirty-file snapshot.
+bound to the inspected workspace. A Git workspace is compared by the stable
+identity derived from `git rev-parse --git-common-dir`, not a folder name, so a
+linked worktree still matches its source repository while an unrelated checkout
+is blocked. An existing folder without Git is instead bound by its canonical
+real path and can run in **Current folder** mode. This lets a new empty project
+start before `git init` without weakening Git repository identity checks. Each
+manifest always records the actual execution directory and records repository
+identity, branch, HEAD, and initial dirty-file snapshot when Git is available.
 
-The optional **Mission worktree** mode requires a clean source checkout and
+The optional **Mission worktree** mode requires a Git repository with a clean source checkout and
 creates an isolated branch/worktree below
 `server-data/agent-runtime/worktrees/`. Follow-up nodes reuse that worktree.
 Once a run is terminal, the user may explicitly checkpoint the run-attributed
@@ -272,6 +275,11 @@ also permit parallel missions in one repository. The Agent Run Workspace shows
 a switcher when more than one local run is active, so a second run does not
 replace the one you are watching. Shared checkouts and the **same existing
 mission worktree** still allow only one writer at a time.
+
+Selecting a run in that switcher focuses its linked request node in the Atlas.
+Selecting an Atlas node with a retained durable-run link switches the workspace
+to that run without forcing a hidden workspace open. Selecting an unrelated
+node does not replace or hide the run currently shown in the workspace.
 
 `POST /api/ai/respond` still drives node-anchored runs. When the browser sends
 `useAgentRuntime: true`, the bridge executes the request through the runtime
@@ -292,6 +300,19 @@ server-data/agent-runtime/
   handoffs/<handoff-id>.json
 ```
 
+### Acknowledgement and retention
+
+A run is `unread` until it is acknowledged. Opening a finished run in the Agent
+Run Workspace acknowledges it, and the workspace also offers a
+`Mark N read` action. Acknowledgement matters for more than the badge:
+`applyRetention` deletes **only** acknowledged terminal runs, so a run that is
+never acknowledged is never reclaimed and `runs/` grows without bound.
+
+Retention runs at bridge startup and removes acknowledged terminal runs older
+than `MIND_ATLAS_AGENT_EVENT_RETENTION_DAYS` (30 days), plus the oldest
+acknowledged runs when the total exceeds `MIND_ATLAS_AGENT_EVENT_MAX_BYTES`.
+Unacknowledged results are never deleted.
+
 `server-data/agent-run-inbox` remains the compatibility recovery path. Closing
 the workspace only hides it; the Agent runs launcher, recent-run switcher, and
 result-node action reopen the same durable run. On startup a run left
@@ -311,6 +332,26 @@ change. The Capabilities tab exposes the runtime-reported models, efforts,
 tools, skills, MCP servers, slash commands, subagent definitions, and support
 reasons. Steer, Compact, and browser controls stay disabled unless that exact
 route reports support.
+
+### Code model preflight
+
+`GET /api/codex/options?refresh=<backend>` uses `codex`, `claude-api`, or
+`claude-subscription` as the refresh scope. Each route returns a shared
+`ready`/`error` discovery state with its source, detail, and check time.
+
+Code execution is fail-closed. Codex models must be reported by the installed
+Codex CLI, Anthropic and DeepSeek models must be present in a successful live
+provider response, and Claude Code Pro models must have been recently observed
+in the native Claude client state. Configured fallback model names may still be
+used by Chat, but they are never presented as confirmed Code models after a
+discovery failure. The model field shows the error and send remains disabled;
+the bridge repeats the availability check before it starts a run.
+
+Refresh work is backend-specific to avoid polling every provider together:
+Codex runs at most every 10 minutes, Claude API and DeepSeek every 30 minutes,
+and the lightweight Claude Code Pro cache every 5 minutes and when the browser
+regains focus. Concurrent refreshes are coalesced, and an unchanged response
+does not update browser state.
 
 ### Context accounting
 
@@ -408,13 +449,59 @@ The Agent Run Workspace UI is a local-only developer surface and is
 intentionally English-only; its strings are recorded in
 `i18n/hardcoded-baseline.json` rather than the translated catalog.
 
+## Live Model Discovery
+
+The bridge no longer serves hardcoded model lists. At startup, and then every
+`MIND_ATLAS_MODEL_REFRESH_MS` (30 minutes by default), it asks each configured
+provider for its real catalogue:
+
+| Service | Endpoint |
+| --- | --- |
+| OpenAI | `GET {MIND_ATLAS_OPENAI_BASE_URL}/models` |
+| Claude (Anthropic) | `GET {MIND_ATLAS_ANTHROPIC_BASE_URL}/v1/models` |
+| DeepSeek | `GET {MIND_ATLAS_DEEPSEEK_BALANCE_BASE_URL}/models` |
+
+Rules:
+
+- a provider with no credential is never fetched and keeps its configured list;
+- a failed or empty fetch falls back to the configured list;
+- `modelSource` is `live` or `configured`, and `modelSourceDetail` carries the
+  reason, so the UI never presents a stale list as if it were live;
+- configured models stay in the list even when discovery omits them, so a
+  pinned model never disappears;
+- models are ordered newest version first. A snapshot date only breaks ties
+  between the same version, so `claude-opus-5` outranks
+  `claude-opus-4-5-20251101`.
+
+The Chat service formerly labelled `Opus` is labelled `Claude`, because it
+routes every Anthropic Claude model rather than only Opus.
+
+### Model display names
+
+Version numbers are always shown: `claude-opus-4-8` renders as
+`Claude Opus 4.8`, `gpt-5.5-pro-2026-04-23` as `GPT-5.5 Pro (2026-04-23)`, and
+`deepseek-v4-pro[1m]` as `DeepSeek V4 Pro [1m]`. Claude Code subscription
+aliases carry no version of their own, so they are labelled with the model they
+resolve to (`opus` renders as `Claude Opus 4.8`).
+
+### Reasoning effort per model
+
+Effort lists are per model, not per service. A non-reasoning model such as
+`gpt-4.1` or `deepseek-chat` offers only `default` instead of a picker full of
+levels it would reject. Changing model moves the effort to that model's default
+when the current one is not accepted.
+
+Code mode uses the same discovery: the Claude Code API route lists live
+Anthropic and DeepSeek models with their base URLs, and the subscription route
+lists the account aliases with their resolved versions.
+
 ## Current AI Surface
 
 - The command dock supports Chat, Code, OpenClaw, and Note modes.
 - The AI modes include a compact usage panel. The Selected view automatically follows the Code backend being edited; All exposes the browser-local multi-metric selection. OpenAI Codex 5-hour and 7-day remaining percentages come from `codex app-server` `account/rateLimits/read`; DeepSeek balance comes from `GET /user/balance`; Claude subscription/SDK allowance comes from the latest durable Claude Code `rate_limit_event` carrying utilization. Anthropic's Claude Console organization-credit value has no public balance API and remains an explicit unavailable metric.
 - Chat is the shared non-agent conversation entry. It can target OpenAI, Opus/Anthropic, DeepSeek, or Local from one service/model/effort settings row.
 - Code is the shared workspace-aware CLI entry. Its first setting chooses Codex, Claude Code API, or Claude Code Pro, then shows that backend's compact settings. Codex exposes model, effort, sandbox, work root, and thread controls. Claude Code exposes preset, effort, permission mode, and work root controls.
-- Claude Code API uses the bridge's configured Anthropic or DeepSeek API credentials and may incur usage-based API charges. Claude Code Pro runs the same native Windows Claude Code executable, but the bridge removes API keys, provider base URLs, and Bedrock/Vertex/Foundry overrides from the child process. It therefore requires `claude auth login` with a Claude Pro or Max account. When Claude Code emits a machine-readable `rate_limit_event.utilization`, Mind Atlas journals and shows that reported subscription/SDK allowance; before such an event it honestly shows unavailable. It does not infer a value or merge that allowance with context-window usage.
+- Claude Code API uses the bridge's configured Anthropic or DeepSeek API credentials and may incur usage-based API charges. Claude Code Pro runs the same native Windows Claude Code executable, but the bridge removes API keys, provider base URLs, and Bedrock/Vertex/Foundry overrides from the child process. It therefore requires `claude auth login` with a Claude Pro or Max account. If that OAuth login is revoked, Mind Atlas opens one visible PowerShell login window, runs `claude auth login`, keeps the original run pending, and retries it once with the same workspace, model, permission, prompt, session, and evidence settings after login succeeds. Concurrent failures share the same login window. A cancelled or failed login, a second authentication rejection, or a run that already produced assistant output or file changes fails explicitly instead of risking duplicate side effects. When Claude Code emits a machine-readable `rate_limit_event.utilization`, Mind Atlas journals and shows that reported subscription/SDK allowance; before such an event it honestly shows unavailable. It does not infer a value or merge that allowance with context-window usage.
 - A user request is saved as a child notebook node first. The provider result is saved as a child of that request.
 - Codex, Claude Code, and OpenClaw requests are also written to a local durable run journal before execution. The browser acknowledges a journal entry only after the normal result or error has been stored. On startup, page resume, and a 60-second poll, an unacknowledged result is restored into its still-running request branch. If that branch no longer exists, the request and result are preserved in the AI Partner log with an unread notification. A bridge restart turns an unfinished journal entry into an explicit interrupted result instead of leaving an indefinite running node. Verify this contract with `npm run verify:agent-recovery`.
 - From the root surface, Chat requests are written to the AI Partner log instead of creating notebook nodes. With an active node, Chat creates the same request/result child branch as before.
@@ -428,10 +515,18 @@ intentionally English-only; its strings are recorded in
 - Claude Code mode pipes the Mind Atlas prompt/context into `claude -p --output-format json` through the bridge. The bridge injects the selected preset, model, base URL, and provider-appropriate auth variables into that child process, saves stdout/stderr/metadata under `server-data/claude-runs`, and stores the log path on the request/result branch.
 - Claude Code API settings include presets for Bridge env, Claude Opus 4.8, Claude Fable 5, and DeepSeek V4 Pro. Claude Code Pro instead exposes Claude account default, Opus, Fable, and Sonnet aliases and passes the selected alias through `--model`. Switching between API and Pro forces a fresh agent session so a session created under one billing route is not resumed under the other. Direct model and base URL text fields are intentionally hidden; use bridge environment variables or presets. Claude Code permission mode is not equivalent to Codex OS sandboxing.
 - Command failures inside a normal Codex run are treated as ordinary diagnostic detail, not Mind Atlas error nodes. Error pulses are reserved for Codex invocation failures or explicit approval/error nodes.
-- Codex web search is enabled automatically. The command dock does not show a web-search toggle.
+- Codex web search is enabled automatically and fixed to live mode for both
+  app-server and exec fallback runs, including resumed sessions. The command
+  dock does not show a web-search toggle.
+- Claude Code API and Claude Code Pro always receive the read-only `WebSearch`
+  and `WebFetch` tools through `--allowedTools`. This is independent of the
+  Permission selector and Claude in Chrome: file/shell permissions still follow
+  the selected permission mode, while Chrome control remains a separate
+  capability-gated per-run option.
 - The bridge decides `--skip-git-repo-check` automatically before each Codex run. If `git rev-parse --is-inside-work-tree` succeeds in the work root, the flag is not used. If the work root is not a Git repository or Git cannot inspect it, the flag is used.
 - If Codex appears blocked by permissions, Mind Atlas creates a pulsing approval request node. Its child option nodes have centered buttons for approving or denying a retry with `danger-full-access`.
 - Work roots can be selected in the Codex settings row. If left blank, the bridge can infer a work root from context text such as `workspace: c:\path\to\repo` or `作業ルート: c:\path\to\repo`.
+- The Code work root is shared by Codex and Claude Code. If its input is cleared while the selected Atlas branch still has a saved repository binding, `Restore bound work root` restores the path in one click and reruns repository verification before showing `Bound`.
 - Running, review, and error states pulse around the affected notebook node.
 - Completed or failed background work emits a wider notification pulse from the result location.
 - Usage metadata is stored on runs and result nodes. Cost estimates appear only when per-token rates are configured.

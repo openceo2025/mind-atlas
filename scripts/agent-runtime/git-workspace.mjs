@@ -18,6 +18,8 @@ export async function inspectGitWorkspace(workspace) {
   const requestedWorkspace = String(workspace ?? "").trim();
   const empty = {
     available: false,
+    workspaceAvailable: false,
+    workspaceKind: "unavailable",
     requestedWorkspace,
     resolvedWorkspace: "",
     gitRoot: "",
@@ -45,7 +47,14 @@ export async function inspectGitWorkspace(workspace) {
 
   const root = await runGit(resolvedWorkspace, ["rev-parse", "--show-toplevel"]);
   if (root.exitCode !== 0 || !root.stdout.trim()) {
-    return { ...empty, resolvedWorkspace, detail: "The selected directory is not inside a Git worktree." };
+    return {
+      ...empty,
+      workspaceAvailable: true,
+      workspaceKind: "directory",
+      resolvedWorkspace,
+      repositoryName: basename(resolvedWorkspace),
+      detail: "This folder is not a Git repository. Code can run in the current folder, but mission worktrees and Git checkpoints are unavailable.",
+    };
   }
   const gitRoot = await normalizeExistingPath(root.stdout.trim());
   const [branch, head, status, diff, commonDir] = await Promise.all([
@@ -62,6 +71,8 @@ export async function inspectGitWorkspace(workspace) {
   const repositoryRoot = sourceRootFromCommonGitDir(commonGitDir, gitRoot);
   return {
     available: true,
+    workspaceAvailable: true,
+    workspaceKind: "git",
     requestedWorkspace,
     resolvedWorkspace,
     gitRoot,

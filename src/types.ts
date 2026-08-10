@@ -168,7 +168,6 @@ export interface CodexSettings {
   workspaceMode?: AgentWorkspaceMode;
   webSearch: boolean;
   skipGitRepoCheck: boolean;
-  timeoutMs: number;
   fullAccessApproved?: boolean;
   continueMode?: CodexContinueMode;
   resumeThreadId?: string;
@@ -199,7 +198,6 @@ export interface ClaudeSettings {
   workspace: string;
   workspaceMode?: AgentWorkspaceMode;
   browser?: boolean;
-  timeoutMs: number;
   continueMode?: CodexContinueMode;
   resumeSessionId?: string;
   forkSession?: boolean;
@@ -234,6 +232,9 @@ export interface ChatServiceOption {
   defaultReasoningEffort: ChatReasoningEffort;
   supportedReasoningEfforts: ChatReasoningEffort[];
   models: ChatModelOption[];
+  /** Whether the model list came from live provider discovery. */
+  modelSource?: "live" | "configured";
+  modelSourceDetail?: string;
   baseUrl?: string;
   detail?: string;
 }
@@ -289,14 +290,51 @@ export interface CodexModelOption {
   supportedReasoningEfforts: CodexReasoningEffort[];
 }
 
+export interface ClaudeApiModelOption {
+  id: string;
+  model: string;
+  baseUrl: string;
+  displayName: string;
+  vendor: "bridge" | "anthropic" | "deepseek";
+  supportedReasoningEfforts: ClaudeReasoningEffort[];
+  defaultReasoningEffort: ClaudeReasoningEffort;
+}
+
+export interface ClaudeSubscriptionModelOption {
+  id: string;
+  model: string;
+  resolvedModel: string;
+  displayName: string;
+  supportedReasoningEfforts: ClaudeReasoningEffort[];
+  defaultReasoningEffort: ClaudeReasoningEffort;
+}
+
+export interface CodeModelDiscoveryState {
+  status: "ready" | "error";
+  source: "runtime" | "provider-api" | "native-cache" | "configured";
+  detail: string;
+  checkedAt: string;
+}
+
 export interface CodexOptionsResult {
   models: CodexModelOption[];
   defaultModel: string;
   defaultReasoningEffort: CodexReasoningEffort;
   claudeReasoningEfforts?: ClaudeReasoningEffort[];
+  claudeApiModels?: {
+    options: ClaudeApiModelOption[];
+    anthropic: CodeModelDiscoveryState;
+    deepseek: CodeModelDiscoveryState;
+  };
+  claudeSubscriptionModels?: {
+    options: ClaudeSubscriptionModelOption[];
+    discovery: CodeModelDiscoveryState;
+  };
+  modelDiscovery: {
+    codex: CodeModelDiscoveryState;
+  };
   defaultWorkspace: string;
   defaultSandbox: CodexSandboxMode;
-  defaultTimeoutMs: number;
 }
 
 export type ProviderUsageMetricKind = "rate_limit" | "balance";
@@ -883,7 +921,7 @@ export interface AtlasNode {
   openClawLogPath?: string;
   claudeLogPath?: string;
   claudeSessionId?: string;
-  /** Local-only repository identity inherited down an Atlas branch. */
+  /** Local-only workspace identity inherited down an Atlas branch. */
   agentWorkspaceBinding?: AgentWorkspaceBinding;
   /** Local-only immutable execution record for request/result nodes. */
   agentExecution?: AgentExecutionMetadata;
@@ -896,7 +934,9 @@ export interface AtlasNode {
 }
 
 export interface AgentWorkspaceBinding {
+  /** Legacy field name; stores the canonical bound root for either binding kind. */
   gitRoot: string;
+  workspaceKind?: "git" | "directory";
   repositoryName: string;
   repositoryId?: string;
   boundAt: string;
@@ -910,6 +950,7 @@ export interface AgentExecutionMetadata {
   resolvedWorkspace?: string;
   sourceWorkspace?: string;
   workspaceMode: AgentWorkspaceMode;
+  workspaceKind?: "git" | "directory";
   gitRoot?: string;
   repositoryName?: string;
   repositoryId?: string;

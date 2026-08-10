@@ -166,7 +166,7 @@ again before editing because the worktree may have changed.
 ### 5.2 Current Codex path
 
 - The bridge uses `codex exec --json`.
-- The selected model, reasoning effort, sandbox, workspace, timeout, web search,
+- The selected model, reasoning effort, sandbox, workspace, web search,
   Git-repository behavior, and optional resume thread id are passed through the
   current `CodexSettings`.
 - Codex web search is always enabled in the current local workflow.

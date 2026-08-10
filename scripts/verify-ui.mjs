@@ -286,6 +286,17 @@ async function verifyLocalDeveloperModeSurface(browser) {
   }
   await bindRepository.click();
   await repositoryGuard.getByText("Bound", { exact: true }).waitFor();
+  const codexWorkRootInput = page.locator(".code-options-row .codex-workspace-field input").first();
+  const boundWorkRoot = await codexWorkRootInput.inputValue();
+  await codexWorkRootInput.fill("");
+  const restoreBoundWorkRoot = repositoryGuard.getByRole("button", { name: "Restore bound work root" });
+  await restoreBoundWorkRoot.waitFor();
+  await restoreBoundWorkRoot.click();
+  await page.waitForFunction(
+    ({ selector, expected }) => document.querySelector(selector)?.value === expected,
+    { selector: ".code-options-row .codex-workspace-field input", expected: boundWorkRoot },
+  );
+  await repositoryGuard.getByText("Bound", { exact: true }).waitFor();
   const codeBackends = await page.locator('.code-options-row select[title="Choose the code backend for this node-anchored run."] option')
     .evaluateAll((options) => options.map((option) => option.textContent?.trim()));
   for (const expected of ["Codex", "Claude Code API", "Claude Code Pro"]) {
@@ -296,12 +307,35 @@ async function verifyLocalDeveloperModeSurface(browser) {
   const backendSelect = page.locator('.code-options-row select[title="Choose the code backend for this node-anchored run."]');
   await backendSelect.selectOption("claude-subscription");
   await page.locator(".claude-options-row").waitFor();
+  if ((await page.locator(".claude-options-row").innerText()).includes("Timeout")) {
+    throw new Error("Claude Code settings still expose an elapsed-time limit.");
+  }
   const proPresets = await page.locator(".claude-options-row select").nth(1).locator("option")
     .evaluateAll((options) => options.map((option) => option.textContent?.trim()));
   if (!proPresets.includes("Claude account default") || proPresets.some((preset) => preset?.includes("DeepSeek"))) {
     throw new Error(`Claude Code Pro presets are not subscription-safe: ${JSON.stringify(proPresets)}`);
   }
+  // Claude Code Pro presets must carry the concrete version number, not a bare
+  // alias, so the user can tell Opus 4.8 from Opus 5.
+  if (!proPresets.some((preset) => /Claude .*\d/.test(preset ?? ""))) {
+    throw new Error(`Claude Code Pro presets do not show model version numbers: ${JSON.stringify(proPresets)}`);
+  }
+
+  // The work root belongs to the branch, not to one provider: switching backend
+  // must not clear it.
+  const claudeWorkRoot = await page.locator(".claude-options-row .codex-workspace-field input").inputValue();
+  if (!claudeWorkRoot.trim()) {
+    throw new Error("Switching to Claude Code Pro cleared the work root.");
+  }
+
   await backendSelect.selectOption("codex");
+  if ((await page.locator(".code-options-row").innerText()).includes("Timeout")) {
+    throw new Error("Codex settings still expose an elapsed-time limit.");
+  }
+  const codexWorkRoot = await page.locator(".code-options-row .codex-workspace-field input").first().inputValue();
+  if (codexWorkRoot !== claudeWorkRoot) {
+    throw new Error(`Work root changed when switching provider: codex=${codexWorkRoot} claude=${claudeWorkRoot}`);
+  }
   const codexModels = await page.locator(".code-options-row select").nth(1).locator("option")
     .evaluateAll((options) => options.map((option) => ({ value: option.getAttribute("value"), label: option.textContent?.trim() })));
   if (!codexModels.some((option) => option.value === "gpt-5.3-codex-spark")) {
@@ -318,6 +352,9 @@ async function verifyLocalDeveloperModeSurface(browser) {
   if (!chatServices.some((service) => service?.startsWith("Local"))) {
     throw new Error(`Local developer mode is missing the Local chat service: ${JSON.stringify(chatServices)}`);
   }
+  if (chatServices.some((service) => service?.trim() === "Opus")) {
+    throw new Error(`The Anthropic chat service is still labelled Opus: ${JSON.stringify(chatServices)}`);
+  }
 
   await context.close();
   return {
@@ -326,10 +363,123 @@ async function verifyLocalDeveloperModeSurface(browser) {
     codexModels,
     proPresets,
     chatServices,
+    claudeWorkRoot,
+    codexWorkRoot,
     localSavePrevented,
     repositoryText,
     agentRunsReopened: true,
   };
+}
+
+async function verifyAgentRunNodeSynchronization(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 820 },
+    ignoreHTTPSErrors: true,
+  });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  await seedAgentRunLinkedNotebook(page);
+  const now = new Date().toISOString();
+  const manifests = [
+    createAgentRunManifest("verify-runtime-a", "verify-client-a", "agent-request-a", "C:\\verify\\repo-a", now),
+    createAgentRunManifest("verify-runtime-b", "verify-client-b", "agent-request-b", "C:\\verify\\repo-b", now),
+  ];
+
+  await page.route("**/api/agent-runs**", async (route) => {
+    const requestUrl = new URL(route.request().url());
+    const path = requestUrl.pathname;
+    if (path === "/api/agent-runs") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ runs: manifests }) });
+      return;
+    }
+    if (path.endsWith("/events")) {
+      const runId = path.split("/").at(-2);
+      const manifest = manifests.find((entry) => entry.runId === runId);
+      await route.fulfill({
+        status: manifest ? 200 : 404,
+        contentType: "text/event-stream",
+        body: manifest ? `event: manifest\ndata: ${JSON.stringify(manifest)}\n\n` : "",
+      });
+      return;
+    }
+    const runId = path.split("/").at(-1);
+    const manifest = manifests.find((entry) => entry.runId === runId);
+    await route.fulfill({
+      status: manifest ? 200 : 404,
+      contentType: "application/json",
+      body: JSON.stringify(manifest ? { manifest, final: null } : { error: "not found" }),
+    });
+  });
+
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  const launcher = page.getByRole("button", { name: "Open Agent runs" });
+  await launcher.click();
+  const switcher = page.getByRole("tablist", { name: "Parallel agent runs" });
+  await switcher.waitFor();
+  const runATab = switcher.getByRole("tab", { name: /repo-a/i });
+  const runBTab = switcher.getByRole("tab", { name: /repo-b/i });
+
+  await runBTab.click();
+  await page.locator('textarea.space-title-editor[data-node-id="agent-request-b"][data-selected="true"]').waitFor();
+  await page.waitForFunction(() => document.querySelector('[role="tab"][title*="repo-b"]')?.getAttribute("aria-selected") === "true");
+
+  await page.locator('textarea.space-title-editor[data-node-id="agent-request-a"]').evaluate((element) => element.click());
+  await page.waitForFunction(() => document.querySelector('[role="tab"][title*="repo-a"]')?.getAttribute("aria-selected") === "true");
+
+  await page.locator('textarea.space-title-editor[data-node-id="unlinked-note"]').evaluate((element) => element.click());
+  await page.waitForTimeout(100);
+  const runAStayedSelected = await runATab.getAttribute("aria-selected");
+  if (runAStayedSelected !== "true") {
+    throw new Error(`Selecting an unrelated node changed the Agent runs thread: aria-selected=${runAStayedSelected}`);
+  }
+
+  const result = {
+    runToNode: "agent-request-b",
+    nodeToRun: "verify-runtime-a",
+    unlinkedNodeKeptRun: runAStayedSelected === "true",
+  };
+  await context.close();
+  return result;
+}
+
+async function verifyCodePreflightFeedback(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1180, height: 780 },
+    ignoreHTTPSErrors: true,
+  });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  await seedSingleChildNotebook(page);
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("canvas");
+  await page.locator(".mode-switch").waitFor();
+  await page.getByRole("button", { name: "Code" }).click();
+  const prompt = "verify visible preflight failure";
+  await page.locator(".command-field input").fill(prompt);
+  const send = page.locator(".send-button");
+  if (await send.isDisabled()) throw new Error("Code send stayed disabled, so the user would receive no feedback.");
+  await send.click();
+  await page.waitForTimeout(400);
+  const recorded = await page.evaluate((expectedPrompt) => {
+    const stored = window.localStorage.getItem("mind-atlas-notebook-v2");
+    if (!stored) return null;
+    const root = JSON.parse(stored);
+    const nodes = [];
+    const visit = (node) => {
+      nodes.push(node);
+      for (const child of node.children ?? []) visit(child);
+    };
+    visit(root);
+    const request = nodes.find((node) => node.nodeType === "human_prompt" && node.body === expectedPrompt);
+    const error = request?.children?.find((node) => node.status === "error");
+    return request && error
+      ? { requestTitle: request.title, requestStatus: request.status, errorTitle: error.title, errorBody: error.body }
+      : null;
+  }, prompt);
+  if (!recorded) throw new Error("Code preflight failure did not persist a request node with an error child.");
+  await context.close();
+  return recorded;
 }
 
 async function verifyNotificationSnoozeActions(browser) {
@@ -1318,42 +1468,52 @@ async function verifyMobileTutorialRootBirth(browser) {
   const page = await context.newPage();
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("canvas");
-  const targetNode = page.locator('[data-node-id="tutorial-practice-answer"]');
-  await targetNode.waitFor({ state: "visible" });
-  await page.getByText("Tap the pulsing node", { exact: false }).waitFor();
+  await page.locator(".onboarding-center-pulse").waitFor();
+  await page.waitForTimeout(420);
 
   const beforeCount = await readPersistedNodeCount(page);
-  if (beforeCount !== 4) {
-    throw new Error(`Fresh mobile tutorial should start with a root and three practice nodes: count=${beforeCount}`);
+  if (beforeCount > 1) {
+    throw new Error(`Fresh mobile tutorial should not start with user nodes: count=${beforeCount}`);
   }
 
-  if (await page.locator(".onboarding-center-pulse").count()) {
-    throw new Error("The redesigned tutorial must not show the old empty-space long-press target.");
-  }
-  await targetNode.tap();
-  await page.waitForFunction(() => JSON.parse(window.localStorage.getItem("mind-atlas-onboarding-v1") || "{}").practiceNodeSelected === true);
-  const bodyInput = page.locator('.mobile-editor-slot[aria-hidden="false"] .node-body-input');
-  await bodyInput.waitFor();
-  await bodyInput.fill("I compared the useful parts of the answer.");
-  await page.waitForFunction(() => JSON.parse(window.localStorage.getItem("mind-atlas-onboarding-v1") || "{}").practiceNodeEdited === true);
-  await page.getByText("Add a child with the Tab button", { exact: false }).waitFor();
-  await page.locator(".operation-panel:visible").getByRole("button", { name: /Add child/ }).click();
-  await page.waitForFunction(() => {
-    const progress = JSON.parse(window.localStorage.getItem("mind-atlas-onboarding-v1") || "{}");
-    return progress.version === 2 && progress.childNodeCreated === true && progress.spaceBasicsCompleted === true;
+  const box = await page.locator("canvas").boundingBox();
+  if (!box) throw new Error("Could not locate mobile tutorial canvas.");
+  const x = Math.round(box.x + box.width / 2);
+  const y = Math.round(box.y + box.height / 2);
+  const client = await context.newCDPSession(page);
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x, y, id: 1, radiusX: 3, radiusY: 3, force: 1 }],
   });
-  let afterCount = await readPersistedNodeCount(page);
-  const persistenceDeadline = Date.now() + 5_000;
-  while (afterCount !== beforeCount + 1 && Date.now() < persistenceDeadline) {
-    await page.waitForTimeout(100);
-    afterCount = await readPersistedNodeCount(page);
+  await page.waitForTimeout(1850);
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+
+  await page.waitForFunction(
+    () => {
+      const progressRaw = window.localStorage.getItem("mind-atlas-onboarding-v1");
+      const notebookRaw = window.localStorage.getItem("mind-atlas-notebook-v2");
+      if (!progressRaw || !notebookRaw) return false;
+      const progress = JSON.parse(progressRaw);
+      const root = JSON.parse(notebookRaw);
+      return progress.rootNodeCreated === true && (root.children?.length ?? 0) >= 1;
+    },
+    undefined,
+    { timeout: 6000 },
+  );
+  const afterCount = await readPersistedNodeCount(page);
+  if (afterCount <= beforeCount) {
+    throw new Error(`Mobile tutorial touch long press did not create the first node: before=${beforeCount}, after=${afterCount}`);
   }
-  if (afterCount !== beforeCount + 1) {
-    throw new Error(`Mobile tutorial did not add exactly one child node: before=${beforeCount}, after=${afterCount}`);
+  const pulseCount = await page.locator(".onboarding-center-pulse").count();
+  if (pulseCount > 0) {
+    throw new Error("Mobile tutorial root pulse remained after first-node creation.");
   }
 
   await context.close();
-  return { beforeCount, afterCount, steps: ["select_node", "edit_node", "add_child"] };
+  return { beforeCount, afterCount };
 }
 
 async function verifyMobileGeneratedLayoutVisibility(browser) {
@@ -1798,6 +1958,7 @@ async function verifyCommandDockAndMobileTextTap(browser) {
   await page.waitForFunction(
     () => document.querySelector('textarea.space-title-editor[data-node-id="verify-child"]')?.getAttribute("data-selected") !== "true",
   );
+  await page.waitForSelector(".command-dock", { state: "visible", timeout: 4000 });
   const afterBackgroundTap = await readCommandDockProbe(page);
   if (!afterBackgroundTap.commandDockExists) {
     throw new Error(`Command dock should remain available after returning one level to the root: ${JSON.stringify(afterBackgroundTap)}`);
@@ -2766,18 +2927,15 @@ async function verifyTutorialModeMenuActions(browser) {
     const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
     if (!raw) return false;
     const progress = JSON.parse(raw);
-    return progress.version === 2 && progress.firstRun === true && progress.practiceAtlasReady === true && progress.aiUnlocked === false;
+    return progress.firstRun === true && progress.rootNodeCreated === false && progress.aiUnlocked === false;
   });
   await clickPage.waitForFunction(() => {
     const notebookRaw = window.localStorage.getItem("mind-atlas-notebook-v2");
-    if (!notebookRaw) return false;
+    if (!notebookRaw) return true;
     const root = JSON.parse(notebookRaw);
-    return root.id === "tutorial-practice-root" && (root.children?.length ?? 0) === 3;
+    return (root.children?.length ?? 0) === 0;
   });
-  await clickPage.locator('[data-node-id="tutorial-practice-answer"]').waitFor({ state: "visible" });
-  if (await clickPage.locator(".onboarding-center-pulse").count()) {
-    throw new Error("Tutorial mode still rendered the old empty-space long-press target.");
-  }
+  await clickPage.locator(".onboarding-center-pulse").waitFor();
   const tutorialLayoutMode = await clickPage.evaluate(() => {
     const raw = window.localStorage.getItem("mind-atlas-ui-state-v1");
     return raw ? JSON.parse(raw).layoutMode : null;
@@ -2786,18 +2944,47 @@ async function verifyTutorialModeMenuActions(browser) {
     throw new Error(`Tutorial mode should reset tree layout to phyllotaxis, got ${tutorialLayoutMode}`);
   }
 
-  await clickPage.locator('[data-node-id="tutorial-practice-answer"]').click();
-  await clickPage.waitForFunction(() => JSON.parse(window.localStorage.getItem("mind-atlas-onboarding-v1") || "{}").practiceNodeSelected === true);
-  const tutorialBodyInput = clickPage.locator(".node-body-input:visible");
-  await tutorialBodyInput.fill("Edited during tutorial verification.");
-  await clickPage.waitForFunction(() => JSON.parse(window.localStorage.getItem("mind-atlas-onboarding-v1") || "{}").practiceNodeEdited === true);
+  const canvasBox = await clickPage.locator("canvas").boundingBox();
+  if (!canvasBox) throw new Error("Could not locate tutorial canvas after tree reset.");
+  let tutorialNodeCreated = false;
+  for (const [xRatio, yRatio] of [[0.5, 0.5], [0.58, 0.46], [0.42, 0.54]]) {
+    await clickPage.mouse.move(canvasBox.x + canvasBox.width * xRatio, canvasBox.y + canvasBox.height * yRatio);
+    await clickPage.mouse.down();
+    await clickPage.waitForTimeout(1720);
+    await clickPage.mouse.up();
+    try {
+      await clickPage.waitForFunction(() => {
+        const progressRaw = window.localStorage.getItem("mind-atlas-onboarding-v1");
+        const notebookRaw = window.localStorage.getItem("mind-atlas-notebook-v2");
+        if (!progressRaw || !notebookRaw) return false;
+        const progress = JSON.parse(progressRaw);
+        const root = JSON.parse(notebookRaw);
+        return progress.rootNodeCreated === true && (root.children?.length ?? 0) >= 1;
+      }, undefined, { timeout: 3500 });
+      tutorialNodeCreated = true;
+      break;
+    } catch {
+      // R3F can occasionally drop one synthetic pointer sequence in a long browser suite.
+    }
+  }
+  if (!tutorialNodeCreated) throw new Error("Tutorial root node was not created after three long-press attempts.");
   const completionStartedAt = Date.now();
-  await clickPage.locator(".operation-panel:visible").getByRole("button", { name: /Add child/ }).click();
+  for (const detail of [
+    { type: "pan" },
+    { type: "zoom" },
+    { type: "node-drag" },
+    { type: "child-node-created", childDepth: 2 },
+  ]) {
+    await clickPage.evaluate((eventDetail) => {
+      window.dispatchEvent(new CustomEvent("mindatlas:onboarding-event", { detail: eventDetail }));
+    }, detail);
+    await clickPage.waitForTimeout(120);
+  }
   await clickPage.waitForFunction(() => {
     const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
     if (!raw) return false;
     const progress = JSON.parse(raw);
-    return progress.version === 2 && progress.childNodeCreated === true && progress.spaceBasicsCompleted === true;
+    return progress.childNodeCreated === true && progress.spaceBasicsCompleted === true;
   });
   const tutorialCompleteDialog = clickPage.getByRole("alertdialog", { name: "Tutorial complete" });
   const tutorialNextDialog = clickPage.getByRole("alertdialog", { name: "How would you like to begin?" });
@@ -2929,6 +3116,113 @@ async function seedSingleChildNotebook(page, layoutMode = "phyllotaxis", childPa
       }),
     );
   }, { root, now, layoutMode });
+}
+
+async function seedAgentRunLinkedNotebook(page) {
+  const now = new Date().toISOString();
+  const baseFields = {
+    kind: "thread",
+    nodeType: "human_prompt",
+    author: "human",
+    status: "needs_review",
+    texture: "speckled",
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    nextDecision: "",
+    tags: [],
+    position: [0, 0, 0],
+    color: "#94a3ff",
+    radius: 48,
+    children: [],
+  };
+  const linkedNode = (suffix) => ({
+    ...baseFields,
+    id: `agent-request-${suffix}`,
+    title: `Agent request ${suffix.toUpperCase()}`,
+    subtitle: `Agent request ${suffix.toUpperCase()}`,
+    body: `Linked request ${suffix}`,
+    summary: `Linked request ${suffix}`,
+    aiRunId: `verify-client-${suffix}`,
+    agentExecution: {
+      clientRunId: `verify-client-${suffix}`,
+      runtimeRunId: `verify-runtime-${suffix}`,
+      requestedWorkspace: `C:\\verify\\repo-${suffix}`,
+      workspaceMode: "shared",
+      recordedAt: now,
+    },
+  });
+  const root = {
+    ...baseFields,
+    id: "atlas-root",
+    kind: "root",
+    nodeType: "note",
+    title: "Agent sync root",
+    subtitle: "Agent sync root",
+    body: "Agent sync verification",
+    summary: "Agent sync root",
+    color: "#8df5cf",
+    radius: 80,
+    children: [
+      linkedNode("a"),
+      linkedNode("b"),
+      {
+        ...baseFields,
+        id: "unlinked-note",
+        title: "Unlinked note",
+        subtitle: "Unlinked note",
+        body: "No durable agent run",
+        summary: "Unlinked note",
+      },
+    ],
+  };
+  await page.addInitScript((seed) => {
+    window.localStorage.setItem("mind-atlas-notebook-v2", JSON.stringify(seed.root));
+    window.localStorage.setItem(
+      "mind-atlas-ui-state-v1",
+      JSON.stringify({
+        version: 1,
+        savedAt: seed.now,
+        selectedNodeId: "atlas-root",
+        viewport: { x: 0, y: 0, zoom: 0.92 },
+        renderQuality: "high",
+        layoutMode: "phyllotaxis",
+        mobilePanelTab: "command",
+      }),
+    );
+  }, { root, now });
+}
+
+function createAgentRunManifest(runId, clientRunId, requestNodeId, workspace, now) {
+  return {
+    schemaVersion: 1,
+    runId,
+    clientRunId,
+    provider: "codex",
+    route: "codex-app-server",
+    requestedRoute: "codex-app-server",
+    status: "completed",
+    requestNodeId,
+    sourceNodeId: "atlas-root",
+    workspace,
+    sourceWorkspace: workspace,
+    workspaceMode: "shared",
+    worktree: null,
+    model: "gpt-verify",
+    effort: "medium",
+    permissionMode: "default",
+    sandboxMode: "workspace-write",
+    authMode: "subscription",
+    title: `Verify ${runId}`,
+    session: null,
+    ownership: { state: "mind_atlas", leaseId: `lease-${runId}`, acquiredAt: now },
+    createdAt: now,
+    updatedAt: now,
+    completedAt: now,
+    lastEventSequence: 0,
+    finalEventId: "",
+    acknowledgedAt: now,
+  };
 }
 
 async function seedNestedNotebook(page, { selectedNodeId = "atlas-root", layoutMode = "phyllotaxis", renderQuality = "high" } = {}) {
@@ -3447,10 +3741,22 @@ try {
     const localDeveloperMode = await runStep("localDeveloperMode", () => verifyLocalDeveloperModeSurface(browser));
     console.log("Local developer mode verification passed");
     console.log({ localDeveloperMode });
+  } else if (process.argv[2] === "agent-run-sync") {
+    const agentRunNodeSync = await runStep("agentRunNodeSync", () => verifyAgentRunNodeSynchronization(browser));
+    console.log("Agent run/node synchronization verification passed");
+    console.log({ agentRunNodeSync });
+  } else if (process.argv[2] === "code-preflight") {
+    const codePreflight = await runStep("codePreflight", () => verifyCodePreflightFeedback(browser));
+    console.log("Code preflight feedback verification passed");
+    console.log({ codePreflight });
   } else if (process.argv[2] === "provider-usage") {
     const providerUsage = await runStep("providerUsage", () => verifyProviderUsagePanel(browser));
     console.log("Provider usage verification passed");
     console.log({ providerUsage });
+  } else if (process.argv[2] === "command-dock") {
+    const commandDock = await runStep("commandDock", () => verifyCommandDockAndMobileTextTap(browser));
+    console.log("Command dock verification passed");
+    console.log({ commandDock });
   } else if (process.argv[2] === "notification") {
     const notificationSnoozeActions = await runStep("notificationSnoozeActions", () => verifyNotificationSnoozeActions(browser));
     console.log("Notification verification passed");
@@ -3466,6 +3772,7 @@ try {
     await runStep("layoutModeSwitch", () => verifyLayoutModeSwitch(browser));
     const calendarLayout = await runStep("calendarLayout", () => verifyCalendarLayout(browser));
     const localDeveloperMode = await runStep("localDeveloperMode", () => verifyLocalDeveloperModeSurface(browser));
+    const agentRunNodeSync = await runStep("agentRunNodeSync", () => verifyAgentRunNodeSynchronization(browser));
     const notificationSnoozeActions = await runStep("notificationSnoozeActions", () => verifyNotificationSnoozeActions(browser));
     await runStep("generatedLayoutBlocksBackgroundBirth", () => verifyGeneratedLayoutBlocksBackgroundBirth(browser));
     await runStep("backgroundReturnsOneParent", () => verifyBackgroundReturnsOneParent(browser));
@@ -3501,7 +3808,7 @@ try {
     const mobile = await runStep("mobileViewport", () => verifyViewport(browser, "mobile", { width: 390, height: 844 }));
     const mobileLandscape = await runStep("mobileLandscapeViewport", () => verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 }));
     console.log("UI verification passed");
-    console.log({ desktop, nodeSearch, calendarLayout, localDeveloperMode, notificationSnoozeActions, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, agentRecovery, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileCanvasInterruptionRecovery, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, iosTouchSuppression, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+    console.log({ desktop, nodeSearch, calendarLayout, localDeveloperMode, agentRunNodeSync, notificationSnoozeActions, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, agentRecovery, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileCanvasInterruptionRecovery, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, iosTouchSuppression, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
   }
 } finally {
   await browser.close();

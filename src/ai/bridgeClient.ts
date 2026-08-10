@@ -109,8 +109,13 @@ export async function getChatOptions(): Promise<ChatOptionsResult> {
   return await readJsonResponse<ChatOptionsResult>(response);
 }
 
-export async function getCodexOptions(): Promise<CodexOptionsResult> {
-  const response = await fetchBridgeGet("/api/codex/options");
+export type CodeModelRefreshScope = "codex" | "claude-api" | "claude-subscription";
+
+export async function getCodexOptions(options: { refresh?: CodeModelRefreshScope } = {}): Promise<CodexOptionsResult> {
+  const params = new URLSearchParams();
+  if (options.refresh) params.set("refresh", options.refresh);
+  const query = params.toString();
+  const response = await fetchBridgeGet(`/api/codex/options${query ? `?${query}` : ""}`);
   return await readJsonResponse<CodexOptionsResult>(response);
 }
 

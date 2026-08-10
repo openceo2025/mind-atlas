@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
@@ -12,8 +12,21 @@ import { Readable } from "node:stream";
 // Local-only agent runtime. These modules must never be imported by
 // `server/mind-atlas-service.mjs`; `npm run verify:hosted-service` asserts it.
 import { createAgentRuntimeRoutes } from "./agent-runtime/bridge-routes.mjs";
+import {
+  createClaudeAuthRecovery,
+  isClaudeOAuthAuthenticationError,
+} from "./agent-runtime/claude-auth-recovery.mjs";
+import { appendClaudeDefaultWebToolArgs } from "./agent-runtime/claude-cli-policy.mjs";
 import { createEvidenceStore } from "./agent-runtime/evidence-store.mjs";
 import { checkAgentWorkspace } from "./agent-runtime/workspace-policy.mjs";
+import {
+  compareModelRecency,
+  createModelCatalog,
+  defaultEffortForModel,
+  effortsForModel,
+  extractClaudeSubscriptionModels,
+  modelDisplayName,
+} from "./model-catalog.mjs";
 import { createHandoffCoordinator } from "./agent-runtime/handoff-coordinator.mjs";
 import { createAgentRunStore } from "./agent-runtime/run-journal.mjs";
 import { createAgentRuntimeManager } from "./agent-runtime/runtime-manager.mjs";
@@ -56,11 +69,12 @@ const codexModel = process.env.MIND_ATLAS_CODEX_MODEL ?? "";
 const codexReasoningEffort = normalizeReasoningEffort(process.env.MIND_ATLAS_CODEX_REASONING_EFFORT ?? "medium");
 const codexFallbackReasoningEfforts = parseReasoningEffortList(process.env.MIND_ATLAS_CODEX_REASONING_EFFORTS, ["low", "medium", "high", "xhigh"]);
 const codexSandbox = normalizeCodexSandbox(process.env.MIND_ATLAS_CODEX_SANDBOX ?? "workspace-write");
-const codexTimeoutMs = Number(process.env.MIND_ATLAS_CODEX_TIMEOUT_MS ?? 60 * 60 * 1000);
 const codexDisabled = process.env.MIND_ATLAS_CODEX_DISABLED === "true";
 const codexModelsOverride = process.env.MIND_ATLAS_CODEX_MODELS ?? "";
 const codexLogDir = resolve(process.env.MIND_ATLAS_CODEX_LOG_DIR ?? join(process.cwd(), "server-data", "codex-runs"));
-let codexOptionsCache = null;
+const codexLiveWebSearchConfig = 'web_search="live"';
+let codexModelDiscoveryCache = null;
+let codexModelDiscoveryInFlight = null;
 let codexSearchFlagSupportCache = null;
 let providerUsageCache = null;
 
@@ -80,13 +94,19 @@ const claudeApiKey = process.env.MIND_ATLAS_CLAUDE_ANTHROPIC_API_KEY ?? process.
 const claudeAuthToken = process.env.MIND_ATLAS_CLAUDE_ANTHROPIC_AUTH_TOKEN ?? process.env.MIND_ATLAS_CLAUDE_AUTH_TOKEN ?? process.env.ANTHROPIC_AUTH_TOKEN ?? "";
 const claudeDeepSeekAuthToken = process.env.MIND_ATLAS_CLAUDE_DEEPSEEK_AUTH_TOKEN ?? process.env.DEEPSEEK_API_KEY ?? "";
 const claudeWorkspace = process.env.MIND_ATLAS_CLAUDE_WORKSPACE ?? codexWorkspace;
-const claudeTimeoutMs = Number(process.env.MIND_ATLAS_CLAUDE_TIMEOUT_MS ?? 60 * 60 * 1000);
 const claudePromptCharLimit = readPositiveIntEnv("MIND_ATLAS_CLAUDE_PROMPT_CHAR_LIMIT", 32_000);
 const claudeDisabled = process.env.MIND_ATLAS_CLAUDE_DISABLED === "true";
 const claudeLogDir = resolve(process.env.MIND_ATLAS_CLAUDE_LOG_DIR ?? join(process.cwd(), "server-data", "claude-runs"));
 const claudeDeepSeekBaseUrl = "https://api.deepseek.com/anthropic";
 const claudeReasoningEfforts = parseReasoningEffortList(process.env.MIND_ATLAS_CLAUDE_REASONING_EFFORTS, ["default", "low", "medium", "high", "xhigh", "max"]);
 let claudeSubscriptionAuthCache = null;
+const recoverClaudeSubscriptionAuth = createClaudeAuthRecovery({
+  buildCommand: (args) => buildClaudeCommand(args),
+  buildEnv: () => buildClaudeEnv({ authMode: "subscription" }),
+  onSuccess: () => {
+    claudeSubscriptionAuthCache = null;
+  },
+});
 
 const anthropicChatBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_ANTHROPIC_BASE_URL ?? process.env.MIND_ATLAS_CLAUDE_ANTHROPIC_BASE_URL ?? process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com");
 const anthropicChatApiKey = process.env.MIND_ATLAS_ANTHROPIC_API_KEY ?? claudeApiKey;
@@ -201,6 +221,43 @@ function resolveOpenClawBin(configuredBin) {
 }
 
 // --- Local agent runtime (Codex app-server / Claude stream-json) -------------
+// Live model discovery. Configured lists stay as the fallback, so a provider
+// without credentials still shows something usable and says it is not live.
+const modelCatalog = createModelCatalog({
+  cacheMs: readPositiveIntEnv("MIND_ATLAS_MODEL_CACHE_MS", 10 * 60 * 1000),
+  timeoutMs: readPositiveIntEnv("MIND_ATLAS_MODEL_FETCH_TIMEOUT_MS", 12_000),
+  log: (message) => console.warn(message),
+  providers: [
+    {
+      id: "openai",
+      kind: "openai",
+      baseUrl: openAiBaseUrl,
+      apiKey: openAiApiKey,
+      fallbackModels: openAiChatModels,
+      accept: (model) => /^(gpt|o[0-9]|chatgpt)/i.test(model) && !/(embedding|whisper|tts|audio|image|moderation|realtime|transcribe|search|dall-e)/i.test(model),
+    },
+    {
+      id: "anthropic",
+      kind: "anthropic",
+      baseUrl: anthropicChatBaseUrl,
+      apiKey: anthropicChatApiKey,
+      authToken: anthropicChatAuthToken,
+      fallbackModels: anthropicChatModels,
+      accept: (model) => /^claude-/i.test(model),
+    },
+    {
+      id: "deepseek",
+      kind: "openai",
+      // The Anthropic-compatible DeepSeek base URL has no /models endpoint;
+      // its native API does.
+      baseUrl: deepSeekBalanceBaseUrl,
+      authToken: deepSeekChatAuthToken,
+      fallbackModels: deepSeekChatModels,
+      accept: (model) => /^deepseek/i.test(model),
+    },
+  ],
+});
+
 const agentRuntimeDir = resolve(process.env.MIND_ATLAS_AGENT_RUNTIME_DIR ?? join(process.cwd(), "server-data", "agent-runtime"));
 const codexRuntimePreference = normalizeRuntimePreference(process.env.MIND_ATLAS_CODEX_RUNTIME, ["auto", "app-server", "exec"]);
 const claudeRuntimePreference = normalizeRuntimePreference(process.env.MIND_ATLAS_CLAUDE_RUNTIME, ["auto", "stream-json", "json"]);
@@ -227,14 +284,15 @@ const agentRuntimeManager = createAgentRuntimeManager({
     workspace: normalizeProcessCwd(codexWorkspace),
     env: process.env,
     resolveCommand: () => (codexUseWsl
-      ? { command: "wsl", args: [codexBin, "app-server"] }
-      : { command: codexBin, args: ["app-server"] }),
+      ? { command: "wsl", args: [codexBin, "app-server", "-c", codexLiveWebSearchConfig] }
+      : { command: codexBin, args: ["app-server", "-c", codexLiveWebSearchConfig] }),
   },
   claude: {
     enabled: !claudeDisabled,
     workspace: normalizeProcessCwd(claudeWorkspace),
     buildCommand: (args) => buildClaudeCommand(args),
     buildEnv: (settings) => buildClaudeEnv(normalizeClaudeSettings(settings ?? {}, settings?.model ?? "", null)),
+    reauthenticate: ({ workspace }) => recoverClaudeSubscriptionAuth({ workspace }),
   },
   // The proven `codex exec` / `claude -p --output-format json` paths stay
   // available as the automatic fallback for both providers.
@@ -450,7 +508,7 @@ const server = createBridgeServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/codex/options") {
-      const result = await createCodexOptionsResponse();
+      const result = await createCodexOptionsResponse(url.searchParams.get("refresh") ?? "");
       sendJson(response, 200, result);
       return;
     }
@@ -580,6 +638,10 @@ server.on("error", (error) => {
   console.error(error);
   process.exit(1);
 });
+
+// Refresh the model catalogue once at startup, then periodically, so a model
+// released after the bridge was written still appears in the pickers.
+modelCatalog.start(readPositiveIntEnv("MIND_ATLAS_MODEL_REFRESH_MS", 30 * 60 * 1000));
 
 agentRuntimeManager.init().then((state) => {
   console.log(`Agent runtime: codex=${codexRuntimePreference}, claude=${claudeRuntimePreference}, dir=${agentRuntimeDir}`);
@@ -812,6 +874,14 @@ async function createAgentRuntimeBackedResponse({ payload, provider, prompt, age
   const workspace = stringOr(settings.workspace, provider === "codex" ? codexWorkspace : claudeWorkspace);
   const workspaceCheck = isAgentWorkspaceAllowed(workspace);
   if (!workspaceCheck.ok) throw new BridgeError(400, workspaceCheck.detail ?? "Workspace is not allowed.");
+  const claudeAccountDefaultRequested =
+    provider === "claude" &&
+    settings.authMode === "subscription" &&
+    Object.prototype.hasOwnProperty.call(settings, "model") &&
+    String(settings.model ?? "").trim() === "";
+  const requestedModel = claudeAccountDefaultRequested
+    ? ""
+    : stringOr(payload?.model, stringOr(settings.model, provider === "codex" ? codexModel : claudeModel));
 
   // Resumed turns already hold the branch history, so only the delta is sent.
   const effectivePrompt = sessionMode !== "new" && agentDeltaPrompt ? agentDeltaPrompt : (agentPrompt || prompt);
@@ -825,7 +895,7 @@ async function createAgentRuntimeBackedResponse({ payload, provider, prompt, age
     workspaceMode: settings.workspaceMode === "worktree" ? "worktree" : "shared",
     prompt: effectivePrompt,
     title: prompt.slice(0, 200),
-    model: stringOr(payload?.model, stringOr(settings.model, provider === "codex" ? codexModel : claudeModel)),
+    model: requestedModel,
     effort: stringOr(settings.reasoningEffort, ""),
     sandboxMode: stringOr(settings.sandbox, ""),
     approvalPolicy: "on-request",
@@ -840,7 +910,7 @@ async function createAgentRuntimeBackedResponse({ payload, provider, prompt, age
   if (!started?.manifest) throw new BridgeError(502, "The agent runtime could not start this run.");
   const runId = started.manifest.runId;
 
-  const terminal = await waitForAgentRuntimeTerminal(runId, provider === "codex" ? codexTimeoutMs : claudeTimeoutMs);
+  const terminal = await waitForAgentRuntimeTerminal(runId);
   const manifest = terminal.manifest;
   const final = terminal.final ?? {};
   const durationMs = Date.now() - startedAt;
@@ -876,6 +946,21 @@ async function createAgentRuntimeBackedResponse({ payload, provider, prompt, age
 
   const text = stringOr(final.text, "");
   const errorText = stringOr(final.error, "");
+  const terminalFailureText = deduplicateRepeatedText([text, errorText].filter(Boolean).join("\n"));
+  if (
+    provider === "claude" &&
+    manifest.status === "failed" &&
+    isClaudePlanLimitFailure(terminalFailureText)
+  ) {
+    throw new BridgeError(429, terminalFailureText);
+  }
+  if (
+    provider === "claude" &&
+    manifest.status === "failed" &&
+    terminalFailureText.toLowerCase().includes("oauth access token has been revoked")
+  ) {
+    throw new BridgeError(401, terminalFailureText);
+  }
   if (!text && errorText && manifest.status === "failed") {
     throw new BridgeError(502, errorText);
   }
@@ -913,13 +998,75 @@ async function createAgentRuntimeBackedResponse({ payload, provider, prompt, age
   };
 }
 
-function waitForAgentRuntimeTerminal(runId, timeoutMs) {
+async function assertCodeModelAvailable(provider, settings, requestedModel) {
+  if (provider === "codex") {
+    const discovery = await getCodexModelDiscovery();
+    if (discovery.status !== "ready") {
+      throw new BridgeError(503, `Codex model discovery failed. ${discovery.detail}`);
+    }
+    if (!requestedModel || !discovery.models.some((option) => option.model === requestedModel)) {
+      throw new BridgeError(409, "The selected Codex model is not present in the latest successful model list. Refresh the model field before sending.");
+    }
+    return;
+  }
+
+  if (settings.authMode === "subscription") {
+    const subscription = buildClaudeSubscriptionModelOptions();
+    if (subscription.discovery.status !== "ready") {
+      throw new BridgeError(503, `Claude Code Pro model discovery failed. ${subscription.discovery.detail}`);
+    }
+    if (requestedModel && !subscription.options.some((option) => option.model === requestedModel)) {
+      throw new BridgeError(409, "The selected Claude Code Pro model is not present in the latest successful model list. Refresh the model field before sending.");
+    }
+    return;
+  }
+
+  const providerId = String(settings.baseUrl ?? "").toLowerCase().includes("deepseek") ? "deepseek" : "anthropic";
+  const label = providerId === "deepseek" ? "DeepSeek" : "Anthropic";
+  const entry = await modelCatalog.get(providerId);
+  const models = providerCodeModels(entry, providerId);
+  if (!models.length) {
+    throw new BridgeError(503, `${label} model discovery failed. ${entry.error || "The provider returned no usable models."}`);
+  }
+  if (!requestedModel || !models.includes(requestedModel)) {
+    throw new BridgeError(409, `The selected ${label} model is not present in the latest successful model list. Refresh the model field before sending.`);
+  }
+}
+
+function deduplicateRepeatedText(value) {
+  const seen = new Set();
+  return String(value)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      const key = line.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join("\n");
+}
+
+function isClaudePlanLimitFailure(value) {
+  const text = String(value ?? "").toLowerCase();
+  return [
+    "claude code pro usage limit reached",
+    "usage limit",
+    "rate limit",
+    "limit reached",
+    "hit your limit",
+    "plan limit",
+    "no weighted tokens left",
+  ].some((needle) => text.includes(needle));
+}
+
+function waitForAgentRuntimeTerminal(runId) {
   return new Promise((resolvePromise, rejectPromise) => {
     let settled = false;
     const finish = async (error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       unsubscribe();
       if (error) {
         rejectPromise(error);
@@ -927,10 +1074,6 @@ function waitForAgentRuntimeTerminal(runId, timeoutMs) {
       }
       resolvePromise(await agentRuntimeManager.describeRun(runId));
     };
-    const timer = setTimeout(() => {
-      void agentRuntimeManager.interrupt(runId).catch(() => {});
-      void finish(new BridgeError(504, `Agent run timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
     const unsubscribe = agentRuntimeManager.subscribe(runId, (event) => {
       if (event.kind === "lifecycle" && event.final === true) void finish(null);
     });
@@ -976,6 +1119,9 @@ async function createAiResponse(payload) {
   }
 
   if (provider === "codex") {
+    const model = stringOr(payload?.model, codexModel);
+    const settings = normalizeCodexSettings(payload?.codex ?? {}, model, context);
+    await assertCodeModelAvailable("codex", settings, settings.model);
     // Rich runtime is opt-in per request so the proven `codex exec` path stays
     // reachable without a restart. The result shape is identical either way.
     if (payload?.useAgentRuntime === true) {
@@ -986,7 +1132,7 @@ async function createAiResponse(payload) {
       context,
       agentPrompt,
       agentDeltaPrompt,
-      model: stringOr(payload?.model, codexModel),
+      model,
       codex: payload?.codex ?? {},
       startedAt,
     });
@@ -1004,6 +1150,9 @@ async function createAiResponse(payload) {
   }
 
   if (provider === "claude") {
+    const model = stringOr(payload?.model, claudeModel);
+    const settings = normalizeClaudeSettings(payload?.claude ?? {}, model, context);
+    await assertCodeModelAvailable("claude", settings, settings.model);
     if (payload?.useAgentRuntime === true) {
       return await createAgentRuntimeBackedResponse({ payload, provider, prompt, agentPrompt, agentDeltaPrompt, startedAt });
     }
@@ -1012,7 +1161,7 @@ async function createAiResponse(payload) {
       context,
       agentPrompt,
       agentDeltaPrompt,
-      model: stringOr(payload?.model, claudeModel),
+      model,
       claude: payload?.claude ?? {},
       startedAt,
     });
@@ -1421,7 +1570,7 @@ function anthropicProviderConfig(settings) {
   }
   return {
     provider: "anthropic",
-    label: "Opus",
+    label: "Claude",
     baseUrl: anthropicChatBaseUrl,
     apiKey: anthropicChatApiKey,
     authToken: anthropicChatAuthToken,
@@ -1463,78 +1612,131 @@ async function createOpenAiImageResponse({ prompt, model, startedAt, requestId }
   };
 }
 
-async function createCodexOptionsResponse() {
+async function createCodexOptionsResponse(refreshScope = "") {
+  if (refreshScope === "claude-api") {
+    await Promise.all([modelCatalog.get("anthropic"), modelCatalog.get("deepseek")]);
+  }
+  const codexDiscovery = refreshScope === "codex" || !codexModelDiscoveryCache
+    ? await getCodexModelDiscovery({ force: refreshScope === "codex" })
+    : codexModelDiscoveryCache;
   const fallback = createFallbackCodexOptions();
-  if (codexDisabled) return fallback;
-  const cacheIsFresh = codexOptionsCache && Date.now() - codexOptionsCache.createdAt < 60_000;
-  if (cacheIsFresh) return codexOptionsCache.value;
+  const models = codexDiscovery.status === "ready" ? codexDiscovery.models : [];
+  const defaultModel = models.some((option) => option.model === codexModel)
+    ? codexModel
+    : models[0]?.model ?? "";
+  return {
+    ...fallback,
+    models,
+    defaultModel,
+    defaultReasoningEffort: resolveDefaultReasoningEffort(models, codexReasoningEffort),
+    modelDiscovery: {
+      codex: discoveryPublicState(codexDiscovery),
+    },
+  };
+}
 
+async function getCodexModelDiscovery({ force = false } = {}) {
+  const now = Date.now();
+  const ttl = codexModelDiscoveryCache?.status === "ready" ? 10 * 60_000 : 60_000;
+  if (!force && codexModelDiscoveryCache && now - codexModelDiscoveryCache.checkedAtMs < ttl) {
+    return codexModelDiscoveryCache;
+  }
+  if (codexModelDiscoveryInFlight) return await codexModelDiscoveryInFlight;
+  codexModelDiscoveryInFlight = readCodexModelDiscovery()
+    .then((result) => {
+      codexModelDiscoveryCache = result;
+      return result;
+    })
+    .finally(() => {
+      codexModelDiscoveryInFlight = null;
+    });
+  return await codexModelDiscoveryInFlight;
+}
+
+async function readCodexModelDiscovery() {
+  const checkedAtMs = Date.now();
+  if (codexDisabled) {
+    return modelDiscoveryError("runtime", "Codex CLI is disabled.", checkedAtMs);
+  }
+  const overrideModels = parseCodexModelOverride(codexModelsOverride);
+  if (overrideModels.length) {
+    return { status: "ready", source: "configured", detail: "Models are explicitly configured for Codex.", checkedAtMs, models: overrideModels };
+  }
+  const command = codexUseWsl ? "wsl" : codexBin;
+  const args = codexUseWsl ? [codexBin, "debug", "models"] : ["debug", "models"];
   try {
-    const models = await readCodexModels();
-    const availableModels = mergeCodexModelOptions(models, fallback.models);
-    const value = {
-      ...fallback,
-      models: availableModels,
-      defaultModel: codexModel || models[0]?.model || fallback.defaultModel,
-      defaultReasoningEffort: resolveDefaultReasoningEffort(availableModels, codexReasoningEffort),
-    };
-    codexOptionsCache = { createdAt: Date.now(), value };
-    return value;
-  } catch {
-    codexOptionsCache = { createdAt: Date.now(), value: fallback };
-    return fallback;
+    const result = await runProcess(command, args, "", 10_000, codexWorkspace);
+    if (result.exitCode !== 0) {
+      const detail = deduplicateRepeatedText([result.stderr, result.stdout].filter(Boolean).join("\n"))
+        || `Codex model discovery exited with code ${result.exitCode}.`;
+      return modelDiscoveryError("runtime", detail.slice(0, 300), checkedAtMs);
+    }
+    const parsed = parseJsonText(result.stdout);
+    const models = (Array.isArray(parsed?.models) ? parsed.models : []).map(normalizeCodexModelOption).filter(Boolean);
+    if (!models.length) return modelDiscoveryError("runtime", "Codex returned no usable models.", checkedAtMs);
+    return { status: "ready", source: "runtime", detail: "Models reported by the installed Codex CLI.", checkedAtMs, models };
+  } catch (error) {
+    return modelDiscoveryError("runtime", String(error?.message ?? error).slice(0, 300), checkedAtMs);
   }
 }
 
-function mergeCodexModelOptions(discoveredModels, fallbackModels) {
-  const merged = [];
-  const seen = new Set();
-  for (const option of [...discoveredModels, ...fallbackModels]) {
-    const model = String(option?.model ?? "").trim();
-    if (!model || seen.has(model)) continue;
-    seen.add(model);
-    merged.push(option);
-  }
-  return merged;
+function modelDiscoveryError(source, detail, checkedAtMs = Date.now()) {
+  return { status: "error", source, detail, checkedAtMs, models: [] };
 }
 
+function discoveryPublicState(discovery) {
+  return {
+    status: discovery.status,
+    source: discovery.source,
+    detail: discovery.detail,
+    checkedAt: new Date(discovery.checkedAtMs).toISOString(),
+  };
+}
+
+/**
+ * Chat service catalogue. Model lists come from live provider discovery when a
+ * credential exists, and every model carries only the reasoning efforts it can
+ * actually accept.
+ */
 function createChatOptionsResponse() {
+  const openai = buildChatService({
+    id: "openai",
+    label: "OpenAI",
+    configured: Boolean(openAiApiKey) || allowMockWithoutKey,
+    fallbackDefault: defaultModel,
+    efforts: openAiChatReasoningEfforts,
+    preferredEffort: "medium",
+    baseUrl: openAiBaseUrl,
+    detail: openAiApiKey ? "OpenAI key configured" : "mock fallback",
+  });
+  const anthropic = buildChatService({
+    id: "anthropic",
+    // This entry routes every Anthropic Claude model, not only Opus.
+    label: "Claude",
+    configured: Boolean(anthropicChatApiKey || anthropicChatAuthToken),
+    fallbackDefault: anthropicChatDefaultModel || "claude-opus-4-8",
+    efforts: anthropicChatReasoningEfforts,
+    preferredEffort: "default",
+    baseUrl: anthropicChatBaseUrl,
+    detail: anthropicChatApiKey || anthropicChatAuthToken ? "Anthropic key configured" : "Anthropic key not configured",
+  });
+  const deepseek = buildChatService({
+    id: "deepseek",
+    label: "DeepSeek",
+    configured: Boolean(deepSeekChatAuthToken),
+    fallbackDefault: deepSeekChatDefaultModel,
+    efforts: deepSeekChatReasoningEfforts,
+    preferredEffort: "max",
+    baseUrl: deepSeekChatBaseUrl,
+    detail: deepSeekChatAuthToken ? "DeepSeek key configured" : "DeepSeek key not configured",
+  });
+
   return {
     defaultService: "openai",
     services: [
-      {
-        id: "openai",
-        label: "OpenAI",
-        configured: Boolean(openAiApiKey) || allowMockWithoutKey,
-        defaultModel,
-        defaultReasoningEffort: defaultReasoningEffort(openAiChatReasoningEfforts, "medium"),
-        supportedReasoningEfforts: openAiChatReasoningEfforts,
-        models: createChatModelOptions(openAiChatModels, defaultReasoningEffort(openAiChatReasoningEfforts, "medium"), openAiChatReasoningEfforts),
-        baseUrl: openAiBaseUrl,
-        detail: openAiApiKey ? "OpenAI key configured" : "mock fallback",
-      },
-      {
-        id: "anthropic",
-        label: "Opus",
-        configured: Boolean(anthropicChatApiKey || anthropicChatAuthToken),
-        defaultModel: anthropicChatDefaultModel || "claude-opus-4-8",
-        defaultReasoningEffort: defaultReasoningEffort(anthropicChatReasoningEfforts, "default"),
-        supportedReasoningEfforts: anthropicChatReasoningEfforts,
-        models: createChatModelOptions(anthropicChatModels, defaultReasoningEffort(anthropicChatReasoningEfforts, "default"), anthropicChatReasoningEfforts),
-        baseUrl: anthropicChatBaseUrl,
-        detail: anthropicChatApiKey || anthropicChatAuthToken ? "Anthropic key configured" : "Anthropic key not configured",
-      },
-      {
-        id: "deepseek",
-        label: "DeepSeek",
-        configured: Boolean(deepSeekChatAuthToken),
-        defaultModel: deepSeekChatDefaultModel,
-        defaultReasoningEffort: defaultReasoningEffort(deepSeekChatReasoningEfforts, "max"),
-        supportedReasoningEfforts: deepSeekChatReasoningEfforts,
-        models: createChatModelOptions(deepSeekChatModels, defaultReasoningEffort(deepSeekChatReasoningEfforts, "max"), deepSeekChatReasoningEfforts),
-        baseUrl: deepSeekChatBaseUrl,
-        detail: deepSeekChatAuthToken ? "DeepSeek key configured" : "DeepSeek key not configured",
-      },
+      openai,
+      anthropic,
+      deepseek,
       {
         id: "local",
         label: "Local",
@@ -1542,6 +1744,7 @@ function createChatOptionsResponse() {
         defaultModel: "",
         defaultReasoningEffort: "default",
         supportedReasoningEfforts: ["default"],
+        modelSource: "configured",
         models: [
           {
             model: "",
@@ -1556,6 +1759,31 @@ function createChatOptionsResponse() {
           : "Local uses the model currently loaded in LM Studio",
       },
     ],
+  };
+}
+
+function buildChatService({ id, label, configured, fallbackDefault, efforts, preferredEffort, baseUrl, detail }) {
+  const entry = modelCatalog.peek(id);
+  const models = entry.models.length ? entry.models : [fallbackDefault].filter(Boolean);
+  const preferredDefault = models.includes(fallbackDefault) ? fallbackDefault : models[0] ?? "";
+  return {
+    id,
+    label,
+    configured,
+    defaultModel: preferredDefault,
+    defaultReasoningEffort: defaultEffortForModel(preferredDefault, efforts, preferredEffort),
+    supportedReasoningEfforts: effortsForModel(preferredDefault, efforts),
+    // The UI states plainly whether this list came from the provider.
+    modelSource: entry.source,
+    modelSourceDetail: entry.error,
+    models: models.map((model) => ({
+      model,
+      displayName: modelDisplayName(model),
+      defaultReasoningEffort: defaultEffortForModel(model, efforts, preferredEffort),
+      supportedReasoningEfforts: effortsForModel(model, efforts),
+    })),
+    baseUrl,
+    detail,
   };
 }
 
@@ -1613,9 +1841,12 @@ async function createClaudePlanMetrics() {
 }
 
 function createClaudePlanMetric(usage) {
+  const rejected = isRejectedClaudeUsageStatus(usage?.status);
   const rawUtilization = numberOrUndefined(usage?.utilization);
-  if (rawUtilization === undefined) return null;
-  const usedPercent = clampNumber(rawUtilization <= 1 ? rawUtilization * 100 : rawUtilization, 0, 100);
+  if (rawUtilization === undefined && !rejected) return null;
+  const usedPercent = rejected
+    ? 100
+    : clampNumber(rawUtilization <= 1 ? rawUtilization * 100 : rawUtilization, 0, 100);
   const remainingPercent = clampNumber(100 - usedPercent, 0, 100);
   const rateLimitType = String(usage?.rateLimitType || "plan");
   return {
@@ -1634,6 +1865,11 @@ function createClaudePlanMetric(usage) {
     source: "claude-stream",
     defaultVisible: true,
   };
+}
+
+function isRejectedClaudeUsageStatus(value) {
+  const status = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return ["rejected", "blocked", "denied", "exceeded", "exhausted", "rate_limited", "limit_reached"].includes(status);
 }
 
 function formatClaudeRateLimitLabel(value) {
@@ -1860,45 +2096,121 @@ function createChatModelOptions(models, defaultReasoningEffort, supportedReasoni
     }));
 }
 
-async function readCodexModels() {
-  const overrideModels = parseCodexModelOverride(codexModelsOverride);
-  if (overrideModels.length) return overrideModels;
-
-  const command = codexUseWsl ? "wsl" : codexBin;
-  const args = codexUseWsl ? [codexBin, "debug", "models"] : ["debug", "models"];
-  const result = await runProcess(command, args, "", 10_000, codexWorkspace);
-  if (result.exitCode !== 0) return [];
-  const parsed = parseJsonText(result.stdout);
-  const models = Array.isArray(parsed?.models) ? parsed.models : [];
-  return models.map(normalizeCodexModelOption).filter(Boolean);
-}
-
 function createFallbackCodexOptions() {
-  const fallbackModels = [
-    {
-      model: "gpt-5.3-codex-spark",
-      displayName: "GPT-5.3-Codex-Spark",
-      description: "Fast Codex model available through supported Codex subscriptions",
-      defaultReasoningEffort: "high",
-      supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
-    },
-    ...["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"].map((model) => ({
-      model,
-      displayName: model.toUpperCase(),
-      description: "Codex CLI model",
-      defaultReasoningEffort: defaultReasoningEffort(codexFallbackReasoningEfforts, "medium"),
-      supportedReasoningEfforts: codexFallbackReasoningEfforts,
-    })),
-  ];
   return {
-    models: fallbackModels,
-    defaultModel: codexModel || "gpt-5.5",
+    models: [],
+    defaultModel: "",
     defaultReasoningEffort: defaultReasoningEffort(codexFallbackReasoningEfforts, codexReasoningEffort),
     claudeReasoningEfforts,
+    claudeApiModels: buildClaudeApiModelOptions(),
+    claudeSubscriptionModels: buildClaudeSubscriptionModelOptions(),
+    modelDiscovery: {
+      codex: discoveryPublicState(modelDiscoveryError("runtime", "Codex models have not been checked yet.")),
+    },
     defaultWorkspace: codexWorkspace,
     defaultSandbox: codexSandbox,
-    defaultTimeoutMs: codexTimeoutMs,
   };
+}
+
+/**
+ * Claude Code models for the API route. Discovered from Anthropic and DeepSeek
+ * so a newly released model is selectable without a Mind Atlas change.
+ */
+function buildClaudeApiModelOptions() {
+  const anthropic = modelCatalog.peek("anthropic");
+  const deepseek = modelCatalog.peek("deepseek");
+  const options = [];
+  for (const model of providerCodeModels(anthropic, "anthropic")) {
+    options.push({
+      id: `anthropic:${model}`,
+      model,
+      baseUrl: anthropicChatBaseUrl,
+      displayName: modelDisplayName(model),
+      vendor: "anthropic",
+      supportedReasoningEfforts: effortsForModel(model, claudeReasoningEfforts),
+      defaultReasoningEffort: defaultEffortForModel(model, claudeReasoningEfforts, "default"),
+    });
+  }
+  for (const model of providerCodeModels(deepseek, "deepseek")) {
+    options.push({
+      id: `deepseek:${model}`,
+      model,
+      baseUrl: claudeDeepSeekBaseUrl,
+      displayName: modelDisplayName(model),
+      vendor: "deepseek",
+      supportedReasoningEfforts: effortsForModel(model, claudeReasoningEfforts),
+      defaultReasoningEffort: defaultEffortForModel(model, claudeReasoningEfforts, "max"),
+    });
+  }
+  return {
+    options,
+    anthropic: providerCodeDiscovery(anthropic, "Anthropic"),
+    deepseek: providerCodeDiscovery(deepseek, "DeepSeek"),
+  };
+}
+
+function providerCodeModels(entry, providerId = "") {
+  const models = entry.source === "live" && !entry.error ? (entry.liveModels ?? []) : [];
+  if (providerId !== "anthropic") return models;
+  const newestByFamily = new Map();
+  for (const model of models) {
+    const family = /^claude-([a-z]+)/i.exec(model)?.[1]?.toLowerCase();
+    if (!family || family === "fable" || family === "mythos") continue;
+    const current = newestByFamily.get(family);
+    if (!current || compareModelRecency(model, current) < 0) newestByFamily.set(family, model);
+  }
+  return [...newestByFamily.values()].sort(compareModelRecency);
+}
+
+function providerCodeDiscovery(entry, label) {
+  const checkedAtMs = Number(entry.fetchedAt) || Date.now();
+  const models = providerCodeModels(entry, label === "Anthropic" ? "anthropic" : "deepseek");
+  if (models.length) {
+    return discoveryPublicState({
+      status: "ready",
+      source: "provider-api",
+      detail: `${label} model API returned ${models.length} usable model${models.length === 1 ? "" : "s"}.`,
+      checkedAtMs,
+    });
+  }
+  return discoveryPublicState(modelDiscoveryError(
+    "provider-api",
+    entry.error || `${label} model API returned no usable models.`,
+    checkedAtMs,
+  ));
+}
+
+/** Claude Code Pro models observed in the native Claude client state. */
+function buildClaudeSubscriptionModelOptions() {
+  let models = [];
+  let detail = "Claude native model cache did not contain a recently observed model.";
+  let checkedAtMs = Date.now();
+  try {
+    const nativeStatePath = join(homedir(), ".claude.json");
+    const nativeState = JSON.parse(readFileSync(nativeStatePath, "utf8"));
+    models = extractClaudeSubscriptionModels(nativeState);
+    if (models.length) detail = "Models recently recognized by the signed-in native Claude clients.";
+  } catch (error) {
+    detail = `Claude native model cache could not be read: ${String(error?.message ?? error).slice(0, 240)}`;
+  }
+  const options = [];
+  if (models.length) {
+    options.push({ id: "account-default", model: "", displayName: "Claude account default", resolvedModel: "", supportedReasoningEfforts: claudeReasoningEfforts, defaultReasoningEffort: "default" });
+  }
+  for (const model of models) {
+    options.push({
+      id: `native:${model}`,
+      model,
+      resolvedModel: model,
+      displayName: modelDisplayName(model),
+      supportedReasoningEfforts: effortsForModel(model, claudeReasoningEfforts),
+      defaultReasoningEffort: defaultEffortForModel(model, claudeReasoningEfforts, "default"),
+    });
+  }
+  const discovery = models.length
+    ? discoveryPublicState({ status: "ready", source: "native-cache", detail, checkedAtMs })
+    : discoveryPublicState(modelDiscoveryError("native-cache", detail, checkedAtMs));
+  return { options, discovery };
 }
 
 async function createCodexRunRecoveryResponse(payload) {
@@ -2560,10 +2872,10 @@ function claudeResumeLooksFailed(result, parsed) {
   return !extractClaudeText(parsed).trim();
 }
 
-async function runClaudeCode(prompt, settings) {
+async function runClaudeCode(prompt, settings, authRecoveryAttempted = false) {
   assertExistingWorkspace(settings.workspace, "Claude Code");
   if (settings.authMode === "subscription") {
-    await assertClaudeSubscriptionAuthenticated(settings);
+    await ensureClaudeSubscriptionAuthenticated(settings);
   }
   const startedAt = new Date().toISOString();
   const boundedPrompt = truncateText(prompt, claudePromptCharLimit);
@@ -2572,6 +2884,7 @@ async function runClaudeCode(prompt, settings) {
     "--output-format",
     "json",
   ];
+  appendClaudeDefaultWebToolArgs(args);
   if (settings.authMode === "subscription" && settings.model) {
     args.push("--model", settings.model);
   }
@@ -2592,7 +2905,18 @@ async function runClaudeCode(prompt, settings) {
     if (settings.forkSession) args.push("--fork-session");
   }
   const commandSpec = buildClaudeCommand(args);
-  const result = await runProcess(commandSpec.command, commandSpec.args, boundedPrompt, settings.timeoutMs, settings.workspace, buildClaudeEnv(settings));
+  const result = await runProcess(commandSpec.command, commandSpec.args, boundedPrompt, null, settings.workspace, buildClaudeEnv(settings));
+  const authenticationFailure = [result.stdout, result.stderr].filter(Boolean).join("\n");
+  if (
+    settings.authMode === "subscription"
+    && !authRecoveryAttempted
+    && isClaudeOAuthAuthenticationError(authenticationFailure)
+  ) {
+    const recovery = await recoverClaudeSubscriptionAuth({ workspace: settings.workspace });
+    claudeSubscriptionAuthCache = null;
+    if (recovery.ok) return await runClaudeCode(prompt, settings, true);
+    throw new BridgeError(401, `${authenticationFailure}\nAutomatic Claude login recovery failed: ${recovery.detail}`);
+  }
   const completedAt = new Date().toISOString();
   if (result.exitCode !== 0 && !result.stdout.trim()) {
     throw new BridgeError(502, result.stderr.trim() || `Claude Code CLI exited with ${result.exitCode}`);
@@ -2622,7 +2946,6 @@ function buildClaudeCommand(args) {
 function buildClaudeEnv(settings) {
   const env = { ...process.env };
   clearClaudeProviderEnv(env);
-  env.API_TIMEOUT_MS = stringOr(process.env.API_TIMEOUT_MS, String(settings.timeoutMs));
   if (settings.authMode === "subscription") {
     return env;
   }
@@ -2664,6 +2987,7 @@ function clearClaudeProviderEnv(env) {
     "CLAUDE_CODE_USE_AWS_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
+    "API_TIMEOUT_MS",
     "MIND_ATLAS_CLAUDE_ANTHROPIC_API_KEY",
     "MIND_ATLAS_CLAUDE_API_KEY",
     "MIND_ATLAS_CLAUDE_ANTHROPIC_AUTH_TOKEN",
@@ -2675,15 +2999,21 @@ function clearClaudeProviderEnv(env) {
   }
 }
 
-async function assertClaudeSubscriptionAuthenticated(settings) {
+async function ensureClaudeSubscriptionAuthenticated(settings) {
   const cacheIsFresh = claudeSubscriptionAuthCache && Date.now() - claudeSubscriptionAuthCache.createdAt < 30_000;
   const status = cacheIsFresh
     ? claudeSubscriptionAuthCache.value
     : await readClaudeSubscriptionAuthStatus(settings);
   if (status.loggedIn) return;
+  const recovery = await recoverClaudeSubscriptionAuth({ workspace: settings.workspace });
+  claudeSubscriptionAuthCache = null;
+  if (recovery.ok) {
+    const refreshed = await readClaudeSubscriptionAuthStatus(settings);
+    if (refreshed.loggedIn) return;
+  }
   throw new BridgeError(
     401,
-    "Claude Code Pro is not signed in. Run `claude auth login` in PowerShell, choose your Claude Pro or Max account, then retry.",
+    `Claude Code Pro is not signed in. Mind Atlas opened \`claude auth login\` automatically, but login did not complete.${recovery.detail ? ` ${recovery.detail}` : ""}`,
   );
 }
 
@@ -2695,7 +3025,7 @@ async function readClaudeSubscriptionAuthStatus(settings) {
       commandSpec.command,
       commandSpec.args,
       "",
-      Math.min(settings.timeoutMs, 10_000),
+      10_000,
       settings.workspace,
       buildClaudeEnv({ ...settings, authMode: "subscription" }),
     );
@@ -2770,15 +3100,19 @@ function buildClaudePrompt(prompt, context, settings) {
 function normalizeClaudeSettings(input, model, context) {
   const workspace = stringOr(input?.workspace, stringOr(extractWorkspaceFromContext(context), claudeWorkspace));
   const continueMode = input?.continueMode === "new" ? "new" : "auto";
+  const authMode = input?.authMode === "subscription" ? "subscription" : "api";
+  const accountDefaultModel =
+    authMode === "subscription" &&
+    Object.prototype.hasOwnProperty.call(input ?? {}, "model") &&
+    String(input?.model ?? "").trim() === "";
   return {
-    authMode: input?.authMode === "subscription" ? "subscription" : "api",
-    model: stringOr(input?.model, model || claudeModel),
+    authMode,
+    model: accountDefaultModel ? "" : stringOr(input?.model, model || claudeModel),
     baseUrl: stringOr(input?.baseUrl, claudeBaseUrl).replace(/\/+$/, ""),
     reasoningEffort: normalizeClaudeReasoningEffort(input?.reasoningEffort),
     permissionMode: normalizeClaudePermissionMode(input?.permissionMode),
     workspace,
     browser: input?.authMode === "subscription" && input?.browser === true,
-    timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input.timeoutMs) : claudeTimeoutMs,
     continueMode,
     resumeSessionId: continueMode === "new" ? "" : stringOr(input?.resumeSessionId, ""),
     forkSession: input?.forkSession === true,
@@ -2927,6 +3261,8 @@ async function runCodexOnce(prompt, settings) {
   const codexArgs = [
     "--ask-for-approval",
     "never",
+    "-c",
+    codexLiveWebSearchConfig,
     "exec",
   ];
   if (resumeThreadId) {
@@ -2961,7 +3297,7 @@ async function runCodexOnce(prompt, settings) {
 
   const command = codexUseWsl ? "wsl" : codexBin;
   const args = codexUseWsl ? [codexBin, ...codexArgs] : codexArgs;
-  const result = await runProcess(command, args, prompt, settings.timeoutMs, settings.workspace);
+  const result = await runProcess(command, args, prompt, null, settings.workspace);
   const completedAt = new Date().toISOString();
   const lastMessage = existsSync(outputFile) ? readFileSync(outputFile, "utf8") : "";
   try {
@@ -3108,7 +3444,6 @@ function normalizeCodexSettings(input, model, context) {
     workspace,
     webSearch: true,
     skipGitRepoCheck: false,
-    timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input.timeoutMs) : codexTimeoutMs,
     fullAccessApproved,
     continueMode,
     resumeThreadId: continueMode === "new" ? "" : stringOr(input?.resumeThreadId, ""),
@@ -3656,12 +3991,14 @@ function runProcess(command, args, stdin, timeoutMs, cwd, env = process.env) {
     let stderr = "";
     let stdinError = "";
     let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      child.kill();
-      reject(new BridgeError(504, `${command} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+    const timer = Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          child.kill();
+          reject(new BridgeError(504, `${command} timed out after ${timeoutMs}ms`));
+        }, timeoutMs)
+      : null;
 
     child.stdout.on("data", (chunk) => {
       stdout = appendBoundedOutput(stdout, chunk.toString());
@@ -3681,13 +4018,13 @@ function runProcess(command, args, stdin, timeoutMs, cwd, env = process.env) {
     child.on("error", (error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       reject(new BridgeError(502, `${command} failed to start: ${error.message}`));
     });
     child.on("close", (exitCode) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       const stdinNote = stdinError ? `\nstdin stream error: ${stdinError}` : "";
       resolve({ exitCode: exitCode ?? 0, stdout, stderr: `${stderr}${stdinNote}` });
     });

@@ -9,16 +9,33 @@
 
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { accountAtlasInjection, estimateTokens, remainingContext } from "../src/agentRuntime/contextAccounting.ts";
 import { createRunViewModel, reduceRunEvent } from "../src/agentRuntime/eventReducer.ts";
 import { isSafeHref, parseMarkdown, parseUnifiedDiff, summarizeDiff } from "../src/agentRuntime/markdown.ts";
+import { sanitizeNotebookForExport } from "../src/notebookExport.ts";
+import {
+  compareModelRecency,
+  createModelCatalog,
+  defaultEffortForModel,
+  effortsForModel,
+  extractClaudeSubscriptionModels,
+  modelDisplayName,
+} from "./model-catalog.mjs";
 import { AtlasToolService } from "./agent-runtime/atlas-tool-service.mjs";
 import { EvidenceStore, planEvidenceTransport, renderEvidenceReferenceBlock } from "./agent-runtime/evidence-store.mjs";
 import { checkAgentWorkspace } from "./agent-runtime/workspace-policy.mjs";
 import { HandoffCoordinator } from "./agent-runtime/handoff-coordinator.mjs";
+import { appendClaudeDefaultWebToolArgs, CLAUDE_DEFAULT_WEB_TOOLS } from "./agent-runtime/claude-cli-policy.mjs";
+import {
+  buildClaudeLoginPowerShellScript,
+  createClaudeAuthRecovery,
+  isClaudeOAuthAuthenticationError,
+} from "./agent-runtime/claude-auth-recovery.mjs";
+import { formatClaudePlanLimitError, isRejectedClaudePlanAllowance } from "./agent-runtime/claude-adapter.mjs";
 import { AgentRunStore } from "./agent-runtime/run-journal.mjs";
 import { AgentRuntimeManager } from "./agent-runtime/runtime-manager.mjs";
 import {
@@ -54,6 +71,9 @@ async function main() {
     await verifyRedaction();
     await verifyTransitions();
     await verifyCapabilityReduction();
+    await verifyClaudeWebToolPolicy();
+    await verifyClaudePlanLimitNormalization();
+    await verifyClaudeAuthRecovery(workDir);
     await verifyJournal(workDir);
     await verifyIdempotencyAndBounds(workDir);
     await verifyRecovery(workDir);
@@ -66,6 +86,8 @@ async function main() {
     await verifyWorkspacePolicy(workDir);
     await verifyWorkspaceGitLifecycle(workDir);
     await verifyAgentWorkspaceReducer();
+    await verifyBindingPersistence();
+    await verifyModelCatalog();
     await verifyModeSafety();
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
@@ -73,6 +95,123 @@ async function main() {
 
   console.log(`\n${failures ? "FAILED" : "PASSED"}: ${checks - failures}/${checks} agent runtime checks`);
   process.exit(failures ? 1 : 0);
+}
+
+async function verifyClaudeWebToolPolicy() {
+  section("Claude default web tools");
+  const args = ["-p", "--permission-mode", "plan"];
+  const returned = appendClaudeDefaultWebToolArgs(args);
+  check("the policy mutates and returns the same CLI argument list", returned === args);
+  check(
+    "WebSearch and WebFetch are explicitly allowed",
+    args.includes("--allowedTools") && args.includes("WebSearch,WebFetch"),
+    args,
+  );
+  check("the permission mode remains independently selectable", args.includes("plan"), args);
+  appendClaudeDefaultWebToolArgs(args);
+  check("the fixed web policy is idempotent", args.filter((value) => value === "--allowedTools").length === 1, args);
+  check(
+    "the policy grants only the two read-only web tools",
+    JSON.stringify(CLAUDE_DEFAULT_WEB_TOOLS) === JSON.stringify(["WebSearch", "WebFetch"]),
+    CLAUDE_DEFAULT_WEB_TOOLS,
+  );
+}
+
+async function verifyClaudePlanLimitNormalization() {
+  section("Claude plan limit normalization");
+  check("allowed warning does not block a Claude subscription run", !isRejectedClaudePlanAllowance({ status: "allowed_warning", utilization: 0.99 }));
+  check("provider rejected allowance is terminal", isRejectedClaudePlanAllowance({ status: "rejected" }));
+  const message = formatClaudePlanLimitError({ status: "rejected", resetsAt: 1_786_197_600 });
+  check("quota failure names the Pro allowance", message.includes("Claude Code Pro usage limit reached"), message);
+  check("quota failure preserves the provider reset time", message.includes("Reset at:"), message);
+}
+
+async function verifyClaudeAuthRecovery(baseRoot) {
+  section("Claude Code Pro OAuth recovery");
+  const oauthError = "Failed to authenticate. API Error: 401 OAuth access token has been revoked.";
+  check("revoked OAuth errors are recognized", isClaudeOAuthAuthenticationError(oauthError));
+  check("ordinary Claude failures do not trigger login", !isClaudeOAuthAuthenticationError("Claude Code exited with 1"));
+
+  const script = buildClaudeLoginPowerShellScript({ command: "C:\\Tools\\claude.exe", args: ["auth", "login"] });
+  check("the recovery window runs claude auth login", script.includes("'auth' 'login'"), script);
+  check("the recovery window says the original request will retry", script.includes("retry automatically"), script);
+
+  let loginWindows = 0;
+  const recover = createClaudeAuthRecovery({
+    platform: "win32",
+    buildCommand: (args) => ({ command: "claude.exe", args }),
+    spawnProcess: () => {
+      loginWindows += 1;
+      const child = new EventEmitter();
+      setTimeout(() => child.emit("close", 0), 10);
+      return child;
+    },
+  });
+  const [firstLogin, secondLogin] = await Promise.all([recover({ workspace: baseRoot }), recover({ workspace: baseRoot })]);
+  check("concurrent failures share one login window", loginWindows === 1 && firstLogin.ok && secondLogin.ok, { loginWindows, firstLogin, secondLogin });
+
+  const markerPath = join(baseRoot, "fake-claude-authenticated.marker");
+  const fakeClaudePath = join(baseRoot, "fake-claude-auth.mjs");
+  await writeFile(fakeClaudePath, `
+import { existsSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args.includes("--version")) {
+  console.log("2.1.999");
+  process.exit(0);
+}
+if (args.includes("--help")) {
+  console.log("fake claude help");
+  process.exit(0);
+}
+process.stdin.resume();
+process.stdin.on("end", () => {
+  if (!existsSync(${JSON.stringify(markerPath)})) {
+    console.log(JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, result: ${JSON.stringify(oauthError)} }));
+    process.exitCode = 1;
+    return;
+  }
+  console.log(JSON.stringify({ type: "system", subtype: "init", session_id: "session-auth-recovered", model: "claude-test", tools: [], mcp_servers: [], skills: [], agents: [] }));
+  console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "session-auth-recovered", result: "recovered answer", usage: { input_tokens: 1, output_tokens: 1 }, modelUsage: { "claude-test": { contextWindow: 1000 } } }));
+});
+`, "utf8");
+
+  let reauthenticationCalls = 0;
+  const store = new AgentRunStore({ baseDir: join(baseRoot, "auth-recovery-runtime") });
+  const manager = new AgentRuntimeManager({
+    store,
+    claudeRoutePreference: "stream-json",
+    claude: {
+      enabled: true,
+      workspace: baseRoot,
+      buildCommand: (args) => ({ command: process.execPath, args: [fakeClaudePath, ...args] }),
+      buildEnv: () => process.env,
+      reauthenticate: async () => {
+        reauthenticationCalls += 1;
+        await writeFile(markerPath, "authenticated\n", "utf8");
+        return { ok: true, detail: "fake login completed" };
+      },
+    },
+  });
+  await manager.init();
+  const started = await manager.startRun({
+    provider: "claude",
+    workspace: baseRoot,
+    prompt: "preserve this request",
+    sessionMode: "new",
+    claudeSettings: { authMode: "subscription", permissionMode: "plan" },
+  });
+  await waitFor(async () => (await store.readManifest(started.manifest.runId))?.status === "completed", 5000);
+  const completed = await manager.describeRun(started.manifest.runId);
+  const events = await store.readEvents(started.manifest.runId, 0);
+  check("the same run completes after automatic login", completed.final?.text === "recovered answer", completed.final);
+  check("automatic login is attempted only once", reauthenticationCalls === 1, reauthenticationCalls);
+  check(
+    "the journal exposes login and retry progress",
+    events.some((event) => event.code === "claude_auth_login_started")
+      && events.some((event) => event.code === "claude_auth_login_completed"),
+    events.map((event) => event.code).filter(Boolean),
+  );
+  manager.close();
 }
 
 async function verifyRedaction() {
@@ -167,6 +306,54 @@ async function verifyJournal(baseRoot) {
     authMode: "subscription",
   });
   check("latest subscription allowance survives in the journal", latestPlan[0]?.usage?.utilization === 0.35, latestPlan);
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const emptyPlanHandle = await store.createRun({
+    provider: "claude",
+    route: "claude-stream-json",
+    workspace: baseRoot,
+    authMode: "subscription",
+  });
+  await emptyPlanHandle.append({
+    kind: "usage_updated",
+    usage: {
+      scope: "account_plan",
+      authMode: "subscription",
+      status: "allowed",
+      rateLimitType: "five_hour",
+      utilization: null,
+    },
+  });
+  const latestUsefulPlan = await store.latestUsageEvents({
+    provider: "claude",
+    scope: "account_plan",
+    authMode: "subscription",
+  });
+  check("empty allowance samples do not hide the latest measured utilization", latestUsefulPlan[0]?.usage?.utilization === 0.35, latestUsefulPlan);
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const rejectedPlanHandle = await store.createRun({
+    provider: "claude",
+    route: "claude-stream-json",
+    workspace: baseRoot,
+    authMode: "subscription",
+  });
+  await rejectedPlanHandle.append({
+    kind: "usage_updated",
+    usage: {
+      scope: "account_plan",
+      authMode: "subscription",
+      status: "rejected",
+      rateLimitType: "five_hour",
+      utilization: null,
+    },
+  });
+  const rejectedPlan = await store.latestUsageEvents({
+    provider: "claude",
+    scope: "account_plan",
+    authMode: "subscription",
+  });
+  check("a rejected allowance remains authoritative without utilization", rejectedPlan[0]?.usage?.status === "rejected", rejectedPlan);
 }
 
 async function verifyIdempotencyAndBounds(baseRoot) {
@@ -217,6 +404,25 @@ async function verifyRecovery(baseRoot) {
   const kept = new AgentRunStore({ baseDir, retentionDays: -1 });
   await kept.applyRetention();
   check("retention keeps unacknowledged results", Boolean(await kept.readManifest(handle.runId)));
+
+  // The other half: once a run has been acknowledged it must actually be
+  // reclaimed, otherwise the run directory grows without bound.
+  const acked = new AgentRunStore({ baseDir, retentionDays: -1 });
+  const ackResult = await acked.listRuns({ limit: 10 });
+  check("the interrupted run is listed before acknowledgement", ackResult.length === 1, ackResult.length);
+  await acked.writeManifest({ ...(await acked.readManifest(handle.runId)), acknowledgedAt: new Date().toISOString() });
+  const removedReport = await acked.applyRetention();
+  check("retention removes an acknowledged result", removedReport.removed === 1, removedReport);
+  check("the acknowledged run is gone from disk", !(await acked.readManifest(handle.runId)), await acked.readManifest(handle.runId));
+
+  // A run acknowledged but still inside the retention window is kept.
+  const fresh = new AgentRunStore({ baseDir, retentionDays: 30 });
+  const freshHandle = await fresh.createRun({ provider: "codex", route: "codex-app-server", workspace: baseRoot });
+  await freshHandle.setStatus("starting");
+  await freshHandle.finalize({ status: "completed", text: "done" });
+  await fresh.writeManifest({ ...(await fresh.readManifest(freshHandle.runId)), acknowledgedAt: new Date().toISOString() });
+  await fresh.applyRetention();
+  check("a recently acknowledged run is kept until the retention window passes", Boolean(await fresh.readManifest(freshHandle.runId)));
 }
 
 async function verifyFakeProviderRun(baseRoot) {
@@ -240,6 +446,7 @@ async function verifyFakeProviderRun(baseRoot) {
 
   const run = await manager.startRun({ provider: "codex", workspace: baseRoot, prompt: "hello", sessionMode: "new" });
   check("fallback route is selected when pinned", run.manifest.route === "codex-exec", run.manifest.route);
+  check("a shared run accepts a non-Git directory", run.manifest.workspace === baseRoot && run.manifest.git === null, run.manifest);
   await waitFor(async () => (await store.readManifest(run.manifest.runId))?.status === "completed", 5000);
   const done = await manager.describeRun(run.manifest.runId);
   check("fallback run reaches completed", done.manifest.status === "completed", done.manifest.status);
@@ -566,8 +773,28 @@ async function verifyWorkspacePolicy(baseRoot) {
 
 async function verifyWorkspaceGitLifecycle(baseRoot) {
   section("Git workspace identity and mission lifecycle");
+  const plainDirectory = join(baseRoot, "plain-workspace");
   const repository = join(baseRoot, "git-workspace-source");
   const runtimeRoot = join(baseRoot, "git-workspace-runtime");
+  await mkdir(plainDirectory, { recursive: true });
+  const plain = await inspectGitWorkspace(plainDirectory);
+  check(
+    "a readable non-Git directory is an available workspace",
+    plain.workspaceAvailable === true && plain.available === false && plain.workspaceKind === "directory" && plain.resolvedWorkspace === plainDirectory,
+    plain,
+  );
+  let nonGitWorktreeError = "";
+  try {
+    const manager = new AgentRuntimeManager({
+      store: new AgentRunStore({ baseDir: join(baseRoot, "plain-runtime") }),
+      legacyRunner: async () => ({ output: { body: "unused" } }),
+    });
+    await manager.init();
+    await manager.startRun({ provider: "codex", workspace: plainDirectory, workspaceMode: "worktree", prompt: "hello" });
+  } catch (error) {
+    nonGitWorktreeError = String(error?.message ?? error);
+  }
+  check("mission worktrees remain Git-only", /requires a Git repository/.test(nonGitWorktreeError), nonGitWorktreeError);
   await mkdir(repository, { recursive: true });
   await runGit(repository, ["init"]);
   await runGit(repository, ["config", "user.email", "mind-atlas-test@example.invalid"]);
@@ -694,6 +921,144 @@ async function verifyAgentWorkspaceReducer() {
  * it becomes reachable from the hosted service, which is the single most
  * dangerous regression this feature could cause.
  */
+async function verifyBindingPersistence() {
+  section("Workspace binding persistence");
+  // The workspace binding decides whether the Code send button is enabled.
+  // If the export sanitizer drops it, every branch silently re-locks after an
+  // export, package save, or cloud round trip.
+  const base = {
+    id: "root", kind: "root", nodeType: "note", title: "Root", subtitle: "", body: "",
+    author: "human", status: "needs_review", color: "#6f8cff", texture: "speckled", radius: 28,
+    summary: "", nextDecision: "", tags: [], attachments: [],
+    createdAt: "2026-07-29T00:00:00.000Z", updatedAt: "2026-07-29T00:00:00.000Z", children: [],
+  };
+  const binding = {
+    gitRoot: "C:\repos\demo",
+    workspaceKind: "git",
+    repositoryName: "demo",
+    repositoryId: "c:/repos/demo/.git",
+    boundAt: "2026-07-29T00:00:00.000Z",
+  };
+  const execution = {
+    clientRunId: "run-1",
+    runtimeRunId: "rt-1",
+    route: "codex-app-server",
+    requestedWorkspace: "C:\repos\demo",
+    workspaceMode: "worktree",
+    repositoryName: "demo",
+    recordedAt: "2026-07-29T00:00:00.000Z",
+  };
+
+  const exported = sanitizeNotebookForExport({ ...base, agentWorkspaceBinding: binding, agentExecution: execution });
+  check("binding survives the export sanitizer", exported.agentWorkspaceBinding?.gitRoot === binding.gitRoot, exported.agentWorkspaceBinding);
+  check("binding keeps its repository id", exported.agentWorkspaceBinding?.repositoryId === binding.repositoryId, exported.agentWorkspaceBinding);
+  check("binding keeps its workspace kind", exported.agentWorkspaceBinding?.workspaceKind === "git", exported.agentWorkspaceBinding);
+  check("execution metadata survives the export sanitizer", exported.agentExecution?.clientRunId === "run-1", exported.agentExecution);
+  check("execution workspace mode is preserved", exported.agentExecution?.workspaceMode === "worktree", exported.agentExecution);
+
+  const nested = sanitizeNotebookForExport({ ...base, children: [{ ...base, id: "child", agentWorkspaceBinding: binding }] });
+  check("child bindings survive too", nested.children[0]?.agentWorkspaceBinding?.gitRoot === binding.gitRoot, nested.children[0]?.agentWorkspaceBinding);
+
+  const folderBinding = sanitizeNotebookForExport({
+    ...base,
+    agentWorkspaceBinding: {
+      gitRoot: "C:\empty-project",
+      workspaceKind: "directory",
+      repositoryName: "empty-project",
+      boundAt: "2026-08-09T00:00:00.000Z",
+    },
+  });
+  check(
+    "a non-Git folder binding survives export",
+    folderBinding.agentWorkspaceBinding?.workspaceKind === "directory"
+      && folderBinding.agentWorkspaceBinding?.gitRoot === "C:\empty-project",
+    folderBinding.agentWorkspaceBinding,
+  );
+
+  const malformed = sanitizeNotebookForExport({ ...base, agentWorkspaceBinding: { repositoryName: "no-git-root" }, agentExecution: { route: "x" } });
+  check("a binding without a git root is dropped", malformed.agentWorkspaceBinding === undefined, malformed.agentWorkspaceBinding);
+  check("execution without a client run id is dropped", malformed.agentExecution === undefined, malformed.agentExecution);
+}
+
+async function verifyModelCatalog() {
+  section("Model catalogue");
+
+  // Labels must always carry the version number the user picks by.
+  const labels = {
+    "claude-opus-4-8": "Claude Opus 4.8",
+    "claude-opus-5": "Claude Opus 5",
+    "claude-fable-5": "Claude Fable 5",
+    "claude-haiku-4-5-20251001": "Claude Haiku 4.5 (2025-10-01)",
+    "gpt-5.5-pro-2026-04-23": "GPT-5.5 Pro (2026-04-23)",
+    "gpt-5.6-sol": "GPT-5.6 Sol",
+    "deepseek-v4-pro[1m]": "DeepSeek V4 Pro [1m]",
+    o3: "o3",
+  };
+  for (const [model, expected] of Object.entries(labels)) {
+    check(`label for ${model}`, modelDisplayName(model) === expected, modelDisplayName(model));
+  }
+  check("a bare alias is labelled with what it resolves to", modelDisplayName("opus", "claude-opus-4-8") === "Claude Opus 4.8", modelDisplayName("opus", "claude-opus-4-8"));
+
+  // A newer version must outrank an older version with a newer snapshot date.
+  const ordered = ["claude-opus-4-5-20251101", "claude-opus-5", "claude-opus-4-1-20250805"].sort(compareModelRecency);
+  check("a newer version outranks a newer snapshot date", ordered[0] === "claude-opus-5", ordered);
+
+  // Efforts must match what the model can accept.
+  const efforts = ["default", "low", "medium", "high", "max"];
+  check("a reasoning model exposes every effort", effortsForModel("claude-opus-5", efforts).length === efforts.length, effortsForModel("claude-opus-5", efforts));
+  check("a non-reasoning model exposes only default", JSON.stringify(effortsForModel("gpt-4.1", efforts)) === JSON.stringify(["default"]), effortsForModel("gpt-4.1", efforts));
+  check("deepseek chat is treated as non-reasoning", JSON.stringify(effortsForModel("deepseek-chat", efforts)) === JSON.stringify(["default"]));
+  check("an unavailable preferred effort falls back", defaultEffortForModel("gpt-4.1", efforts, "high") === "default", defaultEffortForModel("gpt-4.1", efforts, "high"));
+
+  const now = Date.now();
+  const nativeClaudeModels = extractClaudeSubscriptionModels({
+    clientDataCacheSlots: {
+      oldOpus: { model: "claude-opus-4-8", at: now - 1000 },
+      currentOpus: { model: "claude-opus-5", at: now },
+      currentSonnet: { model: "claude-sonnet-5", at: now },
+    },
+    // A rollout option is not proof that the account receives that model.
+    additionalModelOptionsCache: [{ value: "claude-fable-5" }],
+  }, now);
+  check("Claude native discovery keeps the newest observed model per family", nativeClaudeModels.includes("claude-opus-5") && !nativeClaudeModels.includes("claude-opus-4-8"), nativeClaudeModels);
+  check("Claude rollout-only options are not presented as usable models", !nativeClaudeModels.includes("claude-fable-5"), nativeClaudeModels);
+
+  // Live discovery, with a fake provider so the gate never needs network.
+  const calls = [];
+  const catalog = createModelCatalog({
+    cacheMs: 60_000,
+    providers: [
+      { id: "live", kind: "openai", baseUrl: "https://example.test/v1", apiKey: "k", fallbackModels: ["pinned-1"], accept: () => true },
+      { id: "broken", kind: "openai", baseUrl: "https://example.test/v1", apiKey: "k", fallbackModels: ["fallback-1"] },
+      { id: "nokey", kind: "anthropic", baseUrl: "https://example.test", fallbackModels: ["configured-1"] },
+    ],
+    fetchImpl: async (url) => {
+      calls.push(url);
+      if (calls.length === 2) return { ok: false, status: 503, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ data: [{ id: "gpt-5.9" }, { id: "gpt-5.8" }] }) };
+    },
+  });
+
+  const live = await catalog.get("live");
+  check("live discovery is used when it succeeds", live.source === "live", live);
+  check("live discovery keeps pinned configured models", live.models.includes("pinned-1"), live.models);
+  check("live discovery separates provider-confirmed models from configured fallbacks", live.liveModels.includes("gpt-5.9") && !live.liveModels.includes("pinned-1"), live.liveModels);
+  check("live discovery sorts newest first", live.models[0] === "gpt-5.9", live.models);
+
+  const broken = await catalog.get("broken");
+  check("an HTTP error falls back to the configured list", broken.source === "configured" && broken.models.includes("fallback-1"), broken);
+  check("an HTTP error never labels fallback models as provider-confirmed", broken.liveModels.length === 0, broken.liveModels);
+  check("the fallback states why it is not live", /HTTP 503/.test(broken.error), broken.error);
+
+  const nokey = await catalog.get("nokey");
+  check("a provider without a credential is never fetched", nokey.source === "configured", nokey);
+  check("a missing credential is reported", /credential/i.test(nokey.error), nokey.error);
+
+  const cached = await catalog.get("live");
+  check("a cached entry is not refetched", cached === live && calls.length === 2, calls.length);
+  catalog.stop();
+}
+
 async function verifyModeSafety() {
   section("Mode safety (local-only enforcement)");
   const repoRoot = new URL("..", import.meta.url);
@@ -733,15 +1098,94 @@ async function verifyModeSafety() {
   const app = await readRepoFile("src/App.tsx");
   check("App gates the workspace on public service mode", /publicServiceMode \? null : <AgentRunWorkspaceHost \/>/.test(app));
 
+  const textPartner = await readRepoFile("src/ai/textPartnerClient.ts");
+  const voiceTools = await readRepoFile("src/voice/voiceTools.ts");
+  const realtimeClient = await readRepoFile("src/ai/realtimeClient.ts");
+  check(
+    "Chat and Realtime always expose the Mind Atlas web-search tool",
+    /const tools = getVoiceToolDefinitions\(\)/.test(textPartner) &&
+      /name: "web_search"/.test(voiceTools) &&
+      /tools: getVoiceToolDefinitions\(\)/.test(realtimeClient),
+  );
+
   const commandDock = await readRepoFile("src/components/CommandDock.tsx");
-  check("Code requests require an explicit Atlas-to-repository binding", /Bind this branch/.test(commandDock) && /agentRepositoryReady/.test(commandDock));
+  check("Code requests require an explicit Atlas-to-workspace binding", /Bind this branch/.test(commandDock) && /Bind this folder/.test(commandDock) && /agentRepositoryReady/.test(commandDock));
+  check(
+    "Code accepts inspected non-Git folders without enabling Git-only worktrees",
+    /workspaceAvailable/.test(commandDock)
+      && /Git features unavailable/.test(commandDock)
+      && /disabled=\{inspectedWorkspaceKind === "directory"\}/.test(commandDock)
+      && /setCodexSettings\(\{ workspaceMode: "shared" \}\)/.test(commandDock)
+      && /setClaudeSettings\(\{ workspaceMode: "shared" \}\)/.test(commandDock),
+  );
   check("Claude browser control is capability-gated", /disabled=\{!claudeBrowserSupported\}/.test(commandDock));
+  check("Code model refresh uses backend-specific intervals", /CODE_MODEL_REFRESH_MS/.test(commandDock) && /getCodexOptions\(\{ refresh: codeBackendSelection \}\)/.test(commandDock));
+  check(
+    "Code preflight errors create visible request and error nodes",
+    /recordBlockedSubmission\(modelDiscoveryBlockReason\)/.test(commandDock) &&
+      /recordAiSubmissionError\(trimmed, mode, message\)/.test(commandDock) &&
+      /disabled=\{!value\.trim\(\)\}/.test(commandDock),
+  );
+  check("Code model fields render explicit error states", /model-discovery-error/.test(commandDock) && /ERROR:/.test(commandDock));
 
   const workspaceHost = await readRepoFile("src/components/agentRun/AgentRunWorkspaceHost.tsx");
   check("a hidden run workspace keeps a persistent reopen launcher", /agent-workspace-launcher/.test(workspaceHost) && /Agent runs/.test(workspaceHost));
 
   const localBridge = await readRepoFile("scripts/mind-atlas-bridge.mjs");
   check("Claude browser requests require the subscription route", /browser: provider === "claude" && settings\.authMode === "subscription" && settings\.browser === true/.test(localBridge));
+  check(
+    "all Claude execution routes apply the fixed web-tool policy",
+    /appendClaudeDefaultWebToolArgs\(args\)/.test(localBridge) &&
+      /appendClaudeDefaultWebToolArgs\(args\)/.test(await readRepoFile("scripts/agent-runtime/claude-adapter.mjs")),
+  );
+  check(
+    "Codex app-server and exec fallback force live web search",
+    /const codexLiveWebSearchConfig = 'web_search="live"'/.test(localBridge) &&
+      /\[codexBin, "app-server", "-c", codexLiveWebSearchConfig\]/.test(localBridge) &&
+      /"-c",\s*codexLiveWebSearchConfig,\s*"exec"/.test(localBridge),
+  );
+  check("Code model refresh is scoped by backend", /createCodexOptionsResponse\(url\.searchParams\.get\("refresh"\) \?\? ""\)/.test(localBridge));
+  check("All Code execution routes fail closed when model discovery is unavailable", /await assertCodeModelAvailable\("codex", settings, settings\.model\)/.test(localBridge) && /await assertCodeModelAvailable\("claude", settings, settings\.model\)/.test(localBridge) && /model discovery failed/.test(localBridge));
+  check(
+    "Code runs have no Mind Atlas elapsed-time limit",
+    /const terminal = await waitForAgentRuntimeTerminal\(runId\)/.test(localBridge) &&
+      /runProcess\(command, args, prompt, null, settings\.workspace\)/.test(localBridge) &&
+      /runProcess\(commandSpec\.command, commandSpec\.args, boundedPrompt, null, settings\.workspace/.test(localBridge) &&
+      !/MIND_ATLAS_CODEX_TIMEOUT_MS|MIND_ATLAS_CLAUDE_TIMEOUT_MS|Agent run timed out/.test(localBridge),
+  );
+  check(
+    "Code settings do not expose a timeout control",
+    !/claude-timeout-field|claudeSettings\.timeoutMs|codexSettings\.timeoutMs/.test(commandDock),
+  );
+  check("Claude API code options use only provider-confirmed models", /function providerCodeModels\(entry, providerId[\s\S]{0,180}entry\.liveModels/.test(localBridge));
+  check("Claude API code options exclude rollout-only families and older family versions", /family === "fable" \|\| family === "mythos"/.test(localBridge) && /newestByFamily/.test(localBridge));
+
+  const atlasStore = await readRepoFile("src/store/atlasStore.ts");
+  const claudeAuthRecovery = await readRepoFile("scripts/agent-runtime/claude-auth-recovery.mjs");
+  check(
+    "Claude plan rejection creates an actionable error node",
+    /describeClaudePlanLimit/.test(atlasStore) &&
+      /Claude Code Pro usage limit/.test(atlasStore) &&
+      /throw new BridgeError\(429, terminalFailureText\)/.test(localBridge),
+  );
+  check(
+    "Claude plan rejection schedules a reminder for its reset time",
+    /reminderAt: claudePlanLimit\?\.reminderAt/.test(atlasStore) &&
+      /A Mind Atlas reminder has been set for this reset time\./.test(atlasStore) &&
+      /parsedResetAt\.toISOString\(\)/.test(atlasStore),
+  );
+  check(
+    "revoked Claude OAuth errors auto-recover before creating a fallback error node",
+    /describeClaudeAuthenticationFailure/.test(atlasStore) &&
+      /oauth access token has been revoked/.test(atlasStore) &&
+      /claude auth login/.test(atlasStore) &&
+      /claude auth logout/.test(atlasStore) &&
+      /createClaudeAuthRecovery/.test(localBridge) &&
+      /authRecoveryAttempted/.test(await readRepoFile("scripts/agent-runtime/claude-adapter.mjs")) &&
+      /powershell\.exe/.test(claudeAuthRecovery) &&
+      /manifest\.status === "failed"[\s\S]{0,240}oauth access token has been revoked/.test(localBridge) &&
+      /throw new BridgeError\(401, terminalFailureText\)/.test(localBridge),
+  );
 
   const bridgeRoutes = await readRepoFile("scripts/agent-runtime/bridge-routes.mjs");
   check("mutating agent routes require an allowed Origin", /if \(mutating && !originAllowed\(/.test(bridgeRoutes));

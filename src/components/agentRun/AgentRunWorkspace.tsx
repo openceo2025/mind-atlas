@@ -79,6 +79,8 @@ export interface AgentRunWorkspaceProps {
     runs: Array<{ runId: string; provider: string; status: string; workspace: string; title: string }>;
     activeRunId: string;
     onSelect: (runId: string) => void;
+    unreadCount?: number;
+    onMarkAllRead?: () => void;
   } | null;
 }
 
@@ -274,6 +276,16 @@ export function AgentRunWorkspace({ runId, onClose, atlasInjection = null, runSw
               {entry.provider} - {workspaceLabel(entry.workspace)}
             </button>
           ))}
+          {runSwitcher.unreadCount && runSwitcher.onMarkAllRead ? (
+            <button
+              type="button"
+              className="agent-chip"
+              onClick={runSwitcher.onMarkAllRead}
+              title="Acknowledge every finished run so retention can reclaim them"
+            >
+              Mark {runSwitcher.unreadCount} read
+            </button>
+          ) : null}
         </div>
       ) : null}
 

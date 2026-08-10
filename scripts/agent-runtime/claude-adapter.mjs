@@ -14,6 +14,8 @@
 
 import { spawn } from "node:child_process";
 
+import { isClaudeOAuthAuthenticationError } from "./claude-auth-recovery.mjs";
+import { appendClaudeDefaultWebToolArgs } from "./claude-cli-policy.mjs";
 import { boundText, reduceCapabilities } from "./types.mjs";
 
 const FILE_WRITE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit", "ApplyPatch"]);
@@ -25,6 +27,7 @@ export class ClaudeAdapter {
   /**
    * @param {{ buildCommand: (args: string[]) => { command: string, args: string[] },
    *           buildEnv: (settings: object) => NodeJS.ProcessEnv,
+   *           reauthenticate?: (options: { workspace: string }) => Promise<{ ok: boolean, detail?: string }>,
    *           workspace: string,
    *           probeAuth: (settings: object) => Promise<{ loggedIn: boolean, detail?: object }> }} options
    */
@@ -216,6 +219,7 @@ export class ClaudeAdapter {
    */
   async startRun(mode, request, sink) {
     const args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
+    appendClaudeDefaultWebToolArgs(args);
     const settings = request.claudeSettings ?? {};
     // Additive per-run MCP config. The user's own global MCP servers stay
     // available because `--strict-mcp-config` is deliberately not used.
@@ -247,6 +251,7 @@ export class ClaudeAdapter {
       spec,
       prompt: String(request.prompt ?? ""),
       authMode: settings.authMode === "subscription" ? "subscription" : "api",
+      reauthenticate: this.options.reauthenticate,
     });
     this.runs.set(sink.runId, runProcess);
     runProcess.start();
@@ -294,7 +299,7 @@ export class ClaudeAdapter {
 }
 
 class ClaudeRunProcess {
-  constructor({ adapter, sink, sessionAction, requestedSessionId, workspace, env, spec, prompt, authMode }) {
+  constructor({ adapter, sink, sessionAction, requestedSessionId, workspace, env, spec, prompt, authMode, reauthenticate }) {
     this.adapter = adapter;
     this.sink = sink;
     this.sessionAction = sessionAction;
@@ -304,6 +309,7 @@ class ClaudeRunProcess {
     this.spec = spec;
     this.prompt = prompt;
     this.authMode = authMode;
+    this.reauthenticate = reauthenticate;
     this.child = null;
     this.buffer = "";
     this.stderr = "";
@@ -311,14 +317,21 @@ class ClaudeRunProcess {
     this.model = "";
     this.contextWindow = null;
     this.finalText = "";
+    this.sawAssistantText = false;
     this.sawResult = false;
     this.stopping = false;
+    this.planLimitError = "";
+    this.authRecoveryAttempted = false;
+    this.authRecoverySucceeded = false;
+    this.authRecoveryFailure = "";
+    this.processAttempt = 0;
     this.changedFiles = new Set();
     /** @type {Map<string, { name: string, startedAt: number, detail?: string, label?: string }>} */
     this.openTools = new Map();
   }
 
   start() {
+    const processAttempt = ++this.processAttempt;
     const child = spawn(this.spec.command, this.spec.args, {
       cwd: this.workspace,
       env: this.env,
@@ -327,28 +340,23 @@ class ClaudeRunProcess {
     });
     this.child = child;
     child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => this.#consume(chunk));
+    child.stdout.on("data", (chunk) => {
+      if (processAttempt === this.processAttempt) this.#consume(chunk);
+    });
     child.stdout.on("error", () => {});
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => {
+      if (processAttempt !== this.processAttempt) return;
       this.stderr = `${this.stderr}${chunk}`.slice(-8000);
       this.sink.diagnostic(String(chunk).slice(0, 2000));
     });
     child.stderr.on("error", () => {});
     child.on("error", (error) => {
+      if (processAttempt !== this.processAttempt) return;
       this.#finish("failed", String(error?.message ?? error));
     });
     child.on("close", (code) => {
-      if (this.buffer.trim()) {
-        this.#handleLine(this.buffer.trim());
-        this.buffer = "";
-      }
-      if (this.sawResult) return;
-      if (this.stopping) {
-        this.#finish("interrupted", "");
-        return;
-      }
-      this.#finish("failed", this.stderr.trim() || `Claude Code exited with ${code}`);
+      void this.#onClose(processAttempt, code);
     });
     try {
       child.stdin.write(this.prompt);
@@ -356,6 +364,25 @@ class ClaudeRunProcess {
     } catch (error) {
       this.#finish("failed", String(error?.message ?? error));
     }
+  }
+
+  async #onClose(processAttempt, code) {
+    if (processAttempt !== this.processAttempt || this.finished) return;
+    if (this.buffer.trim()) {
+      this.#handleLine(this.buffer.trim());
+      this.buffer = "";
+    }
+    if (this.sawResult) return;
+    if (this.stopping) {
+      this.#finish("interrupted", "");
+      return;
+    }
+    const failure = this.stderr.trim() || `Claude Code exited with ${code}`;
+    if (await this.#recoverAuthentication(failure)) return;
+    this.#finish(
+      "failed",
+      isClaudePlanLimitText(failure) ? formatClaudePlanLimitError({}, failure) : this.#withAuthRecoveryDetail(failure),
+    );
   }
 
   stop(force = false) {
@@ -405,7 +432,11 @@ class ClaudeRunProcess {
     if (type === "result") return this.#onResult(event);
     if (type === "rate_limit_event") {
       const info = event.rate_limit_info ?? {};
-      return this.sink.event({
+      const planLimitError = this.authMode === "subscription" && isRejectedClaudePlanAllowance(info)
+        ? formatClaudePlanLimitError(info)
+        : "";
+      if (planLimitError) this.planLimitError = planLimitError;
+      await this.sink.event({
         kind: "usage_updated",
         usage: {
           scope: "account_plan",
@@ -414,9 +445,16 @@ class ClaudeRunProcess {
           rateLimitType: String(info.rateLimitType ?? ""),
           resetsAt: info.resetsAt ?? null,
           isUsingOverage: Boolean(info.isUsingOverage),
+          overageStatus: String(info.overageStatus ?? ""),
+          overageDisabledReason: String(info.overageDisabledReason ?? ""),
           utilization: Number.isFinite(Number(info.utilization)) ? Number(info.utilization) : null,
         },
       });
+      if (planLimitError) {
+        this.#finish("failed", planLimitError);
+        try { this.child?.kill(); } catch {}
+      }
+      return;
     }
     this.sink.diagnostic(`unmapped claude event type ${type}`);
   }
@@ -488,6 +526,7 @@ class ClaudeRunProcess {
     const content = event?.message?.content ?? [];
     for (const block of content) {
       if (block?.type === "text" && block.text) {
+        this.sawAssistantText = true;
         this.finalText = String(block.text);
         await this.sink.event({ kind: "message_completed", text: boundText(this.finalText, 400_000) });
         continue;
@@ -626,8 +665,74 @@ class ClaudeRunProcess {
       this.finalText = text;
       await this.sink.event({ kind: "message_completed", text: boundText(text, 400_000) });
     }
-    const isError = Boolean(event.is_error) || String(event.subtype ?? "") !== "success";
-    this.#finish(isError ? "failed" : "completed", isError ? boundText(String(event.result ?? event.subtype ?? "Claude Code reported an error"), 8000) : "");
+    const isError = Boolean(event.is_error) || String(event.subtype ?? "") !== "success" || Boolean(this.planLimitError);
+    const rawError = boundText(String(event.result ?? event.subtype ?? "Claude Code reported an error"), 8000);
+    const failure = this.planLimitError || (isError && isClaudePlanLimitText(rawError) ? formatClaudePlanLimitError({}, rawError) : isError ? rawError : "");
+    if (isError && await this.#recoverAuthentication(failure)) return;
+    this.#finish(
+      isError ? "failed" : "completed",
+      this.#withAuthRecoveryDetail(failure),
+    );
+  }
+
+  async #recoverAuthentication(failure) {
+    if (
+      this.authMode !== "subscription"
+      || this.authRecoveryAttempted
+      || typeof this.reauthenticate !== "function"
+      || !isClaudeOAuthAuthenticationError(failure)
+      || this.sawAssistantText
+      || this.changedFiles.size > 0
+      || this.openTools.size > 0
+    ) {
+      return false;
+    }
+    this.authRecoveryAttempted = true;
+    await this.sink.event({
+      kind: "warning",
+      code: "claude_auth_login_started",
+      message: "Claude Code Pro authentication expired. Mind Atlas opened PowerShell for `claude auth login`; this run will retry automatically after login.",
+    });
+    let result;
+    try {
+      result = await this.reauthenticate({ workspace: this.workspace });
+    } catch (error) {
+      result = { ok: false, detail: String(error?.message ?? error) };
+    }
+    if (!result?.ok) {
+      this.authRecoveryFailure = String(result?.detail ?? "Claude Code Pro login did not complete.");
+      return false;
+    }
+    if (this.stopping) {
+      this.#finish("interrupted", "");
+      return true;
+    }
+    this.authRecoverySucceeded = true;
+    await this.sink.event({
+      kind: "retry",
+      code: "claude_auth_login_completed",
+      message: "Claude Code Pro login completed. Retrying the preserved request with the same workspace and permissions.",
+    });
+    this.child = null;
+    this.buffer = "";
+    this.stderr = "";
+    this.sessionId = "";
+    this.model = "";
+    this.contextWindow = null;
+    this.finalText = "";
+    this.sawAssistantText = false;
+    this.sawResult = false;
+    this.planLimitError = "";
+    this.openTools.clear();
+    this.start();
+    return true;
+  }
+
+  #withAuthRecoveryDetail(failure) {
+    if (!failure || !this.authRecoveryAttempted) return failure;
+    if (this.authRecoveryFailure) return `${failure}\nAutomatic Claude login recovery failed: ${this.authRecoveryFailure}`;
+    if (this.authRecoverySucceeded) return `${failure}\nAutomatic Claude login completed, but Claude rejected authentication again.`;
+    return failure;
   }
 
   #finish(status, error) {
@@ -653,6 +758,36 @@ function extractToolResultText(content) {
       .join("\n");
   }
   return "";
+}
+
+export function isRejectedClaudePlanAllowance(info) {
+  const status = String(info?.status ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return ["rejected", "blocked", "denied", "exceeded", "exhausted", "rate_limited", "limit_reached"].includes(status);
+}
+
+function isClaudePlanLimitText(value) {
+  const text = String(value ?? "").toLowerCase();
+  return [
+    "usage limit",
+    "rate limit",
+    "limit reached",
+    "hit your limit",
+    "plan limit",
+    "no weighted tokens left",
+  ].some((needle) => text.includes(needle));
+}
+
+export function formatClaudePlanLimitError(info = {}, providerDetail = "") {
+  const resetSeconds = Number(info?.resetsAt);
+  const resetAt = Number.isFinite(resetSeconds) && resetSeconds > 0
+    ? new Date(resetSeconds * 1000).toISOString()
+    : "";
+  return [
+    "Claude Code Pro usage limit reached.",
+    resetAt ? `Reset at: ${resetAt}` : "",
+    "Wait for the allowance to reset, or switch the Code backend to Codex, Claude API, or DeepSeek.",
+    providerDetail ? `Provider detail: ${providerDetail}` : "",
+  ].filter(Boolean).join("\n");
 }
 
 function runOnce(spec, env, cwd, timeoutMs) {

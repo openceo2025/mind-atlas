@@ -28,15 +28,7 @@ import { formatAppMessage } from "../i18n/format";
 
 let sessionReminderDraftAt = addDays(new Date(), 1).toISOString();
 
-export function FocusPanel({
-  theme = "dark",
-  attachmentsEnabled = true,
-  onNodeTextEdited,
-}: {
-  theme?: AtlasTheme;
-  attachmentsEnabled?: boolean;
-  onNodeTextEdited?: (nodeId: string) => void;
-}) {
+export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { theme?: AtlasTheme; attachmentsEnabled?: boolean }) {
   const { locale } = useMindAtlasLocale();
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
@@ -314,12 +306,11 @@ export function FocusPanel({
           className="node-title-input"
           value={selectedNode.title}
           rows={1}
-          onChange={(event) => {
+          onChange={(event) =>
             updateNode(selectedNode.id, {
               title: event.target.value,
-            });
-            onNodeTextEdited?.(selectedNode.id);
-          }}
+            })
+          }
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
@@ -333,13 +324,12 @@ export function FocusPanel({
           ref={bodyInputRef}
           className="node-body-input"
           value={selectedNode.body}
-          onChange={(event) => {
+          onChange={(event) =>
             updateNode(selectedNode.id, {
               body: event.target.value,
               summary: event.target.value.split("\n").find(Boolean) ?? "Empty notebook node.",
-            });
-            onNodeTextEdited?.(selectedNode.id);
-          }}
+            })
+          }
           placeholder={isRoot ? formatAppMessage("ui.focusPanel.atlasMemo.b78ca47") : formatAppMessage("ui.focusPanel.memoDetailsOrContext.0f619ba")}
           aria-label={formatAppMessage("ui.focusPanel.nodeBody.eeba394")}
         />

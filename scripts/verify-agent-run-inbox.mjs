@@ -63,12 +63,13 @@ try {
   });
   const subscription = await requestClaude(8900, "fixture-subscription", {
     authMode: "subscription",
-    model: "fable",
+    model: "",
     baseUrl: "",
   });
   assert.equal(subscription.model, "fake-claude-code");
   const capture = JSON.parse(await readFile(subscriptionCapturePath, "utf8"));
-  assert.deepEqual(capture.args.slice(0, 5), ["-p", "--output-format", "json", "--model", "fable"]);
+  assert.deepEqual(capture.args.slice(0, 3), ["-p", "--output-format", "json"]);
+  assert.equal(capture.args.includes("--model"), false, "Claude account default should not receive a stale model override");
   for (const [key, value] of Object.entries(capture.env)) {
     assert.equal(value, null, `${key} leaked into the Claude Code Pro process`);
   }
@@ -132,7 +133,8 @@ function requestOptions(clientRunId, claudePatch = {}) {
         requestNodeId: `request-${clientRunId}`,
         sourceNodeId: "test-node",
         workspace,
-        timeoutMs: 60000,
+        authMode: "subscription",
+        model: "",
         ...claudePatch,
       },
     }),

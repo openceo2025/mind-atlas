@@ -1,4 +1,4 @@
-import { AudioLines, Bot, Code2, Mic, PenLine, SendHorizonal, Square, Terminal } from "lucide-react";
+import { AudioLines, Bot, Code2, Mic, PenLine, RotateCcw, SendHorizonal, Square, Terminal } from "lucide-react";
 import { FormEvent, PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { transcribeAudio } from "../ai/audioTranscriptionClient";
 import { getChatOptions, getCodexOptions, getOpenClawOptions } from "../ai/bridgeClient";
@@ -30,6 +30,7 @@ import type {
   ChatServiceId,
   ClaudePermissionMode,
   ClaudeReasoningEffort,
+  CodeModelDiscoveryState,
   CodexOptionsResult,
   CodexReasoningEffort,
   CodexSandboxMode,
@@ -48,20 +49,20 @@ const VOICE_LONG_PRESS_MS = 460;
 const DEFAULT_VOICE_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 const VOICE_IDLE_TIMEOUT_MS = readVoiceIdleTimeoutMs();
 const CHAT_OPTIONS_REFRESH_MS = 5 * 60 * 1000;
-const CLAUDE_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
-const CLAUDE_DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic";
-const CLAUDE_API_MODEL_PRESETS = [
-  { id: "bridge", label: "Bridge env", model: "", baseUrl: "" },
-  { id: "opus-4-8", label: "Claude Opus 4.8", model: "claude-opus-4-8", baseUrl: CLAUDE_ANTHROPIC_BASE_URL },
-  { id: "fable-5", label: "Claude Fable 5", model: "claude-fable-5", baseUrl: CLAUDE_ANTHROPIC_BASE_URL },
-  { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", model: "deepseek-v4-pro[1m]", baseUrl: CLAUDE_DEEPSEEK_BASE_URL },
-] as const;
-const CLAUDE_SUBSCRIPTION_MODEL_PRESETS = [
-  { id: "account-default", label: "Claude account default", model: "", baseUrl: "" },
-  { id: "opus", label: "Claude Opus", model: "opus", baseUrl: "" },
-  { id: "fable", label: "Claude Fable", model: "fable", baseUrl: "" },
-  { id: "sonnet", label: "Claude Sonnet", model: "sonnet", baseUrl: "" },
-] as const;
+const CODE_MODEL_REFRESH_MS: Record<CodeBackendSelection, number> = {
+  codex: 10 * 60 * 1000,
+  "claude-api": 30 * 60 * 1000,
+  "claude-subscription": 5 * 60 * 1000,
+};
+type ClaudeModelPreset = {
+  id: string;
+  label: string;
+  model: string;
+  baseUrl: string;
+  supportedReasoningEfforts?: ClaudeReasoningEffort[];
+  defaultReasoningEffort?: ClaudeReasoningEffort;
+  vendor: "anthropic" | "deepseek" | "subscription";
+};
 const CLAUDE_REASONING_EFFORTS: ClaudeReasoningEffort[] = ["default", "low", "medium", "high", "xhigh", "max"];
 const CLAUDE_PERMISSION_MODES: ClaudePermissionMode[] = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
 const PUBLIC_SERVICE_MODE = isHostedServiceMode();
@@ -116,16 +117,19 @@ export function CommandDock() {
   const setVoiceSessionSummary = useAtlasStore((state) => state.setVoiceSessionSummary);
   const voicePartnerSettings = useAtlasStore((state) => state.voicePartnerSettings);
   const runAiOnSelectedNode = useAtlasStore((state) => state.runAiOnSelectedNode);
+  const recordAiSubmissionError = useAtlasStore((state) => state.recordAiSubmissionError);
   const addQuickChildFromInput = useAtlasStore((state) => state.addQuickChildFromInput);
   const setNodeStatus = useAtlasStore((state) => state.setNodeStatus);
   const forceNewAgentSession = useAtlasStore((state) => state.forceNewAgentSession);
   const requestNewAgentSession = useAtlasStore((state) => state.requestNewAgentSession);
   const bindAgentWorkspaceToSelectedNode = useAtlasStore((state) => state.bindAgentWorkspaceToSelectedNode);
+  const setAgentWorkspace = useAtlasStore((state) => state.setAgentWorkspace);
   const selectedNode = findNode(atlasRoot, selectedNodeId);
   const effectiveAiContextOptions = PUBLIC_SERVICE_MODE
     ? { ...aiContextOptions, scope: "path-children" as AiContextScope }
     : aiContextOptions;
   const [codexOptions, setCodexOptions] = useState<CodexOptionsResult | null>(null);
+  const [codeModelRequestError, setCodeModelRequestError] = useState<{ backend: CodeBackendSelection; message: string } | null>(null);
   const [chatOptions, setChatOptions] = useState<ChatOptionsResult | null>(null);
   const [openClawOptions, setOpenClawOptions] = useState<OpenClawOptionsResult | null>(null);
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
@@ -149,22 +153,7 @@ export function CommandDock() {
           : CONTEXT_BUDGET_PRESETS.chat;
     return buildContextPlan(atlasRoot, selectedNodeId, { ...budget, pinnedNodeIds: multiSelectedNodeIds });
   }, [atlasRoot, selectedNodeId, multiSelectedNodeIds, mode, chatSettings.service]);
-  const codexModelOptions = codexOptions?.models.length
-    ? codexOptions.models
-    : [
-        {
-          model: "gpt-5.3-codex-spark",
-          displayName: "GPT-5.3-Codex-Spark",
-          defaultReasoningEffort: "high" as CodexReasoningEffort,
-          supportedReasoningEfforts: ["low", "medium", "high", "xhigh"] as CodexReasoningEffort[],
-        },
-        {
-          model: "gpt-5.5",
-          displayName: "GPT-5.5",
-          defaultReasoningEffort: "medium" as CodexReasoningEffort,
-          supportedReasoningEfforts: ["low", "medium", "high", "xhigh"] as CodexReasoningEffort[],
-        },
-      ];
+  const codexModelOptions = codeModelRequestError?.backend === "codex" ? [] : codexOptions?.models ?? [];
   const selectedCodexModel = codexModelOptions.find((option) => option.model === codexSettings.model) ?? codexModelOptions[0];
   const codexEfforts = selectedCodexModel?.supportedReasoningEfforts.length
     ? selectedCodexModel.supportedReasoningEfforts
@@ -182,6 +171,21 @@ export function CommandDock() {
     : selectedChatService?.supportedReasoningEfforts.length
       ? selectedChatService.supportedReasoningEfforts
       : (["default"] as ChatReasoningEffort[]);
+  // A model saved before the provider retired it would otherwise leave the
+  // picker showing one model while the request still sent the stale one.
+  useEffect(() => {
+    if (PUBLIC_SERVICE_MODE || aboutDemoConfig) return;
+    if (!chatOptions?.services.length) return;
+    if (!selectedChatModel) return;
+    if (selectedChatModel.model === chatSettings.model) return;
+    setChatSettings({
+      model: selectedChatModel.model,
+      reasoningEffort: selectedChatModel.supportedReasoningEfforts.includes(chatSettings.reasoningEffort)
+        ? chatSettings.reasoningEffort
+        : selectedChatModel.defaultReasoningEffort,
+    });
+  }, [aboutDemoConfig, chatOptions, chatSettings.model, chatSettings.reasoningEffort, selectedChatModel, setChatSettings]);
+
   const codeBackendSelection: CodeBackendSelection =
     mode === "codex" ? "codex" : claudeSettings.authMode === "subscription" ? "claude-subscription" : "claude-api";
   const selectedUsageVendor =
@@ -196,9 +200,41 @@ export function CommandDock() {
         : mode === "chat"
           ? chatSettings.service
           : "";
-  const claudeModelPresets = claudeSettings.authMode === "subscription" ? CLAUDE_SUBSCRIPTION_MODEL_PRESETS : CLAUDE_API_MODEL_PRESETS;
+  // Live discovery first: a model released after this file was written must be
+  // selectable, and every entry must show its version number.
+  const claudeModelPresets = useMemo<ClaudeModelPreset[]>(() => {
+    if (codeModelRequestError?.backend === codeBackendSelection) return [];
+    if (claudeSettings.authMode === "subscription") {
+      const discovered = codexOptions?.claudeSubscriptionModels?.options ?? [];
+      return discovered.map((option) => ({
+        id: option.id,
+        label: option.displayName,
+        model: option.model,
+        baseUrl: "",
+        vendor: "subscription",
+        supportedReasoningEfforts: option.supportedReasoningEfforts,
+        defaultReasoningEffort: option.defaultReasoningEffort,
+      }));
+    }
+    const discovered = codexOptions?.claudeApiModels?.options ?? [];
+    return discovered.map((option) => ({
+      id: option.id,
+      label: option.displayName,
+      model: option.model,
+      baseUrl: option.baseUrl,
+      vendor: option.vendor === "deepseek" ? "deepseek" : "anthropic",
+      supportedReasoningEfforts: option.supportedReasoningEfforts,
+      defaultReasoningEffort: option.defaultReasoningEffort,
+    }));
+  }, [claudeSettings.authMode, codeBackendSelection, codeModelRequestError, codexOptions]);
   const selectedClaudePreset = getClaudePresetId(claudeSettings.model, claudeSettings.baseUrl, claudeModelPresets);
-  const claudeEfforts = codexOptions?.claudeReasoningEfforts?.length ? codexOptions.claudeReasoningEfforts : CLAUDE_REASONING_EFFORTS;
+  const activeClaudePreset = claudeModelPresets.find((preset) => preset.id === selectedClaudePreset);
+  // Only the efforts the selected model can actually take.
+  const claudeEfforts = activeClaudePreset?.supportedReasoningEfforts?.length
+    ? activeClaudePreset.supportedReasoningEfforts
+    : codexOptions?.claudeReasoningEfforts?.length
+      ? codexOptions.claudeReasoningEfforts
+      : CLAUDE_REASONING_EFFORTS;
   const openClawModelOptions = openClawOptions?.models.length
     ? openClawOptions.models
     : [{ model: "", displayName: "OpenClaw default" }];
@@ -210,29 +246,82 @@ export function CommandDock() {
     () => findInheritedAgentWorkspaceBinding(atlasRoot, selectedNodeId),
     [atlasRoot, selectedNodeId],
   );
+  const restorableAgentWorkspace = !agentWorkspacePath ? inheritedAgentWorkspace : undefined;
+  const inspectedWorkspaceKind = agentWorkspaceInfo?.available
+    ? "git"
+    : agentWorkspaceInfo?.workspaceAvailable
+      ? "directory"
+      : null;
+  const inspectedWorkspaceRoot = agentWorkspaceInfo?.available
+    ? agentWorkspaceInfo.gitRoot
+    : agentWorkspaceInfo?.resolvedWorkspace ?? "";
+  const inheritedWorkspaceKind = inheritedAgentWorkspace?.workspaceKind ?? "git";
   const agentWorkspaceMatches = Boolean(
-    agentWorkspaceInfo?.available
+    inspectedWorkspaceKind
     && inheritedAgentWorkspace?.gitRoot
+    && inheritedWorkspaceKind === inspectedWorkspaceKind
     && (
-      inheritedAgentWorkspace.repositoryId && agentWorkspaceInfo.repositoryId
+      inspectedWorkspaceKind === "git" && inheritedAgentWorkspace.repositoryId && agentWorkspaceInfo?.repositoryId
         ? inheritedAgentWorkspace.repositoryId === agentWorkspaceInfo.repositoryId
-        : normalizeWorkspacePath(inheritedAgentWorkspace.gitRoot) === normalizeWorkspacePath(agentWorkspaceInfo.gitRoot)
+        : normalizeWorkspacePath(inheritedAgentWorkspace.gitRoot) === normalizeWorkspacePath(inspectedWorkspaceRoot)
     ),
   );
   const agentModeNeedsWorkspace = mode === "codex" || mode === "claude";
+  const requestFailureDiscovery = codeModelRequestError?.backend === codeBackendSelection
+    ? ({
+        status: "error",
+        source: "runtime",
+        detail: codeModelRequestError.message,
+        checkedAt: new Date().toISOString(),
+      } satisfies CodeModelDiscoveryState)
+    : null;
+  const selectedModelDiscovery: CodeModelDiscoveryState | null = requestFailureDiscovery
+    ?? (mode === "codex"
+      ? codexOptions?.modelDiscovery.codex ?? null
+      : mode === "claude" && claudeSettings.authMode === "subscription"
+        ? codexOptions?.claudeSubscriptionModels?.discovery ?? null
+        : mode === "claude" && activeClaudePreset?.vendor === "deepseek"
+          ? codexOptions?.claudeApiModels?.deepseek ?? null
+          : mode === "claude" && activeClaudePreset?.vendor === "anthropic"
+            ? codexOptions?.claudeApiModels?.anthropic ?? null
+            : null);
+  const modelSelectionReady = mode === "codex"
+    ? Boolean(selectedCodexModel)
+    : mode === "claude"
+      ? Boolean(activeClaudePreset)
+      : true;
+  const modelDiscoveryBlocked = agentModeNeedsWorkspace && (
+    !selectedModelDiscovery
+    || selectedModelDiscovery.status !== "ready"
+    || !modelSelectionReady
+  );
+  const modelDiscoveryBlockReason = requestFailureDiscovery?.detail
+    || selectedModelDiscovery?.detail
+    || (agentModeNeedsWorkspace ? "Checking the available model list..." : "");
+  const claudeApiDiscoveryErrors = claudeSettings.authMode === "api"
+    ? [
+        ["Anthropic", codexOptions?.claudeApiModels?.anthropic] as const,
+        ["DeepSeek", codexOptions?.claudeApiModels?.deepseek] as const,
+      ].flatMap(([label, discovery]) => discovery?.status === "error"
+        ? [[label, discovery] as const]
+        : [])
+    : [];
   const selectedWorkspaceMode = mode === "codex" ? codexSettings.workspaceMode : mode === "claude" ? claudeSettings.workspaceMode : "shared";
   const dirtySourceBlocksWorktree = Boolean(
     selectedWorkspaceMode === "worktree"
     && agentWorkspaceInfo?.dirtyCount
     && !agentWorkspaceInfo.managedMissionWorktree,
   );
-  const agentRepositoryBlockReason = dirtySourceBlocksWorktree
+  const nonGitBlocksWorktree = selectedWorkspaceMode === "worktree" && inspectedWorkspaceKind === "directory";
+  const agentRepositoryBlockReason = nonGitBlocksWorktree
+    ? "Mission worktree mode requires Git. Select Current folder for this workspace."
+    : dirtySourceBlocksWorktree
     ? "Commit or stash source-checkout changes before creating a mission worktree."
     : agentWorkspaceError
       || (inheritedAgentWorkspace
-        ? `Repository mismatch: this branch is bound to ${inheritedAgentWorkspace.repositoryName}.`
-        : "Bind this Atlas branch to the inspected repository before sending.");
-  const agentRepositoryReady = !agentModeNeedsWorkspace || (agentWorkspaceMatches && !dirtySourceBlocksWorktree);
+        ? `Workspace mismatch: this branch is bound to ${inheritedAgentWorkspace.repositoryName}.`
+        : "Bind this Atlas branch to the inspected workspace before sending.");
+  const agentRepositoryReady = !agentModeNeedsWorkspace || (agentWorkspaceMatches && !dirtySourceBlocksWorktree && !nonGitBlocksWorktree);
   const selectedClaudeCapability = agentCapabilities?.providers.find((provider) => provider.provider === "claude");
   const claudeBrowserSupported = Boolean(
     mode === "claude"
@@ -259,7 +348,7 @@ export function CommandDock() {
         .then((info) => {
           if (cancelled) return;
           setAgentWorkspaceInfo(info);
-          setAgentWorkspaceError(info.available ? "" : info.detail || "This path is not a Git repository.");
+          setAgentWorkspaceError(info.workspaceAvailable ? "" : info.detail || "This path is not an available directory.");
         })
         .catch((error) => {
           if (cancelled) return;
@@ -277,10 +366,27 @@ export function CommandDock() {
   }, [agentModeNeedsWorkspace, agentWorkspacePath]);
 
   useEffect(() => {
+    if (inspectedWorkspaceKind !== "directory") return;
+    if (mode === "codex" && codexSettings.workspaceMode === "worktree") {
+      setCodexSettings({ workspaceMode: "shared" });
+    }
+    if (mode === "claude" && claudeSettings.workspaceMode === "worktree") {
+      setClaudeSettings({ workspaceMode: "shared" });
+    }
+  }, [
+    inspectedWorkspaceKind,
+    mode,
+    codexSettings.workspaceMode,
+    claudeSettings.workspaceMode,
+    setCodexSettings,
+    setClaudeSettings,
+  ]);
+
+  useEffect(() => {
     if (
       PUBLIC_SERVICE_MODE
       || mode !== "claude"
-      || !agentWorkspaceInfo?.available
+      || !agentWorkspaceInfo?.workspaceAvailable
     ) {
       setAgentCapabilities(null);
       return undefined;
@@ -303,6 +409,69 @@ export function CommandDock() {
       window.clearTimeout(timer);
     };
   }, [mode, agentWorkspaceInfo?.resolvedWorkspace, agentWorkspaceInfo?.gitRoot, claudeSettings.authMode]);
+
+  useEffect(() => {
+    if (PUBLIC_SERVICE_MODE || !agentModeNeedsWorkspace) return undefined;
+    let alive = true;
+    let inFlight = false;
+    let lastRequestedAt = 0;
+    const intervalMs = CODE_MODEL_REFRESH_MS[codeBackendSelection];
+    const refresh = () => {
+      if (inFlight) return;
+      inFlight = true;
+      lastRequestedAt = Date.now();
+      void getCodexOptions({ refresh: codeBackendSelection })
+        .then((options) => {
+          if (!alive) return;
+          setCodeModelRequestError(null);
+          setCodexOptions((current) => codeOptionsEqual(current, options) ? current : options);
+        })
+        .catch((error) => {
+          if (!alive) return;
+          const message = error instanceof Error ? error.message : String(error);
+          setCodeModelRequestError({ backend: codeBackendSelection, message: `Model list request failed: ${message}` });
+        })
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (codeBackendSelection === "claude-subscription" || Date.now() - lastRequestedAt >= intervalMs) refresh();
+    };
+    setCodeModelRequestError(null);
+    refresh();
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    const timer = window.setInterval(refresh, intervalMs);
+    return () => {
+      alive = false;
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.clearInterval(timer);
+    };
+  }, [agentModeNeedsWorkspace, codeBackendSelection]);
+
+  useEffect(() => {
+    if (!codexOptions || !mode.startsWith("claude")) return;
+    if (claudeModelPresets.some((preset) => preset.model === claudeSettings.model && preset.baseUrl === claudeSettings.baseUrl)) return;
+    const fallback = claudeModelPresets[0];
+    if (!fallback) return;
+    setClaudeSettings({
+      model: fallback.model,
+      baseUrl: fallback.baseUrl,
+      reasoningEffort: fallback.defaultReasoningEffort ?? "default",
+    });
+  }, [claudeModelPresets, claudeSettings.baseUrl, claudeSettings.model, codexOptions, mode, setClaudeSettings]);
+
+  useEffect(() => {
+    if (mode !== "codex" || !selectedCodexModel) return;
+    if (selectedCodexModel.model === codexSettings.model) return;
+    setCodexSettings({
+      model: selectedCodexModel.model,
+      reasoningEffort: selectedCodexModel.defaultReasoningEffort,
+    });
+  }, [codexSettings.model, mode, selectedCodexModel, setCodexSettings]);
 
   useEffect(() => {
     return () => {
@@ -459,14 +628,13 @@ export function CommandDock() {
               reasoningEffort: options.defaultReasoningEffort,
               sandbox: options.defaultSandbox,
               fullAccessApproved: options.defaultSandbox === "danger-full-access",
-              workspace: options.defaultWorkspace,
-              timeoutMs: options.defaultTimeoutMs,
             });
+            setAgentWorkspace(options.defaultWorkspace);
           } else if (!inherited.codexSettings.workspace.trim()) {
-            setCodexSettings({ workspace: options.defaultWorkspace });
+            setAgentWorkspace(options.defaultWorkspace);
           }
-          if (!inherited?.claudeSettings?.workspace.trim()) {
-            setClaudeSettings({ workspace: options.defaultWorkspace });
+          if (!useAtlasStore.getState().claudeSettings.workspace.trim()) {
+            setAgentWorkspace(options.defaultWorkspace);
           }
         })
         .catch(() => {
@@ -500,12 +668,24 @@ export function CommandDock() {
     if (aboutDemoConfig) return;
     const trimmed = value.trim();
     if (!trimmed) return;
+    const recordBlockedSubmission = (message: string) => {
+      setVoiceError(message);
+      clearCommandDraftPersistTimer();
+      latestCommandDraftRef.current = { value: "", mode };
+      setValue("");
+      clearPersistedCommandDraft();
+      if (mode !== "note") recordAiSubmissionError(trimmed, mode, message);
+    };
     if (agentModeNeedsWorkspace && !agentWorkspacePath) {
-      setVoiceError(formatAppMessage("status.realtime.workRootRequired"));
+      recordBlockedSubmission(formatAppMessage("status.realtime.workRootRequired"));
       return;
     }
     if (agentModeNeedsWorkspace && !agentRepositoryReady) {
-      setVoiceError(agentRepositoryBlockReason);
+      recordBlockedSubmission(agentRepositoryBlockReason);
+      return;
+    }
+    if (modelDiscoveryBlocked) {
+      recordBlockedSubmission(modelDiscoveryBlockReason);
       return;
     }
     setVoiceError("");
@@ -1017,7 +1197,9 @@ export function CommandDock() {
     codexWorkRootMissing
       ? `${modeLabel(mode)} Work root required`
       : agentRepositoryBlocked
-        ? (agentWorkspaceLoading ? "Inspecting repository..." : agentRepositoryBlockReason)
+        ? (agentWorkspaceLoading ? "Inspecting workspace..." : agentRepositoryBlockReason)
+      : modelDiscoveryBlocked
+        ? `Model error / ${modelDiscoveryBlockReason}`
       : voiceError || (voiceButtonState !== "idle" ? voiceStatusLabel(voiceButtonState) : micLive ? `Voice Partner ${voiceState}` : PUBLIC_SERVICE_MODE ? `AI / ${selectedNode?.status ?? "waiting"}` : `${modeLabel(mode)} / ${selectedNode?.status ?? "waiting"}`);
 
   return (
@@ -1092,7 +1274,7 @@ export function CommandDock() {
           }
         />
       </label>
-      <button className="send-button" type="submit" aria-label={formatAppMessage("ui.commandDock.sendInstruction.797c542")} disabled={!value.trim() || codexWorkRootMissing || agentRepositoryBlocked}>
+      <button className="send-button" type="submit" aria-label={formatAppMessage("ui.commandDock.sendInstruction.797c542")} disabled={!value.trim()}>
         <SendHorizonal size={18} />
       </button>
       {contextPreviewOpen && contextPlan ? (
@@ -1107,7 +1289,7 @@ export function CommandDock() {
                   turns: contextPlan.stats.conversationTurnCount,
                   summary: contextPlan.stats.droppedTurnCount ? formatAppMessage("dynamic.summarized", { count: contextPlan.stats.droppedTurnCount }) : "",
                   trimmed: contextPlan.stats.truncated ? formatAppMessage("ui.commandDock.trimmedToBudget.c9aeaa4") : "",
-                })}
+                  })}
               </span>
               <button type="button" className="icon-button ghost" onClick={() => setContextPreviewOpen(false)} aria-label={formatAppMessage("ui.commandDock.closeContextPreview.eb189c5")}>
                 ×
@@ -1233,7 +1415,10 @@ export function CommandDock() {
           <label className="context-option-field">
             <span>{<I18nText id="ui.commandDock.model.11440c3" />}</span>
             <select
-              value={codexSettings.model}
+              className={modelDiscoveryBlocked ? "model-discovery-error" : ""}
+              value={selectedCodexModel?.model ?? "__model_error__"}
+              disabled={!selectedCodexModel}
+              title={modelDiscoveryBlocked ? modelDiscoveryBlockReason : "Models reported by the installed Codex CLI."}
               onFocus={() => setCommandInputEditing(true)}
               onBlur={() => setCommandInputEditing(false)}
               onChange={(event) => {
@@ -1246,6 +1431,9 @@ export function CommandDock() {
                 });
               }}
             >
+              {!selectedCodexModel ? (
+                <option value="__model_error__">{`ERROR: ${shortModelError(modelDiscoveryBlockReason)}`}</option>
+              ) : null}
               {codexModelOptions.map((option) => (
                 <option key={option.model} value={option.model}>
                   {option.displayName}
@@ -1292,7 +1480,8 @@ export function CommandDock() {
               onBlur={() => setCommandInputEditing(false)}
               onChange={(event) => {
                 setVoiceError("");
-                setCodexSettings({ workspace: event.target.value });
+                // Shared across providers so switching Codex/Claude keeps it.
+                setAgentWorkspace(event.target.value);
               }}
               placeholder={formatAppMessage("ui.commandDock.workspaceFromSelectedNodeOr.f430333")}
             />
@@ -1306,8 +1495,8 @@ export function CommandDock() {
               onChange={(event) => setCodexSettings({ workspaceMode: event.target.value === "worktree" ? "worktree" : "shared" })}
               title="Run in the current checkout or create an isolated Git worktree for this mission."
             >
-              <option value="shared">Current checkout</option>
-              <option value="worktree">Mission worktree</option>
+              <option value="shared">Current folder</option>
+              <option value="worktree" disabled={inspectedWorkspaceKind === "directory"}>Mission worktree</option>
             </select>
           </label>
           <AgentSessionControl
@@ -1322,21 +1511,38 @@ export function CommandDock() {
           <label className="context-option-field">
             <span>{<I18nText id="ui.commandDock.preset.a4b55c6" />}</span>
             <select
-              value={selectedClaudePreset}
+              className={modelDiscoveryBlocked ? "model-discovery-error" : ""}
+              value={activeClaudePreset ? selectedClaudePreset : "__model_error__"}
+              disabled={!claudeModelPresets.length}
               onFocus={() => setCommandInputEditing(true)}
               onBlur={() => setCommandInputEditing(false)}
               onChange={(event) => {
                 const preset = claudeModelPresets.find((item) => item.id === event.target.value);
-                if (preset) setClaudeSettings({ model: preset.model, baseUrl: preset.baseUrl });
+                if (!preset) return;
+                const allowed = preset.supportedReasoningEfforts ?? [];
+                setClaudeSettings({
+                  model: preset.model,
+                  baseUrl: preset.baseUrl,
+                  ...(allowed.length && !allowed.includes(claudeSettings.reasoningEffort)
+                    ? { reasoningEffort: preset.defaultReasoningEffort ?? "default" }
+                    : {}),
+                });
               }}
-              title={formatAppMessage("ui.commandDock.claudeCodeProviderAndModel.01362ae")}
+              title={modelDiscoveryBlocked ? modelDiscoveryBlockReason : formatAppMessage("ui.commandDock.claudeCodeProviderAndModel.01362ae")}
             >
+              {!activeClaudePreset ? (
+                <option value="__model_error__">{`ERROR: ${shortModelError(modelDiscoveryBlockReason)}`}</option>
+              ) : null}
+              {claudeApiDiscoveryErrors.map(([label, discovery]) => (
+                <option key={`error:${label}`} value={`error:${label}`} disabled>
+                  {`ERROR: ${label} / ${shortModelError(discovery.detail)}`}
+                </option>
+              ))}
               {claudeModelPresets.map((preset) => (
                 <option key={preset.id} value={preset.id}>
                   {preset.label}
                 </option>
               ))}
-              <option value="custom">{<I18nText id="ui.commandDock.custom.f808ea5" />}</option>
             </select>
           </label>
           <label className="context-option-field">
@@ -1377,7 +1583,11 @@ export function CommandDock() {
               value={claudeSettings.workspace}
               onFocus={() => setCommandInputEditing(true)}
               onBlur={() => setCommandInputEditing(false)}
-              onChange={(event) => setClaudeSettings({ workspace: event.target.value })}
+              onChange={(event) => {
+                setVoiceError("");
+                // Shared across providers so switching Codex/Claude keeps it.
+                setAgentWorkspace(event.target.value);
+              }}
               placeholder={formatAppMessage("ui.commandDock.optionalProjectPath.6fcecc8")}
             />
           </label>
@@ -1390,8 +1600,8 @@ export function CommandDock() {
               onChange={(event) => setClaudeSettings({ workspaceMode: event.target.value === "worktree" ? "worktree" : "shared" })}
               title="Run in the current checkout or create an isolated Git worktree for this mission."
             >
-              <option value="shared">Current checkout</option>
-              <option value="worktree">Mission worktree</option>
+              <option value="shared">Current folder</option>
+              <option value="worktree" disabled={inspectedWorkspaceKind === "directory"}>Mission worktree</option>
             </select>
           </label>
           {claudeSettings.authMode === "subscription" ? (
@@ -1416,16 +1626,6 @@ export function CommandDock() {
             onFocus={() => setCommandInputEditing(true)}
             onBlur={() => setCommandInputEditing(false)}
           />
-          <ContextNumberControl
-            className="claude-timeout-field"
-            label="Timeout (min)"
-            value={Math.round(claudeSettings.timeoutMs / 60000)}
-            min={1}
-            max={120}
-            onChange={(minutes) => setClaudeSettings({ timeoutMs: minutes * 60000 })}
-            onFocus={() => setCommandInputEditing(true)}
-            onBlur={() => setCommandInputEditing(false)}
-          />
             </>
           )}
         </div>
@@ -1433,28 +1633,49 @@ export function CommandDock() {
       {agentModeNeedsWorkspace ? (
         <div className={`agent-repository-guard ${agentWorkspaceMatches ? "is-ready" : "is-blocked"}`}>
           <div>
-            <strong>{agentWorkspaceLoading ? "Inspecting repository..." : agentWorkspaceInfo?.repositoryName || "Repository not verified"}</strong>
-            <span title={agentWorkspaceInfo?.gitRoot || agentWorkspacePath}>
+            <strong>{agentWorkspaceLoading ? "Inspecting workspace..." : agentWorkspaceInfo?.repositoryName || "Workspace not verified"}</strong>
+            <span title={inspectedWorkspaceRoot || agentWorkspacePath}>
               {agentWorkspaceInfo?.available
                 ? `${agentWorkspaceInfo.branch || "detached"} @ ${(agentWorkspaceInfo.head || "").slice(0, 10)} - ${agentWorkspaceInfo.dirtyCount} changed - ${agentWorkspaceInfo.gitRoot}`
+                : agentWorkspaceInfo?.workspaceAvailable
+                  ? `Local folder - Git features unavailable - ${agentWorkspaceInfo.resolvedWorkspace}`
                 : agentWorkspaceError || agentWorkspacePath || "Choose a work root"}
             </span>
           </div>
-          {agentWorkspaceInfo?.available && !agentWorkspaceMatches ? (
+          {restorableAgentWorkspace ? (
+            <button
+              type="button"
+              className="agent-btn"
+              title={`Restore ${restorableAgentWorkspace.gitRoot} and verify its saved workspace binding.`}
+              onClick={() => {
+                setAgentWorkspace(restorableAgentWorkspace.gitRoot);
+                setVoiceError("");
+              }}
+            >
+              <RotateCcw aria-hidden="true" size={13} />
+              Restore bound work root
+            </button>
+          ) : null}
+          {agentWorkspaceInfo?.workspaceAvailable && !agentWorkspaceMatches ? (
             <button
               type="button"
               className="agent-btn"
               onClick={() => {
                 bindAgentWorkspaceToSelectedNode({
-                  gitRoot: agentWorkspaceInfo.gitRoot,
+                  gitRoot: inspectedWorkspaceRoot,
+                  workspaceKind: inspectedWorkspaceKind === "directory" ? "directory" : "git",
                   repositoryName: agentWorkspaceInfo.repositoryName,
-                  repositoryId: agentWorkspaceInfo.repositoryId,
+                  repositoryId: agentWorkspaceInfo.available ? agentWorkspaceInfo.repositoryId : undefined,
                   boundAt: new Date().toISOString(),
                 });
                 setVoiceError("");
               }}
             >
-              {inheritedAgentWorkspace ? "Rebind this branch" : "Bind this branch"}
+              {inheritedAgentWorkspace
+                ? "Rebind this branch"
+                : inspectedWorkspaceKind === "directory"
+                  ? "Bind this folder"
+                  : "Bind this branch"}
             </button>
           ) : null}
           {agentWorkspaceMatches ? <span className="agent-repository-ready">Bound</span> : null}
@@ -1769,7 +1990,8 @@ function fallbackChatServices(): ChatOptionsResult["services"] {
     },
     {
       id: "anthropic",
-      label: "Opus",
+      // Routes every Anthropic Claude model, not only Opus.
+      label: "Claude",
       configured: false,
       defaultModel: "claude-opus-4-8",
       defaultReasoningEffort: "default",
@@ -1856,6 +2078,18 @@ function getClaudePresetId(
   const normalizedModel = model.trim();
   const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
   return presets.find((preset) => preset.model === normalizedModel && preset.baseUrl === normalizedBaseUrl)?.id ?? "custom";
+}
+
+function shortModelError(value: string) {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text) return "model list unavailable";
+  return text.length > 72 ? `${text.slice(0, 69)}...` : text;
+}
+
+function codeOptionsEqual(left: CodexOptionsResult | null, right: CodexOptionsResult) {
+  if (!left) return false;
+  const withoutCheckTime = (_key: string, value: unknown) => _key === "checkedAt" ? "" : value;
+  return JSON.stringify(left, withoutCheckTime) === JSON.stringify(right, withoutCheckTime);
 }
 
 function normalizeWorkspacePath(value: string) {

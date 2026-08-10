@@ -8,6 +8,7 @@ import { formatAppMessage } from "../i18n/format";
 import { currentAppLocale } from "../i18n/locales";
 
 const PROVIDER_USAGE_SELECTION_KEY = "mind-atlas-provider-usage-selection-v1";
+const PROVIDER_USAGE_CHANGED_EVENT = "mind-atlas-provider-usage-changed";
 
 export function ProviderUsagePanel({ selectedVendor = "" }: { selectedVendor?: string }) {
   const { locale } = useMindAtlasLocale();
@@ -50,13 +51,16 @@ export function ProviderUsagePanel({ selectedVendor = "" }: { selectedVendor?: s
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void refresh();
     };
+    const refreshAfterProviderRun = () => void refresh(true);
     const timer = window.setInterval(refreshWhenVisible, 60_000);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     window.addEventListener("pageshow", refreshWhenVisible);
+    window.addEventListener(PROVIDER_USAGE_CHANGED_EVENT, refreshAfterProviderRun);
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
       window.removeEventListener("pageshow", refreshWhenVisible);
+      window.removeEventListener(PROVIDER_USAGE_CHANGED_EVENT, refreshAfterProviderRun);
     };
   }, [aboutDemoUsage]);
 

@@ -247,6 +247,11 @@ export class AgentRunStore {
         if (event?.kind !== "usage_updated" || (scope && usage.scope !== scope)) continue;
         if (authMode && usage.authMode && usage.authMode !== authMode) continue;
         const key = String(usage.rateLimitType || usage.scope || "default");
+        // Older Claude Code builds sometimes emit an `allowed` allowance event
+        // without utilization. Do not let that empty sample hide the newest
+        // useful percentage from an earlier run. A rejected sample remains
+        // authoritative even when the provider omits utilization.
+        if (usage.scope === "account_plan" && !hasNumericUsageValue(usage.utilization) && !isRejectedUsageStatus(usage.status)) continue;
         if (!found.has(key)) found.set(key, { ...event, manifestAuthMode: manifest.authMode });
       }
     }
@@ -428,6 +433,15 @@ export class AgentRunStore {
       return null;
     }
   }
+}
+
+function hasNumericUsageValue(value) {
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+}
+
+function isRejectedUsageStatus(value) {
+  const status = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return ["rejected", "blocked", "denied", "exceeded", "exhausted", "rate_limited", "limit_reached"].includes(status);
 }
 
 export class RunHandle {

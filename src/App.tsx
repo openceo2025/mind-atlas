@@ -20,12 +20,6 @@ import { searchAtlasNodes } from "./search/nodeSearch";
 import { createTextOnlyNotebookRoot, textOnlyNotebookSizeBytes } from "./notebookTextOnly";
 import { createNotebookFromTemplate, NOTEBOOK_TEMPLATES, type NotebookTemplateId } from "./notebookTemplates";
 import { emitOnboardingEvent, useOnboarding } from "./onboarding/useOnboarding";
-import {
-  createTutorialPracticeNotebook,
-  getTutorialPracticeOverview,
-  TUTORIAL_PRACTICE_ROOT_ID,
-  TUTORIAL_PRACTICE_TARGET_ID,
-} from "./onboarding/tutorialNotebook";
 import type { OutlineNodeInput } from "./outline/atlasOutline";
 import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
 import { getAtlasLayoutModeLabel, isAtlasLayoutMode, type AtlasLayoutMode } from "./layout/atlasLayout";
@@ -206,8 +200,6 @@ export default function App() {
   const analyticsLastMeaningfulAtRef = useRef(0);
   const analyticsLastUserInputAtRef = useRef(0);
   const analyticsTutorialStartedRef = useRef(false);
-  const tutorialPracticeAppliedRef = useRef("");
-  const tutorialTrackedStepsRef = useRef(new Set<string>());
   const explicitSaveRunningRef = useRef(false);
   const publicServiceMode = isHostedServiceMode();
   useEffect(() => {
@@ -325,7 +317,7 @@ export default function App() {
   const focusPanelOpen = outlineEditorOpen || selectedNodeId !== atlasRoot.id;
   const operationTargets = useMemo(() => getOperationTargets(selectedPath), [selectedPath]);
   const tutorialFallbackChildParentId =
-    showTutorialOperationFallback ? TUTORIAL_PRACTICE_TARGET_ID : selectedNodeId;
+    showTutorialOperationFallback && selectedNodeId === atlasRoot.id ? atlasRoot.children[0]?.id ?? selectedNodeId : selectedNodeId;
   const tutorialFallbackChildParentPath = useMemo(
     () => findNodePath(atlasRoot, tutorialFallbackChildParentId) ?? selectedPath,
     [atlasRoot, selectedPath, tutorialFallbackChildParentId],
@@ -338,16 +330,10 @@ export default function App() {
         shortcut: "Tab",
         icon: <GitBranch size={18} />,
         onClick: () => {
-          const tutorialChildStep = onboarding.tutorialStep === "childNodeCreated";
-          const childId = addChildNode(tutorialFallbackChildParentId, "", { requestEdit: !tutorialChildStep });
+          const childId = addChildNode(tutorialFallbackChildParentId);
           if (childId) {
-            if (!tutorialChildStep) {
-              requestBodyEdit(childId);
-              setMobilePanelTab("editor");
-            } else if (!tutorialTrackedStepsRef.current.has("add_child")) {
-              tutorialTrackedStepsRef.current.add("add_child");
-              trackProductEvent("tutorial_step_completed", { step: "add_child" });
-            }
+            requestBodyEdit(childId);
+            setMobilePanelTab("editor");
             emitOnboardingEvent("child-node-created", { childDepth: tutorialFallbackChildParentPath.length });
           }
         },
@@ -416,7 +402,6 @@ export default function App() {
       operationTargets.nextSiblingId,
       operationTargets.parentId,
       operationTargets.previousSiblingId,
-      onboarding.tutorialStep,
       requestBodyEdit,
       tutorialFallbackChildParentId,
       tutorialFallbackChildParentPath.length,
@@ -677,64 +662,6 @@ export default function App() {
     if (!persistedUiState?.layoutMode) return;
     setLayoutMode(persistedUiState.layoutMode);
   }, [persistedUiState, setLayoutMode]);
-
-  useEffect(() => {
-    if (aboutDemoConfig || notebookPersistenceStatus !== "ready" || !onboarding.shouldInitializePracticeAtlas) return;
-    const applicationKey = `${locale}:${TUTORIAL_PRACTICE_ROOT_ID}`;
-    if (tutorialPracticeAppliedRef.current === applicationKey) return;
-    tutorialPracticeAppliedRef.current = applicationKey;
-
-    const tutorialRoot = createTutorialPracticeNotebook(t);
-    const overview = getTutorialPracticeOverview(tutorialRoot);
-    analyticsIgnoreNextNotebookRef.current = true;
-    importNotebook(tutorialRoot, tutorialRoot.title, {}, {
-      selectedNodeId: TUTORIAL_PRACTICE_ROOT_ID,
-      requestTitleEdit: false,
-    });
-    setLayoutMode("phyllotaxis");
-    setMobilePanelTab("editor");
-    setMobileWorkspacePanelRevealed(false);
-    useAtlasStore.setState((state) => ({
-      titleEditRequestId: null,
-      bodyEditRequestId: null,
-      focusRequest: {
-        ...overview,
-        nonce: (state.focusRequest?.nonce ?? 0) + 1,
-      },
-    }));
-    onboarding.markPracticeAtlasReady();
-  }, [
-    aboutDemoConfig,
-    importNotebook,
-    locale,
-    notebookPersistenceStatus,
-    onboarding.markPracticeAtlasReady,
-    onboarding.shouldInitializePracticeAtlas,
-    setLayoutMode,
-    t,
-  ]);
-
-  useEffect(() => {
-    if (onboarding.tutorialStep !== "selectNode" || selectedNodeId !== TUTORIAL_PRACTICE_TARGET_ID) return;
-    onboarding.markPracticeNodeSelected();
-    setMobilePanelTab("editor");
-    if (!tutorialTrackedStepsRef.current.has("select_node")) {
-      tutorialTrackedStepsRef.current.add("select_node");
-      trackProductEvent("tutorial_step_completed", { step: "select_node" });
-    }
-  }, [onboarding.markPracticeNodeSelected, onboarding.tutorialStep, selectedNodeId]);
-
-  const handleTutorialNodeTextEdited = useCallback(
-    (nodeId: string) => {
-      if (onboarding.tutorialStep !== "editNode" || nodeId !== TUTORIAL_PRACTICE_TARGET_ID) return;
-      onboarding.markPracticeNodeEdited();
-      if (!tutorialTrackedStepsRef.current.has("edit_node")) {
-        tutorialTrackedStepsRef.current.add("edit_node");
-        trackProductEvent("tutorial_step_completed", { step: "edit_node" });
-      }
-    },
-    [onboarding.markPracticeNodeEdited, onboarding.tutorialStep],
-  );
 
   useEffect(() => {
     if (!onboarding.showRootPulse || layoutMode === "phyllotaxis") return;
@@ -1710,8 +1637,6 @@ export default function App() {
     setTutorialStartSpaceDueAt(null);
     setTutorialCompletionStep(null);
     setStartSpaceOpen(false);
-    tutorialPracticeAppliedRef.current = "";
-    tutorialTrackedStepsRef.current.clear();
     analyticsTutorialStartedRef.current = false;
     onboarding.startTutorialMode();
     setOutlineEditorOpen(false);
@@ -1997,12 +1922,7 @@ export default function App() {
       />
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
       {onboarding.message ? (
-        <div
-          className="onboarding-message tutorial-step-message"
-          data-tutorial-step={onboarding.tutorialStep ?? undefined}
-          role="status"
-          aria-live="polite"
-        >
+        <div className="onboarding-message" role="status" aria-live="polite">
           {onboarding.message}
         </div>
       ) : null}
@@ -2444,11 +2364,7 @@ export default function App() {
             </div>
           ) : null}
           <div className="mobile-panel-slot mobile-editor-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "editor"}>
-            <FocusPanel
-              theme={theme}
-              attachmentsEnabled={attachmentsEnabled}
-              onNodeTextEdited={handleTutorialNodeTextEdited}
-            />
+            <FocusPanel theme={theme} attachmentsEnabled={attachmentsEnabled} />
           </div>
           {mobileOperationPanelTabAvailable ? (
             <div className="mobile-panel-slot mobile-operation-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "operation"}>

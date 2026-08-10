@@ -8,10 +8,11 @@
 // Mode: local-only.
 
 import { PanelRightOpen } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { findAgentRunByClientId, isAgentRuntimeAvailable, listAgentRuns } from "../../agentRuntime/runtimeClient";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { acknowledgeAgentRuntimeRuns, findAgentRunByClientId, isAgentRuntimeAvailable, listAgentRuns } from "../../agentRuntime/runtimeClient";
 import type { AgentRunManifest } from "../../agentRuntime/types";
-import { useAtlasStore } from "../../store/atlasStore";
+import { findNode, useAtlasStore } from "../../store/atlasStore";
+import type { AtlasNode } from "../../types";
 import { AgentRunWorkspace } from "./AgentRunWorkspace";
 
 const ACTIVE_STATUSES = new Set(["queued", "starting", "running", "waiting_for_approval", "waiting_for_user_input"]);
@@ -21,8 +22,12 @@ const LAST_RUN_STORAGE_KEY = "mind-atlas-agent-workspace-last-run-v1";
 export function AgentRunWorkspaceHost() {
   const clientRunId = useAtlasStore((state) => state.agentWorkspaceRunId);
   const selectedRunId = useAtlasStore((state) => state.agentWorkspaceSelectedRunId);
+  const atlasRoot = useAtlasStore((state) => state.atlasRoot);
+  const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const visible = useAtlasStore((state) => state.agentWorkspaceVisible);
+  const selectAgentWorkspaceRun = useAtlasStore((state) => state.selectAgentWorkspaceRun);
   const openAgentWorkspaceRun = useAtlasStore((state) => state.openAgentWorkspaceRun);
+  const focusNode = useAtlasStore((state) => state.focusNode);
   const hideAgentWorkspace = useAtlasStore((state) => state.hideAgentWorkspace);
   const injection = useAtlasStore((state) => state.agentWorkspaceInjection);
   const [resolvedClientRunId, setResolvedClientRunId] = useState("");
@@ -96,7 +101,70 @@ export function AgentRunWorkspaceHost() {
     || runs[0]?.runId
     || "";
   const activeCount = runs.filter((entry) => ACTIVE_STATUSES.has(entry.status)).length;
-  const unreadCount = runs.filter((entry) => TERMINAL_STATUSES.has(entry.status) && !entry.acknowledgedAt).length;
+  const unreadRuns = useMemo(
+    () => runs.filter((entry) => TERMINAL_STATUSES.has(entry.status) && !entry.acknowledgedAt),
+    [runs],
+  );
+  const unreadCount = unreadRuns.length;
+  const selectedNode = useMemo(() => findNode(atlasRoot, selectedNodeId), [atlasRoot, selectedNodeId]);
+  const selectedNodeRunId = useMemo(
+    () => findRunIdForNode(selectedNode, runs),
+    [runs, selectedNode],
+  );
+  const previousSyncState = useRef({ selectedNodeId, shownRunId, visible });
+
+  // Reconcile both directions in one effect so simultaneous updates cannot
+  // fight. A run change wins first and focuses its request node. A later node
+  // change may select a linked run; unrelated notes leave the current run as-is.
+  useEffect(() => {
+    const previous = previousSyncState.current;
+    const runChanged = Boolean(shownRunId && shownRunId !== previous.shownRunId);
+    const nodeChanged = selectedNodeId !== previous.selectedNodeId;
+    const workspaceOpened = visible && !previous.visible;
+    previousSyncState.current = { selectedNodeId, shownRunId, visible };
+
+    if (visible && (runChanged || workspaceOpened)) {
+      if (selectedNodeRunId === shownRunId) return;
+      const manifest = runs.find((entry) => entry.runId === shownRunId);
+      const linkedNodeId = manifest ? findNodeIdForRun(atlasRoot, manifest) : "";
+      if (linkedNodeId && linkedNodeId !== selectedNodeId) focusNode(linkedNodeId);
+      return;
+    }
+
+    if (nodeChanged && selectedNodeRunId && selectedNodeRunId !== shownRunId) {
+      rememberRunId(selectedNodeRunId);
+      setLastStoredRunId(selectedNodeRunId);
+      selectAgentWorkspaceRun(selectedNodeRunId);
+    }
+  }, [atlasRoot, focusNode, runs, selectAgentWorkspaceRun, selectedNodeId, selectedNodeRunId, shownRunId, visible]);
+
+  const selectRunFromWorkspace = useCallback((nextRunId: string) => {
+    rememberRunId(nextRunId);
+    setLastStoredRunId(nextRunId);
+    openAgentWorkspaceRun(nextRunId);
+  }, [openAgentWorkspaceRun]);
+
+  const markRunsRead = useCallback(async (runIds: string[]) => {
+    const wanted = runIds.filter(Boolean);
+    if (!wanted.length) return;
+    try {
+      await acknowledgeAgentRuntimeRuns(wanted);
+      await refreshRuns();
+    } catch {
+      // Acknowledgement is a housekeeping step; a failure just leaves the
+      // badge as it was and retention keeps the run until next time.
+    }
+  }, [refreshRuns]);
+
+  // A finished run the user is actually looking at has been read. Without this
+  // the badge only ever grew and retention could never reclaim a run, because
+  // it deletes acknowledged runs only.
+  useEffect(() => {
+    if (!visible || !shownRunId) return;
+    const shown = runs.find((entry) => entry.runId === shownRunId);
+    if (!shown || !TERMINAL_STATUSES.has(shown.status) || shown.acknowledgedAt) return;
+    void markRunsRead([shownRunId]);
+  }, [markRunsRead, runs, shownRunId, visible]);
 
   if (!isAgentRuntimeAvailable()) return null;
 
@@ -146,15 +214,41 @@ export function AgentRunWorkspaceHost() {
             title: entry.title,
           })),
           activeRunId: shownRunId,
-          onSelect: (nextRunId) => {
-            rememberRunId(nextRunId);
-            setLastStoredRunId(nextRunId);
-            openAgentWorkspaceRun(nextRunId);
-          },
+          onSelect: selectRunFromWorkspace,
+          unreadCount,
+          onMarkAllRead: () => void markRunsRead(unreadRuns.map((entry) => entry.runId)),
         }
         : null}
     />
   );
+}
+
+function findRunIdForNode(node: AtlasNode | undefined, runs: AgentRunManifest[]) {
+  if (!node) return "";
+  const runtimeRunId = node.agentExecution?.runtimeRunId || "";
+  if (runtimeRunId && runs.some((entry) => entry.runId === runtimeRunId)) return runtimeRunId;
+  const clientRunId = node.agentExecution?.clientRunId || node.aiRunId || "";
+  return runs.find((entry) => entry.clientRunId === clientRunId)?.runId ?? "";
+}
+
+function findNodeIdForRun(root: AtlasNode, manifest: AgentRunManifest) {
+  if (manifest.requestNodeId && findNode(root, manifest.requestNodeId)) return manifest.requestNodeId;
+  const linkedNode = findLinkedAgentNode(root, manifest.runId, manifest.clientRunId);
+  if (linkedNode) return linkedNode.id;
+  return manifest.sourceNodeId && findNode(root, manifest.sourceNodeId) ? manifest.sourceNodeId : "";
+}
+
+function findLinkedAgentNode(node: AtlasNode, runtimeRunId: string, clientRunId: string): AtlasNode | undefined {
+  if (
+    node.agentExecution?.runtimeRunId === runtimeRunId
+    || node.agentExecution?.clientRunId === clientRunId
+    || node.aiRunId === clientRunId
+  ) return node;
+  for (const child of node.children) {
+    const linked = findLinkedAgentNode(child, runtimeRunId, clientRunId);
+    if (linked) return linked;
+  }
+  return undefined;
 }
 
 function readLastRunId() {
