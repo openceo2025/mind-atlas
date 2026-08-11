@@ -137,18 +137,51 @@ async function verifyClaudeAuthRecovery(baseRoot) {
   check("the recovery window says the original request will retry", script.includes("retry automatically"), script);
 
   let loginWindows = 0;
+  let spawnedCommand = "";
+  let spawnedArgs = [];
+  let credentialStamp = "before";
   const recover = createClaudeAuthRecovery({
     platform: "win32",
     buildCommand: (args) => ({ command: "claude.exe", args }),
-    spawnProcess: () => {
+    readCredentialStamp: () => credentialStamp,
+    spawnProcess: (command, args) => {
       loginWindows += 1;
+      spawnedCommand = command;
+      spawnedArgs = args;
       const child = new EventEmitter();
+      // A real login rewrites the stored credential.
+      credentialStamp = "after";
       setTimeout(() => child.emit("close", 0), 10);
       return child;
     },
   });
   const [firstLogin, secondLogin] = await Promise.all([recover({ workspace: baseRoot }), recover({ workspace: baseRoot })]);
   check("concurrent failures share one login window", loginWindows === 1 && firstLogin.ok && secondLogin.ok, { loginWindows, firstLogin, secondLogin });
+
+  // `detached: true` on Windows gives the child NO console, so `claude auth
+  // login` had nowhere to prompt and exited instantly. Only `cmd /c start`
+  // creates a real console window.
+  check("the Windows login window is created with cmd start", /cmd/i.test(spawnedCommand) && spawnedArgs.includes("start"), { spawnedCommand, spawnedArgs });
+  check("the launcher waits for the login window to close", spawnedArgs.includes("/wait"), spawnedArgs);
+
+  // A clean exit code is not proof of a login: the window can close without the
+  // user completing the browser flow. Retrying then hits the same 401.
+  {
+    let stamp = "unchanged";
+    const recoverNoLogin = createClaudeAuthRecovery({
+      platform: "win32",
+      buildCommand: (args) => ({ command: "claude.exe", args }),
+      readCredentialStamp: () => stamp,
+      spawnProcess: () => {
+        const child = new EventEmitter();
+        setTimeout(() => child.emit("close", 0), 10);
+        return child;
+      },
+    });
+    const cancelled = await recoverNoLogin({ workspace: baseRoot });
+    check("exit 0 without a new credential is not a success", cancelled.ok === false, cancelled);
+    check("the failure tells the user what to run", /claude auth login/.test(cancelled.detail ?? ""), cancelled.detail);
+  }
 
   const markerPath = join(baseRoot, "fake-claude-authenticated.marker");
   const fakeClaudePath = join(baseRoot, "fake-claude-auth.mjs");

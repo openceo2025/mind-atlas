@@ -2968,30 +2968,31 @@ async function verifyTutorialModeMenuActions(browser) {
     }
   }
   if (!tutorialNodeCreated) throw new Error("Tutorial root node was not created after three long-press attempts.");
+  await clickPage.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("mindatlas:onboarding-event", { detail: { type: "node-editor-opened" } }));
+    window.dispatchEvent(new CustomEvent("mindatlas:onboarding-event", { detail: { type: "node-text-edited" } }));
+  });
+  const tutorialOperationPanel = clickPage.locator(".operation-panel-desktop");
+  await tutorialOperationPanel.waitFor();
+  const addChildButton = tutorialOperationPanel.getByRole("button", { name: "Add child" });
+  await addChildButton.click();
+  await addChildButton.click();
   const completionStartedAt = Date.now();
-  for (const detail of [
-    { type: "pan" },
-    { type: "zoom" },
-    { type: "node-drag" },
-    { type: "child-node-created", childDepth: 2 },
-  ]) {
-    await clickPage.evaluate((eventDetail) => {
-      window.dispatchEvent(new CustomEvent("mindatlas:onboarding-event", { detail: eventDetail }));
-    }, detail);
-    await clickPage.waitForTimeout(120);
-  }
   await clickPage.waitForFunction(() => {
     const raw = window.localStorage.getItem("mind-atlas-onboarding-v1");
     if (!raw) return false;
     const progress = JSON.parse(raw);
-    return progress.childNodeCreated === true && progress.spaceBasicsCompleted === true;
+    return progress.nodeEditCompleted === true && progress.nodeCountReached === true && progress.spaceBasicsCompleted === false;
   });
   const tutorialCompleteDialog = clickPage.getByRole("alertdialog", { name: "Tutorial complete" });
   const tutorialNextDialog = clickPage.getByRole("alertdialog", { name: "How would you like to begin?" });
   const startSpaceDialog = clickPage.getByRole("dialog", { name: "Choose how to start" });
   await clickPage.waitForTimeout(1000);
   if ((await tutorialCompleteDialog.count()) || (await tutorialNextDialog.count()) || (await startSpaceDialog.count())) {
-    throw new Error("Tutorial completion flow opened before the child-node completion feedback was visible for five seconds.");
+    throw new Error("Tutorial completion flow opened before the three-node completion feedback was visible for five seconds.");
+  }
+  if ((await clickPage.locator(".minimap").count()) || (await clickPage.getByLabel("Open atlas menu").count())) {
+    throw new Error("Main UI unlocked before the tutorial-complete acknowledgement.");
   }
   await tutorialCompleteDialog.waitFor({ timeout: 7000 });
   const templateDelayMs = Date.now() - completionStartedAt;
@@ -3003,7 +3004,13 @@ async function verifyTutorialModeMenuActions(browser) {
   }
   await tutorialCompleteDialog.getByRole("button", { name: "OK", exact: true }).click();
   await tutorialCompleteDialog.waitFor({ state: "detached" });
-  await tutorialNextDialog.waitFor();
+  await clickPage.locator(".minimap").waitFor();
+  await clickPage.getByLabel("Open atlas menu").waitFor();
+  await clickPage.waitForTimeout(350);
+  if (await tutorialNextDialog.count()) {
+    throw new Error("The next-step choice covered the main UI before its unlock animation could be seen.");
+  }
+  await tutorialNextDialog.waitFor({ timeout: 2200 });
   if (await startSpaceDialog.count()) {
     throw new Error("Template chooser should remain closed until the user chooses to use a template.");
   }
@@ -3011,7 +3018,7 @@ async function verifyTutorialModeMenuActions(browser) {
   await tutorialNextDialog.getByRole("button", { name: "Continue with these nodes", exact: true }).click();
   await tutorialNextDialog.waitFor({ state: "detached" });
   const preservedTutorialNodeCount = await readPersistedNodeCount(clickPage);
-  if (preservedTutorialNodeCount < 2) {
+  if (preservedTutorialNodeCount < 4) {
     throw new Error(`Tutorial no-template continuation should preserve created nodes, got ${preservedTutorialNodeCount}.`);
   }
   await clickContext.close();
@@ -3045,6 +3052,9 @@ async function seedCompletedOnboarding(page, { aiUnlocked = true } = {}) {
         version: 1,
         firstRun: false,
         rootNodeCreated: true,
+        nodeEditorOpened: true,
+        nodeEditCompleted: true,
+        nodeCountReached: true,
         pan: true,
         zoom: true,
         nodeDrag: true,

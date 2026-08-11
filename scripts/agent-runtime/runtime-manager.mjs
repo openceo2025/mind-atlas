@@ -310,7 +310,7 @@ export class AgentRuntimeManager {
 
     if (route === richRoute && adapter) {
       try {
-        const mode = normalizeSessionMode(request.sessionMode, request.session, provider);
+        const mode = normalizeSessionMode(request.sessionMode, request.session);
         await adapter.startRun(mode, providerRequest, sink);
         await handle.setStatus("running");
       } catch (error) {
@@ -594,13 +594,13 @@ export class AgentRuntimeManager {
   }
 }
 
-function normalizeSessionMode(mode, session, provider) {
+function normalizeSessionMode(mode, session) {
   if (mode === "new" || !session) return "new";
   if (mode === "fork") return "fork";
-  if (mode === "resume") return "resume";
-  // Preserved policy: Codex continues the branch tip, Claude forks its nearest
-  // ancestor session so stored ids stay immutable branch-point snapshots.
-  return provider === "codex" ? "resume" : "fork";
+  // Default to resuming the branch session. Forking is reserved for a genuine
+  // branch divergence, which the caller detects and requests explicitly; a
+  // fork on every run mints a new session and discards the prompt cache.
+  return "resume";
 }
 
 /**

@@ -29,6 +29,12 @@ export interface ContextEngineOptions {
   maxPinnedNodes?: number;
   maxChildLines?: number;
   maxSiblingLinesPerLevel?: number;
+  /**
+   * How many of the most recent turns are replayed word for word. Older turns
+   * become one-line summaries: same information, a fraction of the tokens, and
+   * no risk of a long reply being cut mid-sentence.
+   */
+  verbatimTurnLimit?: number;
 }
 
 export interface ContextPlanBlock {
@@ -51,7 +57,12 @@ export interface ContextPlanStats {
 export interface ContextPlan {
   targetNodeId: string;
   breadcrumb: string;
+  /** Stable prefix followed by the volatile tail. */
   contextText: string;
+  /** Everything that stays put across runs on this branch. Cacheable prefix. */
+  stableContextText: string;
+  /** Current node id and body: changes on every run, so it goes last. */
+  volatileContextText: string;
   conversation: ChatContextMessage[];
   stats: ContextPlanStats;
   includedNodeIds: string[];
@@ -71,12 +82,15 @@ const DEFAULT_OPTIONS: Required<Omit<ContextEngineOptions, "pinnedNodeIds">> = {
   maxPinnedNodes: 8,
   maxChildLines: 12,
   maxSiblingLinesPerLevel: 12,
+  verbatimTurnLimit: 4,
 };
 
 export const CONTEXT_BUDGET_PRESETS = {
   chat: { charBudget: 48_000, conversationCharBudget: 28_000 },
-  local: { charBudget: 2_200, conversationCharBudget: 1_200, maxTurnChars: 700, maxNodeBodyChars: 600, maxChildLines: 4, maxSiblingLinesPerLevel: 4 },
-  agent: { charBudget: 16_000, conversationCharBudget: 9_000, maxTurnChars: 3_000, maxNodeBodyChars: 3_000 },
+  local: { charBudget: 2_200, conversationCharBudget: 1_200, maxTurnChars: 700, maxNodeBodyChars: 600, maxChildLines: 4, maxSiblingLinesPerLevel: 4, verbatimTurnLimit: 2 },
+  // Agents re-read the workspace themselves, so the branch conversation is a
+  // pointer, not the payload. Only the last exchange stays verbatim.
+  agent: { charBudget: 16_000, conversationCharBudget: 9_000, maxTurnChars: 3_000, maxNodeBodyChars: 3_000, verbatimTurnLimit: 2 },
 } satisfies Record<string, ContextEngineOptions>;
 
 export function buildContextPlan(
@@ -94,7 +108,12 @@ export function buildContextPlan(
 
   // --- conversation replay -------------------------------------------------
   const allTurns = collectConversationTurns(path);
-  const { turns, dropped } = fitConversationTurns(allTurns, options.conversationCharBudget, options.maxTurnChars);
+  const { turns, dropped } = fitConversationTurns(
+    allTurns,
+    options.conversationCharBudget,
+    options.maxTurnChars,
+    options.verbatimTurnLimit,
+  );
   const conversation: ChatContextMessage[] = mergeAdjacentTurns(
     turns.map((turn) => ({ role: turn.role, content: capText(nodeBodyText(turn.node), options.maxTurnChars) })),
   );
@@ -105,28 +124,31 @@ export function buildContextPlan(
 
   // --- contextText blocks, priority order ----------------------------------
   let remaining = Math.max(600, options.charBudget - conversationChars);
-  const push = (id: string, label: string, lines: string[], nodeIds: string[]) => {
+  // Payload order is stable-first, volatile-last, because provider prompt
+  // caching only reuses an unchanged prefix. Anything that changes on every run
+  // (the current node id, its body, the task) must sit after everything that
+  // stays put across runs on the same branch, or each run invalidates the cache
+  // and pays full price for the whole prompt.
+  const stableSections: string[] = [];
+  const volatileSections: string[] = [];
+  const push = (
+    id: string,
+    label: string,
+    lines: string[],
+    nodeIds: string[],
+    phase: "stable" | "volatile" = "stable",
+  ) => {
     const text = lines.join("\n").trim();
     if (!text) return;
     const block = { id, label, chars: text.length, nodeIds };
     blocks.push(block);
     remaining -= text.length;
     nodeIds.forEach((nodeId) => includedNodeIds.add(nodeId));
-    sections.push(text);
+    (phase === "stable" ? stableSections : volatileSections).push(text);
   };
-  const sections: string[] = [];
   let truncated = dropped.length > 0;
 
   const breadcrumb = path.map((node) => nodeTitleText(node)).join(" > ");
-  push("breadcrumb", "Breadcrumb", [`Position: ${breadcrumb}`, `Current node id: ${target.id}`], [target.id]);
-
-  // Current node body. Skip when the target is already the newest replayed
-  // turn; its body is in the conversation and repeating it wastes budget.
-  if (!lastTurnNode || lastTurnNode.id !== target.id) {
-    const body = capText(nodeBodyText(target), Math.min(options.maxNodeBodyChars, Math.max(600, remaining)));
-    if (body.length < nodeBodyText(target).length) truncated = true;
-    push("current", "Current node", [`## Current node: ${nodeTitleText(target)} (id: ${target.id})`, body], [target.id]);
-  }
 
   // Pinned nodes (multi-selection): explicit user intent, right after target.
   if (pinnedIds.length) {
@@ -230,7 +252,20 @@ export function buildContextPlan(
     if (lines.length) push("attachments", "Attachments", ["## Attachments (metadata)", ...lines], [target.id]);
   }
 
-  const contextText = ["# Mind Atlas notebook context", "", ...sections].join("\n\n").trim();
+  // --- volatile tail: what changes on every run ----------------------------
+  push("breadcrumb", "Breadcrumb", [`Position: ${breadcrumb}`, `Current node id: ${target.id}`], [target.id], "volatile");
+
+  // Current node body. Skip when the target is already the newest replayed
+  // turn; its body is in the conversation and repeating it wastes budget.
+  if (!lastTurnNode || lastTurnNode.id !== target.id) {
+    const body = capText(nodeBodyText(target), Math.min(options.maxNodeBodyChars, Math.max(600, remaining)));
+    if (body.length < nodeBodyText(target).length) truncated = true;
+    push("current", "Current node", [`## Current node: ${nodeTitleText(target)} (id: ${target.id})`, body], [target.id], "volatile");
+  }
+
+  const stableContextText = ["# Mind Atlas notebook context", "", ...stableSections].join("\n\n").trim();
+  const volatileContextText = volatileSections.join("\n\n").trim();
+  const contextText = [stableContextText, volatileContextText].filter(Boolean).join("\n\n").trim();
   const stats: ContextPlanStats = {
     estimatedTokens: Math.ceil((contextText.length + conversationChars) / 3.8),
     contextChars: contextText.length,
@@ -245,6 +280,8 @@ export function buildContextPlan(
     targetNodeId,
     breadcrumb,
     contextText,
+    stableContextText,
+    volatileContextText,
     conversation,
     stats,
     includedNodeIds: [...includedNodeIds],
@@ -255,16 +292,32 @@ export function buildContextPlan(
 // --- agent prompt rendering -------------------------------------------------
 
 export function renderAgentContextPrompt(plan: ContextPlan, task: string): string {
-  const lines: string[] = [];
+  // Stable first, then the conversation (which grows by appending), then the
+  // volatile position and the task. This keeps the prompt prefix identical
+  // across runs on the same branch so provider caching stays warm.
+  const lines: string[] = [plan.stableContextText, "", WORKSPACE_FIRST_NOTE, ""];
   if (plan.conversation.length) {
     lines.push("# Conversation so far (this notebook branch)");
     for (const message of plan.conversation) {
       lines.push(`${message.role === "user" ? "User" : "Assistant"}:`, message.content, "");
     }
   }
-  lines.push(plan.contextText, "", "# Task", task);
+  if (plan.volatileContextText) lines.push(plan.volatileContextText, "");
+  lines.push("# Task", task);
   return lines.join("\n").trim();
 }
+
+/**
+ * The notebook is a pointer, not a mirror of the repository. Re-injecting file
+ * contents that the agent can read itself is the most expensive thing Mind
+ * Atlas can do, and it goes stale the moment the agent edits the file.
+ */
+const WORKSPACE_FIRST_NOTE = [
+  "# How to use this context",
+  "- The notebook above is orientation, not a copy of the repository.",
+  "- Read files from the work root yourself; never assume a file matches a node body.",
+  "- Where a node names a path, open that path instead of trusting the quoted text.",
+].join("\n");
 
 export function renderAgentDeltaPrompt(
   root: AtlasNode,
@@ -274,9 +327,14 @@ export function renderAgentDeltaPrompt(
 ): string {
   const path = findNodePath(root, targetNodeId);
   const maxChars = options.maxNodeBodyChars ?? 4_000;
+  // A resumed session already holds the branch conversation, the ancestor
+  // documents and everything it read from the work root. Re-sending any of it
+  // is pure cost, so the delta carries only what actually moved: where we are
+  // now and what to do next.
   const lines = [
     "You are resuming your previous session for this Mind Atlas branch.",
-    "Earlier conversation and workspace state are already in your session history; only the current position and the new task are provided.",
+    "Earlier conversation, ancestor documents and workspace state are already in your session history. Do not ask for them again and do not assume they changed.",
+    "Anything you need from the repository, read from disk now: your earlier reads may be stale.",
     "",
   ];
   if (path) {
@@ -308,15 +366,22 @@ function agentSessionIdOf(node: AtlasNode, agent: AgentKind): string {
 
 // Decide continue / fork / new without user input.
 //
-// continue: (Codex / OpenClaw) the inherited session's most recent carrier
-//           node sits on the current path; we are extending the tip of the
-//           same branch, so the linear CLI-side history matches this branch.
-// fork:     (Claude Code, always when a session exists) every run resumes the
-//           nearest ancestor session with `--fork-session`, so each stored
-//           session id stays an immutable snapshot of its branch point and any
-//           node can branch from it later without cross-branch contamination.
-// new:      no session, stale session, or divergence on a CLI that cannot fork
-//           (Codex threads and OpenClaw keys are linear).
+// The unit of a session is the BRANCH, not the node. One node starts a session
+// explicitly (`new`) and becomes the origin; every descendant continues that
+// same session. This is what keeps cost down: a continued session keeps its
+// provider-side history and prompt cache, while a per-node cold start pays to
+// rediscover the repository on every single run.
+//
+// continue: the inherited session's most recent carrier node sits on the
+//           current path, so we are extending the tip of that branch and the
+//           linear CLI-side history already matches it. Applies to every agent
+//           including Claude Code, which resumes the same session id.
+// fork:     the branch genuinely diverged - the session's latest run happened
+//           on a sibling branch. Claude Code can fork, so the sibling gets its
+//           own copy instead of interleaving two branches into one transcript.
+// new:      no session, a stale session, the user asked for one, or divergence
+//           on a CLI that cannot fork (Codex threads and OpenClaw keys are
+//           linear, so a diverged branch has to start over).
 export function resolveAgentSession(
   root: AtlasNode,
   targetNodeId: string,
@@ -349,13 +414,21 @@ export function resolveAgentSession(
     return { action: "new", resumeId: inheritedId, reason: "session-stale" };
   }
 
-  if (agent === "claude") {
-    return { action: "fork", resumeId: inheritedId, latestRunNodeId: latest?.id, reason: "fork-from-branch-snapshot" };
-  }
-
   const pathIds = new Set(path.map((node) => node.id));
   if (!latest || pathIds.has(latest.id)) {
+    // Extending the tip of the branch that owns this session: continue it.
+    // Every agent takes this path, so a descendant node inherits the origin
+    // session instead of cold starting.
     return { action: "continue", resumeId: inheritedId, latestRunNodeId: latest?.id, reason: "extending-branch-tip" };
+  }
+
+  if (agent === "claude" || agent === "codex") {
+    // A sibling branch already advanced this session. Both Claude Code
+    // (`--fork-session`) and the Codex app-server (`thread/fork`) can branch a
+    // session, so this branch gets its own copy of the history instead of
+    // starting from nothing. Transports that cannot fork - `codex exec` and
+    // OpenClaw - degrade this to a new session downstream.
+    return { action: "fork", resumeId: inheritedId, latestRunNodeId: latest.id, reason: "branch-diverged-fork" };
   }
   return { action: "new", resumeId: inheritedId, latestRunNodeId: latest.id, reason: "branch-diverged-linear-session" };
 }
@@ -430,15 +503,26 @@ function collectConversationTurns(path: AtlasNode[]): ConversationTurn[] {
 // Keep the newest turns whole within the budget, cutting only at a user-turn
 // boundary so the replay always opens with a user message (Anthropic requires
 // it, and it reads correctly everywhere else).
-function fitConversationTurns(turns: ConversationTurn[], budget: number, maxTurnChars: number) {
+function fitConversationTurns(
+  turns: ConversationTurn[],
+  budget: number,
+  maxTurnChars: number,
+  verbatimTurnLimit: number,
+) {
   if (!turns.length) return { turns: [] as ConversationTurn[], dropped: [] as ConversationTurn[] };
-  let start = turns.length;
+  // A hard cap on verbatim turns, independent of the budget. Without it a
+  // branch with a few short turns replays its whole history word for word and
+  // the payload grows with every node.
+  const limit = Math.max(1, verbatimTurnLimit);
+  let start = Math.max(0, turns.length - limit);
   let used = 0;
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
+  for (let index = turns.length - 1; index >= start; index -= 1) {
     const cost = Math.min(nodeBodyText(turns[index].node).length, maxTurnChars) + 16;
-    if (used + cost > budget && start < turns.length) break;
+    if (used + cost > budget && index < turns.length - 1) {
+      start = index + 1;
+      break;
+    }
     used += cost;
-    start = index;
   }
   while (start < turns.length && turns[start].role !== "user") start += 1;
   return { turns: turns.slice(start), dropped: turns.slice(0, start) };
@@ -477,9 +561,27 @@ function singleLine(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function capText(value: string, maxChars: number) {
-  if (value.length <= maxChars) return value;
-  return `${value.slice(0, Math.max(0, maxChars))}\n[...truncated by Mind Atlas context budget]`;
+/**
+ * Truncate from the middle, keeping the opening and the closing text.
+ *
+ * Cutting only the tail silently deletes the end of a document, which is where
+ * conclusions, acceptance criteria and "what to do next" usually live. Cutting
+ * only the head deletes the specification. Keeping both ends and stating the
+ * size of the elision preserves the parts a reader actually needs and makes the
+ * loss visible instead of silent.
+ */
+export function capText(value: string, maxChars: number) {
+  const limit = Math.max(0, maxChars);
+  if (value.length <= limit) return value;
+  // Too small to show both ends usefully: keep the opening.
+  if (limit < 240) return `${value.slice(0, limit)}\n[...Mind Atlas omitted ${value.length - limit} characters]`;
+  // Favour the opening slightly; it carries the specification more often.
+  const headChars = Math.floor(limit * 0.6);
+  const tailChars = limit - headChars;
+  const head = value.slice(0, headChars);
+  const tail = value.slice(value.length - tailChars);
+  const omitted = value.length - headChars - tailChars;
+  return `${head}\n\n[...Mind Atlas omitted ${omitted} characters from the middle...]\n\n${tail}`;
 }
 
 function uniqueIds(ids: string[]) {

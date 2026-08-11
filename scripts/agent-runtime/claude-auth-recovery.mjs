@@ -3,6 +3,27 @@
 // Mode: local-only. The hosted service must never import this module.
 
 import { spawn } from "node:child_process";
+import { statSync } from "node:fs";
+import { join } from "node:path";
+
+/**
+ * Fingerprint of the stored Claude credential, used to tell a real login from a
+ * cancelled window. `claude auth login` exiting 0 is not proof: the wrapper can
+ * exit 0 without the user completing the OAuth flow. A rewritten credential
+ * file is the observable signal that a login actually happened.
+ */
+export function readClaudeCredentialStamp(home = process.env.USERPROFILE || process.env.HOME || "") {
+  if (!home) return "";
+  for (const name of [".credentials.json", "credentials.json"]) {
+    try {
+      const info = statSync(join(home, ".claude", name));
+      return `${name}:${info.mtimeMs}:${info.size}`;
+    } catch {
+      // Try the next candidate; an absent store simply yields no stamp.
+    }
+  }
+  return "";
+}
 
 export function isClaudeOAuthAuthenticationError(value) {
   const text = String(value ?? "").toLowerCase();
@@ -37,6 +58,7 @@ export function createClaudeAuthRecovery({
   onSuccess = () => {},
   platform = process.platform,
   spawnProcess = spawn,
+  readCredentialStamp = readClaudeCredentialStamp,
 } = {}) {
   let inFlight = null;
 
@@ -44,9 +66,21 @@ export function createClaudeAuthRecovery({
     if (inFlight) return await inFlight;
     const commandSpec = buildCommand?.(["auth", "login"]) ?? { command: "claude", args: ["auth", "login"] };
     const env = buildEnv();
+    const stampBefore = readCredentialStamp();
     const task = launchInteractiveLogin({ commandSpec, workspace, env, platform, spawnProcess })
       .then(async (result) => {
-        if (result.ok) await onSuccess();
+        if (!result.ok) return result;
+        // A clean exit code is not evidence of a login. Require the credential
+        // store to have been rewritten, otherwise the caller would retry the
+        // request straight into the same authentication failure.
+        if (readCredentialStamp() === stampBefore) {
+          return {
+            ok: false,
+            exitCode: result.exitCode,
+            detail: "The Claude login window closed without storing a new credential. Run `claude auth login` in a terminal and complete the browser flow.",
+          };
+        }
+        await onSuccess();
         return result;
       });
     let tracked;
@@ -70,7 +104,19 @@ function launchInteractiveLogin({ commandSpec, workspace, env, platform, spawnPr
 
   const script = buildClaudeLoginPowerShellScript(commandSpec);
   const encoded = Buffer.from(script, "utf16le").toString("base64");
-  const child = spawnProcess("powershell.exe", [
+  // `detached: true` on Windows means DETACHED_PROCESS: the child gets NO
+  // console at all. `claude auth login` needs a terminal to prompt in, so it
+  // exited immediately and the recovery reported a success that never happened.
+  // `cmd /c start /wait` is what actually creates a visible console window, and
+  // `/wait` lets the bridge await the user closing it.
+  const child = spawnProcess(process.env.ComSpec || "cmd.exe", [
+    "/d",
+    "/s",
+    "/c",
+    "start",
+    "/wait",
+    "Mind Atlas - Claude Code Pro login",
+    "powershell.exe",
     "-NoLogo",
     "-NoProfile",
     "-ExecutionPolicy",
@@ -80,9 +126,6 @@ function launchInteractiveLogin({ commandSpec, workspace, env, platform, spawnPr
   ], {
     cwd: workspace || process.cwd(),
     env,
-    // On Windows a detached console process gets its own visible window. Keep
-    // the child referenced so the bridge can await the user's login result.
-    detached: true,
     windowsHide: false,
     stdio: "ignore",
   });

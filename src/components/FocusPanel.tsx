@@ -19,7 +19,8 @@ import {
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { saveStoredAttachmentBlob } from "../attachmentStorage";
-import { UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
+import { UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
+import { emitOnboardingEvent } from "../onboarding/useOnboarding";
 import { findNode, useAtlasStore } from "../store/atlasStore";
 import type { AtlasTheme } from "../theme";
 import type { AtlasNode, AttachmentKind, NodeAttachment } from "../types";
@@ -78,6 +79,14 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
       window.cancelAnimationFrame(frame);
     };
   }, [bodyEditRequestId, consumeBodyEditRequest, isRoot, selectedNode.id]);
+
+  useEffect(() => {
+    if (isRoot) return;
+    emitOnboardingEvent("node-editor-opened");
+    const completeWithoutEdit = () => emitOnboardingEvent("node-editor-closed");
+    window.addEventListener(UNIVERSE_BACKGROUND_CLICK_EVENT, completeWithoutEdit);
+    return () => window.removeEventListener(UNIVERSE_BACKGROUND_CLICK_EVENT, completeWithoutEdit);
+  }, [isRoot, selectedNode.id]);
 
   const updateReminderDraft = (date: Date) => {
     const iso = date.toISOString();
@@ -306,11 +315,12 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
           className="node-title-input"
           value={selectedNode.title}
           rows={1}
-          onChange={(event) =>
+          onChange={(event) => {
             updateNode(selectedNode.id, {
               title: event.target.value,
-            })
-          }
+            });
+            emitOnboardingEvent("node-text-edited");
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
@@ -324,12 +334,13 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
           ref={bodyInputRef}
           className="node-body-input"
           value={selectedNode.body}
-          onChange={(event) =>
+          onChange={(event) => {
             updateNode(selectedNode.id, {
               body: event.target.value,
               summary: event.target.value.split("\n").find(Boolean) ?? "Empty notebook node.",
-            })
-          }
+            });
+            emitOnboardingEvent("node-text-edited");
+          }}
           placeholder={isRoot ? formatAppMessage("ui.focusPanel.atlasMemo.b78ca47") : formatAppMessage("ui.focusPanel.memoDetailsOrContext.0f619ba")}
           aria-label={formatAppMessage("ui.focusPanel.nodeBody.eeba394")}
         />

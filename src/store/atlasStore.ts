@@ -298,6 +298,8 @@ interface AtlasStore {
   setOpenClawSettings: (patch: Partial<OpenClawSettings>) => void;
   setClaudeSettings: (patch: Partial<ClaudeSettings>) => void;
   loadAiDialogSettingsForNode: (id: string) => void;
+  /** Persist the settings a run actually used onto its node. */
+  commitAiDialogSettingsToNode: (id: string) => void;
   resetAiDialogSettingsToDefaults: () => void;
   setCommandInputEditing: (editing: boolean) => void;
   setActiveCommandMode: (mode: AiExecutionMode | "note") => void;
@@ -319,7 +321,11 @@ interface AtlasStore {
   dismissNotificationSnoozePrompt: (id?: string) => void;
   snoozeNodeNotification: (id: string, delayMs: number) => void;
   setNodeStatus: (id: string, status: WorkStatus, nextDecision?: string) => void;
-  addRootNodeAt: (position: [number, number, number], title?: string) => void;
+  addRootNodeAt: (
+    position: [number, number, number],
+    title?: string,
+    options?: { focus?: boolean; requestEdit?: boolean },
+  ) => void;
   addChildNode: (
     parentId: string,
     initialBody?: string,
@@ -530,7 +536,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   },
   setAiContextOptions: (patch) => {
     set((state) => ({
-      ...withAiDialogSettingsSaved(state, {
+      ...withAiDialogSettingsDraft(state, {
         contextOptions: normalizeAiContextOptions({
           ...state.aiContextOptions,
           ...patch,
@@ -542,7 +548,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   setChatSettings: (patch) => {
     set((state) => ({
-      ...withAiDialogSettingsSaved(state, {
+      ...withAiDialogSettingsDraft(state, {
         chatSettings: normalizeChatSettings({
           ...state.chatSettings,
           ...patch,
@@ -553,7 +559,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   setCodexSettings: (patch) => {
     set((state) => ({
-      ...withAiDialogSettingsSaved(state, {
+      ...withAiDialogSettingsDraft(state, {
         codexSettings: normalizeCodexSettings({
           ...state.codexSettings,
           ...patch,
@@ -567,7 +573,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     // Claude keep separate settings objects, so both are written together;
     // otherwise switching provider looks like the work root was cleared.
     set((state) => ({
-      ...withAiDialogSettingsSaved(state, {
+      ...withAiDialogSettingsDraft(state, {
         codexSettings: normalizeCodexSettings({ ...state.codexSettings, workspace }),
         claudeSettings: normalizeClaudeSettings({ ...state.claudeSettings, workspace }),
       }),
@@ -576,7 +582,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   setOpenClawSettings: (patch) => {
     set((state) => ({
-      ...withAiDialogSettingsSaved(state, {
+      ...withAiDialogSettingsDraft(state, {
         openClawSettings: normalizeOpenClawSettings({
           ...state.openClawSettings,
           ...patch,
@@ -587,13 +593,27 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   setClaudeSettings: (patch) => {
     set((state) => ({
-      ...withAiDialogSettingsSaved(state, {
+      ...withAiDialogSettingsDraft(state, {
         claudeSettings: normalizeClaudeSettings({
           ...state.claudeSettings,
           ...patch,
         }),
       }),
     }));
+  },
+
+  commitAiDialogSettingsToNode: (id) => {
+    set((state) => {
+      if (!id || !findNode(state.atlasRoot, id)) return {};
+      const aiDialogSettings = buildStoredAiDialogSettings(state);
+      const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => ({
+        ...node,
+        aiDialogSettings,
+        updatedAt: new Date().toISOString(),
+      }));
+      persistNotebook(atlasRoot);
+      return { atlasRoot };
+    });
   },
 
   loadAiDialogSettingsForNode: (id) => {
@@ -971,7 +991,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     });
   },
 
-  addRootNodeAt: (position, title = "") => {
+  addRootNodeAt: (position, title = "", options = {}) => {
     const state = get();
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
     const aiDialogSettings = createInheritedAiDialogSettings([state.atlasRoot], state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
@@ -993,10 +1013,10 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         ...pushHistory(state),
         atlasRoot,
         birthMarks: { ...state.birthMarks, [child.id]: performance.now() },
-        titleEditRequestId: child.id,
+        titleEditRequestId: options.requestEdit === false ? state.titleEditRequestId : child.id,
       };
     });
-    get().focusNode(child.id);
+    if (options.focus !== false) get().focusNode(child.id);
   },
 
   addChildNode: (parentId, initialBody = "", options = {}) => {
@@ -1938,6 +1958,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const claudeSettingsForRun = mode === "claude" && session
       ? buildClaudeSettingsForRun(requestAiDialogSettings.claudeSettings, sourcePath, session)
       : undefined;
+    // The run is what makes a setting real. Commit the on-screen values onto the
+    // node now, so this node becomes the origin descendants inherit from, and so
+    // reselecting it restores exactly what ran rather than an abandoned draft.
+    get().commitAiDialogSettingsToNode(sourceNodeId);
+
     const useAgentRuntime = (mode === "codex" || mode === "claude") && isAgentRuntimeAvailable();
     const requestedAgentWorkspace = codexSettingsForRun?.workspace ?? claudeSettingsForRun?.workspace ?? "";
     let agentExecution: AgentExecutionMetadata | undefined;
@@ -4793,35 +4818,39 @@ function markReminderNodesFired(root: AtlasNode, ids: Set<string>, firedAt: stri
   return changed ? { ...root, children } : root;
 }
 
-function withAiDialogSettingsSaved(
-  state: Pick<AtlasStore, "atlasRoot" | "selectedNodeId" | "aiContextOptions" | "chatSettings" | "codexSettings" | "openClawSettings" | "claudeSettings">,
+/**
+ * Normalize an edit into on-screen state WITHOUT writing it to the node.
+ *
+ * Settings belong to the node that actually ran with them. Persisting every
+ * keystroke gave each node its own snapshot of whatever happened to be on
+ * screen, which broke inheritance: a descendant stopped following the origin
+ * node that started the session. A draft is committed by
+ * `commitAiDialogSettingsToNode` when a run executes, and reselecting a node
+ * restores the committed values, so an experiment that was never run is
+ * discarded rather than silently kept.
+ */
+function withAiDialogSettingsDraft(
+  state: Pick<AtlasStore, "aiContextOptions" | "chatSettings" | "codexSettings" | "openClawSettings" | "claudeSettings">,
   patch: Partial<AiDialogSettings>,
 ) {
-  const nextContextOptions = normalizeAiContextOptions(patch.contextOptions ?? state.aiContextOptions);
-  const nextChatSettings = normalizeChatSettings(patch.chatSettings ?? state.chatSettings);
-  const nextCodexSettings = normalizeCodexSettings(patch.codexSettings ?? state.codexSettings);
-  const nextOpenClawSettings = normalizeOpenClawSettings(patch.openClawSettings ?? state.openClawSettings);
-  const nextClaudeSettings = normalizeClaudeSettings(patch.claudeSettings ?? state.claudeSettings);
-  const aiDialogSettings: AiDialogSettings = {
-    contextOptions: sanitizeStoredAiContextOptions(nextContextOptions),
-    chatSettings: sanitizeStoredChatSettings(nextChatSettings),
-    codexSettings: sanitizeStoredCodexSettings(nextCodexSettings),
-    openClawSettings: sanitizeStoredOpenClawSettings(nextOpenClawSettings),
-    claudeSettings: sanitizeStoredClaudeSettings(nextClaudeSettings),
-  };
-  const atlasRoot = updateNodeById(state.atlasRoot, state.selectedNodeId, (node) => ({
-    ...node,
-    aiDialogSettings,
-    updatedAt: new Date().toISOString(),
-  }));
-  persistNotebook(atlasRoot);
   return {
-    atlasRoot,
-    aiContextOptions: nextContextOptions,
-    chatSettings: nextChatSettings,
-    codexSettings: nextCodexSettings,
-    openClawSettings: nextOpenClawSettings,
-    claudeSettings: nextClaudeSettings,
+    aiContextOptions: normalizeAiContextOptions(patch.contextOptions ?? state.aiContextOptions),
+    chatSettings: normalizeChatSettings(patch.chatSettings ?? state.chatSettings),
+    codexSettings: normalizeCodexSettings(patch.codexSettings ?? state.codexSettings),
+    openClawSettings: normalizeOpenClawSettings(patch.openClawSettings ?? state.openClawSettings),
+    claudeSettings: normalizeClaudeSettings(patch.claudeSettings ?? state.claudeSettings),
+  };
+}
+
+function buildStoredAiDialogSettings(
+  state: Pick<AtlasStore, "aiContextOptions" | "chatSettings" | "codexSettings" | "openClawSettings" | "claudeSettings">,
+): AiDialogSettings {
+  return {
+    contextOptions: sanitizeStoredAiContextOptions(state.aiContextOptions),
+    chatSettings: sanitizeStoredChatSettings(state.chatSettings),
+    codexSettings: sanitizeStoredCodexSettings(state.codexSettings),
+    openClawSettings: sanitizeStoredOpenClawSettings(state.openClawSettings),
+    claudeSettings: sanitizeStoredClaudeSettings(state.claudeSettings),
   };
 }
 
@@ -4988,11 +5017,16 @@ function removeCodexRetryResultChildren(children: AtlasNode[]) {
 // by a user-facing selector. `settings.continueMode === "new"` survives only as
 // a stored per-branch override that forces a fresh session.
 function buildCodexSettingsForRun(settings: CodexSettings, sourcePath: AtlasNode[], session: AgentSessionResolution) {
+  // `fork` keeps the inherited thread id: the app-server branches from it, so a
+  // diverged branch inherits the history instead of rediscovering the whole
+  // repository from scratch.
+  const reuseThread = session.action === "continue" || session.action === "fork";
   return normalizeCodexSettings({
     ...settings,
     workspace: settings.workspace.trim() || inferWorkspaceFromPath(sourcePath),
-    continueMode: session.action === "continue" ? "auto" : "new",
-    resumeThreadId: session.action === "continue" ? session.resumeId ?? "" : "",
+    continueMode: reuseThread ? "auto" : "new",
+    resumeThreadId: reuseThread ? session.resumeId ?? "" : "",
+    forkThread: session.action === "fork",
   });
 }
 

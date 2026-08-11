@@ -171,6 +171,12 @@ export interface CodexSettings {
   fullAccessApproved?: boolean;
   continueMode?: CodexContinueMode;
   resumeThreadId?: string;
+  /**
+   * Branch the resumed thread instead of extending it. Supported by the Codex
+   * app-server (`thread/fork`); the `codex exec` fallback cannot fork and
+   * degrades to a new thread.
+   */
+  forkThread?: boolean;
   clientRunId?: string;
   requestNodeId?: string;
   sourceNodeId?: string;

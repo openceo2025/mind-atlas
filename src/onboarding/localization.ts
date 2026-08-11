@@ -4,6 +4,8 @@ export type OnboardingMessageId =
   | "root.hint"
   | "root.answer"
   | "root.zoomOutForNodeCreate"
+  | "node.edit"
+  | "node.createMore"
   | "space.pan"
   | "space.cameraReset"
   | "space.cameraResetMobile"
@@ -21,6 +23,8 @@ export const ONBOARDING_MESSAGE_IDS: Record<OnboardingMessageId, MessageId> = {
   "root.hint": "onboarding.root.hint",
   "root.answer": "onboarding.root.answer",
   "root.zoomOutForNodeCreate": "onboarding.root.zoomOutForNodeCreate",
+  "node.edit": "onboarding.practice.editNode",
+  "node.createMore": "onboarding.practice.addChild",
   "space.pan": "onboarding.space.pan",
   "space.cameraReset": "onboarding.space.cameraReset",
   "space.cameraResetMobile": "onboarding.space.cameraResetMobile",

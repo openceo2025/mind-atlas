@@ -495,6 +495,65 @@ Code mode uses the same discovery: the Claude Code API route lists live
 Anthropic and DeepSeek models with their base URLs, and the subscription route
 lists the account aliases with their resolved versions.
 
+## Branch Sessions And Context Cost
+
+The unit of an agent session is the **branch**, not the node. One node starts a
+session explicitly and becomes the origin; every descendant continues that same
+session. A per-node cold start pays to rediscover the repository on every run,
+which is the dominant cost in a long-running branch - far larger than anything
+Mind Atlas injects.
+
+| Situation | Action | Codex | Claude Code |
+| --- | --- | --- | --- |
+| No session, stale session, or user chose `new` | `new` | `thread/start` | fresh session |
+| Extending the tip of the branch that owns the session | `continue` | `thread/resume`, same thread id | `--resume <id>`, same session id |
+| A sibling branch already advanced the session | `fork` | `thread/fork`, new thread id with inherited history | `--resume <id> --fork-session` |
+
+Transports that cannot branch degrade honestly: `codex exec` starts a fresh
+thread for a fork request and reports `fellBack` with
+`codex-exec-cannot-fork-a-diverged-branch`, because reusing the id there would
+splice two Atlas branches into one linear transcript. OpenClaw keys are linear,
+so divergence always means a new session.
+
+Verified live against the installed Codex app-server: `resume` returned the same
+thread id and recalled a token from the origin turn; `fork` returned a new
+thread id and still recalled it.
+
+### What is sent
+
+- **New session**: stable prefix (ancestors, outline, pinned nodes), then the
+  branch conversation, then the volatile tail (current node id and body), then
+  the task.
+- **Resumed session**: only the delta - position plus task. Ancestors and the
+  conversation are already in the provider session, and re-sending them is pure
+  cost.
+
+Payload order is stable-first because provider prompt caching only reuses an
+unchanged prefix. Putting the current node id or the task early invalidates the
+cache on every run and pays full price for the whole prompt.
+
+### Truncation
+
+`capText` keeps the opening **and** the closing text and states how much was
+removed from the middle. Cutting only the tail silently deleted acceptance
+criteria; cutting only the head deleted the specification.
+
+### Conversation replay
+
+`verbatimTurnLimit` caps how many recent turns are replayed word for word (two
+for agents) independently of the character budget. Older turns become one-line
+summaries, so payload size stops growing with branch depth. Measured on a
+depth-8 branch: cold start fell 57.6% and a resumed run is 85.9% smaller than a
+cold start.
+
+### Settings follow the branch
+
+Settings are committed to a node when a run executes, not on every edit. Editing
+without running leaves a draft that is discarded when the node is reselected, and
+a node without its own settings inherits the nearest ancestor's - so descendants
+follow the model, effort, permission and work root of the node that started the
+session.
+
 ## Current AI Surface
 
 - The command dock supports Chat, Code, OpenClaw, and Note modes.

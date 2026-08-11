@@ -165,8 +165,8 @@ button {
   top: 50%;
   left: 50%;
   z-index: 2;
-  width: 90px;
-  height: 90px;
+  width: 116px;
+  height: 116px;
   border: 1px solid rgba(245, 247, 231, 0.44);
   border-radius: 999px;
   background:
@@ -184,14 +184,14 @@ button {
 .onboarding-center-pulse::after {
   content: "";
   position: absolute;
-  inset: -12px;
+  inset: -16px;
   border: 1px solid rgba(245, 247, 231, 0.22);
   border-radius: inherit;
   animation: onboarding-ring 2.4s ease-out infinite;
 }
 
 .onboarding-center-pulse::after {
-  inset: -26px;
+  inset: -36px;
   animation-delay: 0.72s;
 }
 

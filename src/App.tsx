@@ -51,6 +51,7 @@ const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "
 const WORKSPACE_PANEL_EXIT_MS = 960;
 const LAYOUT_BIRTH_UNAVAILABLE_NOTICE_MS = 3600;
 const TUTORIAL_TEMPLATE_DELAY_MS = 5000;
+const TUTORIAL_UI_REVEAL_MS = 900;
 const RENDER_QUALITY_STORAGE_KEY = "mind-atlas-render-quality";
 const ROOT_COMMAND_MAX_ZOOM = 1.08;
 const DEFAULT_DATASET_TITLE = "Mind Atlas";
@@ -192,9 +193,9 @@ export default function App() {
   const [startSpaceOpen, setStartSpaceOpen] = useState(false);
   const [startSpaceSource, setStartSpaceSource] = useState<StartSpaceSource>("initialize");
   const [tutorialStartSpaceDueAt, setTutorialStartSpaceDueAt] = useState<number | null>(null);
+  const [tutorialChoiceDueAt, setTutorialChoiceDueAt] = useState<number | null>(null);
   const [tutorialCompletionStep, setTutorialCompletionStep] = useState<TutorialCompletionStep>(null);
-  const tutorialCompletionRef = useRef({ initialized: false, awaitingCompletion: false });
-  const tutorialCompletionDelayMsRef = useRef(TUTORIAL_TEMPLATE_DELAY_MS);
+  const tutorialCompletionScheduledRef = useRef(false);
   const analyticsNotebookRef = useRef<{ rootId: string; nodeCount: number; maxDepth: number; textSize: number } | null>(null);
   const analyticsIgnoreNextNotebookRef = useRef(false);
   const analyticsLastMeaningfulAtRef = useRef(0);
@@ -303,21 +304,23 @@ export default function App() {
   const attachmentsEnabled = !publicServiceMode;
   const voiceLogReadable = publicServiceMode ? onboarding.showMainChrome : aiFeaturesUnlocked;
   const showCommandDock = aiFeaturesUnlocked && (aboutDemoConfig ? aboutDemoConfig.kind === "app" : publicServiceMode || shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport));
-  const showTutorialOperationFallback = onboarding.showChildCreationFallback;
+  const showTutorialNodeControls = onboarding.showNodeCreationControls;
+  const tutorialWorkspaceAvailable = onboarding.showMainChrome || onboarding.showEditorDuringTutorial;
   const mobileOperationPanelTabAvailable = !mobilePortraitOperationSurface;
   const operationPanelInWorkspace = mobileOperationSurface && mobileOperationPanelTabAvailable;
   const effectiveMobilePanelTab: MobilePanelTab = getEffectiveMobilePanelTab(mobilePanelTab, showCommandDock, outlineEditorOpen, mobileOperationPanelTabAvailable);
   const mobileWorkspaceTabsNeeded = showCommandDock || mobileOperationPanelTabAvailable || outlineEditorOpen;
   const showWorkspacePanel =
     !outlineEditorOpen &&
+    tutorialWorkspaceAvailable &&
     (showCommandDock ||
       selectedNodeId !== atlasRoot.id ||
-      (showTutorialOperationFallback && operationPanelInWorkspace) ||
+      (showTutorialNodeControls && operationPanelInWorkspace) ||
       (onboarding.showMainChrome && mobileWorkspacePanelRevealed && mobileOperationPanelTabAvailable));
-  const focusPanelOpen = outlineEditorOpen || selectedNodeId !== atlasRoot.id;
+  const focusPanelOpen = tutorialWorkspaceAvailable && (outlineEditorOpen || selectedNodeId !== atlasRoot.id);
   const operationTargets = useMemo(() => getOperationTargets(selectedPath), [selectedPath]);
   const tutorialFallbackChildParentId =
-    showTutorialOperationFallback && selectedNodeId === atlasRoot.id ? atlasRoot.children[0]?.id ?? selectedNodeId : selectedNodeId;
+    showTutorialNodeControls && selectedNodeId === atlasRoot.id ? atlasRoot.children[0]?.id ?? selectedNodeId : selectedNodeId;
   const tutorialFallbackChildParentPath = useMemo(
     () => findNodePath(atlasRoot, tutorialFallbackChildParentId) ?? selectedPath,
     [atlasRoot, selectedPath, tutorialFallbackChildParentId],
@@ -489,7 +492,7 @@ export default function App() {
     "app-shell",
     onboarding.showLogoOnly ? "is-onboarding-logo-only" : "",
     !onboarding.showMainChrome ? "is-onboarding-main-hidden" : "",
-    showTutorialOperationFallback ? "is-onboarding-child-fallback" : "",
+    showTutorialNodeControls ? "is-onboarding-child-fallback" : "",
     aiFeaturesUnlocked ? "is-ai-unlocked" : "is-ai-locked",
     publicServiceMode ? "is-public-service" : "",
     aboutDemoConfig ? "is-about-demo" : "",
@@ -805,9 +808,9 @@ export default function App() {
   }, [aiFeaturesUnlocked, mobilePanelTab]);
 
   useEffect(() => {
-    if (!showTutorialOperationFallback) return;
+    if (!showTutorialNodeControls) return;
     setMobilePanelTab("operation");
-  }, [showTutorialOperationFallback]);
+  }, [showTutorialNodeControls]);
 
   useEffect(() => {
     if (showWorkspacePanel) {
@@ -1538,28 +1541,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    const tutorialState = tutorialCompletionRef.current;
-    if (!tutorialState.initialized) {
-      tutorialState.initialized = true;
-      tutorialState.awaitingCompletion = !onboarding.showMainChrome;
-      return;
-    }
-    if (!onboarding.showMainChrome) {
-      tutorialState.awaitingCompletion = true;
-      setTutorialStartSpaceDueAt(null);
-      return;
-    }
-    if (!tutorialState.awaitingCompletion) return;
-    tutorialState.awaitingCompletion = false;
-    trackProductEvent("tutorial_completed", {}, { immediate: true });
-    const delayMs = tutorialCompletionDelayMsRef.current;
-    tutorialCompletionDelayMsRef.current = TUTORIAL_TEMPLATE_DELAY_MS;
-    if (delayMs <= 0) {
-      openStartSpaceDialog("tutorial");
-      return;
-    }
-    setTutorialStartSpaceDueAt(Date.now() + delayMs);
-  }, [onboarding.showMainChrome]);
+    if (!onboarding.readyForCompletion) return;
+    if (tutorialCompletionScheduledRef.current || tutorialCompletionStep) return;
+    tutorialCompletionScheduledRef.current = true;
+    setTutorialStartSpaceDueAt(Date.now() + TUTORIAL_TEMPLATE_DELAY_MS);
+  }, [onboarding.readyForCompletion, tutorialCompletionStep]);
 
   useEffect(() => {
     if (tutorialStartSpaceDueAt === null) return;
@@ -1569,6 +1555,15 @@ export default function App() {
     }, Math.max(0, tutorialStartSpaceDueAt - Date.now()));
     return () => window.clearTimeout(timeout);
   }, [tutorialStartSpaceDueAt]);
+
+  useEffect(() => {
+    if (tutorialChoiceDueAt === null) return;
+    const timeout = window.setTimeout(() => {
+      setTutorialChoiceDueAt(null);
+      setTutorialCompletionStep("choice");
+    }, Math.max(0, tutorialChoiceDueAt - Date.now()));
+    return () => window.clearTimeout(timeout);
+  }, [tutorialChoiceDueAt]);
 
   useEffect(() => {
     const mark = (event: Event) => {
@@ -1633,8 +1628,9 @@ export default function App() {
     latestUiStateRef.current = nextUiState;
     setLayoutMode("phyllotaxis");
     persistUiStatePatch(nextUiState);
-    tutorialCompletionDelayMsRef.current = TUTORIAL_TEMPLATE_DELAY_MS;
+    tutorialCompletionScheduledRef.current = false;
     setTutorialStartSpaceDueAt(null);
+    setTutorialChoiceDueAt(null);
     setTutorialCompletionStep(null);
     setStartSpaceOpen(false);
     analyticsTutorialStartedRef.current = false;
@@ -1647,8 +1643,12 @@ export default function App() {
 
   const handleSkipTutorial = () => {
     trackProductEvent("tutorial_skipped", {}, { immediate: true });
-    tutorialCompletionDelayMsRef.current = 0;
+    tutorialCompletionScheduledRef.current = false;
+    setTutorialStartSpaceDueAt(null);
+    setTutorialChoiceDueAt(null);
+    setTutorialCompletionStep(null);
     onboarding.completeTutorial();
+    openStartSpaceDialog("tutorial");
   };
 
   useEffect(() => {
@@ -2301,7 +2301,7 @@ export default function App() {
       ) : null}
 
       {onboarding.showMainChrome ? <Minimap /> : null}
-      {(onboarding.showMainChrome || showTutorialOperationFallback) && !operationPanelInWorkspace ? <OperationPanel actions={operationActions} variant="desktop" /> : null}
+      {(onboarding.showMainChrome || showTutorialNodeControls) && !operationPanelInWorkspace ? <OperationPanel actions={operationActions} variant="desktop" /> : null}
       {renderWorkspacePanel ? (
         <section
           className={`mobile-workspace-panel ${showWorkspacePanel ? "is-open" : "is-closing"} ${mobileWorkspaceTabsNeeded ? "" : "is-single-editor"}`}
@@ -2497,10 +2497,19 @@ export default function App() {
       {tutorialCompletionStep ? (
         <TutorialCompletionDialog
           step={tutorialCompletionStep}
-          onAcknowledge={() => setTutorialCompletionStep("choice")}
-          onContinue={() => setTutorialCompletionStep(null)}
+          onAcknowledge={() => {
+            trackProductEvent("tutorial_completed", {}, { immediate: true });
+            onboarding.acknowledgeTutorialCompletion();
+            setTutorialCompletionStep(null);
+            setTutorialChoiceDueAt(Date.now() + TUTORIAL_UI_REVEAL_MS);
+          }}
+          onContinue={() => {
+            setTutorialCompletionStep(null);
+            tutorialCompletionScheduledRef.current = false;
+          }}
           onUseTemplate={() => {
             setTutorialCompletionStep(null);
+            tutorialCompletionScheduledRef.current = false;
             openStartSpaceDialog("initialize");
           }}
         />

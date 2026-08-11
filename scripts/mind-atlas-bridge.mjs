@@ -344,6 +344,7 @@ function buildLegacyAiPayload(request) {
           requestNodeId: request.requestNodeId,
           sourceNodeId: request.sourceNodeId,
           resumeThreadId: request.session?.threadId ?? "",
+          forkThread: request.sessionMode === "fork",
           continueMode: request.sessionMode === "new" ? "new" : "auto",
         },
       }
@@ -356,7 +357,7 @@ function buildLegacyAiPayload(request) {
           requestNodeId: request.requestNodeId,
           sourceNodeId: request.sourceNodeId,
           resumeSessionId: request.session?.sessionId ?? "",
-          forkSession: true,
+          forkSession: request.sessionMode === "fork",
           continueMode: request.sessionMode === "new" ? "new" : "auto",
         },
       }),
@@ -865,9 +866,14 @@ function safeJournalText(value, maxLength) {
 async function createAgentRuntimeBackedResponse({ payload, provider, prompt, agentPrompt, agentDeltaPrompt, startedAt }) {
   const settings = provider === "codex" ? (payload?.codex ?? {}) : (payload?.claude ?? {});
   const sessionPlan = payload?.session ?? {};
+  // The client resolved continue / fork / new from the branch shape. Honour it:
+  // a per-node fork mints a fresh session every run and throws away the
+  // provider-side history and prompt cache that make a branch cheap.
   const sessionMode = sessionPlan.action === "new" || settings.continueMode === "new"
     ? "new"
-    : provider === "codex" ? "resume" : "fork";
+    : sessionPlan.action === "fork"
+      ? "fork"
+      : "resume";
   const resumeId = provider === "codex"
     ? stringOr(settings.resumeThreadId, "")
     : stringOr(settings.resumeSessionId, "");
@@ -2433,10 +2439,18 @@ async function createCodexResponse({ prompt, context, model, codex, startedAt, a
     ? `${buildCodexPromptHeader(settings)}\n\n${agentPrompt}`
     : buildCodexPrompt(prompt, context, settings);
   const deltaPrompt = agentDeltaPrompt ? `${buildCodexPromptHeader(settings)}\n\n${agentDeltaPrompt}` : "";
+  // The exec transport cannot fork, so a fork request degrades to a fresh
+  // thread and says so instead of silently contaminating the inherited one.
+  const forkRequested = settings.forkThread === true && Boolean(settings.resumeThreadId);
+  if (forkRequested) settings.resumeThreadId = "";
   const resuming = Boolean(settings.resumeThreadId);
   const beforeGitStatus = await collectGitStatus(settings.workspace);
   let activeSettings = settings;
-  let sessionInfo = resuming ? { action: "continue", resumeId: settings.resumeThreadId } : { action: "new" };
+  let sessionInfo = resuming
+    ? { action: "continue", resumeId: settings.resumeThreadId }
+    : forkRequested
+      ? { action: "new", fellBack: true, reason: "codex-exec-cannot-fork-a-diverged-branch" }
+      : { action: "new" };
   let result = null;
   let resumeError = null;
   try {
@@ -3446,6 +3460,11 @@ function normalizeCodexSettings(input, model, context) {
     skipGitRepoCheck: false,
     fullAccessApproved,
     continueMode,
+    // `codex exec` can only continue a thread linearly. A fork request from a
+    // diverged branch therefore has to start a fresh thread here: reusing the
+    // id would splice two Atlas branches into one transcript. The app-server
+    // route handles the same request with `thread/fork` and keeps the history.
+    forkThread: input?.forkThread === true,
     resumeThreadId: continueMode === "new" ? "" : stringOr(input?.resumeThreadId, ""),
     clientRunId: stringOr(input?.clientRunId, ""),
     requestNodeId: stringOr(input?.requestNodeId, ""),

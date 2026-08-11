@@ -75,11 +75,12 @@ const MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER = 3;
 const VISIBLE_DESCENDANT_DEPTH = 5;
 const GENERATED_LAYOUT_VISIBLE_DESCENDANT_DEPTH = VISIBLE_DESCENDANT_DEPTH;
 const HOLD_TO_BIRTH_MS = 1520;
+const BIRTH_EFFECT_RELEASE_MS = 500;
 const WHITE_HOLE_CANCEL_PX = 12;
 const ROOT_BIRTH_FOCUS_MIDPOINT = 0.5;
 const ROOT_BIRTH_MAX_ZOOM_IN_OFFSET = NOTEBOOK_NODE_RADIUS * 2;
 const ROOT_BIRTH_BLOCKED_HINT_MS = 2000;
-const BIRTH_EFFECT_VISUAL_SCALE = 0.8;
+const BIRTH_EFFECT_VISUAL_SCALE = 1.2;
 const TEAR_SAMPLE_WINDOW_MS = 100;
 const TEAR_STAGE_ONE_SCREEN_DELTA = 118;
 const TEAR_STAGE_TWO_WORLD_DISTANCE = 84;
@@ -131,7 +132,9 @@ type BirthEffect = {
   id: string;
   direction: Vec3Tuple;
   startedAt: number;
-  mode: "charging" | "burst";
+  mode: "charging" | "released" | "burst";
+  releasedAt?: number;
+  chargeAtRelease?: number;
 };
 
 type SpaceDragState = {
@@ -634,7 +637,7 @@ function getNodeKeyboardShortcutOriginId(target: EventTarget | null, spaceEditor
     return spaceEditorNodeId === selectedNodeId ? spaceEditorNodeId : selectedNodeId;
   }
   if (isInteractiveShortcutTarget(target)) return null;
-  if (selectedNodeId === store.atlasRoot.id && getOnboardingCurrentSpaceStep() === "childNodeCreated") {
+  if (selectedNodeId === store.atlasRoot.id && getOnboardingCurrentSpaceStep() === "nodeCount") {
     return store.atlasRoot.children[0]?.id ?? selectedNodeId;
   }
   return selectedNodeId;
@@ -1379,7 +1382,10 @@ function NavigationController({
 
   useFrame((_, delta) => {
     if (!pageActive) return;
-    if (birthEffect?.mode === "burst" && performance.now() - birthEffect.startedAt > 820) {
+    if (
+      (birthEffect?.mode === "burst" && performance.now() - birthEffect.startedAt > 820) ||
+      (birthEffect?.mode === "released" && performance.now() - (birthEffect.releasedAt ?? birthEffect.startedAt) > BIRTH_EFFECT_RELEASE_MS)
+    ) {
       setBirthEffect(null);
     }
 
@@ -1391,7 +1397,11 @@ function NavigationController({
       const heldFor = performance.now() - drag.startedAt;
       if (heldFor >= HOLD_TO_BIRTH_MS) {
         drag.created = true;
-        addRootNodeAt(drag.direction);
+        addRootNodeAt(
+          drag.direction,
+          "",
+          tutorialRootBirthUnlocked ? { focus: false, requestEdit: false } : undefined,
+        );
         emitOnboardingEvent("root-node-created");
         setBirthEffect({
           id: `burst-${performance.now()}`,
@@ -1550,7 +1560,17 @@ function NavigationController({
     releaseUniversePointerSession(pointerSessionOwnerRef.current);
     setMobileRaycastMode({ kind: "idle" });
     if (!drag.created && drag.mode === "hold" && drag.canBirth) {
-      setBirthEffect(null);
+      const releasedAt = performance.now();
+      setBirthEffect((current) =>
+        current?.mode === "charging"
+          ? {
+              ...current,
+              mode: "released",
+              releasedAt,
+              chargeAtRelease: Math.min(1, (releasedAt - current.startedAt) / HOLD_TO_BIRTH_MS),
+            }
+          : current,
+      );
     }
     return true;
   };
@@ -1710,11 +1730,7 @@ function NavigationController({
       wheelZoomInRef.current.startedAt = 0;
       return;
     }
-    const onboardingSpaceStep = getOnboardingCurrentSpaceStep();
-    const suppressOnboardingFastFocus = onboardingSpaceStep !== null || now < onboardingFastFocusSuppressUntilRef.current;
-    if (onboardingSpaceStep === "zoom") {
-      onboardingFastFocusSuppressUntilRef.current = now + 1800;
-    }
+    const suppressOnboardingFastFocus = now < onboardingFastFocusSuppressUntilRef.current;
     if (Math.abs(deltaY) > 0.5) emitOnboardingEvent("zoom");
 
     if (allowCameraZoom) {
@@ -3517,7 +3533,7 @@ function HierarchyNode({
       canCreateChild: true,
       samples: [{ t: performance.now(), x: event.clientX, y: event.clientY }],
       hasMoved: false,
-      suppressChildCreationForDrag: getOnboardingCurrentSpaceStep() === "nodeDrag",
+      suppressChildCreationForDrag: false,
       torn: false,
       shiftKey: event.nativeEvent.shiftKey,
     };
@@ -4872,7 +4888,7 @@ function WhiteHoleChargeMarker({
     setAge(nextAge);
     if (!groupRef.current) return;
     const charge = Math.min(1, nextAge / HOLD_TO_BIRTH_MS);
-    groupRef.current.scale.setScalar((0.36 + charge * 1.08) * (1 + Math.sin(nextAge * 0.018) * 0.035) * BIRTH_EFFECT_VISUAL_SCALE);
+    groupRef.current.scale.setScalar((0.58 + charge * 1.04) * (1 + Math.sin(nextAge * 0.018) * 0.035) * BIRTH_EFFECT_VISUAL_SCALE);
   });
 
   const charge = Math.min(1, age / HOLD_TO_BIRTH_MS);
@@ -4881,15 +4897,15 @@ function WhiteHoleChargeMarker({
     <group ref={groupRef} position={position}>
       <CameraFacingGroup>
         <mesh>
-          <sphereGeometry args={[5 + charge * 9, 32, 18]} />
+          <sphereGeometry args={[7 + charge * 11, 32, 18]} />
           <meshBasicMaterial color={themeColors.birthCore} transparent opacity={0.52 + charge * 0.22} blending={AdditiveBlending} depthWrite={false} />
         </mesh>
         <mesh>
-          <torusGeometry args={[13 + charge * 24, 1.4 + charge * 1.8, 18, 112]} />
+          <torusGeometry args={[18 + charge * 30, 1.8 + charge * 2.2, 18, 112]} />
           <meshBasicMaterial color={themeColors.birthRing} transparent opacity={0.72} blending={AdditiveBlending} depthWrite={false} />
         </mesh>
         <mesh>
-          <torusGeometry args={[(13 + charge * 24) * 1.5, 0.7 + charge, 18, 112]} />
+          <torusGeometry args={[(18 + charge * 30) * 1.55, 0.9 + charge * 1.2, 18, 112]} />
           <meshBasicMaterial color={themeColors.birthAccent} transparent opacity={0.34 + charge * 0.18} blending={AdditiveBlending} depthWrite={false} />
         </mesh>
       </CameraFacingGroup>
@@ -4993,31 +5009,47 @@ function WhiteHoleEffect({ effect, theme }: { effect: BirthEffect; theme: AtlasT
     const nextAge = performance.now() - effect.startedAt;
     setAge(nextAge);
     if (!groupRef.current) return;
-    const charge = effect.mode === "charging" ? Math.min(1, nextAge / HOLD_TO_BIRTH_MS) : 1;
+    const releaseProgress = effect.mode === "released"
+      ? Math.min(1, (performance.now() - (effect.releasedAt ?? performance.now())) / BIRTH_EFFECT_RELEASE_MS)
+      : 0;
+    const charge = effect.mode === "charging"
+      ? Math.min(1, nextAge / HOLD_TO_BIRTH_MS)
+      : effect.mode === "released"
+        ? Math.min(1, (effect.chargeAtRelease ?? 0) + releaseProgress * 0.24)
+        : 1;
     const breathe = 1 + Math.sin(nextAge * 0.018) * 0.035;
-    groupRef.current.scale.setScalar((0.35 + charge * 1.1) * breathe * BIRTH_EFFECT_VISUAL_SCALE);
+    groupRef.current.scale.setScalar((0.62 + charge * 1.0) * breathe * BIRTH_EFFECT_VISUAL_SCALE);
   });
 
-  const charge = effect.mode === "charging" ? Math.min(1, age / HOLD_TO_BIRTH_MS) : 1;
+  const releaseProgress = effect.mode === "released"
+    ? Math.min(1, (performance.now() - (effect.releasedAt ?? performance.now())) / BIRTH_EFFECT_RELEASE_MS)
+    : 0;
+  const charge = effect.mode === "charging"
+    ? Math.min(1, age / HOLD_TO_BIRTH_MS)
+    : effect.mode === "released"
+      ? Math.min(1, (effect.chargeAtRelease ?? 0) + releaseProgress * 0.24)
+      : 1;
   const burstAge = effect.mode === "burst" ? age : 0;
-  const opacity = effect.mode === "burst" ? Math.max(0, 1 - burstAge / 680) : 0.34 + charge * 0.48;
-  const ringRadius = effect.mode === "burst" ? 22 + burstAge * 0.12 : 12 + charge * 26;
+  const opacity = effect.mode === "burst"
+    ? Math.max(0, 1 - burstAge / 680)
+    : (0.48 + charge * 0.42) * (effect.mode === "released" ? 1 - releaseProgress : 1);
+  const ringRadius = effect.mode === "burst" ? 28 + burstAge * 0.15 : 18 + charge * 34;
 
   return (
     <group position={position}>
       <CameraFacingGroup>
       <group ref={groupRef}>
         <mesh>
-          <sphereGeometry args={[6 + charge * 10, 32, 18]} />
-          <meshBasicMaterial color={themeColors.birthCore} transparent opacity={opacity * 0.72} blending={AdditiveBlending} />
+          <sphereGeometry args={[9 + charge * 13, 32, 18]} />
+          <meshBasicMaterial color={themeColors.birthCore} transparent opacity={opacity * 0.72} blending={AdditiveBlending} depthWrite={false} />
         </mesh>
         <mesh>
           <torusGeometry args={[ringRadius, 1.6 + charge * 1.8, 18, 112]} />
-          <meshBasicMaterial color={themeColors.birthRing} transparent opacity={opacity} blending={AdditiveBlending} />
+          <meshBasicMaterial color={themeColors.birthRing} transparent opacity={opacity} blending={AdditiveBlending} depthWrite={false} />
         </mesh>
         <mesh>
-          <torusGeometry args={[ringRadius * 1.54, 0.8 + charge, 18, 112]} />
-          <meshBasicMaterial color={themeColors.birthAccent} transparent opacity={opacity * 0.42} blending={AdditiveBlending} />
+          <torusGeometry args={[ringRadius * 1.58, 1 + charge * 1.2, 18, 112]} />
+          <meshBasicMaterial color={themeColors.birthAccent} transparent opacity={opacity * 0.42} blending={AdditiveBlending} depthWrite={false} />
         </mesh>
       </group>
       </CameraFacingGroup>
