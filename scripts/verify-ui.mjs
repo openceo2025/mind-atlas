@@ -252,6 +252,13 @@ async function verifyLocalDeveloperModeSurface(browser) {
   }
   await agentRunsLauncher.waitFor();
 
+  // The detail panel is dismissible from its transparent backdrop as well as
+  // from the explicit close control, including pointer/touch input.
+  await agentRunsLauncher.click();
+  await agentWorkspace.waitFor();
+  await page.locator(".agent-workspace-backdrop").click({ position: { x: 4, y: 4 } });
+  await agentRunsLauncher.waitFor();
+
   const localSavePrevented = await page.evaluate(() => {
     const event = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true });
     window.dispatchEvent(event);
@@ -368,6 +375,7 @@ async function verifyLocalDeveloperModeSurface(browser) {
     localSavePrevented,
     repositoryText,
     agentRunsReopened: true,
+    agentWorkspaceClosedByOutsideClick: true,
   };
 }
 

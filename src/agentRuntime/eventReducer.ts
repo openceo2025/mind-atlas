@@ -200,6 +200,7 @@ export function reduceRunEvent(model: AgentRunViewModel, event: AgentRunEvent): 
       const request: AgentApprovalRequest = {
         requestId: text(event.requestId),
         category: text(event.category),
+        toolName: text(event.toolName),
         reason: text(event.reason),
         command: text(event.command),
         cwd: text(event.cwd),

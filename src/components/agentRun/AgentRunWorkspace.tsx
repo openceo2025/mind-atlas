@@ -41,7 +41,7 @@ import {
   subscribeToAgentRun,
   type AgentHandoffResult,
 } from "../../agentRuntime/runtimeClient";
-import type { AgentCapabilitiesResult, AgentRunViewModel, AgentTimelineEntry } from "../../agentRuntime/types";
+import type { AgentApprovalRequest, AgentCapabilitiesResult, AgentRunEvent, AgentRunManifest, AgentRunViewModel, AgentTimelineEntry } from "../../agentRuntime/types";
 import { CopyButton, DiffBlock, MarkdownView } from "./MarkdownView";
 
 type WorkspaceTab = "answer" | "timeline" | "terminal" | "changes" | "preview" | "context" | "capabilities";
@@ -63,6 +63,8 @@ const NORMAL_HIDDEN_KINDS = new Set(["command_output", "diagnostic"]);
 export interface AgentRunWorkspaceProps {
   runId: string;
   onClose: () => void;
+  onApprovalRequested?: (runId: string, approval: AgentApprovalRequest, manifest: AgentRunManifest | null) => void;
+  onApprovalResolved?: (runId: string, requestId: string, decision: string, detail?: string) => void;
   /** Atlas injection accounting for the Context tab. Never merged with provider usage. */
   atlasInjection?: {
     estimatedTokens: number | null;
@@ -84,7 +86,7 @@ export interface AgentRunWorkspaceProps {
   } | null;
 }
 
-export function AgentRunWorkspace({ runId, onClose, atlasInjection = null, runSwitcher = null }: AgentRunWorkspaceProps) {
+export function AgentRunWorkspace({ runId, onClose, onApprovalRequested, onApprovalResolved, atlasInjection = null, runSwitcher = null }: AgentRunWorkspaceProps) {
   const [model, setModel] = useState<AgentRunViewModel>(() => createRunViewModel(runId));
   const [tab, setTab] = useState<WorkspaceTab>("answer");
   const [density, setDensity] = useState<TimelineDensity>("normal");
@@ -94,6 +96,7 @@ export function AgentRunWorkspace({ runId, onClose, atlasInjection = null, runSw
   const [capabilities, setCapabilities] = useState<AgentCapabilitiesResult | null>(null);
   const [busy, setBusy] = useState(false);
   const modelRef = useRef(model);
+  const manifestRef = useRef<AgentRunManifest | null>(null);
   modelRef.current = model;
 
   useEffect(() => {
@@ -103,14 +106,19 @@ export function AgentRunWorkspace({ runId, onClose, atlasInjection = null, runSw
     void describeAgentRun(runId)
       .then((description) => {
         if (cancelled) return;
+        manifestRef.current = description.manifest;
         setModel((current) => ({ ...current, manifest: description.manifest, status: description.manifest.status, session: description.manifest.session }));
       })
       .catch(() => {});
     const unsubscribe = subscribeToAgentRun(runId, {
       onManifest: (manifest) => {
+        manifestRef.current = manifest;
         setModel((current) => ({ ...current, manifest, session: manifest.session ?? current.session }));
       },
       onEvent: (event) => {
+        if (event.kind === "approval_requested") {
+          onApprovalRequested?.(runId, approvalFromEvent(event), manifestRef.current);
+        }
         setModel((current) => reduceRunEvent(current, event));
       },
       onError: (error) => setNotice(error.message),
@@ -119,7 +127,7 @@ export function AgentRunWorkspace({ runId, onClose, atlasInjection = null, runSw
       cancelled = true;
       unsubscribe();
     };
-  }, [runId]);
+  }, [onApprovalRequested, runId]);
 
   useEffect(() => {
     const manifest = model.manifest;
@@ -309,7 +317,11 @@ export function AgentRunWorkspace({ runId, onClose, atlasInjection = null, runSw
                 type="button"
                 className={choice.id === "decline" ? "agent-btn agent-btn-danger" : "agent-btn"}
                 disabled={busy}
-                onClick={() => control(() => resolveAgentApproval(runId, approval.requestId, choice.id), `Answered: ${choice.label}`)}
+                onClick={() => control(async () => {
+                  const result = await resolveAgentApproval(runId, approval.requestId, choice.id);
+                  if (result.ok) onApprovalResolved?.(runId, approval.requestId, choice.id, result.detail);
+                  return result;
+                }, `Answered: ${choice.label}`)}
               >
                 {choice.label}
               </button>
@@ -944,6 +956,31 @@ function filterTimeline(entries: AgentTimelineEntry[], density: TimelineDensity)
   if (density === "verbose") return entries;
   if (density === "summary") return entries.filter((entry) => SUMMARY_KINDS.has(entry.kind) || entry.severity === "error");
   return entries.filter((entry) => !NORMAL_HIDDEN_KINDS.has(entry.kind));
+}
+
+function approvalFromEvent(event: AgentRunEvent): AgentApprovalRequest {
+  return {
+    requestId: textValue(event.requestId),
+    category: textValue(event.category),
+    toolName: textValue(event.toolName),
+    reason: textValue(event.reason),
+    command: textValue(event.command),
+    cwd: textValue(event.cwd),
+    grantRoot: textValue(event.grantRoot),
+    choices: Array.isArray(event.choices)
+      ? event.choices
+        .map((choice) => ({
+          id: textValue((choice as { id?: unknown })?.id),
+          label: textValue((choice as { label?: unknown })?.label),
+        }))
+        .filter((choice) => choice.id)
+      : [],
+    createdAt: textValue(event.createdAt),
+  };
+}
+
+function textValue(value: unknown) {
+  return typeof value === "string" ? value : value === null || value === undefined ? "" : String(value);
 }
 
 function statusText(status: string) {

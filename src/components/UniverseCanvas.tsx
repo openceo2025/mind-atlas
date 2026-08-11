@@ -3822,17 +3822,44 @@ function HierarchyNode({
 
       {node.action && node.id === selectedNodeId ? (
         <Html center position={[0, 0, radius + 22]} transform={false} zIndexRange={[5, 1]}>
-          <button
-            className={`node-action-button ${node.action.kind === "codex_full_access" && node.action.decision === "deny" ? "is-deny" : "is-approve"}`}
-            type="button"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              void runNodeAction(node.id);
-            }}
-          >
-            {node.action.label}
-          </button>
+          {node.action.kind === "agent_approval" ? (
+            <div className="node-action-buttons" role="group" aria-label={node.action.label}>
+              <button
+                className="node-action-button is-approve"
+                type="button"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void runNodeAction(node.id, "approve");
+                }}
+              >
+                {node.action.approveLabel ?? formatAppMessage("approval.approveOnce")}
+              </button>
+              <button
+                className="node-action-button is-deny"
+                type="button"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void runNodeAction(node.id, "deny");
+                }}
+              >
+                {node.action.denyLabel ?? formatAppMessage("approval.deny")}
+              </button>
+            </div>
+          ) : (
+            <button
+              className={`node-action-button ${node.action.kind === "codex_full_access" && node.action.decision === "deny" ? "is-deny" : "is-approve"}`}
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                void runNodeAction(node.id);
+              }}
+            >
+              {node.action.label}
+            </button>
+          )}
         </Html>
       ) : null}
 

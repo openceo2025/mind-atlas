@@ -13,6 +13,9 @@ import type {
 import { getBridgeUrl } from "../ai/bridgeClient";
 import { isHostedServiceMode } from "../hosted/serviceClient";
 
+/** A run stream open at least this long counts as healthy, so its reconnect backoff resets. */
+const HEALTHY_STREAM_MS = 10_000;
+
 export function isAgentRuntimeAvailable() {
   return !isHostedServiceMode();
 }
@@ -239,6 +242,9 @@ export function subscribeToAgentRun(runId: string, handlers: AgentRunStreamHandl
   let controller: AbortController | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let attempt = 0;
+  // The bridge closes the stream once a run is terminal. That is a normal end,
+  // not a dropped connection, so it must not trigger the reconnect backoff.
+  let ended = false;
 
   const connect = async () => {
     if (closed) return;
@@ -249,7 +255,12 @@ export function subscribeToAgentRun(runId: string, handlers: AgentRunStreamHandl
         { headers: { Accept: "text/event-stream" }, signal: controller.signal },
       );
       if (!response.ok || !response.body) throw new Error(`Run stream failed with ${response.status}`);
-      attempt = 0;
+      // Connecting is not the same as making progress. Resetting the backoff on
+      // every successful connect turns a stream that closes immediately into an
+      // unbounded reconnect loop; the backoff only resets once this connection
+      // proved useful — it delivered an event, or it stayed open.
+      const openedAt = Date.now();
+      let deliveredEvent = false;
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -270,22 +281,33 @@ export function subscribeToAgentRun(runId: string, handlers: AgentRunStreamHandl
           } catch {
             continue;
           }
-          if (eventLine?.slice(7).trim() === "manifest") {
+          const frameType = eventLine?.slice(7).trim();
+          if (frameType === "manifest") {
             handlers.onManifest?.(payload as AgentRunManifest);
+            continue;
+          }
+          if (frameType === "end") {
+            ended = true;
             continue;
           }
           const event = payload as AgentRunEvent;
           if (typeof event?.sequence !== "number" || event.sequence <= lastSequence) continue;
           lastSequence = event.sequence;
+          deliveredEvent = true;
           handlers.onEvent(event);
         }
       }
+      if (ended) {
+        handlers.onClose?.();
+        return;
+      }
+      if (deliveredEvent || Date.now() - openedAt >= HEALTHY_STREAM_MS) attempt = 0;
       if (!closed) scheduleRetry();
     } catch (error) {
       if (closed) return;
       if ((error as Error)?.name === "AbortError") return;
       handlers.onError?.(error instanceof Error ? error : new Error(String(error)));
-      scheduleRetry();
+      if (!closed) scheduleRetry();
     }
   };
 

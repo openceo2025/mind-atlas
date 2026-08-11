@@ -9,6 +9,9 @@
 // - partial deltas arrive as `stream_event` wrapping Anthropic stream events;
 // - `result` carries usage, total_cost_usd and modelUsage[model].contextWindow;
 // - `rate_limit_event` carries plan allowance, which is NOT context usage;
+// - with `--input-format stream-json --permission-prompt-tool stdio`, provider
+//   approvals arrive as `control_request` frames and are answered with
+//   `control_response` frames on the same stdin/stdout channel;
 // - killing the process yields no `result` line, so the terminal event must be
 //   synthesized locally.
 
@@ -141,6 +144,9 @@ export class ClaudeAdapter {
         mcp: Array.isArray(init?.mcp_servers) && init.mcp_servers.length > 0,
         skills: Array.isArray(init?.skills) && init.skills.length > 0,
         subagents: Array.isArray(init?.agents) && init.agents.length > 0,
+        // Verified against the installed CLI's stdio permission bridge. This
+        // is a provider approval channel, not a blanket permission grant.
+        approvals: true,
         // /desktop is not present on the verified build; never advertise it
         // from documentation alone.
         nativeDesktopHandoff: authIsSubscription && slashCommands.includes("desktop"),
@@ -153,7 +159,7 @@ export class ClaudeAdapter {
       },
       unavailableReasons: {
         steer: "Claude print mode has no verified mid-turn steering channel; Mind Atlas queues a follow-up run instead.",
-        approvals: "Claude print mode resolves permissions from --permission-mode; it does not raise an interactive approval to the client.",
+        approvals: "",
         userQuestions: "Claude print mode does not surface interactive questions to a non-TTY client.",
         nativeDesktopHandoff: slashCommands.includes("desktop")
           ? ""
@@ -218,7 +224,17 @@ export class ClaudeAdapter {
    * @param {"new"|"resume"|"fork"} mode
    */
   async startRun(mode, request, sink) {
-    const args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
+    const args = [
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--include-partial-messages",
+      "--permission-prompt-tool",
+      "stdio",
+    ];
     appendClaudeDefaultWebToolArgs(args);
     const settings = request.claudeSettings ?? {};
     // Additive per-run MCP config. The user's own global MCP servers stay
@@ -280,8 +296,10 @@ export class ClaudeAdapter {
     return { ok: true };
   }
 
-  async resolveApproval() {
-    return { ok: false, reason: "unsupported", detail: "Claude print mode does not raise interactive approvals." };
+  async resolveApproval(runId, requestId, decision) {
+    const run = this.runs.get(runId);
+    if (!run) return { ok: false, reason: "unsupported", detail: "No active Claude run." };
+    return await run.resolveApproval(requestId, decision);
   }
 
   async resolveUserInput() {
@@ -328,6 +346,8 @@ class ClaudeRunProcess {
     this.changedFiles = new Set();
     /** @type {Map<string, { name: string, startedAt: number, detail?: string, label?: string }>} */
     this.openTools = new Map();
+    /** @type {Map<string, { toolName: string, input: Record<string, unknown>, toolUseId: string }>} */
+    this.openApprovals = new Map();
   }
 
   start() {
@@ -359,8 +379,12 @@ class ClaudeRunProcess {
       void this.#onClose(processAttempt, code);
     });
     try {
-      child.stdin.write(this.prompt);
-      child.stdin.end();
+      // Keep stdin open: Claude uses the same stdio channel to park on a
+      // permission request until Mind Atlas sends a control_response.
+      child.stdin.write(JSON.stringify({
+        type: "user",
+        message: { role: "user", content: this.prompt },
+      }) + "\n");
     } catch (error) {
       this.#finish("failed", String(error?.message ?? error));
     }
@@ -426,6 +450,7 @@ class ClaudeRunProcess {
   async #onEvent(event) {
     const type = String(event?.type ?? "");
     if (type === "system") return this.#onSystem(event);
+    if (type === "control_request") return this.#onControlRequest(event);
     if (type === "stream_event") return this.#onStreamEvent(event);
     if (type === "assistant") return this.#onAssistant(event);
     if (type === "user") return this.#onUser(event);
@@ -457,6 +482,42 @@ class ClaudeRunProcess {
       return;
     }
     this.sink.diagnostic(`unmapped claude event type ${type}`);
+  }
+
+  async #onControlRequest(event) {
+    const request = event?.request;
+    if (!request || request.subtype !== "can_use_tool") {
+      this.sink.diagnostic(`unmapped claude control request ${String(request?.subtype ?? "")}`);
+      return;
+    }
+    const requestId = String(event.request_id ?? "");
+    if (!requestId) {
+      this.sink.diagnostic("claude approval request had no request id");
+      return;
+    }
+    const toolName = String(request.tool_name ?? "");
+    const input = request.input && typeof request.input === "object" && !Array.isArray(request.input)
+      ? request.input
+      : {};
+    this.openApprovals.set(requestId, {
+      toolName,
+      input,
+      toolUseId: String(request.tool_use_id ?? ""),
+    });
+    await this.sink.event({
+      kind: "approval_requested",
+      requestId,
+      category: approvalCategoryForTool(toolName),
+      toolName,
+      reason: boundText(String(request.description ?? "Permission is required for this tool."), 4000),
+      command: toolName === "Bash" ? boundText(String(input.command ?? ""), 4000) : "",
+      cwd: this.workspace,
+      grantRoot: boundText(String(request.blocked_path ?? ""), 1000),
+      choices: [
+        { id: "allow", label: "Approve once" },
+        { id: "deny", label: "Deny" },
+      ],
+    });
   }
 
   async #onSystem(event) {
@@ -724,8 +785,42 @@ class ClaudeRunProcess {
     this.sawResult = false;
     this.planLimitError = "";
     this.openTools.clear();
+    this.openApprovals.clear();
     this.start();
     return true;
+  }
+
+  async resolveApproval(requestId, decision) {
+    const open = this.openApprovals.get(requestId);
+    if (!open) return { ok: false, reason: "unknown_request", detail: "That approval is no longer waiting." };
+    if (decision !== "allow" && decision !== "deny" && decision !== "cancel") {
+      return { ok: false, reason: "invalid_decision", detail: `Unsupported Claude approval decision: ${decision}` };
+    }
+    const response = decision === "allow"
+      ? {
+          behavior: "allow",
+          // Claude's stdio bridge expects the original input in camelCase.
+          updatedInput: open.input,
+        }
+      : {
+          behavior: "deny",
+        message: decision === "cancel" ? "Cancelled by the user in Mind Atlas." : "Denied by the user in Mind Atlas.",
+      };
+    const stdin = this.child?.stdin;
+    if (!stdin || stdin.destroyed || stdin.writableEnded) {
+      return { ok: false, reason: "failed", detail: "Claude Code's approval channel is no longer writable." };
+    }
+    try {
+      stdin.write(JSON.stringify({
+        type: "control_response",
+        response: { subtype: "success", request_id: requestId, response },
+      }) + "\n");
+    } catch (error) {
+      return { ok: false, reason: "failed", detail: String(error?.message ?? error).slice(0, 400) };
+    }
+    this.openApprovals.delete(requestId);
+    await this.sink.event({ kind: "approval_resolved", requestId, decision });
+    return { ok: true };
   }
 
   #withAuthRecoveryDetail(failure) {
@@ -738,6 +833,7 @@ class ClaudeRunProcess {
   #finish(status, error) {
     if (this.finished) return;
     this.finished = true;
+    try { this.child?.stdin.end(); } catch {}
     this.adapter.release(this.sink.runId);
     void this.sink.terminal({
       status,
@@ -747,6 +843,12 @@ class ClaudeRunProcess {
       changedFiles: [...this.changedFiles],
     });
   }
+}
+
+function approvalCategoryForTool(toolName) {
+  if (toolName === "Bash" || toolName === "PowerShell") return "command";
+  if (["Write", "Edit", "MultiEdit", "NotebookEdit", "ApplyPatch"].includes(toolName)) return "file";
+  return "tool";
 }
 
 function extractToolResultText(content) {

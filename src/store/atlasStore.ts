@@ -9,7 +9,8 @@ import { isAboutDemoMode } from "../aboutDemo";
 import { planetColorForSeed, planetTextureForSeed } from "../config/planetTheme";
 import { atlasRoot, initialWorkAreas } from "../data/atlas";
 import { acknowledgeAgentRuns, getAgentRunInbox, getBridgeUrl, getBridgeUrlCandidates, recoverCodexRun, requestAiResponse, requestGitPush } from "../ai/bridgeClient";
-import { inspectAgentWorkspace, isAgentRuntimeAvailable } from "../agentRuntime/runtimeClient";
+import { inspectAgentWorkspace, isAgentRuntimeAvailable, resolveAgentApproval } from "../agentRuntime/runtimeClient";
+import type { AgentApprovalRequest } from "../agentRuntime/types";
 import { materializeEvidence } from "../agentRuntime/evidence";
 import { accountAtlasInjection, type AtlasInjectionAccounting } from "../agentRuntime/contextAccounting";
 import {
@@ -71,6 +72,8 @@ import type {
   AiRun,
   AiUsage,
   AgentExecutionMetadata,
+  AgentApprovalRecord,
+  AgentApprovalAction,
   AgentRunInboxItem,
   AgentWorkspaceBinding,
   AtlasEvent,
@@ -208,6 +211,13 @@ type ChildNodeDraft = {
   summary?: string;
 };
 
+type AgentApprovalNodeInput = AgentApprovalRequest & {
+  runId: string;
+  provider: Extract<AiProvider, "codex" | "claude">;
+  requestNodeId?: string;
+  sourceNodeId?: string;
+};
+
 type PartnerArchiveMode = Extract<AiExecutionMode, "chat" | "openai" | "local"> | "realtime";
 
 type PartnerTurnArchive = {
@@ -249,6 +259,8 @@ interface AtlasStore {
   agentWorkspaceVisible: boolean;
   /** Local-only: exactly what Mind Atlas injected into that run. */
   agentWorkspaceInjection: AtlasInjectionAccounting | null;
+  recordAgentApprovalRequest: (input: AgentApprovalNodeInput) => void;
+  recordAgentApprovalResponse: (runId: string, requestId: string, decision: string, detail?: string) => void;
   setAgentWorkspaceRunId: (clientRunId: string) => void;
   /** Selects a durable run without changing whether the workspace is visible. */
   selectAgentWorkspaceRun: (runtimeRunId: string) => void;
@@ -300,7 +312,7 @@ interface AtlasStore {
   setClaudeSettings: (patch: Partial<ClaudeSettings>) => void;
   loadAiDialogSettingsForNode: (id: string) => void;
   /** Persist the settings a run actually used onto its node. */
-  commitAiDialogSettingsToNode: (id: string) => void;
+  commitAiDialogSettingsToNode: (id: string, settings?: AiDialogSettings, mode?: AiExecutionMode) => void;
   resetAiDialogSettingsToDefaults: () => void;
   setCommandInputEditing: (editing: boolean) => void;
   setActiveCommandMode: (mode: AiExecutionMode | "note") => void;
@@ -382,7 +394,7 @@ interface AtlasStore {
   addQuickChildFromInput: (prompt: string) => string | undefined;
   recordAiSubmissionError: (prompt: string, mode: AiExecutionMode, message: string) => void;
   runAiOnSelectedNode: (prompt: string, mode: AiExecutionMode, options?: AiContextScope | Partial<AiContextOptions>) => Promise<void>;
-  runNodeAction: (nodeId: string) => Promise<void>;
+  runNodeAction: (nodeId: string, decision?: "approve" | "deny") => Promise<void>;
   recoverCompletedCodexRuns: () => Promise<void>;
   recoverMissedAgentRuns: () => Promise<void>;
   tickNotificationPulses: () => void;
@@ -428,6 +440,85 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   birthMarks: {},
   titleEditRequestId: null,
   bodyEditRequestId: null,
+
+  recordAgentApprovalRequest: (input) => {
+    if (!isAgentRuntimeAvailable() || !input.runId || !input.requestId) return;
+    set((current) => {
+      if (findAgentApprovalNode(current.atlasRoot, input.runId, input.requestId)) return current;
+      const parentId = findAgentApprovalParentId(current.atlasRoot, input);
+      const parentPath = parentId ? findNodePath(current.atlasRoot, parentId) : null;
+      const parent = parentPath?.at(-1);
+      if (!parentId || !parentPath || !parent) return current;
+      const record = normalizeAgentApprovalRecord(input);
+      const node = createAgentApprovalNode(
+        parentId,
+        parent.children.length,
+        record,
+        parent.aiDialogSettings ?? findAiDialogSettingsInPath(parentPath),
+        collectNodeIdSet(current.atlasRoot),
+      );
+      const atlasRoot = stabilizePhyllotaxisPositions(updateNodeById(current.atlasRoot, parentId, (parentNode) => ({
+        ...parentNode,
+        status: "waiting",
+        nextDecision: `${modeLabel(input.provider)} is waiting for your approval.`,
+        updatedAt: new Date().toISOString(),
+        children: [...parentNode.children, node],
+      })));
+      const title = `${modeLabel(input.provider)} approval required`;
+      persistNotebook(atlasRoot);
+      return {
+        ...pushHistory(current),
+        atlasRoot,
+        birthMarks: { ...current.birthMarks, [node.id]: performance.now() },
+        notificationPulses: [...current.notificationPulses, createNotificationPulse(node.id, input.provider, title)],
+        unreadNotifications: markUnreadNotification(current.unreadNotifications, node.id, input.provider, title),
+      };
+    });
+  },
+
+  recordAgentApprovalResponse: (runId, requestId, decision, detail = "") => {
+    set((current) => {
+      const approvalNode = findAgentApprovalNode(current.atlasRoot, runId, requestId);
+      if (!approvalNode?.agentApproval || approvalNode.agentApproval.resolvedDecision) return current;
+      const record = approvalNode.agentApproval;
+      const denied = decision === record.denyDecision || decision === "deny" || decision === "decline" || decision === "cancel";
+      const outcome = denied ? "denied" : "approved";
+      const completedAt = new Date().toISOString();
+      let atlasRoot = updateNodeById(current.atlasRoot, approvalNode.id, (node) => {
+        const { action: _action, ...rest } = node;
+        return {
+          ...rest,
+          status: "done",
+          body: `${node.body}\n\n# User response\n- Decision: ${outcome}\n- Sent to ${modeLabel(record.provider)}: ${decision}${detail ? `\n- Provider response: ${detail}` : ""}`,
+          summary: `${modeLabel(record.provider)} approval ${outcome}.`,
+          nextDecision: denied
+            ? `${modeLabel(record.provider)} was told to deny this request.`
+            : `${modeLabel(record.provider)} received approval and may continue.`,
+          agentApproval: { ...record, resolvedDecision: decision, resolvedAt: completedAt, responseDetail: detail || undefined },
+          updatedAt: completedAt,
+        };
+      });
+      if (approvalNode.sourceParentId) {
+        atlasRoot = updateNodeById(atlasRoot, approvalNode.sourceParentId, (parent) => parent.status === "waiting"
+          ? {
+              ...parent,
+              status: "running",
+              nextDecision: `${modeLabel(record.provider)} continued after the approval response.`,
+              updatedAt: completedAt,
+            }
+          : parent);
+      }
+      atlasRoot = stabilizePhyllotaxisPositions(atlasRoot);
+      persistNotebook(atlasRoot);
+      const title = `${modeLabel(record.provider)} approval ${outcome}`;
+      return {
+        ...pushHistory(current),
+        atlasRoot,
+        notificationPulses: [...current.notificationPulses, createNotificationPulse(approvalNode.id, record.provider, title)],
+        unreadNotifications: markUnreadNotification(current.unreadNotifications, approvalNode.id, record.provider, title),
+      };
+    });
+  },
 
   selectNode: (id) => {
     const state = get();
@@ -642,13 +733,28 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     }));
   },
 
-  commitAiDialogSettingsToNode: (id) => {
+  commitAiDialogSettingsToNode: (id, settings, mode) => {
     set((state) => {
       if (!id || !findNode(state.atlasRoot, id)) return {};
-      const aiDialogSettings = buildStoredAiDialogSettings(state);
+      const aiDialogSettings = settings
+        ? createCurrentAiDialogSettings(
+            settings.contextOptions,
+            settings.chatSettings,
+            settings.codexSettings,
+            settings.openClawSettings,
+            settings.claudeSettings,
+          )
+        : buildStoredAiDialogSettings(state);
       const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => ({
         ...node,
         aiDialogSettings,
+        ...(mode
+          ? {
+              provider: providerForMode(mode),
+              runMode: mode,
+              modelId: modelIdForAiDialogSettings(mode, aiDialogSettings),
+            }
+          : {}),
         updatedAt: new Date().toISOString(),
       }));
       persistNotebook(atlasRoot);
@@ -1877,20 +1983,12 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!sourcePath || !sourceNode) return;
     const runId = `ai-run-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
     const completedAt = new Date().toISOString();
-    const inherited = createInheritedAiDialogSettings(
-      sourcePath,
+    const dialogSettings = createCurrentAiDialogSettings(
       current.aiContextOptions,
       current.chatSettings,
       current.codexSettings,
       current.openClawSettings,
       current.claudeSettings,
-    );
-    const dialogSettings = createCurrentAiDialogSettings(
-      current.aiContextOptions,
-      inherited.chatSettings,
-      inherited.codexSettings,
-      inherited.openClawSettings,
-      inherited.claudeSettings,
     );
     const requestNode = createAiRequestNode(sourceNodeId, sourceNode.children.length, runId, mode, trimmed, {
       aiDialogSettings: dialogSettings,
@@ -1978,8 +2076,17 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const sourceParent = sourcePath?.at(-1);
     if (!sourceParent) return;
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
-    const inheritedAiDialogSettings = createInheritedAiDialogSettings(sourcePath, state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
-    const requestAiDialogSettings = createCurrentAiDialogSettings(contextOptions, inheritedAiDialogSettings.chatSettings, inheritedAiDialogSettings.codexSettings, inheritedAiDialogSettings.openClawSettings, inheritedAiDialogSettings.claudeSettings);
+    // The dock is loaded from the selected node's nearest stored settings, then
+    // remains editable as a draft. Use that draft for this run so an explicit
+    // provider/model/API-vs-Pro change is not silently replaced by an older
+    // ancestor snapshot.
+    const requestAiDialogSettings = createCurrentAiDialogSettings(
+      contextOptions,
+      state.chatSettings,
+      state.codexSettings,
+      state.openClawSettings,
+      state.claudeSettings,
+    );
     const chatSettingsForRun = isChatLikeMode(mode) ? buildChatSettingsForRun(requestAiDialogSettings.chatSettings, mode) : undefined;
     if (mode === "codex" && !requestAiDialogSettings.codexSettings.workspace.trim()) {
       return;
@@ -2001,7 +2108,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     // The run is what makes a setting real. Commit the on-screen values onto the
     // node now, so this node becomes the origin descendants inherit from, and so
     // reselecting it restores exactly what ran rather than an abandoned draft.
-    get().commitAiDialogSettingsToNode(sourceNodeId);
+    get().commitAiDialogSettingsToNode(sourceNodeId, requestAiDialogSettings, mode);
 
     const useAgentRuntime = (mode === "codex" || mode === "claude") && isAgentRuntimeAvailable();
     const requestedAgentWorkspace = codexSettingsForRun?.workspace ?? claudeSettingsForRun?.workspace ?? "";
@@ -2326,6 +2433,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
             ...node,
             status: result.output.suggestedStatus === "done" ? "needs_review" : result.output.suggestedStatus,
             nextDecision: "Review the child AI request branch.",
+            aiDialogSettings: completedAiDialogSettings ?? node.aiDialogSettings,
             updatedAt: completedAt,
           })),
           requestNode.id,
@@ -2333,6 +2441,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           ...node,
           status: result.output.suggestedStatus === "done" ? "needs_review" : result.output.suggestedStatus,
           nextDecision: "Review the AI result, then keep, edit, or branch from it.",
+          aiDialogSettings: completedAiDialogSettings ?? node.aiDialogSettings,
           updatedAt: completedAt,
           codexThreadId: result.codexThreadId ?? node.codexThreadId,
           codexLogPath: result.codexLogPath ?? node.codexLogPath,
@@ -2471,11 +2580,51 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     }
   },
 
-  runNodeAction: async (nodeId) => {
+  runNodeAction: async (nodeId, decision) => {
     const state = get();
     const actionNode = findNode(state.atlasRoot, nodeId);
     const action = actionNode?.action;
     if (!action) return;
+
+    if (action.kind === "agent_approval") {
+      if (!decision) return;
+      const providerDecision = decision === "approve" ? action.approveDecision : action.denyDecision;
+      try {
+        const result = await resolveAgentApproval(action.runId, action.requestId, providerDecision);
+        if (result.ok) {
+          get().recordAgentApprovalResponse(action.runId, action.requestId, providerDecision, result.detail);
+          return;
+        }
+        const message = result.detail || result.reason || "Mind Atlas could not send the approval response.";
+        set((current) => {
+          const atlasRoot = updateNodeById(current.atlasRoot, nodeId, (node) => ({
+            ...node,
+            status: "error",
+            body: `${node.body}\n\n# Mind Atlas response error\n${message}`,
+            summary: "Approval response failed.",
+            nextDecision: "Retry the approval response while the provider request is still waiting.",
+            updatedAt: new Date().toISOString(),
+          }));
+          persistNotebook(atlasRoot);
+          return { ...pushHistory(current), atlasRoot };
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Mind Atlas could not send the approval response.";
+        set((current) => {
+          const atlasRoot = updateNodeById(current.atlasRoot, nodeId, (node) => ({
+            ...node,
+            status: "error",
+            body: `${node.body}\n\n# Mind Atlas response error\n${message}`,
+            summary: "Approval response failed.",
+            nextDecision: "Retry the approval response while the provider request is still waiting.",
+            updatedAt: new Date().toISOString(),
+          }));
+          persistNotebook(atlasRoot);
+          return { ...pushHistory(current), atlasRoot };
+        });
+      }
+      return;
+    }
 
     if (action.kind === "git_push") {
       const startedAt = new Date().toISOString();
@@ -3228,6 +3377,16 @@ export function findNode(root: AtlasNode, id: string): AtlasNode | undefined {
 export function findInheritedAiDialogSettings(root: AtlasNode, id: string): AiDialogSettings | undefined {
   const path = findNodePath(root, id);
   return path ? findAiDialogSettingsInPath(path) : undefined;
+}
+
+/** The last AI mode recorded on the selected branch, including generated nodes. */
+export function findInheritedCommandMode(root: AtlasNode, id: string): AiExecutionMode | undefined {
+  const path = findNodePath(root, id);
+  if (!path) return undefined;
+  for (const node of path.slice().reverse()) {
+    if (node.runMode) return node.runMode;
+  }
+  return undefined;
 }
 
 export function findInheritedAgentWorkspaceBinding(root: AtlasNode, id: string): AgentWorkspaceBinding | undefined {
@@ -4122,6 +4281,121 @@ function createGeneratedAttachmentRecords(nodeId: string, generatedAttachments: 
   return { attachments, blobs, previewUrls };
 }
 
+function normalizeAgentApprovalRecord(input: AgentApprovalNodeInput): AgentApprovalRecord {
+  const choices = Array.isArray(input.choices) ? input.choices : [];
+  const denyChoice = choices.find((choice) => /^(deny|decline|cancel)$/i.test(choice.id)) ?? choices.find((choice) => /deny|decline|cancel/i.test(choice.label));
+  const approveChoice = choices.find((choice) => choice !== denyChoice && !/deny|decline|cancel/i.test(`${choice.id} ${choice.label}`));
+  return {
+    provider: input.provider,
+    runId: input.runId,
+    requestId: input.requestId,
+    toolName: input.toolName || input.category || "provider tool",
+    category: input.category || "provider",
+    reason: redactApprovalText(input.reason),
+    command: input.command ? redactApprovalText(input.command) : undefined,
+    cwd: input.cwd ? redactApprovalText(input.cwd) : undefined,
+    grantRoot: input.grantRoot ? redactApprovalText(input.grantRoot) : undefined,
+    approveDecision: approveChoice?.id || (input.provider === "claude" ? "allow" : "accept"),
+    denyDecision: denyChoice?.id || (input.provider === "claude" ? "deny" : "decline"),
+    createdAt: input.createdAt || new Date().toISOString(),
+  };
+}
+
+function findAgentApprovalParentId(root: AtlasNode, input: AgentApprovalNodeInput) {
+  if (input.requestNodeId && findNode(root, input.requestNodeId)) return input.requestNodeId;
+  if (input.sourceNodeId && findNode(root, input.sourceNodeId)) return input.sourceNodeId;
+  let match = "";
+  const visit = (node: AtlasNode) => {
+    if (match) return;
+    if (
+      node.agentExecution?.runtimeRunId === input.runId
+      || node.agentExecution?.clientRunId === input.runId
+      || node.aiRunId === input.runId
+    ) {
+      match = node.id;
+      return;
+    }
+    node.children.forEach(visit);
+  };
+  visit(root);
+  return match || "";
+}
+
+function findAgentApprovalNode(root: AtlasNode, runId: string, requestId: string): AtlasNode | undefined {
+  if (root.agentApproval?.runId === runId && root.agentApproval.requestId === requestId) return root;
+  for (const child of root.children) {
+    const found = findAgentApprovalNode(child, runId, requestId);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function createAgentApprovalNode(
+  parentId: string,
+  index: number,
+  record: AgentApprovalRecord,
+  aiDialogSettings: AiDialogSettings | undefined,
+  usedNodeIds: Set<string>,
+): AtlasNode {
+  const now = new Date().toISOString();
+  const title = `${modeLabel(record.provider)} approval required`;
+  const body = [
+    "# Approval required",
+    `Provider: ${record.provider}`,
+    `Tool: ${record.toolName}`,
+    record.reason ? `Reason: ${record.reason}` : "",
+    record.command ? `\nCommand:\n${record.command}` : "",
+    record.cwd ? `\nWorking directory: ${record.cwd}` : "",
+    record.grantRoot ? `\nRequested path: ${record.grantRoot}` : "",
+  ].filter(Boolean).join("\n");
+  const seed = `${parentId}-${record.runId}-${record.requestId}`;
+  const action: AgentApprovalAction = {
+    kind: "agent_approval",
+    label: "Respond to approval",
+    approveLabel: "Approve once",
+    denyLabel: "Deny",
+    provider: record.provider,
+    runId: record.runId,
+    requestId: record.requestId,
+    approveDecision: record.approveDecision,
+    denyDecision: record.denyDecision,
+  };
+  return {
+    id: createUniqueNodeId("approval", { usedNodeIds }),
+    kind: "event",
+    nodeType: "approval_request",
+    title,
+    subtitle: `${record.provider} / approval`,
+    body,
+    author: "system",
+    status: "waiting",
+    color: planetColorForSeed(seed),
+    texture: randomTexture(seed),
+    radius: NOTEBOOK_NODE_RADIUS,
+    summary: `${modeLabel(record.provider)} is waiting for your approval.`,
+    nextDecision: "Select Approve or Deny to answer the provider.",
+    tags: normalizeTags([record.provider, "approval", "agent"], title, body),
+    attachments: [],
+    createdAt: now,
+    updatedAt: now,
+    sourceParentId: parentId,
+    sourceId: record.runId,
+    aiRunId: record.runId,
+    provider: record.provider,
+    runMode: record.provider,
+    aiDialogSettings,
+    agentApproval: record,
+    action,
+    children: [],
+  };
+}
+
+function redactApprovalText(value: string) {
+  return String(value ?? "")
+    .replace(/\b(sk-[A-Za-z0-9_-]{16,}|sk-ant-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g, "[redacted]")
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]");
+}
+
 function base64ToBlob(base64: string, mimeType: string) {
   const binary = window.atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -4647,6 +4921,14 @@ function providerForMode(mode: AiExecutionMode): AiProvider {
   if (mode === "openclaw") return "openclaw";
   if (mode === "claude") return "claude";
   return "openai";
+}
+
+function modelIdForAiDialogSettings(mode: AiExecutionMode, settings: AiDialogSettings) {
+  if (isChatLikeMode(mode)) return buildChatSettingsForRun(settings.chatSettings, mode).model;
+  if (mode === "codex") return settings.codexSettings.model;
+  if (mode === "openclaw") return settings.openClawSettings.model || "openclaw-default";
+  if (mode === "claude") return settings.claudeSettings.model || "claude-code-default";
+  return "";
 }
 
 function isChatLikeMode(mode: AiExecutionMode) {

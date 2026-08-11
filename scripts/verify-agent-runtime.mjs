@@ -28,6 +28,7 @@ import {
 import { AtlasToolService } from "./agent-runtime/atlas-tool-service.mjs";
 import { EvidenceStore, planEvidenceTransport, renderEvidenceReferenceBlock } from "./agent-runtime/evidence-store.mjs";
 import { checkAgentWorkspace } from "./agent-runtime/workspace-policy.mjs";
+import { createAgentRuntimeRoutes } from "./agent-runtime/bridge-routes.mjs";
 import { HandoffCoordinator } from "./agent-runtime/handoff-coordinator.mjs";
 import { appendClaudeDefaultWebToolArgs, CLAUDE_DEFAULT_WEB_TOOLS } from "./agent-runtime/claude-cli-policy.mjs";
 import {
@@ -74,6 +75,7 @@ async function main() {
     await verifyClaudeWebToolPolicy();
     await verifyClaudePlanLimitNormalization();
     await verifyClaudeAuthRecovery(workDir);
+    await verifyClaudeApprovalRoundTrip(workDir);
     await verifyJournal(workDir);
     await verifyIdempotencyAndBounds(workDir);
     await verifyRecovery(workDir);
@@ -197,14 +199,18 @@ if (args.includes("--help")) {
   process.exit(0);
 }
 process.stdin.resume();
-process.stdin.on("end", () => {
+let handled = false;
+process.stdin.on("data", () => {
+  if (handled) return;
+  handled = true;
   if (!existsSync(${JSON.stringify(markerPath)})) {
     console.log(JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, result: ${JSON.stringify(oauthError)} }));
-    process.exitCode = 1;
+    setTimeout(() => process.exit(1), 0);
     return;
   }
   console.log(JSON.stringify({ type: "system", subtype: "init", session_id: "session-auth-recovered", model: "claude-test", tools: [], mcp_servers: [], skills: [], agents: [] }));
   console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "session-auth-recovered", result: "recovered answer", usage: { input_tokens: 1, output_tokens: 1 }, modelUsage: { "claude-test": { contextWindow: 1000 } } }));
+  setTimeout(() => process.exit(0), 0);
 });
 `, "utf8");
 
@@ -245,6 +251,116 @@ process.stdin.on("end", () => {
     events.map((event) => event.code).filter(Boolean),
   );
   manager.close();
+}
+
+async function verifyClaudeApprovalRoundTrip(baseRoot) {
+  section("Claude approval round trip");
+  const fakeClaudePath = join(baseRoot, "fake-claude-approval.mjs");
+  const responsePath = join(baseRoot, "claude-approval-response.json");
+  await writeFile(fakeClaudePath, `
+import { writeFileSync } from "node:fs";
+let buffer = "";
+let stage = 0;
+const requestId = "approval-test-1";
+const input = { file_path: "approval-probe.txt", content: "approved" };
+const expectedDecision = process.env.FAKE_APPROVAL_DECISION ?? "allow";
+process.stdin.resume();
+process.stdin.on("data", (chunk) => {
+  buffer += chunk.toString();
+  const lines = buffer.split(/\\r?\\n/);
+  buffer = lines.pop() ?? "";
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const frame = JSON.parse(line);
+    if (stage === 0 && frame.type === "user") {
+      stage = 1;
+      console.log(JSON.stringify({ type: "system", subtype: "init", session_id: "session-approval", model: "claude-test", tools: ["Write"], mcp_servers: [], skills: [], agents: [] }));
+      console.log(JSON.stringify({ type: "control_request", request_id: requestId, request: { subtype: "can_use_tool", tool_name: "Write", input, description: "Write approval probe", tool_use_id: "tool-approval-1" } }));
+      continue;
+    }
+    if (stage === 1 && frame.type === "control_response") {
+      stage = 2;
+      const response = frame.response?.response ?? {};
+      writeFileSync(${JSON.stringify(responsePath)}, JSON.stringify(response));
+      const validAllow = response.behavior === "allow" && JSON.stringify(response.updatedInput) === JSON.stringify(input);
+      const validDeny = response.behavior === "deny" && String(response.message ?? "").includes("Denied");
+      if ((expectedDecision === "allow" && !validAllow) || (expectedDecision === "deny" && !validDeny)) {
+        console.log(JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, result: "approval response was malformed" }));
+        setTimeout(() => process.exit(1), 0);
+        return;
+      }
+      const answer = expectedDecision === "deny" ? "denied answer" : "approved answer";
+      console.log(JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tool-approval-1", content: expectedDecision === "deny" ? "Denied by user" : "Write completed", is_error: expectedDecision === "deny" }] } }));
+      console.log(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: answer }] } }));
+      console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "session-approval", result: answer, usage: { input_tokens: 1, output_tokens: 1 }, modelUsage: { "claude-test": { contextWindow: 1000 } } }));
+      setTimeout(() => process.exit(0), 0);
+    }
+  }
+});
+`, "utf8");
+
+  const store = new AgentRunStore({ baseDir: join(baseRoot, "claude-approval-runtime") });
+  const manager = new AgentRuntimeManager({
+    store,
+    claudeRoutePreference: "stream-json",
+    claude: {
+      enabled: true,
+      workspace: baseRoot,
+      buildCommand: (args) => ({ command: process.execPath, args: [fakeClaudePath, ...args] }),
+      buildEnv: () => process.env,
+    },
+  });
+  await manager.init();
+  const started = await manager.startRun({
+    provider: "claude",
+    workspace: baseRoot,
+    prompt: "wait for approval",
+    sessionMode: "new",
+    claudeSettings: { authMode: "subscription", permissionMode: "default" },
+  });
+  await waitFor(async () => (await store.readManifest(started.manifest.runId))?.status === "waiting_for_approval", 5000);
+  const waitingEvents = await store.readEvents(started.manifest.runId, 0);
+  const request = waitingEvents.find((event) => event.kind === "approval_requested");
+  check(
+    "Claude approval becomes a durable waiting event",
+    request?.requestId === "approval-test-1" && request?.toolName === "Write" && request?.category === "file",
+    request,
+  );
+  const response = await manager.resolveApproval(started.manifest.runId, "approval-test-1", "allow");
+  check("Claude approval response reaches the provider", response.ok === true && existsSync(responsePath), response);
+  await waitFor(async () => (await store.readManifest(started.manifest.runId))?.status === "completed", 5000);
+  const final = await manager.describeRun(started.manifest.runId);
+  const events = await store.readEvents(started.manifest.runId, 0);
+  check("the provider resumes after approval", final.final?.text === "approved answer", final.final);
+  check("the journal records the approval decision", events.some((event) => event.kind === "approval_resolved" && event.decision === "allow"), events);
+  manager.close();
+
+  const denyStore = new AgentRunStore({ baseDir: join(baseRoot, "claude-deny-runtime") });
+  const denyManager = new AgentRuntimeManager({
+    store: denyStore,
+    claudeRoutePreference: "stream-json",
+    claude: {
+      enabled: true,
+      workspace: baseRoot,
+      buildCommand: (args) => ({ command: process.execPath, args: [fakeClaudePath, ...args] }),
+      buildEnv: () => ({ ...process.env, FAKE_APPROVAL_DECISION: "deny" }),
+    },
+  });
+  await denyManager.init();
+  const deniedRun = await denyManager.startRun({
+    provider: "claude",
+    workspace: baseRoot,
+    prompt: "wait for denial",
+    sessionMode: "new",
+    claudeSettings: { authMode: "subscription", permissionMode: "default" },
+  });
+  await waitFor(async () => (await denyStore.readManifest(deniedRun.manifest.runId))?.status === "waiting_for_approval", 5000);
+  const denied = await denyManager.resolveApproval(deniedRun.manifest.runId, "approval-test-1", "deny");
+  await waitFor(async () => (await denyStore.readManifest(deniedRun.manifest.runId))?.status === "completed", 5000);
+  const deniedEvents = await denyStore.readEvents(deniedRun.manifest.runId, 0);
+  check("Claude denial reaches the provider", denied.ok === true, denied);
+  check("the journal records the denial decision", deniedEvents.some((event) => event.kind === "approval_resolved" && event.decision === "deny"), deniedEvents);
+  denyManager.close();
 }
 
 async function verifyRedaction() {
@@ -989,6 +1105,32 @@ async function verifyBindingPersistence() {
   check("execution metadata survives the export sanitizer", exported.agentExecution?.clientRunId === "run-1", exported.agentExecution);
   check("execution workspace mode is preserved", exported.agentExecution?.workspaceMode === "worktree", exported.agentExecution);
 
+  const approvalRecord = {
+    provider: "claude",
+    runId: "runtime-approval-1",
+    requestId: "approval-1",
+    toolName: "Write",
+    category: "file",
+    reason: "Write the requested file",
+    approveDecision: "allow",
+    denyDecision: "deny",
+    createdAt: "2026-08-11T00:00:00.000Z",
+  };
+  const approvalAction = {
+    kind: "agent_approval",
+    label: "Respond to approval",
+    approveLabel: "Approve once",
+    denyLabel: "Deny",
+    provider: "claude",
+    runId: approvalRecord.runId,
+    requestId: approvalRecord.requestId,
+    approveDecision: approvalRecord.approveDecision,
+    denyDecision: approvalRecord.denyDecision,
+  };
+  const approvalExported = sanitizeNotebookForExport({ ...base, agentApproval: approvalRecord, action: approvalAction });
+  check("approval record survives the export sanitizer", approvalExported.agentApproval?.requestId === "approval-1", approvalExported.agentApproval);
+  check("pending approval action survives the export sanitizer", approvalExported.action?.kind === "agent_approval", approvalExported.action);
+
   const nested = sanitizeNotebookForExport({ ...base, children: [{ ...base, id: "child", agentWorkspaceBinding: binding }] });
   check("child bindings survive too", nested.children[0]?.agentWorkspaceBinding?.gitRoot === binding.gitRoot, nested.children[0]?.agentWorkspaceBinding);
 
@@ -1224,6 +1366,81 @@ async function verifyModeSafety() {
   check("mutating agent routes require an allowed Origin", /if \(mutating && !originAllowed\(/.test(bridgeRoutes));
   check("run creation checks the workspace allow-list", /isAllowedWorkspace\(/.test(bridgeRoutes));
   check("legacy inbox and ack routes are left to the bridge", /path === "\/api\/agent-runs\/inbox" \|\| path === "\/api\/agent-runs\/ack"/.test(bridgeRoutes));
+
+  await verifyRunStreamLifecycle(runtimeClient);
+}
+
+/**
+ * A finished run can never emit another event. Streaming it must replay and
+ * close: an open socket per viewer leaks a connection and a heartbeat timer,
+ * and it keeps the page permanently busy for anything awaiting network idle.
+ */
+async function verifyRunStreamLifecycle(client) {
+  const openStream = (manifest, listeners) => {
+    const request = new EventEmitter();
+    request.method = "GET";
+    request.headers = {};
+    const response = new EventEmitter();
+    response.chunks = [];
+    response.ended = false;
+    response.writeHead = () => response;
+    response.write = (chunk) => { response.chunks.push(String(chunk)); return true; };
+    response.end = () => { response.ended = true; };
+    response.setHeader = () => {};
+    const manager = {
+      describeRun: async () => ({ manifest, final: null }),
+      replay: async () => [],
+      subscribe: (_runId, listener) => {
+        listeners.push(listener);
+        return () => {
+          const index = listeners.indexOf(listener);
+          if (index >= 0) listeners.splice(index, 1);
+        };
+      },
+    };
+    const handle = createAgentRuntimeRoutes({
+      manager,
+      handoff: {},
+      isAllowedOrigin: () => true,
+      isAllowedWorkspace: () => ({ ok: true }),
+    });
+    const url = new URL(`http://127.0.0.1/api/agent-runs/${manifest.runId}/events?since=0`);
+    return { request, response, done: handle(request, response, url) };
+  };
+
+  const finishedListeners = [];
+  const finished = openStream({ runId: "run-finished", status: "completed" }, finishedListeners);
+  await finished.done;
+  const finishedBody = finished.response.chunks.join("");
+  check("a finished run's stream is closed after replay", finished.response.ended === true, finishedBody);
+  check("the client is told the stream ended on purpose", /event: end/.test(finishedBody), finishedBody);
+  check("a finished run leaves no live subscription behind", finishedListeners.length === 0, finishedListeners.length);
+
+  const liveListeners = [];
+  const live = openStream({ runId: "run-live", status: "running" }, liveListeners);
+  await live.done;
+  check("a running run's stream stays open", live.response.ended === false);
+  check("a running run keeps a live subscription", liveListeners.length > 0, liveListeners.length);
+
+  // The run finishes while this connection is open.
+  for (const listener of [...liveListeners]) listener({ kind: "lifecycle", sequence: 4, status: "completed", final: true });
+  const closedInTime = await waitFor(async () => live.response.ended === true, 2000);
+  const liveBody = live.response.chunks.join("");
+  check("a run that finishes mid-stream closes its connection", closedInTime, liveBody);
+  check("the terminal close is announced to the client", /event: end/.test(liveBody), liveBody);
+  check("no subscription survives the close", liveListeners.length === 0, liveListeners.length);
+
+  check("the client does not reconnect after a deliberate stream end", /frameType === "end"/.test(client) && /if \(ended\) \{[\s\S]{0,80}onClose/.test(client));
+
+  // Resetting the backoff on every successful connect turned a stream that
+  // closed immediately into an unbounded reconnect loop (measured at ~2.5
+  // requests per second, forever). Connecting is not progress.
+  check(
+    "the reconnect backoff only resets when a stream made progress",
+    !/if \(!response\.ok \|\| !response\.body\)[\s\S]{0,120}\n\s*attempt = 0;/.test(client)
+      && /deliveredEvent \|\| Date\.now\(\) - openedAt >= HEALTHY_STREAM_MS\) attempt = 0;/.test(client),
+  );
+  check("a closed subscription never schedules another retry", !/handlers\.onError[\s\S]{0,80}\n\s*scheduleRetry\(\);/.test(client));
 }
 
 async function waitFor(predicate, timeoutMs) {

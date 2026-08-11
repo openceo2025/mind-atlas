@@ -12,7 +12,7 @@
 // - request bodies are size limited;
 // - workspaces are checked against an allow-list before a run starts.
 
-import { boundText } from "./types.mjs";
+import { boundText, isTerminalStatus } from "./types.mjs";
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const SSE_HEARTBEAT_MS = 15_000;
@@ -252,6 +252,20 @@ async function streamRunEvents(request, response, manager, runId, url) {
     if (event.sequence > highest) write(event);
   }
 
+  // A run that already reached a terminal state can never emit another event.
+  // Holding the socket open for it leaks one connection and one heartbeat timer
+  // per viewer, and keeps the page permanently busy for anything that waits on
+  // network idle. Replay everything, say so explicitly, then close.
+  if (isTerminalStatus(describe.manifest?.status)) {
+    closed = true;
+    unsubscribe();
+    try {
+      response.write(`event: end\ndata: ${JSON.stringify({ runId, status: describe.manifest.status })}\n\n`);
+      response.end();
+    } catch {}
+    return;
+  }
+
   const heartbeat = setInterval(() => {
     if (closed) return;
     try {
@@ -262,16 +276,32 @@ async function streamRunEvents(request, response, manager, runId, url) {
   }, SSE_HEARTBEAT_MS);
   heartbeat.unref?.();
 
+  let stopOnTerminal = () => {};
   const finish = () => {
     if (closed) return;
     closed = true;
     clearInterval(heartbeat);
+    stopOnTerminal();
     unsubscribe();
     try { response.end(); } catch {}
   };
   request.on("close", finish);
   request.on("error", finish);
   response.on("error", finish);
+
+  // A live run finishes while this connection is open. Deliver the terminal
+  // event, then close instead of heart-beating forever.
+  stopOnTerminal = manager.subscribe(runId, (event) => {
+    if (!isTerminalStatus(event?.status)) return;
+    const timer = setTimeout(() => {
+      if (closed) return;
+      try {
+        response.write(`event: end\ndata: ${JSON.stringify({ runId, status: event.status })}\n\n`);
+      } catch {}
+      finish();
+    }, 0);
+    timer.unref?.();
+  });
 }
 
 function normalizeRunRequest(body) {

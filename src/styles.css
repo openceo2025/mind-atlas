@@ -4430,6 +4430,13 @@ button:disabled,
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.36);
 }
 
+.node-action-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+
 .node-action-button:hover {
   border-color: rgba(141, 245, 207, 0.78);
   background: rgba(12, 36, 32, 0.92);
@@ -6576,6 +6583,17 @@ button:disabled,
    Agent Run Workspace (local developer mode only).
    Hosted public mode never renders these elements.
 --------------------------------------------------------------------------- */
+
+.agent-workspace-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+}
+
+.agent-workspace-dialog {
+  position: static;
+}
 
 .agent-workspace {
   position: fixed;

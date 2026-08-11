@@ -390,7 +390,7 @@ export type CodexGeneratedNodeKind =
   | "final"
   | "error";
 
-export type AtlasNodeAction = CodexFullAccessAction | GitPushAction;
+export type AtlasNodeAction = CodexFullAccessAction | AgentApprovalAction | GitPushAction;
 
 export interface CodexFullAccessAction {
   kind: "codex_full_access";
@@ -401,6 +401,36 @@ export interface CodexFullAccessAction {
   runId: string;
   contextOptions: AiContextOptions;
   settings: CodexSettings;
+}
+
+export interface AgentApprovalAction {
+  kind: "agent_approval";
+  label: string;
+  approveLabel?: string;
+  denyLabel?: string;
+  provider: Extract<AiProvider, "codex" | "claude">;
+  runId: string;
+  requestId: string;
+  approveDecision: string;
+  denyDecision: string;
+}
+
+export interface AgentApprovalRecord {
+  provider: Extract<AiProvider, "codex" | "claude">;
+  runId: string;
+  requestId: string;
+  toolName: string;
+  category: string;
+  reason: string;
+  command?: string;
+  cwd?: string;
+  grantRoot?: string;
+  approveDecision: string;
+  denyDecision: string;
+  createdAt: string;
+  resolvedDecision?: string;
+  resolvedAt?: string;
+  responseDetail?: string;
 }
 
 export interface GitPushAction {
@@ -931,6 +961,8 @@ export interface AtlasNode {
   agentWorkspaceBinding?: AgentWorkspaceBinding;
   /** Local-only immutable execution record for request/result nodes. */
   agentExecution?: AgentExecutionMetadata;
+  /** Local-only durable record of a provider approval request and its answer. */
+  agentApproval?: AgentApprovalRecord;
   usage?: AiUsage;
   action?: AtlasNodeAction;
   aiDialogSettings?: AiDialogSettings;

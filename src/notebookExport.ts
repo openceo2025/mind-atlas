@@ -1,5 +1,6 @@
 import type {
   AgentExecutionMetadata,
+  AgentApprovalRecord,
   AgentWorkspaceBinding,
   AiContextOptions,
   AiDialogSettings,
@@ -112,6 +113,9 @@ export function sanitizeNotebookForExport(node: AtlasNode, options: NotebookExpo
   const agentExecution = sanitizeAgentExecution(source.agentExecution);
   if (agentExecution) sanitized.agentExecution = agentExecution;
 
+  const agentApproval = sanitizeAgentApprovalRecord(source.agentApproval);
+  if (agentApproval) sanitized.agentApproval = agentApproval;
+
   return sanitized;
 }
 
@@ -152,6 +156,32 @@ function sanitizeAgentExecution(value: unknown): AgentExecutionMetadata | undefi
     if (text) execution[key] = text;
   }
   return execution;
+}
+
+function sanitizeAgentApprovalRecord(value: unknown): AgentApprovalRecord | undefined {
+  if (!isRecord(value)) return undefined;
+  const provider = value.provider === "codex" || value.provider === "claude" ? value.provider : null;
+  const runId = safeBoundedText(value.runId, "", 240);
+  const requestId = safeBoundedText(value.requestId, "", 240);
+  if (!provider || !runId || !requestId) return undefined;
+  const record: AgentApprovalRecord = {
+    provider,
+    runId,
+    requestId,
+    toolName: safeBoundedText(value.toolName, "provider tool", 160),
+    category: safeBoundedText(value.category, "provider", 80),
+    reason: safeBoundedText(value.reason, "", 4000),
+    approveDecision: safeBoundedText(value.approveDecision, provider === "claude" ? "allow" : "accept", 80),
+    denyDecision: safeBoundedText(value.denyDecision, provider === "claude" ? "deny" : "decline", 80),
+    createdAt: safeDateText(value.createdAt).slice(0, 80),
+  };
+  for (const key of ["command", "cwd", "grantRoot", "resolvedDecision", "responseDetail"] as const) {
+    const text = safeOptionalBoundedText(value[key], 4000);
+    if (text) record[key] = text;
+  }
+  const resolvedAt = safeOptionalBoundedText(value.resolvedAt, 80);
+  if (resolvedAt) record.resolvedAt = resolvedAt;
+  return record;
 }
 
 export function sanitizeAttachmentForExport(
@@ -266,6 +296,21 @@ function sanitizeNodeAction(value: unknown): AtlasNodeAction | undefined {
       label: safeString(value.label, "Push"),
       workspace: safeString(value.workspace, ""),
       runId: safeString(value.runId, ""),
+    };
+  }
+  if (value.kind === "agent_approval") {
+    const provider = value.provider === "codex" || value.provider === "claude" ? value.provider : null;
+    if (!provider) return undefined;
+    return {
+      kind: "agent_approval",
+      label: safeString(value.label, "Respond to approval"),
+      approveLabel: safeString(value.approveLabel, "Approve once"),
+      denyLabel: safeString(value.denyLabel, "Deny"),
+      provider,
+      runId: safeString(value.runId, ""),
+      requestId: safeString(value.requestId, ""),
+      approveDecision: safeString(value.approveDecision, provider === "claude" ? "allow" : "accept"),
+      denyDecision: safeString(value.denyDecision, provider === "claude" ? "deny" : "decline"),
     };
   }
   if (value.kind !== "codex_full_access") return undefined;

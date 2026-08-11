@@ -10,7 +10,7 @@
 import { PanelRightOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { acknowledgeAgentRuntimeRuns, findAgentRunByClientId, isAgentRuntimeAvailable, listAgentRuns } from "../../agentRuntime/runtimeClient";
-import type { AgentRunManifest } from "../../agentRuntime/types";
+import type { AgentApprovalRequest, AgentRunManifest } from "../../agentRuntime/types";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode } from "../../types";
 import { AgentRunWorkspace } from "./AgentRunWorkspace";
@@ -30,6 +30,8 @@ export function AgentRunWorkspaceHost() {
   const focusNode = useAtlasStore((state) => state.focusNode);
   const hideAgentWorkspace = useAtlasStore((state) => state.hideAgentWorkspace);
   const injection = useAtlasStore((state) => state.agentWorkspaceInjection);
+  const recordAgentApprovalRequest = useAtlasStore((state) => state.recordAgentApprovalRequest);
+  const recordAgentApprovalResponse = useAtlasStore((state) => state.recordAgentApprovalResponse);
   const [resolvedClientRunId, setResolvedClientRunId] = useState("");
   const [failed, setFailed] = useState(false);
   // Parallel supervision: runs started in other repositories stay reachable
@@ -106,6 +108,10 @@ export function AgentRunWorkspaceHost() {
     [runs],
   );
   const unreadCount = unreadRuns.length;
+  const backgroundRunIds = useMemo(() => {
+    const ids = [shownRunId, ...runs.filter((entry) => ACTIVE_STATUSES.has(entry.status)).map((entry) => entry.runId)];
+    return [...new Set(ids.filter(Boolean))].slice(0, 10);
+  }, [runs, shownRunId]);
   const selectedNode = useMemo(() => findNode(atlasRoot, selectedNodeId), [atlasRoot, selectedNodeId]);
   const selectedNodeRunId = useMemo(
     () => findRunIdForNode(selectedNode, runs),
@@ -144,6 +150,22 @@ export function AgentRunWorkspaceHost() {
     openAgentWorkspaceRun(nextRunId);
   }, [openAgentWorkspaceRun]);
 
+  const handleApprovalRequested = useCallback((runId: string, approval: AgentApprovalRequest, manifest: AgentRunManifest | null) => {
+    const provider = manifest?.provider ?? runs.find((entry) => entry.runId === runId)?.provider;
+    if (provider !== "codex" && provider !== "claude") return;
+    recordAgentApprovalRequest({
+      ...approval,
+      runId,
+      provider,
+      requestNodeId: manifest?.requestNodeId,
+      sourceNodeId: manifest?.sourceNodeId,
+    });
+  }, [recordAgentApprovalRequest, runs]);
+
+  const handleApprovalResolved = useCallback((runId: string, requestId: string, decision: string, detail?: string) => {
+    recordAgentApprovalResponse(runId, requestId, decision, detail);
+  }, [recordAgentApprovalResponse]);
+
   const markRunsRead = useCallback(async (runIds: string[]) => {
     const wanted = runIds.filter(Boolean);
     if (!wanted.length) return;
@@ -170,28 +192,46 @@ export function AgentRunWorkspaceHost() {
 
   if (!visible) {
     return (
-      <button
-        type="button"
-        className="agent-workspace-launcher"
-        onClick={() => openAgentWorkspaceRun(shownRunId)}
-        aria-label="Open Agent runs"
-        title={shownRunId ? "Open recent and running agent sessions" : "No agent run has been recorded yet"}
-      >
-        <PanelRightOpen size={15} />
-        <span>Agent runs</span>
-        {activeCount ? <b>{activeCount} running</b> : unreadCount ? <b>{unreadCount} unread</b> : null}
-      </button>
+      <>
+        <button
+          type="button"
+          className="agent-workspace-launcher"
+          onClick={() => openAgentWorkspaceRun(shownRunId)}
+          aria-label="Open Agent runs"
+          title={shownRunId ? "Open recent and running agent sessions" : "No agent run has been recorded yet"}
+        >
+          <PanelRightOpen size={15} />
+          <span>Agent runs</span>
+          {activeCount ? <b>{activeCount} running</b> : unreadCount ? <b>{unreadCount} unread</b> : null}
+        </button>
+        {/* Keep the SSE listeners alive while the panel is hidden. Approval
+            must still become an Atlas node when the user is looking elsewhere. */}
+        {backgroundRunIds.map((backgroundRunId) => (
+          <div key={backgroundRunId} hidden>
+            <AgentRunWorkspace
+              runId={backgroundRunId}
+              onClose={() => {}}
+              onApprovalRequested={handleApprovalRequested}
+              onApprovalResolved={handleApprovalResolved}
+            />
+          </div>
+        ))}
+      </>
     );
   }
 
   if (!shownRunId) {
     return (
-      <section className="agent-workspace agent-workspace-pending">
-        <p>{failed ? "This run is not tracked by the streaming runtime; it used the fallback route." : clientRunId ? "Attaching to the run..." : "No agent runs are available yet."}</p>
-        <button type="button" className="agent-btn agent-btn-ghost" onClick={hideAgentWorkspace}>
-          Close
-        </button>
-      </section>
+      <div className="agent-workspace-backdrop" role="presentation" onPointerDown={hideAgentWorkspace}>
+        <div className="agent-workspace-dialog" onPointerDown={(event) => event.stopPropagation()}>
+          <section className="agent-workspace agent-workspace-pending">
+            <p>{failed ? "This run is not tracked by the streaming runtime; it used the fallback route." : clientRunId ? "Attaching to the run..." : "No agent runs are available yet."}</p>
+            <button type="button" className="agent-btn agent-btn-ghost" onClick={hideAgentWorkspace}>
+              Close
+            </button>
+          </section>
+        </div>
+      </div>
     );
   }
 
@@ -200,26 +240,32 @@ export function AgentRunWorkspaceHost() {
     .slice(0, 10);
 
   return (
-    <AgentRunWorkspace
-      runId={shownRunId}
-      onClose={hideAgentWorkspace}
-      atlasInjection={shownRunId === resolvedClientRunId ? injection : null}
-      runSwitcher={switchable.length > 1
-        ? {
-          runs: switchable.map((entry) => ({
-            runId: entry.runId,
-            provider: entry.provider,
-            status: entry.status,
-            workspace: entry.workspace,
-            title: entry.title,
-          })),
-          activeRunId: shownRunId,
-          onSelect: selectRunFromWorkspace,
-          unreadCount,
-          onMarkAllRead: () => void markRunsRead(unreadRuns.map((entry) => entry.runId)),
-        }
-        : null}
-    />
+    <div className="agent-workspace-backdrop" role="presentation" onPointerDown={hideAgentWorkspace}>
+      <div className="agent-workspace-dialog" onPointerDown={(event) => event.stopPropagation()}>
+        <AgentRunWorkspace
+          runId={shownRunId}
+          onClose={hideAgentWorkspace}
+          onApprovalRequested={handleApprovalRequested}
+          onApprovalResolved={handleApprovalResolved}
+          atlasInjection={shownRunId === resolvedClientRunId ? injection : null}
+          runSwitcher={switchable.length > 1
+            ? {
+              runs: switchable.map((entry) => ({
+                runId: entry.runId,
+                provider: entry.provider,
+                status: entry.status,
+                workspace: entry.workspace,
+                title: entry.title,
+              })),
+              activeRunId: shownRunId,
+              onSelect: selectRunFromWorkspace,
+              unreadCount,
+              onMarkAllRead: () => void markRunsRead(unreadRuns.map((entry) => entry.runId)),
+            }
+            : null}
+        />
+      </div>
+    </div>
   );
 }
 

@@ -135,7 +135,7 @@ Command used (subscription route, provider env stripped exactly like
 `buildClaudeEnv({ authMode: "subscription" })`):
 
 ```powershell
-claude -p --output-format stream-json --verbose --include-partial-messages
+claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio
 ```
 
 ### 3.1 Verified results
@@ -152,6 +152,7 @@ claude -p --output-format stream-json --verbose --include-partial-messages
 | Account/plan usage | PASS | `rate_limit_event.rate_limit_info` with `status`, `rateLimitType: "five_hour"`, `resetsAt`, `overageStatus` |
 | Thinking token estimate | PASS | `system/thinking_tokens` with `estimated_tokens` / `estimated_tokens_delta` |
 | Turn summary | PASS | `system/post_turn_summary` with `status_category`, `status_detail`, `needs_action` |
+| Permission bridge | PASS | `control_request` / `control_response` over stdio; the Mind Atlas adapter keeps the channel open while an approval is pending |
 | Resume + fork | PASS | `--resume <id> --fork-session` recalled `MIND_ATLAS_CLAUDE_POC_OK` and produced a **new** session id |
 | Stop | PARTIAL | see 3.2 |
 
@@ -207,6 +208,27 @@ because the probe did not find the command.
 API and DeepSeek routes never advertise Desktop continuity at all; they receive
 the prepared handoff package.
 
+### 3.4 Mind Atlas approval bridge update (2026-08-11)
+
+The earlier print-mode observation predates the stdio permission bridge. The
+installed Claude Code build was probed with
+`--input-format stream-json --permission-prompt-tool stdio` and emitted a
+`control_request` frame with subtype `can_use_tool`, tool name, input, and a
+request id. The adapter now keeps stdin open, converts that frame into the
+provider-neutral `approval_requested` event, and sends `control_response` with
+the original input for Allow or a user-facing denial message for Deny.
+
+`npm run verify:agent-runtime` covers both allow/resume and deny/resume fake
+provider round trips, durable journal events, and export preservation of the
+pending approval action. The live probe established the installed protocol
+shape; it did not use a real provider write as a routine gate.
+
+On the Atlas side, the approval event creates a notification-bearing
+`approval_request` child node. Its node action sends the answer immediately;
+the same node is retained and its body records the user's outcome and the
+provider decision. Hidden Agent Run listeners keep this path active after the
+supervision panel is closed.
+
 ## 4. Capability Matrix After Phase 0
 
 | Capability | Codex App Server | Codex exec | Claude subscription stream | Claude API stream | Claude DeepSeek stream |
@@ -217,7 +239,7 @@ the prepared handoff package.
 | Live text | PASS | coarse | PASS | PASS | PASS |
 | Tool timeline | PASS | coarse | PASS | PASS | PASS |
 | Diff stream | `turn/diff/updated` available in schema, not exercised | coarse | derived from Edit/Write tool events | same | same |
-| Approval round trip | PASS | limited | print mode auto-resolves; no interactive approval observed | same | same |
+| Approval round trip | PASS | PASS through `--permission-prompt-tool stdio`; fake-provider regression covers allow and resume | same adapter path; live provider not re-run | same adapter path; live provider not re-run |
 | User question | schema present (`item/tool/requestUserInput`), not triggered | no | not observed in print mode | same | same |
 | Stop | PASS (`turn/interrupt`) | process fallback | PARTIAL (signal, no result event) | same | same |
 | Steer | PASS (`turn/steer`) | no | not available in print mode | no | no |

@@ -220,6 +220,7 @@ export interface AgentApprovalChoice {
 export interface AgentApprovalRequest {
   requestId: string;
   category: string;
+  toolName?: string;
   reason: string;
   command?: string;
   cwd?: string;

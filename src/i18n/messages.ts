@@ -201,6 +201,8 @@ const coreSourceMessages = {
   "status.mobile.notificationsUnsupported": "Notifications are not supported",
   "status.device.unsupported": "Unsupported on this device",
   "status.realtime.workRootRequired": "Set the Codex work root before sending.",
+  "approval.approveOnce": "Approve once",
+  "approval.deny": "Deny",
   "dynamic.nextRenewal": "Next renewal: {date}",
   "dynamic.mergeChoice": "Merge choice for {path}",
   "dynamic.logSummary": "{entries, plural, one {# entry} other {# entries}}{approvals, plural, =0 {} other { / # approval pending}}{readOnly, select, yes { / read-only} other {}}",

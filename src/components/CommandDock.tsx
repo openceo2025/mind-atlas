@@ -14,6 +14,7 @@ import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from ".
 import { isHostedServiceMode } from "../hosted/serviceClient";
 import {
   buildAiNodeContextWithAttachments,
+  findInheritedCommandMode,
   findInheritedAgentWorkspaceBinding,
   findInheritedAiDialogSettings,
   findNode,
@@ -488,9 +489,10 @@ export function CommandDock() {
   }, [setCommandInputEditing]);
 
   useEffect(() => {
-    if (value.trim()) return;
     loadAiDialogSettingsForNode(selectedNodeId);
-  }, [loadAiDialogSettingsForNode, selectedNodeId, value]);
+    const inheritedMode = findInheritedCommandMode(useAtlasStore.getState().atlasRoot, selectedNodeId);
+    if (inheritedMode) setMode(inheritedMode);
+  }, [loadAiDialogSettingsForNode, selectedNodeId]);
 
   useEffect(() => {
     const resetIfPromptIsEmpty = () => {
