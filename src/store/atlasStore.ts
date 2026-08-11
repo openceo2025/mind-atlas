@@ -42,6 +42,7 @@ import {
   type ContextPlan,
 } from "../context/contextEngine";
 import { hydrateMissingNodeTitlesFromBodies } from "../titleMaintenance";
+import { acknowledgeNodeError, isIntrinsicErrorNode } from "../nodeErrorState";
 import {
   clearPersistedNotebook,
   listNotebookSnapshots,
@@ -434,9 +435,22 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!located) return;
     const { node, path, position } = located;
     const visualRadius = getNodeVisualRadius(node, path.length - 1);
-    set(() => {
+    set((current) => {
+      const acknowledgement = isIntrinsicErrorNode(node)
+        ? acknowledgeNodeError(current.atlasRoot, id)
+        : { root: current.atlasRoot, acknowledged: false };
+      const selectedNode = acknowledgement.acknowledged ? findNode(acknowledgement.root, id) ?? node : node;
+      if (acknowledgement.acknowledged) persistNotebook(acknowledgement.root);
       return {
-        selected: selectionFromNode(node),
+        ...(acknowledgement.acknowledged ? pushHistory(current) : {}),
+        ...(acknowledgement.acknowledged
+          ? {
+              atlasRoot: acknowledgement.root,
+              unreadNotifications: markNodeNotificationsRead(acknowledgement.root, current.unreadNotifications, id),
+              notificationPulses: current.notificationPulses.filter((pulse) => pulse.nodeId !== id),
+            }
+          : {}),
+        selected: selectionFromNode(selectedNode),
         selectedNodeId: id,
         cameraFocusNodeId: null,
         focusRequest: {
@@ -454,9 +468,22 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   selectNodeInPlace: (id) => {
     const node = findNode(get().atlasRoot, id);
     if (!node) return;
-    set(() => {
+    set((current) => {
+      const acknowledgement = isIntrinsicErrorNode(node)
+        ? acknowledgeNodeError(current.atlasRoot, id)
+        : { root: current.atlasRoot, acknowledged: false };
+      const selectedNode = acknowledgement.acknowledged ? findNode(acknowledgement.root, id) ?? node : node;
+      if (acknowledgement.acknowledged) persistNotebook(acknowledgement.root);
       return {
-        selected: selectionFromNode(node),
+        ...(acknowledgement.acknowledged ? pushHistory(current) : {}),
+        ...(acknowledgement.acknowledged
+          ? {
+              atlasRoot: acknowledgement.root,
+              unreadNotifications: markNodeNotificationsRead(acknowledgement.root, current.unreadNotifications, id),
+              notificationPulses: current.notificationPulses.filter((pulse) => pulse.nodeId !== id),
+            }
+          : {}),
+        selected: selectionFromNode(selectedNode),
         selectedNodeId: id,
         cameraFocusNodeId: null,
       };
@@ -469,9 +496,22 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (!located) return;
     const { node, path, position } = located;
     const visualRadius = getNodeVisualRadius(node, path.length - 1);
-    set((state) => {
+    set((current) => {
+      const acknowledgement = isIntrinsicErrorNode(node)
+        ? acknowledgeNodeError(current.atlasRoot, id)
+        : { root: current.atlasRoot, acknowledged: false };
+      const selectedNode = acknowledgement.acknowledged ? findNode(acknowledgement.root, id) ?? node : node;
+      if (acknowledgement.acknowledged) persistNotebook(acknowledgement.root);
       return {
-        selected: selectionFromNode(node),
+        ...(acknowledgement.acknowledged ? pushHistory(current) : {}),
+        ...(acknowledgement.acknowledged
+          ? {
+              atlasRoot: acknowledgement.root,
+              unreadNotifications: markNodeNotificationsRead(acknowledgement.root, current.unreadNotifications, id),
+              notificationPulses: current.notificationPulses.filter((pulse) => pulse.nodeId !== id),
+            }
+          : {}),
+        selected: selectionFromNode(selectedNode),
         selectedNodeId: id,
         cameraFocusNodeId: null,
         focusRequest: {
@@ -479,7 +519,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           y: position[1],
           z: position[2],
           diameter: visualRadius * 2,
-          nonce: (state.focusRequest?.nonce ?? 0) + 1,
+          nonce: (current.focusRequest?.nonce ?? 0) + 1,
           nodeId: id,
         },
       };
@@ -3920,14 +3960,6 @@ function clearResolvedPropagatedErrors(node: AtlasNode): AtlasNode {
 
 function hasIntrinsicErrorDescendant(node: AtlasNode): boolean {
   return node.children.some((child) => isIntrinsicErrorNode(child) || hasIntrinsicErrorDescendant(child));
-}
-
-function isIntrinsicErrorNode(node: AtlasNode) {
-  return (
-    node.status === "error" &&
-    !node.propagatedErrorSourceId &&
-    (node.kind === "event" || node.author === "system" || node.tags.includes("error"))
-  );
 }
 
 function hasDescendant(node: AtlasNode, id: string | undefined): boolean {

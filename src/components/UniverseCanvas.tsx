@@ -41,6 +41,7 @@ import { getStatusColor } from "../utils/status";
 import { I18nText } from "../i18n/I18nProvider";
 import { formatAppMessage } from "../i18n/format";
 import { currentAppLocale } from "../i18n/locales";
+import { isIntrinsicErrorNode } from "../nodeErrorState";
 import { SpatialLayoutOverlay } from "./SpatialLayoutOverlay";
 
 const FOCUS_DURATION_SECONDS = 1.05;
@@ -899,13 +900,7 @@ function markStatusNotificationPaths(
   }
 }
 
-function isNotificationErrorSource(node: AtlasNode) {
-  return (
-    node.status === "error" &&
-    !node.propagatedErrorSourceId &&
-    (node.kind === "event" || node.author === "system" || node.tags.includes("error"))
-  );
-}
+const isNotificationErrorSource = isIntrinsicErrorNode;
 
 function markNotificationPath(kinds: Map<string, NotificationPulseKind>, path: AtlasNode[], kind: NotificationPulseKind) {
   for (const node of path.slice(1)) {

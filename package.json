@@ -37,6 +37,7 @@
     "verify:templates": "node --experimental-strip-types scripts/verify-notebook-templates.ts",
     "verify:layout": "node --experimental-strip-types scripts/verify-layout.ts",
     "verify:node-search": "node --experimental-strip-types scripts/verify-node-search.ts",
+    "verify:node-error-acknowledgement": "node --experimental-strip-types scripts/verify-node-error-acknowledgement.ts",
     "verify:ui": "node scripts/verify-ui.mjs",
     "i18n:verify": "node --experimental-strip-types scripts/verify-i18n.ts && node scripts/i18n-scan-hardcoded.mjs",
     "i18n:scan": "node scripts/i18n-scan-hardcoded.mjs",
