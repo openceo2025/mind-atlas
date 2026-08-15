@@ -473,8 +473,11 @@ async function verifyMobileLayout(mode) {
   const { context, page } = await createPage({ ...mobileViewport, mobile: true });
   try {
     await importFixture(page, mode);
-    await page.waitForTimeout(700);
     const { board, universe } = await assertBoardModeLayout(page, mode, true);
+    await page.waitForTimeout(1_450);
+    await assertMobileAtlasComposition(page, `${mode} initial load`, universe);
+    await focusMobileBoardMidRecord(page, mode);
+    await page.waitForTimeout(1_450);
     const panel = activeFocusPanel(page);
     const globalMenu = await page.locator(".global-menu").boundingBox();
     if (!globalMenu) throw new Error(`${mode} mobile global menu is missing.`);
@@ -490,6 +493,9 @@ async function verifyMobileLayout(mode) {
     if (await addSibling.isVisible()) throw new Error(`${mode} mobile Enter operation should be hidden.`);
     if (board.x < 8 || board.x + board.width > page.viewportSize().width - 8) throw new Error(`${mode} mobile board overflows horizontally.`);
     await assertMobileCandidateVisibility(page, mode);
+    await captureScreenshot(page, `${mode}-mobile`);
+    await assertMobileAtlasComposition(page, `${mode} auto focus`, universe);
+    await assertVariationStripHorizontalScroll(page, mode);
     const titleInputs = page.locator('.universe-shell input[aria-label$="のタイトル"]');
     if (await titleInputs.count()) {
       const activeTitle = await titleInputs.last().boundingBox();
@@ -519,9 +525,134 @@ async function verifyMobileLayout(mode) {
         throw new Error(`Shogi mobile coordinates still overlap board pieces: ${JSON.stringify(coordinateState)}`);
       }
     }
-    await captureScreenshot(page, `${mode}-mobile`);
   } finally {
     await context.close();
+  }
+}
+
+async function focusMobileBoardMidRecord(page, mode) {
+  const steps = mode === "go" ? 1 : 2;
+  for (let step = 0; step < steps; step += 1) {
+    await page.getByRole("button", { name: "一手進む" }).click();
+  }
+}
+
+async function assertMobileAtlasComposition(page, mode, universe) {
+  const composition = await page.evaluate(() => {
+    const universeElement = document.querySelector(".universe-shell");
+    const universeRect = universeElement?.getBoundingClientRect();
+    if (!universeRect) return null;
+    const visibleTitles = [...document.querySelectorAll(".universe-shell .board-mobile-node-title")]
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          selected: element.classList.contains("board-mobile-node-input"),
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+          width: rect.width,
+          height: rect.height,
+          visible:
+            rect.width > 0
+            && rect.height > 0
+            && rect.x < universeRect.right
+            && rect.right > universeRect.left
+            && rect.y < universeRect.bottom
+            && rect.bottom > universeRect.top,
+        };
+      })
+      .filter((entry) => entry.visible);
+    const selected = visibleTitles.find((entry) => entry.selected) ?? null;
+    const selectedBodyElement = document.querySelector(".universe-shell .board-mobile-node-body.board-mobile-node-input");
+    const selectedBodyRect = selectedBodyElement?.getBoundingClientRect();
+    const selectedBody = selectedBodyRect
+      ? {
+          x: selectedBodyRect.x + selectedBodyRect.width / 2,
+          y: selectedBodyRect.y + selectedBodyRect.height / 2,
+          visible:
+            selectedBodyRect.width > 0
+            && selectedBodyRect.height > 0
+            && selectedBodyRect.x < universeRect.right
+            && selectedBodyRect.right > universeRect.left
+            && selectedBodyRect.y < universeRect.bottom
+            && selectedBodyRect.bottom > universeRect.top,
+        }
+      : null;
+    const xs = visibleTitles.map((entry) => entry.x);
+    const ys = visibleTitles.map((entry) => entry.y);
+    return {
+      count: visibleTitles.length,
+      spanX: xs.length ? Math.max(...xs) - Math.min(...xs) : 0,
+      spanY: ys.length ? Math.max(...ys) - Math.min(...ys) : 0,
+      selected,
+      selectedBody,
+      centerX: universeRect.x + universeRect.width / 2,
+      centerY: universeRect.y + universeRect.height / 2,
+    };
+  });
+  if (!composition?.selected || !composition.selectedBody?.visible) {
+    throw new Error(`${mode} mobile Atlas has no selected node text anchors to evaluate.`);
+  }
+  const activeTextGap = Math.abs(composition.selectedBody.y - composition.selected.y);
+  const minActiveTextGap = Math.min(universe.width, universe.height) * 0.15;
+  const maxActiveTextGap = Math.min(universe.width, universe.height) * 0.44;
+  const activeAnchorX = (composition.selected.x + composition.selectedBody.x) / 2;
+  const activeAnchorY = (composition.selected.y + composition.selectedBody.y) / 2;
+  const maxCenterOffsetX = universe.width * 0.24;
+  const maxCenterOffsetY = universe.height * 0.3;
+  if (
+    composition.count < 2
+    || activeTextGap < minActiveTextGap
+    || activeTextGap > maxActiveTextGap
+    || Math.abs(activeAnchorX - composition.centerX) > maxCenterOffsetX
+    || Math.abs(activeAnchorY - composition.centerY) > maxCenterOffsetY
+  ) {
+    throw new Error(`${mode} mobile Atlas camera composition is too distant or off-center: ${JSON.stringify({ ...composition, activeTextGap, minActiveTextGap, maxActiveTextGap })}`);
+  }
+}
+
+async function assertVariationStripHorizontalScroll(page, mode) {
+  const state = await page.locator(`.${mode}-variations`).evaluate((strip) => {
+    const source = strip.querySelector("button");
+    if (!source) return null;
+    const clones = [];
+    for (let index = 0; index < 12; index += 1) {
+      const clone = source.cloneNode(true);
+      clone.textContent = `候補手 ${index + 1} ７六歩成`;
+      clone.setAttribute("data-board-overflow-fixture", "true");
+      strip.append(clone);
+      clones.push(clone);
+    }
+    void strip.getBoundingClientRect();
+    const firstStyle = getComputedStyle(clones[0]);
+    const before = strip.scrollLeft;
+    strip.scrollLeft = strip.scrollWidth;
+    const result = {
+      clientWidth: strip.clientWidth,
+      scrollWidth: strip.scrollWidth,
+      clientHeight: strip.clientHeight,
+      scrollHeight: strip.scrollHeight,
+      before,
+      after: strip.scrollLeft,
+      flexShrink: firstStyle.flexShrink,
+      whiteSpace: firstStyle.whiteSpace,
+      writingMode: firstStyle.writingMode,
+      maxButtonHeight: Math.max(...clones.map((clone) => clone.getBoundingClientRect().height)),
+    };
+    clones.forEach((clone) => clone.remove());
+    strip.scrollLeft = before;
+    return result;
+  });
+  if (
+    !state
+    || state.scrollWidth <= state.clientWidth + 8
+    || state.after <= 0
+    || state.scrollHeight > state.clientHeight + 2
+    || state.maxButtonHeight > state.clientHeight + 2
+    || state.flexShrink !== "0"
+    || state.whiteSpace !== "nowrap"
+    || !state.writingMode.startsWith("horizontal")
+  ) {
+    throw new Error(`${mode} candidate strip is not a single horizontally scrollable row: ${JSON.stringify(state)}`);
   }
 }
 

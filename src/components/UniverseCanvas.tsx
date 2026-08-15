@@ -1003,7 +1003,6 @@ function NavigationController({
   const stableLayoutMetrics = getBoardGameStableLayoutMetrics(size.width, size.height, boardGameMode, boardLayoutMetricsRef);
   const { keyboardPortraitLock } = stableLayoutMetrics;
   const mobilePortraitCamera = isMobilePortraitCamera(stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
-  const boardGamePortraitCamera = boardGameMode && isMobileBoardGameViewport();
   const mobileCamera = isMobileCamera(stableLayoutMetrics.width, stableLayoutMetrics.height);
   const mobileLandscapeCamera = isMobileLandscapeCamera(stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
   const initialCenteredRef = useRef(false);
@@ -1261,11 +1260,8 @@ function NavigationController({
         ? Math.min(MAX_CAMERA_OFFSET, targetRadius - focusDistance)
         : targetIsRoot && mobileCamera
         ? getInitialCameraOffset(mobilePortraitCamera)
-        : getFocusTargetOffset(
-            targetRadius,
-            focusDistance,
-            boardGamePortraitCamera,
-          );
+        // The measured canvas height already accounts for compact board-mode framing.
+        : getFocusTargetOffset(targetRadius, focusDistance);
     const baseFocusScreenOffset = getGeneratedLayoutFocusScreenOffset(
       layoutMode,
       layoutViewport,
@@ -5768,15 +5764,8 @@ function getInitialCameraOffset(mobilePortraitCamera: boolean) {
   return NOTEBOOK_FIRST_SHELL_RADIUS - initialFirstLayerDistance * MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER;
 }
 
-function getFocusTargetOffset(targetRadius: number, targetDistance: number, mobilePortraitCamera: boolean) {
-  const baseOffset = clamp(targetRadius - targetDistance, MIN_CAMERA_OFFSET, MAX_CAMERA_OFFSET);
-  if (!mobilePortraitCamera) return baseOffset;
-  const baseVisibleDistance = targetRadius - baseOffset;
-  return clamp(
-    targetRadius - baseVisibleDistance * MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER,
-    getMinCameraOffset(true),
-    MAX_CAMERA_OFFSET,
-  );
+function getFocusTargetOffset(targetRadius: number, targetDistance: number) {
+  return clamp(targetRadius - targetDistance, MIN_CAMERA_OFFSET, MAX_CAMERA_OFFSET);
 }
 
 function getMinCameraOffset(mobilePortraitCamera: boolean) {

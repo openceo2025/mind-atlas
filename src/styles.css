@@ -3682,6 +3682,13 @@ h1 {
   flex-wrap: nowrap;
   align-items: center;
   gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
   color: #c2d5c7;
   font-size: 11px;
 }
@@ -3701,13 +3708,16 @@ h1 {
 }
 
 .shogi-variations button {
-  max-width: 100%;
+  flex: 0 0 auto;
+  max-width: none;
   border: 1px solid rgba(219, 234, 211, 0.16);
   border-radius: 5px;
   padding: 4px 6px;
   background: rgba(219, 234, 211, 0.06);
   color: inherit;
   cursor: pointer;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
 }
 
 .shogi-variations button.is-active {
@@ -3876,13 +3886,21 @@ h1 {
   flex-wrap: nowrap;
   align-items: center;
   gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
   color: #c2d5c7;
   font-size: 11px;
 }
 
 .chess-variations button,
 .go-variations button {
-  max-width: 100%;
+  flex: 0 0 auto;
+  max-width: none;
   border: 1px solid rgba(219, 234, 211, 0.16);
   border-radius: 5px;
   padding: 4px 6px;
@@ -3890,6 +3908,8 @@ h1 {
   color: inherit;
   cursor: pointer;
   font-size: 11px;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
 }
 
 .chess-variations button.is-active,
