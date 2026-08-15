@@ -16,7 +16,7 @@ import {
   Presentation,
   X,
 } from "lucide-react";
-import { ChangeEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { saveStoredAttachmentBlob } from "../attachmentStorage";
 import { UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
@@ -26,9 +26,10 @@ import type { AtlasTheme } from "../theme";
 import type { AtlasNode, AttachmentKind, NodeAttachment } from "../types";
 import { I18nText, useMindAtlasLocale } from "../i18n/I18nProvider";
 import { formatAppMessage } from "../i18n/format";
-import { ShogiViewer } from "../features/shogi/ShogiViewer";
-import { ChessViewer } from "../features/chess/ChessViewer";
-import { GoViewer } from "../features/go/GoViewer";
+
+const ShogiViewer = lazy(() => import("../features/shogi/ShogiViewer").then((module) => ({ default: module.ShogiViewer })));
+const ChessViewer = lazy(() => import("../features/chess/ChessViewer").then((module) => ({ default: module.ChessViewer })));
+const GoViewer = lazy(() => import("../features/go/GoViewer").then((module) => ({ default: module.GoViewer })));
 
 let sessionReminderDraftAt = addDays(new Date(), 1).toISOString();
 
@@ -379,11 +380,17 @@ export function FocusPanel({
                 <input type="file" multiple onChange={handleAttachmentChange} />
               </label>
             ) : null}
-            <ShogiViewer enabled={boardGameMode} onStatus={setShogiStatus} />
-            {shogiStatus ? <p className="shogi-viewer-status" role="status">{shogiStatus}</p> : null}
-            <ChessViewer enabled={boardGameMode} onStatus={setBoardGameStatus} />
-            <GoViewer enabled={boardGameMode} onStatus={setBoardGameStatus} />
-            {boardGameStatus ? <p className="board-game-viewer-status" role="status">{boardGameStatus}</p> : null}
+            {boardGameMode ? (
+              <Suspense fallback={<p className="board-game-viewer-status">{formatAppMessage("common.loading")}</p>}>
+                {atlasRoot.notebookMode === "shogi" ? <ShogiViewer onStatus={setShogiStatus} /> : null}
+                {atlasRoot.notebookMode === "chess" ? <ChessViewer onStatus={setBoardGameStatus} /> : null}
+                {atlasRoot.notebookMode === "go" ? <GoViewer onStatus={setBoardGameStatus} /> : null}
+              </Suspense>
+            ) : null}
+            {atlasRoot.notebookMode === "shogi" && shogiStatus ? <p className="shogi-viewer-status" role="status">{shogiStatus}</p> : null}
+            {(atlasRoot.notebookMode === "chess" || atlasRoot.notebookMode === "go") && boardGameStatus ? (
+              <p className="board-game-viewer-status" role="status">{boardGameStatus}</p>
+            ) : null}
             {attachmentsEnabled && selectedNode.attachments.length ? (
               <div className="attachment-list panel-preview-list">
                 {selectedNode.attachments.map((attachment) => (

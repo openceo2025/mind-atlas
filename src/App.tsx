@@ -46,9 +46,6 @@ import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from
 import type { AtlasNode, CloudNotebookEntry, CloudNotebookListResult, HostedServiceSession, NotebookMode, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
 import type { NotebookPersistenceStatus, NotebookSnapshot } from "./notebookPersistence";
 import { formatAppMessage } from "./i18n/format";
-import { detectShogiRecordFormat, importShogiRecordFile } from "./features/shogi/shogiRecord";
-import { detectChessRecordFormat, importChessRecordFile } from "./features/chess/chessRecord";
-import { detectGoRecordFormat, importGoRecordFile } from "./features/go/goRecord";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const WORKSPACE_PANEL_EXIT_MS = 960;
@@ -61,6 +58,11 @@ const DEFAULT_DATASET_TITLE = "Mind Atlas";
 const MIND_ATLAS_SOURCE_URL = "https://github.com/openceo2025/mind-atlas";
 const IMPORT_ACCEPT_TYPES = ".mindatlas,.mindatlaspkg,.md,.markdown,.opml,.mm,.kif,.ki2,.csa,.pgn,.sgf,application/mindatlas+json,application/x-mindatlas-package,text/markdown,text/plain,text/xml,application/xml";
 const HOSTED_IMPORT_ACCEPT_TYPES = ".mindatlas,.md,.markdown,.opml,.mm,.kif,.ki2,.csa,.pgn,.sgf,application/mindatlas+json,text/markdown,text/plain,text/xml,application/xml";
+const BOARD_RECORD_FORMATS: Record<Exclude<NotebookMode, "standard">, { label: string; extension: string }> = {
+  shogi: { label: "KIF", extension: "kif" },
+  chess: { label: "PGN", extension: "pgn" },
+  go: { label: "SGF", extension: "sgf" },
+};
 const CLOUD_NOTEBOOK_MAX_BYTES = 10 * 1024 * 1024;
 const CURRENT_CLOUD_NOTEBOOK_SESSION_KEY = "mind-atlas-current-cloud-notebook-v1";
 type StartSpaceSource = "initialize" | "tutorial";
@@ -311,6 +313,7 @@ export default function App() {
   }, [currentCloudNotebook, hostedSession, notebookPersistenceStatus, publicServiceMode]);
   const notebookMode: NotebookMode = atlasRoot.notebookMode ?? "standard";
   const isBoardGameMode = notebookMode !== "standard";
+  const boardRecordFormat = isBoardNotebookMode(notebookMode) ? BOARD_RECORD_FORMATS[notebookMode] : null;
   const appliedBoardModeRef = useRef<NotebookMode | null>(null);
   const appliedBoardLayoutRef = useRef("");
   useEffect(() => {
@@ -946,6 +949,30 @@ export default function App() {
     setMenuOpen(false);
   };
 
+  const handleExportBoardRecord = async () => {
+    if (!isBoardGameMode) return;
+    try {
+      await saveNotebookNow();
+      let content = "";
+      let extension = boardRecordFormat?.extension ?? "txt";
+      if (notebookMode === "shogi") {
+        const { exportShogiRecord } = await import("./features/shogi/shogiRecord");
+        content = exportShogiRecord(atlasRoot);
+      } else if (notebookMode === "chess") {
+        const { exportChessRecord } = await import("./features/chess/chessRecord");
+        content = exportChessRecord(atlasRoot);
+      } else if (notebookMode === "go") {
+        const { exportGoRecord } = await import("./features/go/goRecord");
+        content = exportGoRecord(atlasRoot);
+      }
+      downloadBlob(new Blob([content], { type: "text/plain;charset=utf-8" }), `${datasetFileName(atlasRoot.title)}.${extension}`);
+      setMenuOpen(false);
+    } catch (error) {
+      console.error("Board record export failed", error);
+      window.alert(`${t("error.boardExport")}\n${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   const prepareHostedCloudNotebook = () => {
     const root = createTextOnlyNotebookRoot(atlasRoot);
     const sizeBytes = textOnlyNotebookSizeBytes(root);
@@ -1393,9 +1420,10 @@ export default function App() {
       return;
     }
 
-    const shogiFormat = detectShogiRecordFormat(file.name);
+    const shogiFormat = lowerName.match(/\.(kif|ki2|csa)$/)?.[1];
     if (shogiFormat) {
       try {
+        const { importShogiRecordFile } = await import("./features/shogi/shogiRecord");
         const result = await importShogiRecordFile(file);
         resetNotebook();
         importNotebook(result.root, result.datasetName, {}, { selectedNodeId: result.recordRootId, requestTitleEdit: false, notebookMode: "shogi" });
@@ -1408,9 +1436,10 @@ export default function App() {
       return;
     }
 
-    const chessFormat = detectChessRecordFormat(file.name);
+    const chessFormat = lowerName.endsWith(".pgn") ? "pgn" : null;
     if (chessFormat) {
       try {
+        const { importChessRecordFile } = await import("./features/chess/chessRecord");
         const result = await importChessRecordFile(file);
         resetNotebook();
         importNotebook(result.root, result.datasetName, {}, { selectedNodeId: result.recordRootId, requestTitleEdit: false, notebookMode: "chess" });
@@ -1423,9 +1452,10 @@ export default function App() {
       return;
     }
 
-    const goFormat = detectGoRecordFormat(file.name);
+    const goFormat = lowerName.endsWith(".sgf") ? "sgf" : null;
     if (goFormat) {
       try {
+        const { importGoRecordFile } = await import("./features/go/goRecord");
         const result = await importGoRecordFile(file);
         resetNotebook();
         importNotebook(result.root, result.datasetName, {}, { selectedNodeId: result.recordRootId, requestTitleEdit: false, notebookMode: "go" });
@@ -2119,6 +2149,15 @@ export default function App() {
                   <small>{t("menu.searchNodes.detail")}</small>
                 </span>
               </button>
+              {isBoardGameMode ? (
+                <button type="button" onClick={handleExportBoardRecord}>
+                  <Download size={15} />
+                  <span>
+                    {t("board.exportRecord", { format: boardRecordFormat?.label ?? "" })}
+                    <small>.{boardRecordFormat?.extension}</small>
+                  </span>
+                </button>
+              ) : null}
               <button type="button" onClick={handleExportLight}>
                 <Download size={15} />
                 <span>

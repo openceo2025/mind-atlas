@@ -47,7 +47,11 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
   const currentContent = findChessNodeContent(currentNode) ?? findChessNodeContent(recordRoot);
   const path = recordRoot && currentNode ? findPath(recordRoot, currentNode.id) ?? [recordRoot] : recordRoot ? [recordRoot] : [];
   const parentNode = path.length > 1 ? path[path.length - 2] : null;
-  const variations = (currentNode ?? recordRoot)?.children.filter((node) => findChessNodeContent(node)?.role === "move") ?? [];
+  const variationChildren = (currentNode ?? recordRoot)?.children ?? [];
+  const variations = useMemo(
+    () => variationChildren.filter((node) => findChessNodeContent(node)?.role === "move"),
+    [variationChildren],
+  );
   const boardRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<Api | null>(null);
   const configRef = useRef<Config | null>(null);
@@ -76,9 +80,12 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
 
   useEffect(() => {
     if (!apiRef.current || !currentContent) return;
-    setPendingPromotion(null);
     apiRef.current.set(makeBoardConfig(currentContent, handleBoardMove, orientation, candidateShapes));
   }, [candidateShapes, currentContent?.fen, currentContent?.uci, currentNode?.id, orientation, recordRoot?.id]);
+
+  useEffect(() => {
+    setPendingPromotion(null);
+  }, [currentContent?.fen, currentContent?.uci, currentNode?.id, recordRoot?.id]);
 
   if (!enabled || !recordRoot || !currentContent || !selectedNode) return null;
 

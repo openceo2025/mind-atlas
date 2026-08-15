@@ -23,6 +23,9 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
   const rootContent = findGoNodeContent(recordRoot);
   const currentContent = findGoNodeContent(currentNode) ?? rootContent;
   const path = recordRoot && currentNode ? goRecordPath(recordRoot, currentNode.id) : recordRoot ? [recordRoot] : [];
+  const positionHistory = path
+    .map((node) => findGoNodeContent(node)?.board)
+    .filter((value): value is string => Boolean(value));
   const parentNode = path.length > 1 ? path[path.length - 2] : null;
   const variations = (currentNode ?? recordRoot)?.children.filter((node) => findGoNodeContent(node)?.role === "move") ?? [];
   const board = useMemo(() => (currentContent ? boardFromGoContent(currentContent) : null), [currentContent?.board, currentContent?.boardSize]);
@@ -61,7 +64,12 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
         onStatus?.("その手は現在の局面では指せません。");
         return;
       }
-      nextBoard = board.makeMove(sign, vertex, { preventOverwrite: true, preventSuicide: true, preventKo: true });
+      nextBoard = board.makeMove(sign, vertex, { preventOverwrite: true, preventSuicide: true });
+      const previousPosition = positionHistory.at(-2);
+      if (previousPosition && boardString(nextBoard) === previousPosition) {
+        onStatus?.("コウのため、直前の局面へ戻る手は指せません。");
+        return;
+      }
     }
     const displayText = pass ? `${color} pass` : `${color} ${board.stringifyVertex(vertex)}`;
     const childId = addChildNode(parent.id, "", { title: displayText, focus: false, requestEdit: false });
@@ -111,8 +119,9 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
       </div>
       <div className={`go-board-host ${flipped ? "is-flipped" : ""}`} style={{ "--go-size": currentContent.boardSize } as React.CSSProperties}>
         {Array.from({ length: currentContent.boardSize * currentContent.boardSize }, (_, index) => {
-          const x = index % currentContent.boardSize;
-          const y = Math.floor(index / currentContent.boardSize);
+          const boardIndex = flipped ? currentContent.boardSize * currentContent.boardSize - 1 - index : index;
+          const x = boardIndex % currentContent.boardSize;
+          const y = Math.floor(boardIndex / currentContent.boardSize);
           const vertex: Vertex = [x, y];
           const sign = board.get(vertex);
           const vertexLabel = board.stringifyVertex(vertex);
