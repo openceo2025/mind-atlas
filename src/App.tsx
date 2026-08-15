@@ -620,7 +620,7 @@ export default function App() {
     }
   }, [publicServiceMode, t]);
 
-  useVisualViewportHeight(commandInputEditing);
+  useVisualViewportHeight(commandInputEditing, isBoardGameMode);
   useMobileBackButtonGuard({ closeOverlays: closeMobileBackOverlays });
 
   useEffect(() => {
@@ -4173,7 +4173,7 @@ function isMobileBackButtonGuardTarget() {
   return coarsePointer && window.innerWidth <= 980;
 }
 
-function useVisualViewportHeight(commandInputEditing: boolean) {
+function useVisualViewportHeight(commandInputEditing: boolean, boardGameMode = false) {
   const commandInputEditingRef = useRef(commandInputEditing);
   const requestViewportUpdateRef = useRef<() => void>(() => undefined);
   const stableHeightRef = useRef<number | null>(null);
@@ -4185,6 +4185,31 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
   const lastKeyboardBottomOffsetRef = useRef(0);
   const keyboardSessionBottomOffsetRef = useRef(0);
   const lastKeyboardLayoutSignatureRef = useRef("");
+  const boardGameFixedHeightRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!boardGameMode || !isMobileBoardGameViewport()) {
+      boardGameFixedHeightRef.current = null;
+      document.documentElement.style.removeProperty("--board-mobile-fixed-height");
+      return;
+    }
+
+    const fixedHeight = Math.max(
+      1,
+      Math.round(window.innerHeight || document.documentElement.clientHeight || 1),
+    );
+    boardGameFixedHeightRef.current = fixedHeight;
+    document.documentElement.style.setProperty("--board-mobile-fixed-height", `${fixedHeight}px`);
+    document.documentElement.style.setProperty(
+      "--board-mobile-panel-height-root",
+      `min(${Math.round(fixedHeight * 0.72)}px, calc(100vw + 190px), 680px)`,
+    );
+    document.documentElement.style.setProperty("--app-height", `${fixedHeight}px`);
+    return () => {
+      document.documentElement.style.removeProperty("--board-mobile-fixed-height");
+      document.documentElement.style.removeProperty("--board-mobile-panel-height-root");
+    };
+  }, [boardGameMode]);
 
   useEffect(() => {
     commandInputEditingRef.current = commandInputEditing;
@@ -4192,6 +4217,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
   }, [commandInputEditing]);
 
   useEffect(() => {
+    if (boardGameMode && isMobileBoardGameViewport()) return;
     const timeoutIds = new Set<number>();
     let animationFrameId: number | null = null;
     let geometrySettleTimeoutId: number | null = null;
@@ -4439,7 +4465,7 @@ function useVisualViewportHeight(commandInputEditing: boolean) {
       window.removeEventListener("orientationchange", updateViewportHeightAfterOrientation);
       applyIdleViewportState(readViewport().visualHeight);
     };
-  }, []);
+  }, [boardGameMode]);
 }
 
 type MobileKeyboardPhase = "idle" | "opening" | "open" | "closing";
@@ -4456,6 +4482,16 @@ function isMobileKeyboardOverlayTarget(stableHeight: number | null) {
   const keyboardPortraitLocked = document.documentElement.getAttribute("data-keyboard-overlay-portrait") === "true" && hasKeyboardPanelSizeLock();
   const portraitBeforeKeyboard = keyboardPortraitLocked || (stableHeight ? stableHeight > width : (window.matchMedia?.("(orientation: portrait)").matches ?? window.innerHeight >= width));
   return coarsePointer && narrowViewport && portraitBeforeKeyboard;
+}
+
+function isMobileBoardGameViewport() {
+  if (typeof window === "undefined" || typeof document === "undefined") return false;
+  const width = Math.round(window.visualViewport?.width ?? window.innerWidth);
+  const fixedHeight = Number.parseFloat(document.documentElement.style.getPropertyValue("--board-mobile-fixed-height"));
+  const height = Number.isFinite(fixedHeight) && fixedHeight > 0
+    ? fixedHeight
+    : Math.round(window.innerHeight);
+  return width <= 980 && height > width;
 }
 
 function getVirtualKeyboardTop(stableHeight: number) {

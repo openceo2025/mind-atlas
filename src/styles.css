@@ -13,6 +13,233 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Mobile board notebooks use a fixed two-region composition. The upper Atlas
+   view stays stable while the lower viewer owns the complete board, hands,
+   controls, and candidate strip. */
+@media (max-width: 980px) and (orientation: portrait) {
+  .app-shell.is-board-game-mode {
+    --board-mobile-panel-height: var(--board-mobile-panel-height-root, min(72dvh, calc(100vw + 190px), 680px));
+  }
+
+  .app-shell.is-board-game-mode .universe-shell {
+    top: 0;
+    right: 0;
+    bottom: calc(var(--board-mobile-panel-height) + env(safe-area-inset-bottom));
+    left: 0;
+    transition: none;
+  }
+
+  .app-shell.is-board-game-mode .operation-panel-desktop,
+  .app-shell.is-board-game-mode .atlas-breadcrumb,
+  .app-shell.is-board-game-mode .mobile-workspace-tabs,
+  .app-shell.is-board-game-mode .mobile-command-slot,
+  .app-shell.is-board-game-mode .mobile-operation-slot,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-toolbar,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-text-section {
+    display: none !important;
+  }
+
+  .app-shell.is-board-game-mode .mobile-workspace-panel,
+  .app-shell.is-board-game-mode .mobile-editor-slot,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    height: auto;
+    max-height: none;
+    pointer-events: none;
+    transform: none !important;
+    transition: none;
+    animation: none;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-preview-area {
+    position: absolute;
+    top: auto;
+    right: calc(8px + env(safe-area-inset-right));
+    bottom: env(safe-area-inset-bottom);
+    left: calc(8px + env(safe-area-inset-left));
+    z-index: 6;
+    display: block;
+    width: auto;
+    height: var(--board-mobile-panel-height);
+    min-height: 0;
+    pointer-events: auto;
+    border: 1px solid rgba(211, 230, 203, 0.16);
+    border-radius: 8px;
+    background: rgba(6, 10, 8, 0.9);
+    box-shadow: 0 18px 56px rgba(0, 0, 0, 0.34);
+    backdrop-filter: blur(20px);
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-preview-frame {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: 5px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-attach-preview-button,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-preview-list,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .preview-empty {
+    display: none !important;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer-toolbar,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer-toolbar,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer-toolbar {
+    flex: 0 0 34px;
+    min-height: 34px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-board-shell {
+    flex: 0 0 auto;
+    width: min(calc(100% - 12px), calc(var(--board-mobile-panel-height) - 184px), 520px);
+    max-width: 100%;
+    min-height: 0;
+    margin: 0 auto;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-board-frame,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-board-host {
+    flex: 0 0 auto;
+    width: min(calc(100% - 12px), calc(var(--board-mobile-panel-height) - 104px), 520px);
+    max-width: 100%;
+    min-height: 0;
+    margin: 0 auto;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host.sg-hand-wrap,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand {
+    min-height: 38px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand {
+    padding: 1px 6px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hp-wrap {
+    min-width: 34px;
+    min-height: 34px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand piece {
+    width: 34px;
+    height: 34px;
+    font-size: 21px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer-icon,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer-icon,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer-icon {
+    min-width: 36px;
+    width: 36px;
+    height: 34px;
+    padding: 0 7px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-variations,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-variations,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-variations {
+    position: static;
+    flex: 0 0 var(--board-variation-height);
+    min-height: var(--board-variation-height);
+    max-height: var(--board-variation-height);
+    overflow-x: auto;
+    overflow-y: hidden;
+    align-items: center;
+    margin: 0;
+    padding: 2px 0;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-variations button,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-variations button,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-variations button {
+    min-height: 26px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+}
+
+.board-mobile-node-title,
+.board-mobile-node-body {
+  display: block;
+  width: min(220px, 52vw);
+  border: 1px solid rgba(219, 234, 211, 0.2);
+  border-radius: 6px;
+  outline: 0;
+  background: rgba(4, 8, 7, 0.78);
+  color: #f3f5dd;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.32);
+  pointer-events: auto;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  touch-action: manipulation;
+  user-select: text;
+}
+
+.board-mobile-node-title {
+  min-height: 25px;
+  padding: 4px 7px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.board-mobile-node-body {
+  width: min(230px, 58vw);
+  min-height: 42px;
+  max-height: 56px;
+  resize: none;
+  overflow: auto;
+  padding: 5px 7px;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.board-mobile-node-title::placeholder,
+.board-mobile-node-body::placeholder {
+  color: rgba(243, 245, 221, 0.5);
+}
+
+.board-mobile-node-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-mobile-node-input:focus {
+  border-color: rgba(141, 245, 207, 0.68);
+  box-shadow: 0 0 0 2px rgba(141, 245, 207, 0.13);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -8431,6 +8658,349 @@ button:disabled,
   }
 }
 
+/* Mobile board rules must be last: the older compact-board block above is
+   intentionally superseded for portrait board notebooks. */
+@media (max-width: 980px) and (orientation: portrait) {
+  .app-shell.is-board-game-mode {
+    --board-mobile-panel-height: var(--board-mobile-panel-height-root, min(72dvh, calc(100vw + 190px), 680px));
+  }
+
+  .app-shell.is-board-game-mode .universe-shell {
+    top: 0;
+    right: 0;
+    bottom: calc(var(--board-mobile-panel-height) + env(safe-area-inset-bottom));
+    left: 0;
+    transition: none;
+  }
+
+  .app-shell.is-board-game-mode .operation-panel-desktop,
+  .app-shell.is-board-game-mode .atlas-breadcrumb,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-toolbar,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-text-section {
+    display: none !important;
+  }
+
+  .app-shell.is-board-game-mode .mobile-workspace-panel,
+  .app-shell.is-board-game-mode .mobile-editor-slot,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    height: auto;
+    max-height: none;
+    pointer-events: none;
+    transform: none !important;
+    transition: none;
+    animation: none;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-preview-area {
+    position: absolute;
+    top: auto;
+    right: calc(8px + env(safe-area-inset-right));
+    bottom: env(safe-area-inset-bottom);
+    left: calc(8px + env(safe-area-inset-left));
+    z-index: 6;
+    display: block;
+    width: auto;
+    height: var(--board-mobile-panel-height);
+    min-height: 0;
+    pointer-events: auto;
+    border: 1px solid rgba(211, 230, 203, 0.16);
+    border-radius: 8px;
+    background: rgba(6, 10, 8, 0.9);
+    box-shadow: 0 18px 56px rgba(0, 0, 0, 0.34);
+    backdrop-filter: blur(20px);
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-preview-frame {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: 5px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-attach-preview-button,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-preview-list,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .preview-empty {
+    display: none !important;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer-toolbar,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer-toolbar,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer-toolbar {
+    flex: 0 0 34px;
+    min-height: 34px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-board-shell {
+    flex: 0 0 auto;
+    width: min(calc(100% - 12px), calc(var(--board-mobile-panel-height) - 184px), 520px);
+    max-width: 100%;
+    min-height: 0;
+    margin: 0 auto;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-board-frame,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-board-host {
+    flex: 0 0 auto;
+    width: min(calc(100% - 12px), calc(var(--board-mobile-panel-height) - 104px), 520px);
+    max-width: 100%;
+    min-height: 0;
+    margin: 0 auto;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host.sg-hand-wrap,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand {
+    min-height: 38px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand {
+    padding: 1px 6px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hp-wrap {
+    min-width: 34px;
+    min-height: 34px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand piece {
+    width: 34px;
+    height: 34px;
+    font-size: 21px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer-icon,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer-icon,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer-icon {
+    min-width: 36px;
+    width: 36px;
+    height: 34px;
+    padding: 0 7px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-variations,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-variations,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-variations {
+    position: static;
+    flex: 0 0 var(--board-variation-height);
+    min-height: var(--board-variation-height);
+    max-height: var(--board-variation-height);
+    overflow-x: auto;
+    overflow-y: hidden;
+    align-items: center;
+    margin: 0;
+    padding: 2px 0;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-variations button,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-variations button,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-variations button {
+    min-height: 26px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+}
+
+/* Final mobile board overrides. These come after the legacy compact board
+   rules so the mobile board mode is intentionally the only owner of this
+   layout. */
+@media (max-width: 980px) and (orientation: portrait) {
+  .app-shell.is-board-game-mode {
+    --board-mobile-panel-height: var(--board-mobile-panel-height-root, min(72dvh, calc(100vw + 190px), 680px));
+  }
+
+  .app-shell.is-board-game-mode .universe-shell {
+    top: 0;
+    right: 0;
+    bottom: calc(var(--board-mobile-panel-height) + env(safe-area-inset-bottom));
+    left: 0;
+    transition: none;
+  }
+
+  .app-shell.is-board-game-mode .operation-panel-desktop,
+  .app-shell.is-board-game-mode .atlas-breadcrumb,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-toolbar,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-text-section {
+    display: none !important;
+  }
+
+  .app-shell.is-board-game-mode .mobile-workspace-panel,
+  .app-shell.is-board-game-mode .mobile-editor-slot,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    height: auto;
+    max-height: none;
+    pointer-events: none;
+    transform: none !important;
+    transition: none;
+    animation: none;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-preview-area {
+    position: absolute;
+    top: auto;
+    right: calc(8px + env(safe-area-inset-right));
+    bottom: env(safe-area-inset-bottom);
+    left: calc(8px + env(safe-area-inset-left));
+    z-index: 6;
+    display: block;
+    width: auto;
+    height: var(--board-mobile-panel-height);
+    min-height: 0;
+    pointer-events: auto;
+    border: 1px solid rgba(211, 230, 203, 0.16);
+    border-radius: 8px;
+    background: rgba(6, 10, 8, 0.9);
+    box-shadow: 0 18px 56px rgba(0, 0, 0, 0.34);
+    backdrop-filter: blur(20px);
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-preview-frame {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: 5px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-attach-preview-button,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-preview-list,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .preview-empty {
+    display: none !important;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer-toolbar,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer-toolbar,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer-toolbar {
+    flex: 0 0 34px;
+    min-height: 34px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-board-shell {
+    flex: 0 0 auto;
+    width: min(calc(100% - 12px), calc(var(--board-mobile-panel-height) - 184px), 520px);
+    max-width: 100%;
+    min-height: 0;
+    margin: 0 auto;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-board-frame,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-board-host {
+    flex: 0 0 auto;
+    width: min(calc(100% - 12px), calc(var(--board-mobile-panel-height) - 104px), 520px);
+    max-width: 100%;
+    min-height: 0;
+    margin: 0 auto;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host.sg-hand-wrap,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand {
+    min-height: 38px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand {
+    padding: 1px 6px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hp-wrap {
+    min-width: 34px;
+    min-height: 34px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand piece {
+    width: 34px;
+    height: 34px;
+    font-size: 21px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer-icon,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer-icon,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer-icon {
+    min-width: 36px;
+    width: 36px;
+    height: 34px;
+    padding: 0 7px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-variations,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-variations,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-variations {
+    position: static;
+    flex: 0 0 var(--board-variation-height);
+    min-height: var(--board-variation-height);
+    max-height: var(--board-variation-height);
+    overflow-x: auto;
+    overflow-y: hidden;
+    align-items: center;
+    margin: 0;
+    padding: 2px 0;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-variations button,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-variations button,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-variations button {
+    min-height: 26px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+}
+
 @media (max-width: 980px) {
   .app-shell.is-board-game-mode {
     --board-mobile-panel-height: min(64dvh, calc(100vw + 124px), 620px);
@@ -8718,5 +9288,94 @@ button:disabled,
     opacity: 0;
     pointer-events: none;
     transform: none;
+  }
+}
+
+/* The mobile board contract is deliberately the final cascade layer. */
+@media (max-width: 980px) and (orientation: portrait) {
+  .app-shell.is-board-game-mode {
+    --board-mobile-panel-height: var(--board-mobile-panel-height-root, min(72dvh, calc(100vw + 190px), 680px));
+  }
+
+  .app-shell.is-board-game-mode .universe-shell {
+    top: 0 !important;
+    right: 0 !important;
+    bottom: calc(var(--board-mobile-panel-height) + env(safe-area-inset-bottom)) !important;
+    left: 0 !important;
+    transition: none !important;
+  }
+
+  .app-shell.is-board-game-mode .operation-panel-desktop,
+  .app-shell.is-board-game-mode .atlas-breadcrumb,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-toolbar,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-text-section {
+    display: none !important;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-preview-area {
+    top: auto !important;
+    right: calc(8px + env(safe-area-inset-right)) !important;
+    bottom: env(safe-area-inset-bottom) !important;
+    left: calc(8px + env(safe-area-inset-left)) !important;
+    width: auto !important;
+    height: var(--board-mobile-panel-height) !important;
+    min-height: 0 !important;
+    pointer-events: auto !important;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer {
+    height: 100% !important;
+    min-height: 0 !important;
+    gap: 4px !important;
+    overflow: hidden !important;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer-toolbar,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer-toolbar,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer-toolbar {
+    flex: 0 0 34px !important;
+    min-height: 34px !important;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-board-shell {
+    width: min(calc(100% - 12px), calc(var(--board-mobile-panel-height) - 184px), 520px) !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-board-frame,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-board-host {
+    width: min(calc(100% - 12px), calc(var(--board-mobile-panel-height) - 104px), 520px) !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host.sg-hand-wrap,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand {
+    min-height: 38px !important;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hp-wrap {
+    min-width: 34px !important;
+    min-height: 34px !important;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand piece {
+    width: 34px !important;
+    height: 34px !important;
+    font-size: 21px !important;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-variations,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-variations,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-variations {
+    flex: 0 0 var(--board-variation-height) !important;
+    min-height: var(--board-variation-height) !important;
+    max-height: var(--board-variation-height) !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    margin: 0 !important;
   }
 }

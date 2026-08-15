@@ -5,6 +5,7 @@ import path from "node:path";
 const baseUrl = process.env.MIND_ATLAS_URL ?? "http://127.0.0.1:5173";
 const testScope = process.env.MIND_ATLAS_BOARD_TEST ?? "all";
 const screenshotDir = process.env.MIND_ATLAS_BOARD_SCREENSHOT_DIR;
+const mobileViewport = parseViewport(process.env.MIND_ATLAS_BOARD_VIEWPORT) ?? { width: 390, height: 844 };
 const browser = await chromium.launch({ headless: true });
 
 const fixtures = {
@@ -113,12 +114,12 @@ async function assertBoardModeLayout(page, mode, mobile) {
   await app.waitFor();
   const panel = activeFocusPanel(page);
   const board = await panel.locator(".panel-preview-area").boundingBox();
-  const text = await panel.locator(".panel-text-section").boundingBox();
+  const text = mobile ? null : await panel.locator(".panel-text-section").boundingBox();
   const universe = await page.locator(".universe-shell").boundingBox();
-  if (!board || !text || !universe) throw new Error(`${mode} board layout did not render all fixed regions.`);
+  if (!board || (!mobile && !text) || !universe) throw new Error(`${mode} board layout did not render all fixed regions.`);
   if (!mobile && board.x <= text.x + text.width) throw new Error(`${mode} desktop board is not to the right of the editor.`);
   if (!mobile && board.width < page.viewportSize().width * 0.42) throw new Error(`${mode} desktop board is narrower than the reserved right region.`);
-  if (mobile && board.y <= page.viewportSize().height / 3) throw new Error(`${mode} mobile board is not anchored to the lower region.`);
+  if (mobile && board.y <= page.viewportSize().height * 0.2) throw new Error(`${mode} mobile board is not anchored to the lower region.`);
   if (mobile && board.width < page.viewportSize().width - 28) throw new Error(`${mode} mobile board does not use the available width.`);
   if (mobile && universe.y + universe.height > board.y + 2) throw new Error(`${mode} mobile universe overlaps the board region.`);
   if (board.height < 180) throw new Error(`${mode} board region is too short: ${board.height}`);
@@ -402,32 +403,25 @@ async function verifyGoKo() {
 }
 
 async function verifyMobileLayout(mode) {
-  const { context, page } = await createPage({ width: 390, height: 844, mobile: true });
+  const { context, page } = await createPage({ ...mobileViewport, mobile: true });
   try {
     await importFixture(page, mode);
     await page.waitForTimeout(700);
-    const { board, text, universe } = await assertBoardModeLayout(page, mode, true);
+    const { board, universe } = await assertBoardModeLayout(page, mode, true);
     const panel = activeFocusPanel(page);
-    const body = await panel.locator(".node-body-input").boundingBox();
-    const toolbar = await panel.locator(".panel-toolbar").boundingBox();
-    const breadcrumb = await page.locator(".atlas-breadcrumb").boundingBox();
     const globalMenu = await page.locator(".global-menu").boundingBox();
-    if (!body || !toolbar || !breadcrumb || !globalMenu) throw new Error(`${mode} mobile compact controls are incomplete.`);
+    if (!globalMenu) throw new Error(`${mode} mobile global menu is missing.`);
     const viewport = { x: 0, y: 0, width: page.viewportSize().width, height: page.viewportSize().height };
     await assertRectInside(viewport, globalMenu, `${mode} mobile global menu`);
-    await assertRectInside(viewport, breadcrumb, `${mode} mobile breadcrumb`);
-    await assertRectInside(viewport, text, `${mode} mobile editor`);
-    await assertRectInside(viewport, toolbar, `${mode} mobile editor toolbar`);
-    if (body.height > 58) throw new Error(`${mode} mobile body editor is too tall: ${body.height}`);
-    if (breadcrumb.x < page.viewportSize().width * 0.48) throw new Error(`${mode} mobile breadcrumb is not on the right.`);
-    if (rectsOverlap(breadcrumb, globalMenu) || rectsOverlap(text, globalMenu)) throw new Error(`${mode} mobile header controls overlap.`);
+    if (await panel.locator(".panel-toolbar").isVisible()) throw new Error(`${mode} mobile editor toolbar should be hidden.`);
+    if (await panel.locator(".panel-text-section").isVisible()) throw new Error(`${mode} mobile text editor panel should be hidden.`);
+    if (await page.locator(".atlas-breadcrumb").isVisible()) throw new Error(`${mode} mobile breadcrumb should be hidden.`);
+    if (await page.locator(".operation-panel-desktop").isVisible()) throw new Error(`${mode} mobile operation panel should be hidden.`);
     if (await panel.locator(".editor-panel-role").isVisible()) throw new Error(`${mode} mobile Editor label should be hidden.`);
     if (await panel.locator(".return-button").isVisible()) throw new Error(`${mode} mobile return button should be hidden.`);
     const addSibling = page.getByRole("button", { name: "Add sibling" });
     if (await addSibling.isVisible()) throw new Error(`${mode} mobile Enter operation should be hidden.`);
     if (board.x < 8 || board.x + board.width > page.viewportSize().width - 8) throw new Error(`${mode} mobile board overflows horizontally.`);
-    await assertRectInside(text, await panel.locator(".node-title-input").boundingBox(), `${mode} mobile title editor`);
-    await assertRectInside(text, body, `${mode} mobile body editor`);
     await assertMobileCandidateVisibility(page, mode);
     const titleInputs = page.locator('.universe-shell input[aria-label$="のタイトル"]');
     if (await titleInputs.count()) {
@@ -438,6 +432,13 @@ async function verifyMobileLayout(mode) {
   } finally {
     await context.close();
   }
+}
+
+function parseViewport(value) {
+  if (!value) return null;
+  const match = /^(\d+)x(\d+)$/.exec(value.trim());
+  if (!match) throw new Error(`Invalid MIND_ATLAS_BOARD_VIEWPORT: ${value}`);
+  return { width: Number(match[1]), height: Number(match[2]) };
 }
 
 async function assertBoardControlsVisible(page, mode, previewRect) {

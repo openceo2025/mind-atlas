@@ -576,7 +576,7 @@ export function UniverseCanvas({
           embedInteractionLocked={embedInteractionLocked}
           boardGameMode={boardGameMode}
         />
-        <SpatialOverlayLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} />
+        <SpatialOverlayLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} boardGameMode={boardGameMode} />
         <NotebookNodes
           theme={theme}
           renderQuality={renderQuality}
@@ -584,18 +584,20 @@ export function UniverseCanvas({
           pageActive={pageActive}
           embedInteractionLocked={embedInteractionLocked}
           attachmentsEnabled={attachmentsEnabled}
+          boardGameMode={boardGameMode}
           onOpenNodeContextMenu={setNodeContextMenu}
         />
-        <NotificationPulseLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} pageActive={pageActive} />
+        <NotificationPulseLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} pageActive={pageActive} boardGameMode={boardGameMode} />
       </Canvas>
       <NodeContextMenu menu={nodeContextMenu} onClose={() => setNodeContextMenu(null)} />
     </section>
   );
 }
 
-function SpatialOverlayLayer({ theme, renderQuality, layoutMode }: { theme: AtlasTheme; renderQuality: RenderQuality; layoutMode: AtlasLayoutMode }) {
+function SpatialOverlayLayer({ theme, renderQuality, layoutMode, boardGameMode }: { theme: AtlasTheme; renderQuality: RenderQuality; layoutMode: AtlasLayoutMode; boardGameMode: boolean }) {
   const { size } = useThree();
-  const stableLayoutMetrics = getStableLayoutMetrics(size.width, size.height);
+  const boardLayoutMetricsRef = useRef<StableLayoutMetrics | null>(null);
+  const stableLayoutMetrics = getBoardGameStableLayoutMetrics(size.width, size.height, boardGameMode, boardLayoutMetricsRef);
   const viewport = getGeneratedLayoutViewport(layoutMode, stableLayoutMetrics.width, stableLayoutMetrics.height, stableLayoutMetrics.keyboardPortraitLock);
   return (
     <SpatialLayoutOverlay
@@ -733,11 +735,13 @@ function NotificationPulseLayer({
   renderQuality,
   layoutMode,
   pageActive,
+  boardGameMode,
 }: {
   theme: AtlasTheme;
   renderQuality: RenderQuality;
   layoutMode: AtlasLayoutMode;
   pageActive: boolean;
+  boardGameMode: boolean;
 }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
@@ -745,7 +749,8 @@ function NotificationPulseLayer({
   const tickNotificationPulses = useAtlasStore((state) => state.tickNotificationPulses);
   const lastPruneRef = useRef(0);
   const { size } = useThree();
-  const stableLayoutMetrics = getStableLayoutMetrics(size.width, size.height);
+  const boardLayoutMetricsRef = useRef<StableLayoutMetrics | null>(null);
+  const stableLayoutMetrics = getBoardGameStableLayoutMetrics(size.width, size.height, boardGameMode, boardLayoutMetricsRef);
   const layoutViewport = getGeneratedLayoutViewport(layoutMode, stableLayoutMetrics.width, stableLayoutMetrics.height, stableLayoutMetrics.keyboardPortraitLock);
   const renderablePulses = useMemo(
     () => pulses.filter((pulse) => pulse.nodeId !== atlasRoot.id && Boolean(findNode(atlasRoot, pulse.nodeId))),
@@ -994,10 +999,11 @@ function NavigationController({
   const addRootNodeAt = useAtlasStore((state) => state.addRootNodeAt);
   const { camera, gl, size } = useThree();
   const perspective = camera as PerspectiveCamera;
-  const stableLayoutMetrics = getStableLayoutMetrics(size.width, size.height);
+  const boardLayoutMetricsRef = useRef<StableLayoutMetrics | null>(null);
+  const stableLayoutMetrics = getBoardGameStableLayoutMetrics(size.width, size.height, boardGameMode, boardLayoutMetricsRef);
   const { keyboardPortraitLock } = stableLayoutMetrics;
   const mobilePortraitCamera = isMobilePortraitCamera(stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
-  const boardGamePortraitCamera = boardGameMode && stableLayoutMetrics.width <= 980 && stableLayoutMetrics.height > stableLayoutMetrics.width;
+  const boardGamePortraitCamera = boardGameMode && isMobileBoardGameViewport();
   const mobileCamera = isMobileCamera(stableLayoutMetrics.width, stableLayoutMetrics.height);
   const mobileLandscapeCamera = isMobileLandscapeCamera(stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
   const initialCenteredRef = useRef(false);
@@ -1268,12 +1274,7 @@ function NavigationController({
       boardGameMode ? 0 : getVisibleCommandDockReservedBottom(stableLayoutMetrics.height),
       boardGameMode,
     );
-    const focusScreenOffset = boardGamePortraitCamera
-      ? {
-          ...baseFocusScreenOffset,
-          x: baseFocusScreenOffset.x + clamp(stableLayoutMetrics.width * 0.12, 18, 30),
-        }
-      : baseFocusScreenOffset;
+    const focusScreenOffset = baseFocusScreenOffset;
     const focusWorldPerPixel = getWorldUnitsPerPixel(focusDistance, stableLayoutMetrics.height, perspective.fov);
     const current = yawPitchRef.current;
     const targetYaw = closestAngle(current.yaw, targetAngles.yaw);
@@ -2263,6 +2264,7 @@ function NotebookNodes({
   pageActive,
   embedInteractionLocked,
   attachmentsEnabled,
+  boardGameMode,
   onOpenNodeContextMenu,
 }: {
   theme: AtlasTheme;
@@ -2271,6 +2273,7 @@ function NotebookNodes({
   pageActive: boolean;
   embedInteractionLocked: boolean;
   attachmentsEnabled: boolean;
+  boardGameMode: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -2349,7 +2352,8 @@ function NotebookNodes({
       selectedNodeId,
     ],
   );
-  const stableLayoutMetrics = getStableLayoutMetrics(size.width, size.height);
+  const boardLayoutMetricsRef = useRef<StableLayoutMetrics | null>(null);
+  const stableLayoutMetrics = getBoardGameStableLayoutMetrics(size.width, size.height, boardGameMode, boardLayoutMetricsRef);
   const layoutViewport = getGeneratedLayoutViewport(layoutMode, stableLayoutMetrics.width, stableLayoutMetrics.height, stableLayoutMetrics.keyboardPortraitLock);
   const layoutFrame = useMemo(
     () =>
@@ -3150,6 +3154,7 @@ function HierarchyNode({
   const snoozeNodeNotification = useAtlasStore((state) => state.snoozeNodeNotification);
   const birthMarks = useAtlasStore((state) => state.birthMarks);
   const zoom = useAtlasStore((state) => state.viewport.zoom);
+  const boardGameMobile = notebookMode !== "standard" && isMobileBoardGameViewport();
   const hiddenDragEdgeNodeId = useHiddenDragEdgeNodeId();
   const { camera, scene } = useThree();
   const perspective = camera as PerspectiveCamera;
@@ -3188,8 +3193,9 @@ function HierarchyNode({
   const lineageRunningColor = theme === "light" ? "#0b63ce" : "#86b7ff";
   const statusColor = hasRunningDescendant && node.status !== "error" ? lineageRunningColor : getStatusColor(effectiveStatus);
   const ringColor = theme === "light" ? themeColors.ring : statusColor;
-  const radius = getNodeVisualRadius(node, depth);
-  const hitRadius = getNodeHitRadius(node, depth);
+  const boardGameNodeScale = boardGameMobile ? 0.72 : 1;
+  const radius = getNodeVisualRadius(node, depth) * boardGameNodeScale;
+  const hitRadius = getNodeHitRadius(node, depth) * boardGameNodeScale;
   const visualDepthIndex =
     activeDescendantDistance !== null
       ? activeDescendantDistance
@@ -3217,7 +3223,7 @@ function HierarchyNode({
       layoutMode !== "phyllotaxis");
   const isLocalContextNode =
     isSelected || isMultiSelected || aiContextPreviewNodeIds.has(node.id) || isActiveAncestor || isActiveSibling || isDirectChildOfSelected || rootOverviewDirectChild;
-  const mobileLabelVisible = isSelected || isDirectChildOfSelected || rootDirectTitleVisible || rootOverviewDirectChild;
+  const mobileLabelVisible = isSelected || isDirectChildOfSelected || isDirectParentOfSelected || rootDirectTitleVisible || rootOverviewDirectChild;
   const lowQualityLabelVisible = isSelected || isDirectChildOfSelected || rootDirectTitleVisible || rootOverviewDirectChild;
   const baseLabelVisible = renderQuality === "low"
     ? lowQualityLabelVisible
@@ -3961,7 +3967,26 @@ function HierarchyNode({
           })
         : null}
 
-      {labelVisible ? (
+      {labelVisible && boardGameMobile ? (
+        <>
+          <Html center position={[0, radius + 24, 16]} transform={false} zIndexRange={isLabelAnchor ? [4, 1] : [2, 0]}>
+            <BoardMobileNodeTitle
+              node={node}
+              isSelected={isSelected}
+              onFocusNode={() => focusNode(node.id)}
+              onChange={(title) => updateNode(node.id, { title })}
+            />
+          </Html>
+          {isSelected ? (
+            <Html center position={[0, -radius - 14, 16]} transform={false} zIndexRange={[4, 1]}>
+              <BoardMobileNodeBody
+                node={node}
+                onChange={(body) => updateNode(node.id, { body, summary: body.split("\\n").find(Boolean) ?? "" })}
+              />
+            </Html>
+          ) : null}
+        </>
+      ) : labelVisible ? (
         <Html center position={[0, -radius - 14, 16]} transform={false} zIndexRange={isLabelAnchor ? [4, 1] : [2, 0]}>
           <div
             className={layoutMode === "calendar" ? "calendar-node-label" : undefined}
@@ -3991,6 +4016,70 @@ function HierarchyNode({
         </Html>
       ) : null}
     </group>
+  );
+}
+
+function BoardMobileNodeTitle({
+  node,
+  isSelected,
+  onFocusNode,
+  onChange,
+}: {
+  node: AtlasNode;
+  isSelected: boolean;
+  onFocusNode: () => void;
+  onChange: (title: string) => void;
+}) {
+  if (!isSelected) {
+    return (
+      <div
+        className="board-mobile-node-title board-mobile-node-preview"
+        role="button"
+        tabIndex={0}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onFocusNode();
+        }}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          onFocusNode();
+        }}
+      >
+        {node.title.trim() || formatAppMessage("node.untitled")}
+      </div>
+    );
+  }
+
+  return (
+    <input
+      className="board-mobile-node-title board-mobile-node-input"
+      data-node-id={node.id}
+      value={node.title}
+      placeholder={formatAppMessage("node.untitled")}
+      aria-label={formatAppMessage("dynamic.nodeTitle", { title: node.title || formatAppMessage("node.untitled") })}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+}
+
+function BoardMobileNodeBody({ node, onChange }: { node: AtlasNode; onChange: (body: string) => void }) {
+  return (
+    <textarea
+      className="board-mobile-node-body board-mobile-node-input"
+      data-node-id={node.id}
+      value={node.body}
+      placeholder={formatAppMessage("ui.focusPanel.memoDetailsOrContext.0f619ba")}
+      aria-label={formatAppMessage("ui.focusPanel.memoDetailsOrContext.0f619ba")}
+      rows={2}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => onChange(event.target.value)}
+    />
   );
 }
 
@@ -5683,6 +5772,31 @@ function getStableLayoutMetrics(width: number, height: number): StableLayoutMetr
     height: Math.max(fallbackHeight, stableAppHeight, stableWidth + 1),
     keyboardPortraitLock: true,
   };
+}
+
+function getBoardGameStableLayoutMetrics(
+  width: number,
+  height: number,
+  boardGameMode: boolean,
+  lockedMetricsRef: { current: StableLayoutMetrics | null },
+) {
+  const current = getStableLayoutMetrics(width, height);
+  if (!boardGameMode || !isMobileBoardGameViewport()) {
+    lockedMetricsRef.current = null;
+    return current;
+  }
+  if (!lockedMetricsRef.current) lockedMetricsRef.current = current;
+  return lockedMetricsRef.current;
+}
+
+function isMobileBoardGameViewport() {
+  if (typeof window === "undefined" || typeof document === "undefined") return false;
+  const width = Math.round(window.visualViewport?.width ?? window.innerWidth);
+  const fixedHeight = Number.parseFloat(document.documentElement.style.getPropertyValue("--board-mobile-fixed-height"));
+  const viewportHeight = Number.isFinite(fixedHeight) && fixedHeight > 0
+    ? fixedHeight
+    : Math.round(window.innerHeight);
+  return width <= 980 && viewportHeight > width;
 }
 
 function readRootPixelValue(name: string) {
