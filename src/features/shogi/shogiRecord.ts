@@ -3,10 +3,15 @@ import {
   importCSA,
   importKIF,
   importKI2,
+  anySpecialMove,
   Position,
   Record as TsshogiRecord,
   RecordMetadataKey,
+  SpecialMoveType,
   type ImmutableNode,
+  type ImmutablePosition,
+  type Move,
+  type SpecialMove,
 } from "tsshogi";
 import type { AtlasNode, ShogiRecordContent, ShogiRecordFormat } from "../../types";
 import { decodeRecordComment, encodeRecordComment } from "../board/recordComment.ts";
@@ -56,6 +61,15 @@ export function importShogiRecordText(
   throw new Error(`The pasted text is not a supported KIF, KI2, or CSA record.\n${failures.join("\n")}`);
 }
 
+export function createNewShogiRecord(datasetName = "新規の棋譜"): ShogiImportResult {
+  const position = Position.newBySFEN(DEFAULT_SFEN);
+  if (!position) throw new Error("The standard shogi position could not be created.");
+  return recordToAtlas(new TsshogiRecord(position), "new", datasetName, {
+    recordRootTitle: "初期局面",
+    recordRootBody: "",
+  });
+}
+
 export function exportShogiRecord(root: AtlasNode): string {
   const recordRoot = findRecordRoot(root);
   if (!recordRoot) throw new Error("Select a node inside an imported shogi record first.");
@@ -92,8 +106,9 @@ function parseRecord(text: string, format: ShogiFileFormat) {
 
 function recordToAtlas(
   record: TsshogiRecord,
-  format: ShogiFileFormat,
+  format: ShogiRecordFormat,
   datasetName: string,
+  options: { recordRootTitle?: string; recordRootBody?: string } = {},
 ): ShogiImportResult {
   const recordId = makeId("record");
   const now = new Date().toISOString();
@@ -109,7 +124,8 @@ function recordToAtlas(
     sfen: record.first.sfen || DEFAULT_SFEN,
     metadata,
   };
-  const rootText = decodeRecordComment(record.first.comment, metadata.title || datasetName);
+  const rootText = decodeRecordComment(record.first.comment, options.recordRootTitle ?? (metadata.title || datasetName));
+  if (options.recordRootBody !== undefined) rootText.body = options.recordRootBody;
   const recordRoot: AtlasNode = makeNode(
     recordRootId,
     "workArea",
@@ -125,7 +141,7 @@ function recordToAtlas(
     "atlas-root",
     "root",
     datasetName,
-    "Imported shogi record. Select a move to view and edit the position.",
+    format === "new" ? "" : "Imported shogi record. Select a move to view and edit the position.",
     now,
     undefined,
     [recordRoot],
@@ -138,13 +154,14 @@ function buildMoveChildren(
   parent: ImmutableNode,
   parentId: string,
   recordId: string,
-  format: ShogiFileFormat,
+  format: ShogiRecordFormat,
   now: string,
 ): AtlasNode[] {
   const children: AtlasNode[] = [];
   let move = parent.next;
   while (move) {
     const moveId = makeId(`shogi-move-${move.ply}`);
+    const specialMove = "usi" in move.move ? undefined : serializeSpecialMove(move.move);
     const content: ShogiRecordContent = {
       kind: "shogi-record",
       schemaVersion: 1,
@@ -154,6 +171,7 @@ function buildMoveChildren(
       ply: move.ply,
       sfen: move.sfen,
       ...(move.move && "usi" in move.move ? { usi: move.move.usi } : {}),
+      ...(specialMove ? { specialMove } : {}),
       displayText: move.displayText,
       branchIndex: move.branchIndex,
     };
@@ -179,14 +197,91 @@ function appendChildren(
       throw new Error(`Could not select the parent position for branch ${atlasChild.title}.`);
     }
     const content = findShogiNodeContent(atlasChild);
-    if (!content?.usi) throw new Error(`Move node ${atlasChild.title} is missing USI data.`);
-    const move = record.position.createMoveByUSI(content.usi);
-    if (!move || !record.append(move)) throw new Error(`Illegal or unsupported move: ${content.usi}.`);
+    const move = content ? resolveAtlasMove(record.position, content, atlasChild) : null;
+    if (!move || !record.append(move)) return;
     const nativeChild = record.current;
     nativeChild.comment = encodeRecordComment(atlasChild.title, atlasChild.body);
     nativeByAtlasId.set(atlasChild.id, nativeChild);
     appendChildren(record, atlasChild, nativeChild, nativeByAtlasId);
   });
+}
+
+function serializeSpecialMove(move: SpecialMove): NonNullable<ShogiRecordContent["specialMove"]> {
+  return move.type === "any" ? { type: move.type, name: move.name } : { type: move.type };
+}
+
+function resolveAtlasMove(position: ImmutablePosition, content: ShogiRecordContent, node: AtlasNode): Move | SpecialMove | null {
+  const targetPosition = comparableSfen(content.sfen);
+  if (content.usi) {
+    const direct = position.createMoveByUSI(content.usi);
+    if (direct && position.isValidMove(direct) && moveMatchesTarget(position, direct, targetPosition)) return direct;
+  }
+  const persistedSpecial = specialMoveFromContent(content.specialMove);
+  if (persistedSpecial) return persistedSpecial;
+  if (comparableSfen(position.sfen) === targetPosition) return inferLegacySpecialMove(content.displayText || node.title);
+  return recoverMoveFromTargetSfen(position, targetPosition);
+}
+
+function specialMoveFromContent(value: ShogiRecordContent["specialMove"]): SpecialMove | null {
+  if (!value) return null;
+  if (value.type === "any") return value.name ? anySpecialMove(value.name) : null;
+  return Object.values(SpecialMoveType).includes(value.type as SpecialMoveType)
+    ? { type: value.type as SpecialMoveType }
+    : null;
+}
+
+function inferLegacySpecialMove(label: string): SpecialMove {
+  const normalized = String(label ?? "").trim();
+  const known: Array<[RegExp, SpecialMoveType]> = [
+    [/投了/, SpecialMoveType.RESIGN],
+    [/中断/, SpecialMoveType.INTERRUPT],
+    [/千日手/, SpecialMoveType.REPETITION_DRAW],
+    [/持将棋/, SpecialMoveType.IMPASS],
+    [/不詰/, SpecialMoveType.NO_MATE],
+    [/詰み/, SpecialMoveType.MATE],
+    [/時間切れ/, SpecialMoveType.TIMEOUT],
+    [/反則勝ち/, SpecialMoveType.FOUL_WIN],
+    [/反則負け/, SpecialMoveType.FOUL_LOSE],
+    [/入玉勝ち/, SpecialMoveType.ENTERING_OF_KING],
+    [/不戦勝/, SpecialMoveType.WIN_BY_DEFAULT],
+    [/不戦敗/, SpecialMoveType.LOSE_BY_DEFAULT],
+  ];
+  const matched = known.find(([pattern]) => pattern.test(normalized));
+  return matched ? { type: matched[1] } : anySpecialMove(normalized || "終局");
+}
+
+function recoverMoveFromTargetSfen(position: ImmutablePosition, targetPosition: string): Move | null {
+  const ranks = "abcdefghi";
+  for (let fromFile = 1; fromFile <= 9; fromFile += 1) {
+    for (const fromRank of ranks) {
+      for (let toFile = 1; toFile <= 9; toFile += 1) {
+        for (const toRank of ranks) {
+          for (const suffix of ["", "+"] as const) {
+            const move = position.createMoveByUSI(`${fromFile}${fromRank}${toFile}${toRank}${suffix}`);
+            if (move && position.isValidMove(move) && moveMatchesTarget(position, move, targetPosition)) return move;
+          }
+        }
+      }
+    }
+  }
+  for (const piece of ["R", "B", "G", "S", "N", "L", "P"] as const) {
+    for (let file = 1; file <= 9; file += 1) {
+      for (const rank of ranks) {
+        const move = position.createMoveByUSI(`${piece}*${file}${rank}`);
+        if (move && position.isValidMove(move) && moveMatchesTarget(position, move, targetPosition)) return move;
+      }
+    }
+  }
+  return null;
+}
+
+function moveMatchesTarget(position: ImmutablePosition, move: Move, targetPosition: string) {
+  const next = position.clone();
+  return next.doMove(move) && comparableSfen(next.sfen) === targetPosition;
+}
+
+function comparableSfen(value: string) {
+  return String(value ?? "").trim().split(/\s+/).slice(0, 3).join(" ");
 }
 
 function applyMetadata(record: TsshogiRecord, metadata: Record<string, string>) {

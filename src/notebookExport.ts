@@ -154,7 +154,18 @@ function sanitizeShogiStructuredContent(value: unknown): AtlasStructuredContent 
     sfen: safeBoundedText(source.sfen, "", 500),
   } as ShogiRecordContent;
   addCommonStructuredFields(content as unknown as Record<string, unknown>, source);
+  const specialMove = sanitizeShogiSpecialMove(source.specialMove);
+  if (specialMove) content.specialMove = specialMove;
   return content;
+}
+
+function sanitizeShogiSpecialMove(value: unknown): ShogiRecordContent["specialMove"] | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  const type = safeOptionalBoundedText(source.type, 80);
+  if (!type) return undefined;
+  const name = safeOptionalBoundedText(source.name, 240);
+  return name ? { type, name } : { type };
 }
 
 function sanitizeChessStructuredContent(value: unknown): AtlasStructuredContent | undefined {
@@ -207,7 +218,7 @@ function sanitizeGoStructuredContent(value: unknown): AtlasStructuredContent | u
 }
 
 function addCommonStructuredFields(content: Record<string, unknown>, source: Record<string, unknown>) {
-  for (const key of ["uci", "san", "vertex", "displayText"] as const) {
+  for (const key of ["usi", "uci", "san", "vertex", "displayText"] as const) {
     const text = safeOptionalBoundedText(source[key], 240);
     if (text) content[key] = text;
   }

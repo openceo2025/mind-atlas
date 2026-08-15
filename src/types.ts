@@ -1012,6 +1012,10 @@ export interface ShogiRecordContent {
   ply: number;
   sfen: string;
   usi?: string;
+  specialMove?: {
+    type: string;
+    name?: string;
+  };
   displayText?: string;
   branchIndex?: number;
   metadata?: Record<string, string>;

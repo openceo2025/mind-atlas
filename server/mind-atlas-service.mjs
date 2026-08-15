@@ -2845,6 +2845,7 @@ function normalizeCloudStructuredContent(value) {
       sourceFormat,
       ply,
       sfen: value.sfen.slice(0, 500),
+      specialMove: normalizeCloudShogiSpecialMove(value.specialMove),
       ...normalizeCloudStructuredCommon(value),
     });
   }
@@ -2894,7 +2895,7 @@ function normalizeCloudStructuredContent(value) {
 
 function normalizeCloudStructuredCommon(value) {
   const result = {};
-  for (const key of ["uci", "san", "vertex", "displayText"]) {
+  for (const key of ["usi", "uci", "san", "vertex", "displayText"]) {
     if (typeof value[key] === "string" && value[key]) result[key] = value[key].slice(0, 240);
   }
   if (Number.isInteger(value.branchIndex) && value.branchIndex >= 0 && value.branchIndex < 1000) result.branchIndex = value.branchIndex;
@@ -2907,6 +2908,14 @@ function normalizeCloudStructuredCommon(value) {
     if (entries.length) result.metadata = Object.fromEntries(entries);
   }
   return result;
+}
+
+function normalizeCloudShogiSpecialMove(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const type = safeCloudText(value.type, "", 80);
+  if (!type) return undefined;
+  const name = safeCloudText(value.name, "", 240);
+  return compactObject({ type, name: name || undefined });
 }
 
 function normalizeCloudGoSetup(value) {

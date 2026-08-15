@@ -2209,8 +2209,25 @@ h1 {
 }
 
 .board-record-source-section > .primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   justify-self: end;
   min-height: 36px;
+  border: 1px solid rgba(141, 245, 207, 0.52);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: rgba(141, 245, 207, 0.16);
+  color: #eafff4;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.board-record-source-section > .primary-button:disabled {
+  border-color: rgba(219, 234, 211, 0.12);
+  background: rgba(219, 234, 211, 0.07);
+  color: rgba(237, 247, 232, 0.48);
+  cursor: default;
 }
 
 .board-record-file-action {

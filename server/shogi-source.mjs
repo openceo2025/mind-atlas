@@ -3,11 +3,25 @@ const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 2;
 
 export async function fetchSupportedShogiSource(sourceUrl, options = {}) {
-  const initial = validateShogiSourceUrl(sourceUrl);
+  const initial = validateShogiSourceUrl(extractSupportedShogiSourceUrl(sourceUrl) ?? sourceUrl);
   const html = await fetchBoundedHtml(initial, options.fetchImpl ?? fetch);
   return initial.hostname === "shogiwars.heroz.jp"
     ? parseShogiWarsHtml(html, initial)
     : parseShogiQuestHtml(html, initial);
+}
+
+export function extractSupportedShogiSourceUrl(value) {
+  const decoded = decodeHtmlEntities(String(value ?? ""));
+  const candidates = decoded.match(/https:\/\/[^\s<>"'\]]+/gi) ?? [];
+  for (const candidate of candidates) {
+    const normalized = candidate.replace(/[),.;:!?}\u3001\u3002\u300d\u300f\u3011]+$/g, "");
+    try {
+      return validateShogiSourceUrl(normalized).toString();
+    } catch {
+      // Continue until a supported public game link is found.
+    }
+  }
+  return null;
 }
 
 export function validateShogiSourceUrl(sourceUrl) {

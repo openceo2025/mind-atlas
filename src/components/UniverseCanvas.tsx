@@ -1891,6 +1891,7 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
   const [copyContextPreset, setCopyContextPreset] = useState("");
   const nodePath = menu ? findNodePath(atlasRoot, menu.nodeId) : null;
   const node = nodePath?.at(-1);
+  const boardGameClipboardLocked = atlasRoot.notebookMode === "shogi" || atlasRoot.notebookMode === "chess" || atlasRoot.notebookMode === "go";
 
   useEffect(() => {
     if (!menu) return;
@@ -1990,6 +1991,11 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
   };
 
   const handleCutObject = async () => {
+    if (boardGameClipboardLocked) {
+      window.alert(formatAppMessage("board.clipboard.blocked"));
+      onClose();
+      return;
+    }
     try {
       const hasAttachments = nodeTreeHasAttachments(node);
       await writeNodeClipboard(node, serializeNodeTreeForLlm(node));
@@ -2004,6 +2010,11 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
   };
 
   const handlePasteObject = async () => {
+    if (boardGameClipboardLocked) {
+      window.alert(formatAppMessage("board.clipboard.blocked"));
+      onClose();
+      return;
+    }
     let copiedNode = clipboardNode;
     try {
       const latestNode = await readNodeClipboard();
@@ -2029,7 +2040,7 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
     onClose();
   };
 
-  const canPaste = clipboardState === "available" && clipboardNode !== null;
+  const canPaste = boardGameClipboardLocked || (clipboardState === "available" && clipboardNode !== null);
   const canPromote = Boolean(nodePath && nodePath.length >= 3);
 
   return (
@@ -2049,7 +2060,9 @@ function NodeContextMenu({ menu, onClose }: { menu: NodeContextMenuState | null;
         type="button"
         onClick={handlePasteObject}
         disabled={!canPaste}
-        title={canPaste ? formatAppMessage("ui.universeCanvas.mindAtlasObjectPaste.0c3ed8f") : formatAppMessage("ui.universeCanvas.theClipboardDoesNotContain.00e8362")}
+        title={boardGameClipboardLocked
+          ? formatAppMessage("board.clipboard.blocked")
+          : canPaste ? formatAppMessage("ui.universeCanvas.mindAtlasObjectPaste.0c3ed8f") : formatAppMessage("ui.universeCanvas.theClipboardDoesNotContain.00e8362")}
       >
         <ClipboardPaste size={15} /> {<I18nText id="ui.universeCanvas.paste.f06d057" />}</button>
       <button

@@ -59,6 +59,8 @@ import {
   nativeBoardRecordSizeBytes,
 } from "./features/board/boardRecord";
 import { mergeBoardRecords } from "./features/board/boardRecordMerge";
+import { createNewShogiRecord } from "./features/shogi/shogiRecord";
+import { extractSupportedShogiSourceUrl } from "./features/shogi/shogiSource";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const WORKSPACE_PANEL_EXIT_MS = 960;
@@ -93,6 +95,10 @@ const UNIVERSE_TITLE_PLACEHOLDER_ALIASES = [
 function localizedAboutUrl(locale: string) {
   const publicLocale = locale === "en-XA" ? "en" : locale === "ar-XB" ? "ar" : locale;
   return `/${encodeURIComponent(publicLocale)}/about.html`;
+}
+
+function isDirectShogiLaunchRequested() {
+  return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mode") === "shogi";
 }
 
 const KEYBOARD_OVERLAY_INPUT_SELECTOR =
@@ -148,6 +154,8 @@ export default function App() {
   const t = useMessage();
   const { locale, preference: localePreference, setPreference: setLocalePreference } = useMindAtlasLocale();
   const aboutDemoConfig = useMemo(() => readAboutDemoConfig(), []);
+  const directShogiLaunchRequestedRef = useRef(isDirectShogiLaunchRequested());
+  const directShogiLaunchAppliedRef = useRef(false);
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const viewport = useAtlasStore((state) => state.viewport);
@@ -1011,6 +1019,25 @@ export default function App() {
     clearStoredCurrentCloudNotebook();
   };
 
+  useEffect(() => {
+    if (!directShogiLaunchRequestedRef.current || directShogiLaunchAppliedRef.current) return;
+    if (notebookPersistenceStatus !== "ready" || sharedNotebookRoot) return;
+    directShogiLaunchAppliedRef.current = true;
+    const imported = createNewShogiRecord();
+    analyticsIgnoreNextNotebookRef.current = true;
+    resetNotebook();
+    importNotebook(imported.root, imported.datasetName, {}, {
+      selectedNodeId: imported.recordRootId,
+      requestTitleEdit: false,
+      notebookMode: "shogi",
+    });
+    forgetCurrentCloudNotebook();
+    onboarding.completeTutorial();
+    const url = new URL(window.location.href);
+    url.searchParams.delete("mode");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [importNotebook, notebookPersistenceStatus, onboarding, resetNotebook, sharedNotebookRoot]);
+
   const handleSaveToCloud = async () => {
     try {
       setCloudError("");
@@ -1566,11 +1593,15 @@ export default function App() {
   const importBoardRecordSourceText = async (mode: Exclude<NotebookMode, "standard">, value: string) => {
     const source = value.trim();
     if (!source) throw new Error(t("board.record.sourceRequired"));
-    if (mode === "shogi" && /^https?:\/\//i.test(source)) {
+    const supportedShogiSourceUrl = mode === "shogi" ? extractSupportedShogiSourceUrl(source) : null;
+    if (mode === "shogi" && supportedShogiSourceUrl) {
       const result = publicServiceMode
-        ? await importHostedShogiSource(source)
-        : await importBridgeShogiSource(source);
+        ? await importHostedShogiSource(supportedShogiSourceUrl)
+        : await importBridgeShogiSource(supportedShogiSourceUrl);
       return await importNativeBoardRecordText("shogi", result.text, result.datasetName);
+    }
+    if (mode === "shogi" && /https?:\/\//i.test(source)) {
+      throw new Error(t("board.shogi.unsupportedSourceUrl"));
     }
     return await importNativeBoardRecordText(mode, source, `${BOARD_RECORD_FORMATS[mode].label} record`);
   };
@@ -1606,11 +1637,13 @@ export default function App() {
     });
     setBoardRecordDialogMode(null);
     setBoardRecordDialogError("");
-    setCloudStatus(t("board.merge.completed", {
+    const message = t("board.merge.completed", {
       matched: result.matchedNodes,
       added: result.addedBranches,
       notes: result.mergedTextNodes,
-    }));
+    });
+    setCloudStatus(message);
+    window.alert(message);
   };
 
   const runBoardRecordDialogAction = async (action: () => Promise<void>) => {
@@ -1622,6 +1655,9 @@ export default function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setBoardRecordDialogError(message);
+      window.alert(boardRecordDialogMode === "merge"
+        ? t("board.merge.failed", { detail: message })
+        : t("board.import.failed", { detail: message }));
     } finally {
       setBoardRecordDialogBusy(false);
     }

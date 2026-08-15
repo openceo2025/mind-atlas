@@ -1487,6 +1487,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   pasteNodeSubtree: (parentId, copiedRoot) => {
     const state = get();
+    if (isBoardGameNotebookMode(state.atlasRoot.notebookMode)) return undefined;
     if (blocksBoardGameRootInsertion(state.atlasRoot, parentId)) return undefined;
     const parentPath = findNodePath(state.atlasRoot, parentId);
     const parent = parentPath?.at(-1);

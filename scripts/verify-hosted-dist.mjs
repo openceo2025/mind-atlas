@@ -50,6 +50,7 @@ for (const staticFile of ["index.html", "styles.css", "kio-copy-guide-v3.webp", 
 const shogiHtml = fs.readFileSync(path.join(shogiDir, "index.html"), "utf8");
 assert.ok(shogiHtml.includes("気になった局面を、あとですぐに見返せる。"), "hosted shogi page is missing its current value proposition");
 assert.ok(shogiHtml.includes('/shogi/kio-copy-guide-v3.webp'), "hosted shogi page should use the current Kio copy guide image");
+assert.ok(shogiHtml.includes('https://mind-atlas.org/?mode=shogi'), "hosted shogi calls to action should open a fresh shogi workspace");
 assert.equal(/<script\b/i.test(shogiHtml), false, "hosted shogi page should not depend on the Sites runtime");
 
 for (const locale of ["en", "ja"]) {

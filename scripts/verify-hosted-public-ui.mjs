@@ -286,6 +286,7 @@ try {
     await signedOutMobilePage.close();
 
     await verifyHostedBoardImport(browser);
+    await verifyDirectShogiLaunch(browser);
 
     mockSessionMode = "active";
     const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
@@ -677,9 +678,62 @@ async function verifyHostedBoardImport(browser) {
       if (await page.locator(".panel-attach-preview-button").count()) {
         throw new Error(`Hosted ${fixture.name} exposed the multimedia attachment control.`);
       }
+      if (fixture.mode === "shogi") {
+        await verifyHostedShogiMergeFeedback(page, fixture.content);
+      }
     } finally {
       await context.close();
     }
+  }
+}
+
+async function verifyHostedShogiMergeFeedback(page, recordText) {
+  await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
+  await page.getByRole("button", { name: "KIF棋譜をマージ" }).click();
+  const dialog = page.locator(".board-record-dialog");
+  await dialog.waitFor();
+  await dialog.locator("textarea").fill(recordText);
+  const action = dialog.getByRole("button", { name: "この棋譜にマージ" });
+  const colors = await action.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, text: style.color };
+  });
+  if (colors.background === colors.text || colors.background === "rgba(0, 0, 0, 0)") {
+    throw new Error(`Hosted shogi merge action is not visually readable after paste: ${JSON.stringify(colors)}`);
+  }
+  const alertMessage = new Promise((resolve) => {
+    page.once("dialog", async (browserDialog) => {
+      resolve(browserDialog.message());
+      await browserDialog.accept();
+    });
+  });
+  await action.click();
+  const message = await alertMessage;
+  if (!String(message).includes("棋譜をマージしました")) {
+    throw new Error(`Hosted shogi merge did not show completion feedback: ${message}`);
+  }
+  await dialog.waitFor({ state: "detached" });
+}
+
+async function verifyDirectShogiLaunch(browser) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  try {
+    await page.goto(`${appUrl}/?mode=shogi`, { waitUntil: "networkidle" });
+    await page.locator('main[data-notebook-mode="shogi"]').waitFor({ timeout: 15_000 });
+    await page.locator(".shogi-viewer").waitFor({ timeout: 15_000 });
+    const state = await page.evaluate(() => ({
+      datasetTitle: document.querySelector(".dataset-title-input")?.value ?? "",
+      nodeTitle: document.querySelector(".node-title-input")?.value ?? "",
+      nodeBody: document.querySelector(".node-body-input")?.value ?? "",
+      modeParam: new URLSearchParams(location.search).get("mode"),
+    }));
+    if (state.datasetTitle !== "新規の棋譜" || state.nodeTitle !== "初期局面" || state.nodeBody !== "") {
+      throw new Error(`Direct shogi launch did not create the requested empty record: ${JSON.stringify(state)}`);
+    }
+    if (state.modeParam !== null) throw new Error(`Direct shogi launch URL was not consumed safely: ${JSON.stringify(state)}`);
+  } finally {
+    await context.close();
   }
 }
 

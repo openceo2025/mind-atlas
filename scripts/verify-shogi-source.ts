@@ -1,8 +1,10 @@
 import {
+  extractSupportedShogiSourceUrl as extractServerShogiSourceUrl,
   parseShogiQuestHtml,
   parseShogiWarsHtml,
   validateShogiSourceUrl,
 } from "../server/shogi-source.mjs";
+import { extractSupportedShogiSourceUrl } from "../src/features/shogi/shogiSource.ts";
 import { importShogiRecordText } from "../src/features/shogi/shogiRecord.ts";
 
 const warsProps = {
@@ -30,6 +32,19 @@ const quest = parseShogiQuestHtml(questHtml, new URL("https://kifu.questgames.ne
 const questRecord = importShogiRecordText(quest.text, quest.datasetName, "csa");
 if (quest.provider !== "shogi-quest" || countNodes(questRecord.root) !== 5) {
   throw new Error("Shogi Quest public-page parsing failed.");
+}
+
+const sharedWarsText = `将棋ウォーズ棋譜(hiro8305:二段 vs morusuko:二段)
+[https://shogiwars.heroz.jp/games/hiro8305-morusuko-20260811_191229?ply=2&amp;tw=1](https://shogiwars.heroz.jp/games/hiro8305-morusuko-20260811_191229?ply=2&amp;tw=1)
+
+棋神アナリティクスで棋譜解析
+[https://kishin-analytics.heroz.jp/?wars_game_id=hiro8305-morusuko-20260811_191229&amp;ply=2](https://kishin-analytics.heroz.jp/?wars_game_id=hiro8305-morusuko-20260811_191229&amp;ply=2)`;
+const expectedWarsUrl = "https://shogiwars.heroz.jp/games/hiro8305-morusuko-20260811_191229?ply=2&tw=1";
+if (extractSupportedShogiSourceUrl(sharedWarsText) !== expectedWarsUrl) {
+  throw new Error("Client-side Shogi Wars share-text extraction failed.");
+}
+if (extractServerShogiSourceUrl(sharedWarsText) !== expectedWarsUrl) {
+  throw new Error("Server-side Shogi Wars share-text extraction failed.");
 }
 
 for (const unsafe of [

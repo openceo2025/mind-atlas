@@ -1,5 +1,6 @@
-import { exportCSA, exportKI2, exportKIF, Record as TsshogiRecord } from "tsshogi";
-import { exportShogiRecord, importShogiRecordFile } from "../src/features/shogi/shogiRecord.ts";
+import { anySpecialMove, exportCSA, exportKI2, exportKIF, Record as TsshogiRecord } from "tsshogi";
+import { sanitizeStructuredContentForExport } from "../src/notebookExport.ts";
+import { createNewShogiRecord, exportShogiRecord, importShogiRecordFile } from "../src/features/shogi/shogiRecord.ts";
 import { buildShogiCandidateArrows, buildShogiCandidateTargets } from "../src/features/shogi/shogiCandidates.ts";
 
 const source = TsshogiRecord.newByUSI("startpos moves 7g7f 3c3d 2g2f");
@@ -40,6 +41,44 @@ if (restoredMove?.title !== annotatedMove.title || restoredMove.body !== annotat
   throw new Error("KIF move title/body annotations did not round-trip.");
 }
 console.log("verify:shogi:annotations:passed");
+
+const fresh = createNewShogiRecord();
+if (fresh.datasetName !== "新規の棋譜" || fresh.root.title !== "新規の棋譜" || fresh.root.children.length !== 1) {
+  throw new Error("New shogi launch did not create exactly one initial-position node.");
+}
+if (fresh.root.children[0]?.title !== "初期局面" || fresh.root.children[0]?.body !== "" || fresh.root.children[0]?.children.length !== 0) {
+  throw new Error("New shogi launch initial node is not empty and correctly titled.");
+}
+console.log("verify:shogi:new-record:passed");
+
+const specialSource = TsshogiRecord.newByUSI("startpos moves 7g7f");
+if (specialSource instanceof Error) throw specialSource;
+if (!specialSource.append(anySpecialMove("封じ手"))) throw new Error("Could not create a special-move fixture.");
+const specialAtlas = await importShogiRecordFile(new File([exportKIF(specialSource)], "special.kif"));
+const cloudRoundTripRoot = sanitizeBoardTree(specialAtlas.root);
+const cloudKif = exportShogiRecord(cloudRoundTripRoot);
+if (!cloudKif.includes("封じ手") || !cloudKif.includes("７六歩")) {
+  throw new Error("Cloud text-only sanitization lost shogi USI or special-move data.");
+}
+
+const legacyAtlas = structuredClone(specialAtlas.root);
+const legacyMove = legacyAtlas.children[0]?.children[0];
+if (!legacyMove?.structuredContent || legacyMove.structuredContent.kind !== "shogi-record") {
+  throw new Error("Legacy repair fixture is incomplete.");
+}
+delete legacyMove.structuredContent.usi;
+const repairedKif = exportShogiRecord(legacyAtlas);
+if (!repairedKif.includes("７六歩")) throw new Error("Missing legacy USI data was not reconstructed from SFEN.");
+
+const deletedTerminalAtlas = structuredClone(specialAtlas.root);
+const moveParent = deletedTerminalAtlas.children[0]?.children[0];
+if (!moveParent) throw new Error("Terminal deletion fixture is incomplete.");
+moveParent.children = [];
+const deletedTerminalKif = exportShogiRecord(deletedTerminalAtlas);
+if (deletedTerminalKif.includes("封じ手") || !deletedTerminalKif.includes("７六歩")) {
+  throw new Error("Deleting a terminal subtree did not produce a valid shortened KIF.");
+}
+console.log("verify:shogi:cloud-delete-and-legacy-repair:passed");
 
 const promotionNodes = ["8f8h", "8f8h+"].map((usi, index) => ({
   id: `promotion-${index}`,
@@ -107,4 +146,13 @@ console.log("verify:shogi:candidate-arrows:passed drop-and-invalid");
 
 function countNodes(node: { children: Array<{ children: unknown[] }> }): number {
   return 1 + node.children.reduce((sum, child) => sum + countNodes(child), 0);
+}
+
+function sanitizeBoardTree<T extends { structuredContent?: unknown; children: T[] }>(node: T): T {
+  const clone = structuredClone(node);
+  const structuredContent = sanitizeStructuredContentForExport(clone.structuredContent);
+  if (structuredContent) clone.structuredContent = structuredContent;
+  else delete clone.structuredContent;
+  clone.children = clone.children.map(sanitizeBoardTree);
+  return clone;
 }
