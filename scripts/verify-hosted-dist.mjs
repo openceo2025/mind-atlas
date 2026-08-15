@@ -34,6 +34,7 @@ assert.ok(indexHtml.includes('property="og:image" content="https://mind-atlas.or
 assert.ok(fs.readFileSync(path.join(distDir, "robots.txt"), "utf8").includes("Sitemap: https://mind-atlas.org/sitemap.xml"), "robots.txt should advertise the sitemap");
 const sitemap = fs.readFileSync(path.join(distDir, "sitemap.xml"), "utf8");
 assert.ok(sitemap.includes("https://mind-atlas.org/ja/about.html"), "sitemap should include localized introduction pages");
+assert.ok(sitemap.includes("https://mind-atlas.org/shogi/"), "sitemap should include the shogi landing page");
 assert.ok(sitemap.includes('xmlns:xhtml="http://www.w3.org/1999/xhtml"'), "sitemap should declare the hreflang namespace");
 assert.ok(sitemap.includes('hreflang="x-default" href="https://mind-atlas.org/en/about.html"'), "sitemap should use the English introduction as x-default");
 for (const legacyPath of ["about", "privacy", "terms"]) {
@@ -41,6 +42,15 @@ for (const legacyPath of ["about", "privacy", "terms"]) {
 }
 const jsAssets = fs.readdirSync(assetsDir).filter((name) => name.endsWith(".js"));
 assert.ok(jsAssets.length > 0, "dist/assets has no JavaScript bundle");
+
+const shogiDir = path.join(distDir, "shogi");
+for (const staticFile of ["index.html", "styles.css", "kio-copy-guide-v3.webp", "mind-atlas-shogi-board.webp"]) {
+  assert.equal(fs.existsSync(path.join(shogiDir, staticFile)), true, `hosted shogi file is missing: ${staticFile}`);
+}
+const shogiHtml = fs.readFileSync(path.join(shogiDir, "index.html"), "utf8");
+assert.ok(shogiHtml.includes("気になった局面を、あとですぐに見返せる。"), "hosted shogi page is missing its current value proposition");
+assert.ok(shogiHtml.includes('/shogi/kio-copy-guide-v3.webp'), "hosted shogi page should use the current Kio copy guide image");
+assert.equal(/<script\b/i.test(shogiHtml), false, "hosted shogi page should not depend on the Sites runtime");
 
 for (const locale of ["en", "ja"]) {
   for (const page of ["about", "privacy", "terms"]) {

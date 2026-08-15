@@ -2419,6 +2419,9 @@ async function serveStatic(response, method, pathname) {
   }
   let filePath = path.resolve(distRoot, normalized);
   if (!isPathWithin(filePath, distRoot)) throw new ServiceError(403, "Forbidden");
+  if (fs.existsSync(filePath) && (await fsp.stat(filePath)).isDirectory()) {
+    filePath = path.join(filePath, "index.html");
+  }
   const status = fs.existsSync(filePath) ? 200 : 404;
   if (status === 404) filePath = path.join(distRoot, "404.html");
   const realFilePath = await fsp.realpath(filePath);

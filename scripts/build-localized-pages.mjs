@@ -133,7 +133,10 @@ function buildLegalPage(page, locale) {
 }
 
 function buildSitemap() {
-  const urls = ['  <url><loc>https://mind-atlas.org/</loc></url>'];
+  const urls = [
+    '  <url><loc>https://mind-atlas.org/</loc></url>',
+    '  <url><loc>https://mind-atlas.org/shogi/</loc></url>',
+  ];
   for (const locale of locales) {
     for (const page of ["about", "privacy", "terms"]) {
       urls.push(`  <url>
