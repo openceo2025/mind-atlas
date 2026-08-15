@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Download, GitBranch, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, GitBranch, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Chess } from "chessops/chess";
 import { makeFen, parseFen } from "chessops/fen";
@@ -9,7 +9,7 @@ import type { Config } from "chessground/config";
 import { Chessground } from "chessground";
 import "chessground/assets/chessground.base.css";
 import "chessground/assets/chessground.cburnett.css";
-import { exportChessRecord, findChessNodeContent, findChessRecordRoot, nearestChessRecordNode } from "./chessRecord";
+import { findChessNodeContent, findChessRecordRoot, nearestChessRecordNode } from "./chessRecord";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, ChessRecordContent } from "../../types";
 
@@ -36,7 +36,8 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
   const configRef = useRef<Config | null>(null);
   const [libraryReady, setLibraryReady] = useState(false);
   const [libraryError, setLibraryError] = useState("");
-  configRef.current = currentContent ? makeBoardConfig(currentContent, handleMove) : null;
+  const [orientation, setOrientation] = useState<"white" | "black">("white");
+  configRef.current = currentContent ? makeBoardConfig(currentContent, handleMove, orientation) : null;
 
   useEffect(() => {
     if (!enabled || !recordRoot || !boardRef.current) return;
@@ -56,8 +57,8 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
 
   useEffect(() => {
     if (!apiRef.current || !currentContent) return;
-    apiRef.current.set(makeBoardConfig(currentContent, handleMove));
-  }, [currentContent?.fen, currentNode?.id, recordRoot?.id]);
+    apiRef.current.set(makeBoardConfig(currentContent, handleMove, orientation));
+  }, [currentContent?.fen, currentNode?.id, orientation, recordRoot?.id]);
 
   if (!enabled || !recordRoot || !currentContent || !selectedNode) return null;
 
@@ -71,7 +72,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     const move = parseUci(uci);
     if (!move || !position.isLegal(move)) {
       onStatus?.("その手は現在の局面では指せません。");
-      apiRef.current?.set(makeBoardConfig(content, handleMove));
+      apiRef.current?.set(makeBoardConfig(content, handleMove, orientation));
       return;
     }
     const existing = parent.children.find((child) => findChessNodeContent(child)?.uci === uci);
@@ -106,28 +107,18 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     if (node) focusNode(node.id);
   };
 
-  const exportCurrentRecord = () => {
-    try {
-      const pgn = exportChessRecord(atlasRoot);
-      const blob = new Blob([pgn], { type: "application/x-chess-pgn;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `${recordRoot.title || "chess-record"}.pgn`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error("Chess PGN export failed", error);
-      onStatus?.(error instanceof Error ? error.message : "PGNの出力に失敗しました。");
-    }
-  };
-
   return (
     <section className="chess-viewer" aria-label="Chess record viewer">
       <div className="chess-viewer-toolbar">
         <span className="chess-viewer-label">チェス</span>
         <span className="chess-viewer-position">{currentContent.ply === 0 ? "開始局面" : `${currentContent.ply} ply`}</span>
-        <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(recordRoot)} aria-label="開始局面">
+        <button
+          type="button"
+          className="chess-viewer-icon"
+          onClick={() => setOrientation((current) => current === "white" ? "black" : "white")}
+          aria-label="盤面を反転"
+          title="盤面を反転"
+        >
           <RotateCcw size={14} />
         </button>
         <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(parentNode)} disabled={!parentNode} aria-label="一手戻る">
@@ -136,32 +127,27 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
         <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(variations[0] ?? null)} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
         </button>
-        <button type="button" className="chess-viewer-icon" onClick={exportCurrentRecord} aria-label="PGNを出力">
-          <Download size={14} />
-        </button>
       </div>
       <div className="chess-board-host" ref={boardRef} />
       {!libraryReady && !libraryError ? <p className="chess-viewer-note">チェス盤を準備しています...</p> : null}
       {libraryError ? <p className="chess-viewer-note is-error">{libraryError}</p> : null}
-      {variations.length > 1 ? (
-        <div className="chess-variations" aria-label="分岐">
-          <GitBranch size={13} />
-          {variations.map((node) => (
-            <button key={node.id} type="button" className={node.id === currentNode?.id ? "is-active" : ""} onClick={() => focusNode(node.id)}>
-              {findChessNodeContent(node)?.displayText || node.title}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      <div className="chess-variations" aria-label="候補手">
+        {variations.length ? <GitBranch size={13} /> : null}
+        {variations.map((node) => (
+          <button key={node.id} type="button" className={node.id === currentNode?.id ? "is-active" : ""} onClick={() => focusNode(node.id)}>
+            {findChessNodeContent(node)?.displayText || node.title}
+          </button>
+        ))}
+      </div>
     </section>
   );
 }
 
-function makeBoardConfig(content: ChessRecordContent, onMove: (orig: string, dest: string) => void): Config {
+function makeBoardConfig(content: ChessRecordContent, onMove: (orig: string, dest: string) => void, orientation: "white" | "black"): Config {
   const turnColor = content.fen.split(" ")[1] === "b" ? "black" : "white";
   return {
     fen: content.fen as never,
-    orientation: "white",
+    orientation,
     turnColor,
     coordinates: true,
     blockTouchScroll: true,

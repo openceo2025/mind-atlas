@@ -1,7 +1,7 @@
-import { ChevronLeft, ChevronRight, Download, GitBranch, RotateCcw } from "lucide-react";
-import { useMemo } from "react";
+import { ChevronLeft, ChevronRight, GitBranch, RotateCcw } from "lucide-react";
+import { useMemo, useState } from "react";
 import GoBoard, { type Sign, type Vertex } from "@sabaki/go-board";
-import { exportGoRecord, findGoNodeContent, findGoRecordRoot, goRecordPath, goVertexToSgf, nearestGoRecordNode, nextGoSign, boardFromGoContent } from "./goRecord";
+import { findGoNodeContent, findGoRecordRoot, goRecordPath, goVertexToSgf, nearestGoRecordNode, nextGoSign, boardFromGoContent } from "./goRecord";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, GoRecordContent } from "../../types";
 
@@ -25,6 +25,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
   const parentNode = path.length > 1 ? path[path.length - 2] : null;
   const variations = (currentNode ?? recordRoot)?.children.filter((node) => findGoNodeContent(node)?.role === "move") ?? [];
   const board = useMemo(() => (currentContent ? boardFromGoContent(currentContent) : null), [currentContent?.board, currentContent?.boardSize]);
+  const [flipped, setFlipped] = useState(false);
 
   if (!enabled || !recordRoot || !rootContent || !currentContent || !selectedNode || !board) return null;
 
@@ -73,28 +74,18 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
     focusNode(childId);
   };
 
-  const exportCurrentRecord = () => {
-    try {
-      const sgf = exportGoRecord(atlasRoot);
-      const blob = new Blob([sgf], { type: "application/x-go-sgf;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `${recordRoot.title || "go-record"}.sgf`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error("Go SGF export failed", error);
-      onStatus?.(error instanceof Error ? error.message : "SGFの出力に失敗しました。");
-    }
-  };
-
   return (
     <section className="go-viewer" aria-label="Go record viewer">
       <div className="go-viewer-toolbar">
         <span className="go-viewer-label">囲碁</span>
         <span className="go-viewer-position">{currentContent.ply === 0 ? "開始局面" : `${currentContent.ply} 手目`}</span>
-        <button type="button" className="go-viewer-icon" onClick={() => focusNode(recordRoot.id)} aria-label="開始局面">
+        <button
+          type="button"
+          className="go-viewer-icon"
+          onClick={() => setFlipped((current) => !current)}
+          aria-label="盤面を反転"
+          title="盤面を反転"
+        >
           <RotateCcw size={14} />
         </button>
         <button type="button" className="go-viewer-icon" onClick={() => parentNode && focusNode(parentNode.id)} disabled={!parentNode} aria-label="一手戻る">
@@ -106,11 +97,8 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
         <button type="button" className="go-viewer-icon" onClick={() => addMove([-1, -1], true)} aria-label="パス">
           Pass
         </button>
-        <button type="button" className="go-viewer-icon" onClick={exportCurrentRecord} aria-label="SGFを出力">
-          <Download size={14} />
-        </button>
       </div>
-      <div className="go-board-host" style={{ "--go-size": currentContent.boardSize } as React.CSSProperties}>
+      <div className={`go-board-host ${flipped ? "is-flipped" : ""}`} style={{ "--go-size": currentContent.boardSize } as React.CSSProperties}>
         {Array.from({ length: currentContent.boardSize * currentContent.boardSize }, (_, index) => {
           const x = index % currentContent.boardSize;
           const y = Math.floor(index / currentContent.boardSize);
@@ -129,16 +117,14 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
           );
         })}
       </div>
-      {variations.length > 1 ? (
-        <div className="go-variations" aria-label="分岐">
-          <GitBranch size={13} />
-          {variations.map((node) => (
-            <button key={node.id} type="button" className={node.id === currentNode?.id ? "is-active" : ""} onClick={() => focusNode(node.id)}>
-              {findGoNodeContent(node)?.displayText || node.title}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      <div className="go-variations" aria-label="候補手">
+        {variations.length ? <GitBranch size={13} /> : null}
+        {variations.map((node) => (
+          <button key={node.id} type="button" className={node.id === currentNode?.id ? "is-active" : ""} onClick={() => focusNode(node.id)}>
+            {findGoNodeContent(node)?.displayText || node.title}
+          </button>
+        ))}
+      </div>
     </section>
   );
 }

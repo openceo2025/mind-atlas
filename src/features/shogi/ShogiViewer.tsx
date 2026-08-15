@@ -1,8 +1,8 @@
-import { ChevronLeft, ChevronRight, Download, GitBranch, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, GitBranch, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatKIFMove, Position } from "tsshogi";
 import type { Api } from "shogiground/api";
-import { exportShogiRecord, findShogiNodeContent, findShogiRecordRoot } from "./shogiRecord";
+import { findShogiNodeContent, findShogiRecordRoot } from "./shogiRecord";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, ShogiRecordContent } from "../../types";
 
@@ -38,6 +38,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   const [libraryReady, setLibraryReady] = useState(false);
   const [libraryError, setLibraryError] = useState("");
   const [selectedSquare, setSelectedSquare] = useState("");
+  const [orientation, setOrientation] = useState<"sente" | "gote">("sente");
   const boardRef = useRef<HTMLDivElement>(null);
   const topHandRef = useRef<HTMLDivElement>(null);
   const bottomHandRef = useRef<HTMLDivElement>(null);
@@ -45,8 +46,8 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   const boardConfigRef = useRef<ReturnType<typeof makeBoardConfig> | null>(null);
 
   const boardConfig = useMemo(
-    () => (currentContent?.kind === "shogi-record" ? makeBoardConfig(currentContent.sfen, (usi) => handleMove(usi)) : null),
-    [currentContent?.sfen, currentNode?.id, recordRoot?.id],
+    () => (currentContent?.kind === "shogi-record" ? makeBoardConfig(currentContent.sfen, (usi) => handleMove(usi), orientation) : null),
+    [currentContent?.sfen, currentNode?.id, orientation, recordRoot?.id],
   );
   boardConfigRef.current = boardConfig;
 
@@ -150,28 +151,21 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
     if (node) focusNode(node.id);
   };
 
-  const exportCurrentRecord = () => {
-    try {
-      const kif = exportShogiRecord(atlasRoot);
-      const blob = new Blob([kif], { type: "text/plain;charset=shift_jis" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `${recordRoot.title || "shogi-record"}.kif`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error("Shogi KIF export failed", error);
-      onStatus?.(error instanceof Error ? error.message : "KIFの出力に失敗しました。");
-    }
-  };
-
   return (
     <section className="shogi-viewer" aria-label="Shogi record viewer">
       <div className="shogi-viewer-toolbar">
         <span className="shogi-viewer-label">将棋</span>
         <span className="shogi-viewer-position">{currentContent.ply === 0 ? "開始局面" : `${currentContent.ply}手目`}</span>
-        <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(recordRoot)} aria-label="開始局面">
+        <button
+          type="button"
+          className="shogi-viewer-icon"
+          onClick={() => {
+            setSelectedSquare("");
+            setOrientation((current) => current === "sente" ? "gote" : "sente");
+          }}
+          aria-label="盤面を反転"
+          title="盤面を反転"
+        >
           <RotateCcw size={14} />
         </button>
         <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(parentNode)} disabled={!parentNode} aria-label="一手戻る">
@@ -179,9 +173,6 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
         </button>
         <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(variations[0] ?? null)} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
-        </button>
-        <button type="button" className="shogi-viewer-icon" onClick={exportCurrentRecord} aria-label="KIFを出力">
-          <Download size={14} />
         </button>
       </div>
       <div className="shogi-board-shell">
@@ -191,16 +182,14 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       </div>
       {!libraryReady && !libraryError ? <p className="shogi-viewer-note">将棋盤を準備しています...</p> : null}
       {libraryError ? <p className="shogi-viewer-note is-error">{libraryError}</p> : null}
-      {variations.length > 1 ? (
-        <div className="shogi-variations" aria-label="分岐">
-          <GitBranch size={13} />
-          {variations.map((node) => (
-            <button key={node.id} type="button" className={node.id === currentNode?.id ? "is-active" : ""} onClick={() => focusNode(node.id)}>
-              {findShogiNodeContent(node)?.displayText || node.title}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      <div className="shogi-variations" aria-label="候補手">
+        {variations.length ? <GitBranch size={13} /> : null}
+        {variations.map((node) => (
+          <button key={node.id} type="button" className={node.id === currentNode?.id ? "is-active" : ""} onClick={() => focusNode(node.id)}>
+            {findShogiNodeContent(node)?.displayText || node.title}
+          </button>
+        ))}
+      </div>
     </section>
   );
 }
@@ -212,12 +201,12 @@ function shogiKeyAtPoint(bounds: DOMRect, clientX: number, clientY: number) {
   return `${9 - fileIndex}${"abcdefghi"[rankIndex]}`;
 }
 
-function makeBoardConfig(sfen: string, onMove: (usi: string) => void) {
+function makeBoardConfig(sfen: string, onMove: (usi: string) => void, orientation: "sente" | "gote") {
   const [board = "", turn = "b", hands = "-"] = sfen.split(" ");
   const turnColor = turn === "w" ? "gote" : "sente";
   return {
     sfen: { board, hands },
-    orientation: "sente" as const,
+    orientation,
     turnColor: turnColor as "sente" | "gote",
     // The viewer validates the resulting USI through tsshogi. Keeping both
     // colors selectable also makes imported handicap/analysis positions

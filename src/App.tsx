@@ -323,7 +323,9 @@ export default function App() {
       setLayoutMode("phyllotaxis");
       persistUiStatePatch({ layoutMode: "phyllotaxis" });
     }
-  }, [isBoardGameMode, layoutMode, notebookMode, setLayoutMode]);
+    const frame = window.requestAnimationFrame(() => focusNode(selectedNodeId));
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusNode, isBoardGameMode, layoutMode, notebookMode, selectedNodeId, setLayoutMode]);
   const attachmentsEnabled = !publicServiceMode;
   const voiceLogReadable = publicServiceMode ? onboarding.showMainChrome : aiFeaturesUnlocked;
   const showCommandDock = aiFeaturesUnlocked && (aboutDemoConfig ? aboutDemoConfig.kind === "app" : publicServiceMode || shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport));
