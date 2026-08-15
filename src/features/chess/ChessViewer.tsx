@@ -8,7 +8,6 @@ import type { Role } from "chessops/types";
 import { parseSquare, parseUci } from "chessops/util";
 import type { Api } from "chessground/api";
 import type { Config } from "chessground/config";
-import type { DrawShape } from "chessground/draw";
 import type { Key } from "chessground/types";
 import { Chessground } from "chessground";
 import "chessground/assets/chessground.base.css";
@@ -59,8 +58,8 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
   const [libraryError, setLibraryError] = useState("");
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [pendingPromotion, setPendingPromotion] = useState<PendingPromotion | null>(null);
-  const candidateShapes = useMemo(() => makeCandidateShapes(variations), [variations]);
-  configRef.current = currentContent ? makeBoardConfig(currentContent, handleBoardMove, orientation, candidateShapes) : null;
+  const candidateArrows = useMemo(() => buildCandidateArrows(variations, orientation), [variations, orientation]);
+  configRef.current = currentContent ? makeBoardConfig(currentContent, handleBoardMove, orientation) : null;
 
   useEffect(() => {
     if (!enabled || !recordRoot || !boardRef.current) return;
@@ -80,8 +79,8 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
 
   useEffect(() => {
     if (!apiRef.current || !currentContent) return;
-    apiRef.current.set(makeBoardConfig(currentContent, handleBoardMove, orientation, candidateShapes));
-  }, [candidateShapes, currentContent?.fen, currentContent?.uci, currentNode?.id, orientation, recordRoot?.id]);
+    apiRef.current.set(makeBoardConfig(currentContent, handleBoardMove, orientation));
+  }, [currentContent?.fen, currentContent?.uci, currentNode?.id, orientation, recordRoot?.id]);
 
   useEffect(() => {
     setPendingPromotion(null);
@@ -122,7 +121,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     const move = parseUci(uci);
     if (!move || !position.isLegal(move)) {
       onStatus?.("その手は現在の局面では指せません。");
-      apiRef.current?.set(makeBoardConfig(content, handleBoardMove, orientation, candidateShapes));
+      apiRef.current?.set(makeBoardConfig(content, handleBoardMove, orientation));
       setPendingPromotion(null);
       return;
     }
@@ -186,6 +185,37 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
       </div>
       <div className="chess-board-frame">
         <div className="chess-board-host" ref={boardRef} />
+        <div className="chess-candidate-overlay">
+          <svg className="chess-candidate-arrows" viewBox="0 0 800 800" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <marker id="chess-candidate-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto">
+                <path d="M0,0 L7,3.5 L0,7 Z" />
+              </marker>
+            </defs>
+            {candidateArrows.map((candidate) => (
+              <line
+                key={`arrow-${candidate.node.id}`}
+                x1={candidate.from[0]}
+                y1={candidate.from[1]}
+                x2={candidate.to[0]}
+                y2={candidate.to[1]}
+                markerEnd="url(#chess-candidate-arrowhead)"
+                onClick={() => focusNode(candidate.node.id)}
+              />
+            ))}
+          </svg>
+          {candidateArrows.map((candidate) => (
+            <button
+              key={candidate.node.id}
+              type="button"
+              className="chess-candidate-arrow-hit"
+              style={{ left: `${candidate.to[0] / 8}%`, top: `${candidate.to[1] / 8}%` }}
+              onClick={() => focusNode(candidate.node.id)}
+              aria-label={candidate.label}
+              title={candidate.label}
+            />
+          ))}
+        </div>
         {pendingPromotion ? (
           <div className="chess-promotion-picker" role="dialog" aria-label={formatAppMessage("board.chess.promotion")}>
             {pendingPromotion.options.map((option) => (
@@ -198,7 +228,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
               className="is-cancel"
               onClick={() => {
                 setPendingPromotion(null);
-                apiRef.current?.set(makeBoardConfig(currentContent, handleBoardMove, orientation, candidateShapes));
+                apiRef.current?.set(makeBoardConfig(currentContent, handleBoardMove, orientation));
               }}
             >
               {formatAppMessage("common.cancel")}
@@ -225,7 +255,6 @@ function makeBoardConfig(
   content: ChessRecordContent,
   onMove: (orig: string, dest: string) => void,
   orientation: "white" | "black",
-  candidateShapes: DrawShape[],
 ): Config {
   const position = positionFromFen(content.fen);
   const turnColor = position.turn;
@@ -248,31 +277,56 @@ function makeBoardConfig(
     premovable: { enabled: false },
     draggable: { enabled: true },
     selectable: { enabled: true },
-    drawable: { enabled: false, visible: true, autoShapes: candidateShapes },
+    drawable: { enabled: false, visible: false, autoShapes: [] },
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 180 },
   };
 }
 
-function makeCandidateShapes(nodes: AtlasNode[]): DrawShape[] {
-  const groups = new Map<string, { orig: Key; dest: Key; labels: string[] }>();
+type ChessCandidateArrow = {
+  node: AtlasNode;
+  label: string;
+  from: [number, number];
+  to: [number, number];
+};
+
+function buildCandidateArrows(nodes: AtlasNode[], orientation: "white" | "black"): ChessCandidateArrow[] {
+  const groups = new Map<string, Array<{ node: AtlasNode; label: string; from: string; to: string }>>();
   for (const node of nodes) {
     const content = findChessNodeContent(node);
-    const move = content?.uci ? parseUci(content.uci) : undefined;
-    if (!move || !("from" in move)) continue;
-    const [orig, dest] = chessgroundMove(move) as Key[];
-    const key = `${orig}-${dest}`;
-    const group = groups.get(key) ?? { orig, dest, labels: [] };
-    group.labels.push(content?.displayText || node.title);
+    const uci = content?.uci;
+    const move = uci ? parseUci(uci) : undefined;
+    if (!uci || !move || !("from" in move)) continue;
+    const from = uci.slice(0, 2);
+    const to = uci.slice(2, 4);
+    const key = `${from}-${to}`;
+    const group = groups.get(key) ?? [];
+    group.push({ node, label: content?.displayText || node.title, from, to });
     groups.set(key, group);
   }
-  return [...groups.values()].map((group) => ({
-    orig: group.orig,
-    dest: group.dest,
-    brush: "green",
-    modifiers: { lineWidth: 7 },
-    label: group.labels.length > 1 ? { text: String(group.labels.length) } : undefined,
+  return [...groups.values()].flatMap((group) => group.map((candidate, index) => {
+    const from = chessArrowPoint(candidate.from, orientation);
+    const to = chessArrowPoint(candidate.to, orientation);
+    const offset = (index - (group.length - 1) / 2) * 12;
+    const dx = to[0] - from[0];
+    const dy = to[1] - from[1];
+    const length = Math.hypot(dx, dy) || 1;
+    const normal: [number, number] = [-dy / length * offset, dx / length * offset];
+    return {
+      node: candidate.node,
+      label: candidate.label,
+      from: [from[0] + normal[0], from[1] + normal[1]],
+      to: [to[0] + normal[0], to[1] + normal[1]],
+    };
   }));
+}
+
+function chessArrowPoint(square: string, orientation: "white" | "black"): [number, number] {
+  const file = square.charCodeAt(0) - 97;
+  const rank = Number(square[1]) - 1;
+  const column = orientation === "white" ? file : 7 - file;
+  const row = orientation === "white" ? 7 - rank : rank;
+  return [(column + 0.5) * 100, (row + 0.5) * 100];
 }
 
 function makeLastMove(uci?: string): Key[] | undefined {

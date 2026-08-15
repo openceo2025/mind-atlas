@@ -34,11 +34,13 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
   if (!enabled || !recordRoot || !rootContent || !currentContent || !selectedNode || !board) return null;
 
   const lastVertex = currentContent.vertex && currentContent.vertex !== "pass" ? board.parseVertex(currentContent.vertex) : null;
-  const candidateCounts = new Map<string, number>();
+  const candidateNodesByVertex = new Map<string, AtlasNode[]>();
   for (const variation of variations) {
     const content = findGoNodeContent(variation);
     if (!content?.vertex || content.vertex === "pass") continue;
-    candidateCounts.set(content.vertex, (candidateCounts.get(content.vertex) ?? 0) + 1);
+    const nodes = candidateNodesByVertex.get(content.vertex) ?? [];
+    nodes.push(variation);
+    candidateNodesByVertex.set(content.vertex, nodes);
   }
   const turnLabel = nextGoSign(rootContent, currentNode ?? recordRoot) === 1 ? "黒番" : "白番";
 
@@ -125,18 +127,18 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
           const vertex: Vertex = [x, y];
           const sign = board.get(vertex);
           const vertexLabel = board.stringifyVertex(vertex);
-          const candidateCount = candidateCounts.get(vertexLabel) ?? 0;
+          const candidateNodes = candidateNodesByVertex.get(vertexLabel) ?? [];
+          const isCandidate = candidateNodes.length > 0;
           const isLast = Boolean(lastVertex && lastVertex[0] === x && lastVertex[1] === y);
           return (
             <button
               key={`${x}-${y}`}
               type="button"
-              className={`go-point ${sign === 1 ? "is-black" : sign === -1 ? "is-white" : ""} ${isStarPoint(x, y, currentContent.boardSize) ? "is-star" : ""} ${isLast ? "is-last" : ""} ${candidateCount ? "is-candidate" : ""}`}
-              data-candidate-count={candidateCount > 1 ? candidateCount : undefined}
-              onClick={() => sign === 0 ? addMove(vertex) : onStatus?.("その交点にはすでに石があります。")}
-              aria-label={`${vertexLabel}${sign === 1 ? " 黒" : sign === -1 ? " 白" : ""}${candidateCount ? ` 候補手 ${candidateCount}` : ""}`}
+              className={`go-point ${sign === 1 ? "is-black" : sign === -1 ? "is-white" : ""} ${isStarPoint(x, y, currentContent.boardSize) ? "is-star" : ""} ${isLast ? "is-last" : ""} ${isCandidate ? "is-candidate" : ""}`}
+              onClick={() => isCandidate ? focusNode(candidateNodes[0].id) : sign === 0 ? addMove(vertex) : onStatus?.("その交点にはすでに石があります。")}
+              aria-label={`${vertexLabel}${sign === 1 ? " 黒" : sign === -1 ? " 白" : ""}${isCandidate ? " 候補手" : ""}`}
             >
-              <span aria-hidden="true" data-candidate-count={candidateCount > 1 ? candidateCount : undefined} />
+              <span aria-hidden="true" />
             </button>
           );
         })}

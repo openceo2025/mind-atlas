@@ -65,7 +65,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   );
   boardConfigRef.current = boardConfig;
 
-  const candidateMarkers = useMemo(() => groupCandidateMoves(variations), [variations]);
+  const candidateArrows = useMemo(() => buildCandidateArrows(variations, orientation), [variations, orientation]);
   const coordinateFiles = orientation === "sente" ? ["9", "8", "7", "6", "5", "4", "3", "2", "1"] : ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
   const coordinateRanks = orientation === "sente" ? JAPANESE_RANKS : [...JAPANESE_RANKS].reverse();
   const turnLabel = currentContent?.sfen.split(" ")[1] === "w" ? "後手番" : "先手番";
@@ -178,16 +178,35 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
           <div className="shogi-rank-coordinates" aria-hidden="true">
             {coordinateRanks.map((rank) => <span key={rank}>{rank}</span>)}
           </div>
-          <div className="shogi-candidate-overlay" aria-hidden="true">
-            {candidateMarkers.map((candidate) => (
-              <span
-                key={candidate.destination}
-                className="shogi-candidate-marker"
-                style={candidateMarkerStyle(candidate.destination, orientation)}
-                title={candidate.labels.join(" / ")}
-              >
-                {candidate.labels.length > 1 ? candidate.labels.length : ""}
-              </span>
+          <div className="shogi-candidate-overlay">
+            <svg className="shogi-candidate-arrows" viewBox="0 0 900 900" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <marker id="shogi-candidate-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto">
+                  <path d="M0,0 L7,3.5 L0,7 Z" />
+                </marker>
+              </defs>
+              {candidateArrows.filter((candidate) => candidate.from).map((candidate) => (
+                <line
+                  key={`arrow-${candidate.node.id}`}
+                  x1={candidate.from?.[0]}
+                  y1={candidate.from?.[1]}
+                  x2={candidate.to[0]}
+                  y2={candidate.to[1]}
+                  markerEnd="url(#shogi-candidate-arrowhead)"
+                  onClick={() => focusNode(candidate.node.id)}
+                />
+              ))}
+            </svg>
+            {candidateArrows.map((candidate) => (
+              <button
+                key={candidate.node.id}
+                type="button"
+                className={`shogi-candidate-arrow-hit ${candidate.from ? "" : "is-drop"}`}
+                style={{ left: `${(candidate.to[0] / 9)}%`, top: `${(candidate.to[1] / 9)}%` }}
+                onClick={() => focusNode(candidate.node.id)}
+                aria-label={candidate.label}
+                title={candidate.label}
+              />
             ))}
           </div>
         </div>
@@ -305,28 +324,56 @@ function lastDropPiece(usi: string | undefined, turnColor: "sente" | "gote") {
   return role ? { role, color: turnColor === "sente" ? "gote" as const : "sente" as const } : undefined;
 }
 
-function groupCandidateMoves(nodes: AtlasNode[]) {
-  const groups = new Map<string, string[]>();
+type ShogiCandidateArrow = {
+  node: AtlasNode;
+  label: string;
+  from?: [number, number];
+  to: [number, number];
+};
+
+function buildCandidateArrows(nodes: AtlasNode[], orientation: "sente" | "gote"): ShogiCandidateArrow[] {
+  const groups = new Map<string, Array<{ node: AtlasNode; label: string; from?: string; to: string }>>();
   for (const node of nodes) {
     const content = findShogiNodeContent(node);
     if (!content?.usi) continue;
-    const destination = content.usi.includes("*") ? content.usi.slice(2, 4) : content.usi.slice(2, 4);
-    const labels = groups.get(destination) ?? [];
-    labels.push(content.displayText || node.title);
-    groups.set(destination, labels);
+    const from = content.usi.includes("*") ? undefined : content.usi.slice(0, 2);
+    const to = content.usi.slice(-2);
+    const key = `${from ?? "drop"}-${to}`;
+    const group = groups.get(key) ?? [];
+    group.push({ node, label: content.displayText || node.title, from, to });
+    groups.set(key, group);
   }
-  return [...groups].map(([destination, labels]) => ({ destination, labels }));
+
+  return [...groups.values()].flatMap((group) => group.map((candidate, index) => {
+    const offset = (index - (group.length - 1) / 2) * 14;
+    const baseTo = shogiArrowPoint(candidate.to, orientation);
+    const baseFrom = candidate.from ? shogiArrowPoint(candidate.from, orientation) : undefined;
+    const dx = baseTo[0] - (baseFrom?.[0] ?? baseTo[0]);
+    const dy = baseTo[1] - (baseFrom?.[1] ?? baseTo[1]);
+    const length = Math.hypot(dx, dy) || 1;
+    const normal: [number, number] = [-dy / length * offset, dx / length * offset];
+    const to: [number, number] = [baseTo[0] + normal[0], baseTo[1] + normal[1]];
+    const from: [number, number] | undefined = baseFrom
+      ? [baseFrom[0] + normal[0], baseFrom[1] + normal[1]]
+      : undefined;
+    return {
+      node: candidate.node,
+      label: candidate.label,
+      from,
+      to,
+    };
+  }));
 }
 
-function candidateMarkerStyle(key: string, orientation: "sente" | "gote") {
+function shogiArrowPoint(key: string, orientation: "sente" | "gote"): [number, number] {
   const file = Number(key[0]);
   const rank = "abcdefghi".indexOf(key[1]);
   const column = orientation === "sente" ? 9 - file : file - 1;
   const row = orientation === "sente" ? rank : 8 - rank;
-  return {
-    left: `${((column + 0.5) / 9) * 100}%`,
-    top: `${((row + 0.5) / 9) * 100}%`,
-  };
+  return [
+    (column + 0.5) * 100,
+    (row + 0.5) * 100,
+  ];
 }
 
 function nearestRecordNode(root: AtlasNode, nodeId: string, recordRootId: string) {

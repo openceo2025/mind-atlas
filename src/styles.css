@@ -3211,19 +3211,51 @@ h1 {
   pointer-events: none;
 }
 
-.shogi-candidate-marker {
+.shogi-candidate-arrows {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.shogi-candidate-arrows line,
+.chess-candidate-arrows line {
+  stroke: rgba(225, 255, 229, 0.92);
+  stroke-linecap: round;
+  stroke-width: 10;
+  fill: none;
+  pointer-events: stroke;
+  cursor: pointer;
+  filter: drop-shadow(0 0 3px rgba(18, 50, 37, 0.85));
+}
+
+.shogi-candidate-arrows marker path,
+.chess-candidate-arrows marker path {
+  fill: rgba(225, 255, 229, 0.96);
+}
+
+.shogi-candidate-arrow-hit,
+.chess-candidate-arrow-hit {
   position: absolute;
   display: grid;
-  width: clamp(10px, 3.2%, 16px);
-  height: clamp(10px, 3.2%, 16px);
+  width: clamp(22px, 7%, 38px);
+  height: clamp(22px, 7%, 38px);
   place-items: center;
   border: 2px solid rgba(46, 119, 91, 0.92);
   border-radius: 50%;
   background: rgba(225, 255, 229, 0.72);
   box-shadow: 0 0 0 2px rgba(255, 244, 197, 0.62);
   color: #153c2f;
-  font: 700 8px/1 sans-serif;
+  cursor: pointer;
+  pointer-events: auto;
   transform: translate(-50%, -50%);
+}
+
+.shogi-candidate-arrow-hit.is-drop {
+  border-style: dashed;
+  background: rgba(255, 244, 197, 0.84);
 }
 
 .shogi-board-host sg-promotion {
@@ -3406,6 +3438,21 @@ h1 {
   height: 100%;
 }
 
+.chess-candidate-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+}
+
+.chess-candidate-arrows {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
 .chess-promotion-picker {
   position: absolute;
   inset: 50% auto auto 50%;
@@ -3577,17 +3624,6 @@ h1 {
   border: 2px solid rgba(40, 111, 80, 0.92);
   background: rgba(224, 255, 226, 0.72);
   box-shadow: 0 0 0 2px rgba(255, 244, 197, 0.52);
-}
-
-.go-point.is-candidate[data-candidate-count] span::before {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 2;
-  color: #173c2e;
-  content: attr(data-candidate-count);
-  font: 700 8px/1 sans-serif;
-  transform: translate(-50%, -50%);
 }
 
 .preview-empty {
@@ -8189,7 +8225,7 @@ button:disabled,
    the imported board a stable home. Candidate moves and branch controls stay
    inside a reserved strip so the board itself does not jump as they appear. */
 .app-shell.is-board-game-mode {
-  --board-panel-width: clamp(540px, 48vw, 900px);
+  --board-panel-width: clamp(600px, 48vw, 920px);
   --board-editor-height: 232px;
   --board-variation-height: 34px;
 }
@@ -8269,10 +8305,13 @@ button:disabled,
   }
 
   .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-preview-frame {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     height: 100%;
     min-height: 0;
     overflow: hidden;
-    padding: 12px;
+    padding: 18px 24px;
   }
 
   .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .panel-attach-preview-button,
@@ -8288,7 +8327,7 @@ button:disabled,
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 6px;
+    gap: 10px;
     width: 100%;
     height: 100%;
     min-height: 0;
@@ -8299,8 +8338,8 @@ button:disabled,
   .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer-toolbar,
   .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer-toolbar,
   .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer-toolbar {
-    flex: 0 0 30px;
-    min-height: 30px;
+    flex: 0 0 40px;
+    min-height: 40px;
   }
 
   .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-board-shell,
@@ -8313,14 +8352,50 @@ button:disabled,
 
   .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-board-shell {
     align-content: center;
-    width: min(100%, 760px, calc(100dvh - 154px));
+    width: min(100%, 600px, calc(100dvh - 270px));
     margin: 0 auto;
   }
 
   .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-board-frame,
   .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-board-host {
-    width: min(100%, 760px, calc(100dvh - 104px));
+    width: min(100%, 600px, calc(100dvh - 190px));
     margin: 0 auto;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host.sg-hand-wrap {
+    min-height: 42px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand {
+    min-height: 42px;
+    padding: 2px 8px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hp-wrap {
+    min-width: 38px;
+    min-height: 38px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-hand-host sg-hand piece {
+    width: 38px;
+    height: 38px;
+    font-size: 23px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer-icon,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer-icon,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer-icon {
+    min-width: 40px;
+    height: 40px;
+    padding: 0 9px;
+    font-size: 12px;
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-viewer-icon svg,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-viewer-icon svg,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-viewer-icon svg {
+    width: 18px;
+    height: 18px;
   }
 
   .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-board-host {
@@ -8340,6 +8415,13 @@ button:disabled,
     margin: 0;
     padding: 2px 0;
     border-top: 1px solid rgba(219, 234, 211, 0.1);
+  }
+
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .shogi-variations button,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .chess-variations button,
+  .app-shell.is-board-game-mode .focus-panel.is-board-game-panel .go-variations button {
+    padding: 7px 10px;
+    font-size: 13px;
   }
 
   .app-shell.is-board-game-mode .focus-panel.is-board-game-panel.is-hidden {

@@ -1402,7 +1402,7 @@ function NavigationController({
     reportNodeVisibility(atlasRoot, perspective, nodeVisibilityRef.current, visibilityViewport);
 
     const drag = dragRef.current;
-    if (layoutMode === "phyllotaxis" && drag?.mode === "hold" && drag.canBirth && !drag.created) {
+    if (!boardGameMode && layoutMode === "phyllotaxis" && drag?.mode === "hold" && drag.canBirth && !drag.created) {
       const heldFor = performance.now() - drag.startedAt;
       if (heldFor >= HOLD_TO_BIRTH_MS) {
         drag.created = true;
@@ -1420,7 +1420,7 @@ function NavigationController({
         });
       }
     }
-    if (layoutMode === "phyllotaxis" && drag?.mode === "hold" && !drag.canBirth && !drag.blockedBirthHintEmitted) {
+    if (!boardGameMode && layoutMode === "phyllotaxis" && drag?.mode === "hold" && !drag.canBirth && !drag.blockedBirthHintEmitted) {
       const heldFor = performance.now() - drag.startedAt;
       if (heldFor >= ROOT_BIRTH_BLOCKED_HINT_MS) {
         drag.blockedBirthHintEmitted = true;
@@ -1486,6 +1486,7 @@ function NavigationController({
     window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_INTERACTION_EVENT));
     backgroundClickRef.current = pointerType !== "mouse" || button === 0 ? { pointerId, x: clientX, y: clientY } : null;
     const canBirth =
+      !boardGameMode &&
       layoutMode === "phyllotaxis" &&
       (tutorialRootBirthUnlocked || canStartRootBirth(yawPitchRef.current.offset, size.height, perspective.fov));
     setMobileRaycastMode({ kind: "space-drag" });
@@ -3137,6 +3138,7 @@ function HierarchyNode({
   attachmentsEnabled: boolean;
   onOpenNodeContextMenu: (menu: NodeContextMenuState) => void;
 }) {
+  const notebookMode = useAtlasStore((state) => state.atlasRoot.notebookMode);
   const selectNodeInPlace = useAtlasStore((state) => state.selectNodeInPlace);
   const focusNode = useAtlasStore((state) => state.focusNode);
   const toggleMultiSelectedNode = useAtlasStore((state) => state.toggleMultiSelectedNode);
@@ -3170,6 +3172,9 @@ function HierarchyNode({
     typeof activePathIndex === "number" ? selectedPathLength - 1 - activePathIndex : null;
   const isDirectChildOfSelected = parentId === selectedNodeId;
   const isRootDirectChild = depth === 1 && parentId === path[0]?.id;
+  const rootCreationLocked = notebookMode === "shogi" || notebookMode === "chess" || notebookMode === "go"
+    ? node.id === path[0]?.id
+    : false;
   const isLabelAnchor = node.id === labelAnchorNodeId;
   const rootActiveDirectChild = selectedNodeId === path[0]?.id && isRootDirectChild;
   const rootOverviewDirectChild = rootOverviewActive && isRootDirectChild;
@@ -3539,7 +3544,7 @@ function HierarchyNode({
       siblingCount: path.length > 2 ? path[path.length - 2].children.length : 1,
       layerRadius,
       stage: "moving",
-      canCreateChild: true,
+      canCreateChild: !rootCreationLocked,
       samples: [{ t: performance.now(), x: event.clientX, y: event.clientY }],
       hasMoved: false,
       suppressChildCreationForDrag: false,

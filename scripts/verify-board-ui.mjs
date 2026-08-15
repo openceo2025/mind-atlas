@@ -122,6 +122,10 @@ async function assertBoardModeLayout(page, mode, mobile) {
   if (mobile && board.width < page.viewportSize().width - 28) throw new Error(`${mode} mobile board does not use the available width.`);
   if (mobile && universe.y + universe.height > board.y + 2) throw new Error(`${mode} mobile universe overlaps the board region.`);
   if (board.height < 180) throw new Error(`${mode} board region is too short: ${board.height}`);
+  const addSibling = page.locator(".operation-panel-desktop button[aria-label='Add sibling']");
+  if (await addSibling.count() && await addSibling.first().isEnabled()) {
+    throw new Error(`${mode} root-level sibling creation is not disabled in board mode.`);
+  }
   await assertBoardControlsVisible(page, mode, board);
   return { board, text, universe };
 }
@@ -136,9 +140,13 @@ async function verifyShogi() {
     await captureScreenshot(page, "shogi-desktop");
     await expectTexts(page.locator(".shogi-file-coordinates span"), ["9", "8", "7", "6", "5", "4", "3", "2", "1"], "shogi files");
     await expectTexts(page.locator(".shogi-rank-coordinates span"), ["一", "二", "三", "四", "五", "六", "七", "八", "九"], "shogi ranks");
-    if (await page.locator(".shogi-candidate-marker").count() !== 1) throw new Error("Shogi root candidate is not marked on the board.");
+    if (await page.locator(".shogi-candidate-arrow-hit").count() !== 1) throw new Error("Shogi root candidate arrow is not marked on the board.");
     const firstMoveLabel = await page.locator(".shogi-variations button").first().textContent();
     if (!firstMoveLabel?.includes("７六歩") || /[?�]/.test(firstMoveLabel)) throw new Error(`Shogi UTF-8 move label is corrupted: ${firstMoveLabel}`);
+    await page.locator(".shogi-candidate-arrow-hit").first().click();
+    await page.locator(".shogi-viewer-position").filter({ hasText: "1手目" }).waitFor();
+    await page.getByRole("button", { name: "一手戻る" }).click();
+    await page.locator(".shogi-viewer-position").filter({ hasText: "開始局面" }).waitFor();
 
     for (let ply = 1; ply <= 4; ply += 1) {
       await page.getByRole("button", { name: "一手進む" }).click();
@@ -174,7 +182,7 @@ async function verifyShogi() {
     await page.locator(".shogi-viewer-position").filter({ hasText: "5手目" }).waitFor({ timeout: 5_000 });
     await page.getByRole("button", { name: "一手戻る" }).click();
     await page.locator(".shogi-viewer-position").filter({ hasText: "4手目" }).waitFor();
-    if (await page.locator(".shogi-candidate-marker").count() !== 2) throw new Error("Shogi drop and move branches are not both marked as candidates.");
+    if (await page.locator(".shogi-candidate-arrow-hit").count() !== 2) throw new Error("Shogi drop and move branches are not both marked as candidates.");
 
     await page.getByRole("button", { name: "Go to parent layer" }).click();
     await page.locator(".shogi-viewer-position").filter({ hasText: "3手目" }).waitFor();
@@ -205,7 +213,7 @@ async function verifyChess() {
     await assertBoardModeLayout(page, "chess", false);
     await assertDesktopInputLayer(page);
     await captureScreenshot(page, "chess-desktop");
-    if (await page.locator(".chess-board-host svg.cg-shapes g").count() < 1) throw new Error("Chess root candidate arrow is missing.");
+    if (await page.locator(".chess-candidate-arrows line").count() < 1) throw new Error("Chess root candidate arrow is missing.");
     const whiteFiles = await chessCoordinatePositions(page);
     await page.getByRole("button", { name: "盤面を反転" }).click();
     const blackFiles = await chessCoordinatePositions(page);
@@ -226,7 +234,7 @@ async function verifyChess() {
     await page.locator(".chess-viewer-position").filter({ hasText: "6 ply" }).waitFor({ timeout: 5_000 });
     await page.getByRole("button", { name: "一手戻る" }).click();
     await page.locator(".chess-viewer-position").filter({ hasText: "5 ply" }).waitFor();
-    if (await page.locator(".chess-board-host svg.cg-shapes g").count() < 1) throw new Error("New chess branch arrow is missing.");
+    if (await page.locator(".chess-candidate-arrows line").count() < 1) throw new Error("New chess branch arrow is missing.");
     await verifyGeneratedLayoutFocus(page, "ツリー");
     await verifyGeneratedLayoutFocus(page, "マインドマップ");
   } finally {
@@ -451,9 +459,9 @@ async function assertBoardControlsVisible(page, mode, previewRect) {
 
 async function assertMobileCandidateVisibility(page, mode) {
   const marker = mode === "shogi"
-    ? page.locator(".shogi-candidate-marker").first()
+    ? page.locator(".shogi-candidate-arrow-hit").first()
     : mode === "chess"
-      ? page.locator(".chess-board-host svg.cg-shapes line").first()
+      ? page.locator(".chess-candidate-arrows line").first()
       : page.locator(".go-point.is-candidate").first();
   const visibility = mode === "chess"
     ? await marker.evaluate((line) => {

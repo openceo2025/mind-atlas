@@ -1231,6 +1231,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   addRootNodeAt: (position, title = "", options = {}) => {
     const state = get();
+    if (isBoardGameNotebookMode(state.atlasRoot.notebookMode)) return;
     const usedNodeIds = collectNodeIdSet(state.atlasRoot);
     const aiDialogSettings = createInheritedAiDialogSettings([state.atlasRoot], state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
     const child = createNotebookNode("atlas-root", state.atlasRoot.children.length, title, "", {
@@ -1259,6 +1260,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   addChildNode: (parentId, initialBody = "", options = {}) => {
     const state = get();
+    if (blocksBoardGameRootInsertion(state.atlasRoot, parentId)) return;
     const parent = findNode(state.atlasRoot, parentId);
     if (!parent) return;
     const parentPath = findNodePath(state.atlasRoot, parentId);
@@ -1310,6 +1312,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   addChildNodes: (parentId, nodes, options = {}) => {
     const state = get();
+    if (blocksBoardGameRootInsertion(state.atlasRoot, parentId)) return [];
     const parentPath = findNodePath(state.atlasRoot, parentId);
     const parent = parentPath?.at(-1);
     if (!parentPath || !parent) return [];
@@ -1484,6 +1487,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   pasteNodeSubtree: (parentId, copiedRoot) => {
     const state = get();
+    if (blocksBoardGameRootInsertion(state.atlasRoot, parentId)) return undefined;
     const parentPath = findNodePath(state.atlasRoot, parentId);
     const parent = parentPath?.at(-1);
     if (!parentPath || !parent) return undefined;
@@ -1538,6 +1542,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const state = get();
     const path = findNodePath(state.atlasRoot, id);
     if (!path || path.length < 2) return undefined;
+    if (isBoardGameNotebookMode(state.atlasRoot.notebookMode) && path.length === 2) return undefined;
     const parent = path[path.length - 2];
     const siblingDepth = path.length - 1;
     const insertIndex = parent.children.length;
@@ -5872,6 +5877,14 @@ function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCou
 
 function normalizeNotebookMode(value: unknown): NotebookMode {
   return value === "shogi" || value === "chess" || value === "go" ? value : "standard";
+}
+
+function isBoardGameNotebookMode(value: unknown): value is Exclude<NotebookMode, "standard"> {
+  return value === "shogi" || value === "chess" || value === "go";
+}
+
+function blocksBoardGameRootInsertion(root: AtlasNode, parentId: string) {
+  return isBoardGameNotebookMode(root.notebookMode) && parentId === root.id;
 }
 
 interface AiContextTruncationStats {

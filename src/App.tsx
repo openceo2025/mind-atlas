@@ -357,6 +357,8 @@ export default function App() {
       (onboarding.showMainChrome && mobileWorkspacePanelRevealed && mobileOperationPanelTabAvailable));
   const focusPanelOpen = tutorialWorkspaceAvailable && (isBoardGameMode || outlineEditorOpen || selectedNodeId !== atlasRoot.id);
   const operationTargets = useMemo(() => getOperationTargets(selectedPath), [selectedPath]);
+  const boardRootDirectCreationBlocked = isBoardGameMode && selectedPath.length <= 2;
+  const boardRootChildCreationBlocked = isBoardGameMode && selectedNodeId === atlasRoot.id;
   const tutorialFallbackChildParentId =
     showTutorialNodeControls && selectedNodeId === atlasRoot.id ? atlasRoot.children[0]?.id ?? selectedNodeId : selectedNodeId;
   const tutorialFallbackChildParentPath = useMemo(
@@ -370,6 +372,7 @@ export default function App() {
         label: "Add child",
         shortcut: "Tab",
         icon: <GitBranch size={18} />,
+        disabled: boardRootChildCreationBlocked,
         onClick: () => {
           const childId = addChildNode(tutorialFallbackChildParentId);
           if (childId) {
@@ -384,7 +387,7 @@ export default function App() {
         label: "Add sibling",
         shortcut: "Enter",
         icon: <Plus size={18} />,
-        disabled: selectedNodeId === atlasRoot.id,
+        disabled: selectedNodeId === atlasRoot.id || boardRootDirectCreationBlocked,
         onClick: () => {
           const siblingId = addSiblingNode(selectedNodeId);
           if (siblingId) {
@@ -438,6 +441,8 @@ export default function App() {
       addChildNode,
       addSiblingNode,
       atlasRoot.id,
+      boardRootChildCreationBlocked,
+      boardRootDirectCreationBlocked,
       focusNode,
       operationTargets.childId,
       operationTargets.nextSiblingId,
