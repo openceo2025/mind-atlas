@@ -43,9 +43,12 @@ import {
 } from "./hosted/serviceClient";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
-import type { AtlasNode, CloudNotebookEntry, CloudNotebookListResult, HostedServiceSession, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
+import type { AtlasNode, CloudNotebookEntry, CloudNotebookListResult, HostedServiceSession, NotebookMode, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
 import type { NotebookPersistenceStatus, NotebookSnapshot } from "./notebookPersistence";
 import { formatAppMessage } from "./i18n/format";
+import { detectShogiRecordFormat, importShogiRecordFile } from "./features/shogi/shogiRecord";
+import { detectChessRecordFormat, importChessRecordFile } from "./features/chess/chessRecord";
+import { detectGoRecordFormat, importGoRecordFile } from "./features/go/goRecord";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const WORKSPACE_PANEL_EXIT_MS = 960;
@@ -56,7 +59,7 @@ const RENDER_QUALITY_STORAGE_KEY = "mind-atlas-render-quality";
 const ROOT_COMMAND_MAX_ZOOM = 1.08;
 const DEFAULT_DATASET_TITLE = "Mind Atlas";
 const MIND_ATLAS_SOURCE_URL = "https://github.com/openceo2025/mind-atlas";
-const IMPORT_ACCEPT_TYPES = ".mindatlas,.mindatlaspkg,.md,.markdown,.opml,.mm,application/mindatlas+json,application/x-mindatlas-package,text/markdown,text/plain,text/xml,application/xml";
+const IMPORT_ACCEPT_TYPES = ".mindatlas,.mindatlaspkg,.md,.markdown,.opml,.mm,.kif,.ki2,.csa,.pgn,.sgf,application/mindatlas+json,application/x-mindatlas-package,text/markdown,text/plain,text/xml,application/xml";
 const HOSTED_IMPORT_ACCEPT_TYPES = ".mindatlas,.md,.markdown,.opml,.mm,application/mindatlas+json,text/markdown,text/plain,text/xml,application/xml";
 const CLOUD_NOTEBOOK_MAX_BYTES = 10 * 1024 * 1024;
 const CURRENT_CLOUD_NOTEBOOK_SESSION_KEY = "mind-atlas-current-cloud-notebook-v1";
@@ -80,6 +83,11 @@ function localizedAboutUrl(locale: string) {
   const publicLocale = locale === "en-XA" ? "en" : locale === "ar-XB" ? "ar" : locale;
   return `/${encodeURIComponent(publicLocale)}/about.html`;
 }
+
+function isBoardNotebookMode(value: unknown): value is Exclude<NotebookMode, "standard"> {
+  return value === "shogi" || value === "chess" || value === "go";
+}
+
 const KEYBOARD_OVERLAY_INPUT_SELECTOR =
   ".command-dock input, .command-dock textarea, .command-dock select, .node-body-input, .space-title-editor, .space-body-editor";
 const SPACE_LABEL_KEYBOARD_SELECTOR = ".space-title-editor, .space-body-editor";
@@ -301,6 +309,21 @@ export default function App() {
     setCurrentCloudNotebook(stored.entry);
     setCurrentCloudBaseline(stored.baseline);
   }, [currentCloudNotebook, hostedSession, notebookPersistenceStatus, publicServiceMode]);
+  const notebookMode: NotebookMode = atlasRoot.notebookMode ?? "standard";
+  const isBoardGameMode = notebookMode !== "standard";
+  const appliedBoardModeRef = useRef<NotebookMode | null>(null);
+  useEffect(() => {
+    if (!isBoardGameMode) {
+      appliedBoardModeRef.current = null;
+      return;
+    }
+    if (appliedBoardModeRef.current === notebookMode) return;
+    appliedBoardModeRef.current = notebookMode;
+    if (layoutMode !== "phyllotaxis") {
+      setLayoutMode("phyllotaxis");
+      persistUiStatePatch({ layoutMode: "phyllotaxis" });
+    }
+  }, [isBoardGameMode, layoutMode, notebookMode, setLayoutMode]);
   const attachmentsEnabled = !publicServiceMode;
   const voiceLogReadable = publicServiceMode ? onboarding.showMainChrome : aiFeaturesUnlocked;
   const showCommandDock = aiFeaturesUnlocked && (aboutDemoConfig ? aboutDemoConfig.kind === "app" : publicServiceMode || shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport));
@@ -308,16 +331,19 @@ export default function App() {
   const tutorialWorkspaceAvailable = onboarding.showMainChrome || onboarding.showEditorDuringTutorial;
   const mobileOperationPanelTabAvailable = !mobilePortraitOperationSurface;
   const operationPanelInWorkspace = mobileOperationSurface && mobileOperationPanelTabAvailable;
-  const effectiveMobilePanelTab: MobilePanelTab = getEffectiveMobilePanelTab(mobilePanelTab, showCommandDock, outlineEditorOpen, mobileOperationPanelTabAvailable);
-  const mobileWorkspaceTabsNeeded = showCommandDock || mobileOperationPanelTabAvailable || outlineEditorOpen;
+  const effectiveMobilePanelTab: MobilePanelTab = isBoardGameMode
+    ? "editor"
+    : getEffectiveMobilePanelTab(mobilePanelTab, showCommandDock, outlineEditorOpen, mobileOperationPanelTabAvailable);
+  const mobileWorkspaceTabsNeeded = !isBoardGameMode && (showCommandDock || mobileOperationPanelTabAvailable || outlineEditorOpen);
   const showWorkspacePanel =
     !outlineEditorOpen &&
     tutorialWorkspaceAvailable &&
-    (showCommandDock ||
+    (isBoardGameMode ||
+      showCommandDock ||
       selectedNodeId !== atlasRoot.id ||
       (showTutorialNodeControls && operationPanelInWorkspace) ||
       (onboarding.showMainChrome && mobileWorkspacePanelRevealed && mobileOperationPanelTabAvailable));
-  const focusPanelOpen = tutorialWorkspaceAvailable && (outlineEditorOpen || selectedNodeId !== atlasRoot.id);
+  const focusPanelOpen = tutorialWorkspaceAvailable && (isBoardGameMode || outlineEditorOpen || selectedNodeId !== atlasRoot.id);
   const operationTargets = useMemo(() => getOperationTargets(selectedPath), [selectedPath]);
   const tutorialFallbackChildParentId =
     showTutorialNodeControls && selectedNodeId === atlasRoot.id ? atlasRoot.children[0]?.id ?? selectedNodeId : selectedNodeId;
@@ -498,6 +524,8 @@ export default function App() {
     aboutDemoConfig ? "is-about-demo" : "",
     aboutDemoConfig ? `is-about-demo-${aboutDemoConfig.kind}` : "",
     aboutDemoConfig ? `is-about-demo-view-${aboutDemoConfig.view}` : "",
+    isBoardGameMode ? "is-board-game-mode" : "",
+    isBoardGameMode ? `is-board-game-${notebookMode}` : "",
   ].filter(Boolean).join(" ");
   const unreadNotificationLinks = useMemo(
     () =>
@@ -1148,6 +1176,7 @@ export default function App() {
       const file = new File([blob], entry.name, { type: "application/x-mindatlas-package" });
       const { root, attachmentPreviewUrls, attachmentBlobs } = await importNotebookPackage(file);
       await replaceStoredAttachmentBlobs(root, attachmentBlobs);
+      if (isBoardNotebookMode(root.notebookMode)) resetNotebook();
       importNotebook(root, undefined, attachmentPreviewUrls);
       return true;
     } catch (error) {
@@ -1344,12 +1373,70 @@ export default function App() {
       try {
         const { root, attachmentPreviewUrls, attachmentBlobs } = await importNotebookPackage(file);
         await replaceStoredAttachmentBlobs(root, attachmentBlobs);
+        if (isBoardNotebookMode(root.notebookMode)) resetNotebook();
         importNotebook(root, datasetNameFromFile(file.name), attachmentPreviewUrls);
         forgetCurrentCloudNotebook();
         setMenuOpen(false);
       } catch (error) {
         console.error("Notebook package import failed", error);
         window.alert(importErrorMessage(t("error.packageImport"), error));
+      }
+      return;
+    }
+
+    const shogiFormat = detectShogiRecordFormat(file.name);
+    if (shogiFormat) {
+      if (publicServiceMode) {
+        window.alert("将棋棋譜のインポートはローカル開発者モードでのみ利用できます。");
+        return;
+      }
+      try {
+        const result = await importShogiRecordFile(file);
+        resetNotebook();
+        importNotebook(result.root, result.datasetName, {}, { selectedNodeId: result.recordRootId, requestTitleEdit: false, notebookMode: "shogi" });
+        forgetCurrentCloudNotebook();
+        setMenuOpen(false);
+      } catch (error) {
+        console.error(`${shogiFormat} import failed`, error);
+        window.alert(`将棋棋譜のインポートに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return;
+    }
+
+    const chessFormat = detectChessRecordFormat(file.name);
+    if (chessFormat) {
+      if (publicServiceMode) {
+        window.alert("チェス棋譜のインポートはローカル開発者モードでのみ利用できます。");
+        return;
+      }
+      try {
+        const result = await importChessRecordFile(file);
+        resetNotebook();
+        importNotebook(result.root, result.datasetName, {}, { selectedNodeId: result.recordRootId, requestTitleEdit: false, notebookMode: "chess" });
+        forgetCurrentCloudNotebook();
+        setMenuOpen(false);
+      } catch (error) {
+        console.error("pgn import failed", error);
+        window.alert(`チェス棋譜のインポートに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return;
+    }
+
+    const goFormat = detectGoRecordFormat(file.name);
+    if (goFormat) {
+      if (publicServiceMode) {
+        window.alert("囲碁棋譜のインポートはローカル開発者モードでのみ利用できます。");
+        return;
+      }
+      try {
+        const result = await importGoRecordFile(file);
+        resetNotebook();
+        importNotebook(result.root, result.datasetName, {}, { selectedNodeId: result.recordRootId, requestTitleEdit: false, notebookMode: "go" });
+        forgetCurrentCloudNotebook();
+        setMenuOpen(false);
+      } catch (error) {
+        console.error("sgf import failed", error);
+        window.alert(`囲碁棋譜のインポートに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
       }
       return;
     }
@@ -1901,6 +1988,7 @@ export default function App() {
       className={appClassName}
       data-theme={theme}
       data-focus-panel={focusPanelOpen ? "open" : "closed"}
+      data-notebook-mode={notebookMode}
       data-about-demo={aboutDemoConfig?.kind}
       onDragEnter={handleImportDragEnter}
       onDragOver={handleImportDragOver}
@@ -2364,7 +2452,7 @@ export default function App() {
             </div>
           ) : null}
           <div className="mobile-panel-slot mobile-editor-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "editor"}>
-            <FocusPanel theme={theme} attachmentsEnabled={attachmentsEnabled} />
+            <FocusPanel theme={theme} attachmentsEnabled={attachmentsEnabled} boardGameMode={isBoardGameMode} />
           </div>
           {mobileOperationPanelTabAvailable ? (
             <div className="mobile-panel-slot mobile-operation-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "operation"}>

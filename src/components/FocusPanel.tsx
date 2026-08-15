@@ -26,10 +26,21 @@ import type { AtlasTheme } from "../theme";
 import type { AtlasNode, AttachmentKind, NodeAttachment } from "../types";
 import { I18nText, useMindAtlasLocale } from "../i18n/I18nProvider";
 import { formatAppMessage } from "../i18n/format";
+import { ShogiViewer } from "../features/shogi/ShogiViewer";
+import { ChessViewer } from "../features/chess/ChessViewer";
+import { GoViewer } from "../features/go/GoViewer";
 
 let sessionReminderDraftAt = addDays(new Date(), 1).toISOString();
 
-export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { theme?: AtlasTheme; attachmentsEnabled?: boolean }) {
+export function FocusPanel({
+  theme = "dark",
+  attachmentsEnabled = true,
+  boardGameMode = false,
+}: {
+  theme?: AtlasTheme;
+  attachmentsEnabled?: boolean;
+  boardGameMode?: boolean;
+}) {
   const { locale } = useMindAtlasLocale();
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
@@ -45,10 +56,13 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
   const selectedNode = findNode(atlasRoot, selectedNodeId) ?? atlasRoot;
   const isRoot = selectedNode.id === atlasRoot.id;
+  const panelHidden = isRoot && !boardGameMode;
   const [surfaceMenuOpen, setSurfaceMenuOpen] = useState(false);
   const [reminderMenuOpen, setReminderMenuOpen] = useState(false);
   const [reminderDraftAt, setReminderDraftAt] = useState(sessionReminderDraftAt);
   const [reminderCalendarMonth, setReminderCalendarMonth] = useState(() => startOfMonth(dateFromInput(sessionReminderDraftAt) ?? addDays(new Date(), 1)));
+  const [shogiStatus, setShogiStatus] = useState("");
+  const [boardGameStatus, setBoardGameStatus] = useState("");
   const bodyInputRef = useRef<HTMLTextAreaElement>(null);
   const reminderDraft = dateFromInput(reminderDraftAt) ?? addDays(new Date(), 1);
   const reminderMobileLayout = useReminderMobileLayout();
@@ -229,9 +243,9 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
   return (
     <>
       <aside
-        className={`focus-panel ${isRoot ? "is-hidden" : "is-active"} ${attachmentsEnabled ? "" : "is-text-only"}`}
+        className={`focus-panel ${panelHidden ? "is-hidden" : "is-active"} ${attachmentsEnabled ? "" : "is-text-only"} ${boardGameMode ? "is-board-game-panel" : ""}`}
         aria-label={formatAppMessage("ui.focusPanel.focusedContext.924c0f6")}
-        aria-hidden={isRoot}
+        aria-hidden={panelHidden}
       >
         <div className="panel-toolbar">
           <div className="panel-role-label editor-panel-role" aria-hidden="true">
@@ -363,6 +377,11 @@ export function FocusPanel({ theme = "dark", attachmentsEnabled = true }: { them
               <Paperclip size={17} />
               <input type="file" multiple onChange={handleAttachmentChange} />
             </label>
+            <ShogiViewer enabled={attachmentsEnabled} onStatus={setShogiStatus} />
+            {shogiStatus ? <p className="shogi-viewer-status" role="status">{shogiStatus}</p> : null}
+            <ChessViewer enabled={attachmentsEnabled} onStatus={setBoardGameStatus} />
+            <GoViewer enabled={attachmentsEnabled} onStatus={setBoardGameStatus} />
+            {boardGameStatus ? <p className="board-game-viewer-status" role="status">{boardGameStatus}</p> : null}
             {selectedNode.attachments.length ? (
               <div className="attachment-list panel-preview-list">
                 {selectedNode.attachments.map((attachment) => (

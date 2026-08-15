@@ -17,3 +17,21 @@ endorsement or official status. See [TRADEMARKS.md](TRADEMARKS.md).
 
 Alternative commercial licensing may be available under a separate written
 agreement. See [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
+
+## Third-party components
+
+The local developer-mode shogi viewer uses `shogiground`, Copyright (C)
+contributors, licensed under the GNU General Public License version 3 or later
+(`GPL-3.0-or-later`). Its source and license text are distributed through the
+corresponding package in `node_modules` and its upstream repository.
+
+Shogi record parsing and KIF/KI2/CSA conversion use `tsshogi`, licensed under
+the MIT License.
+
+The local developer-mode chess viewer uses `chessground`, licensed under the
+GNU General Public License version 3 or later (`GPL-3.0-or-later`). Chess PGN
+parsing and legal move handling use `chessops`, licensed under the GNU General
+Public License version 3 or later (`GPL-3.0-or-later`).
+
+The local developer-mode Go viewer uses `@sabaki/go-board` and `@sabaki/sgf`,
+both licensed under the MIT License.

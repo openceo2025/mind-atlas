@@ -87,6 +87,7 @@ import type {
   NotificationPulse,
   NotificationPulseKind,
   NodeAttachment,
+  NotebookMode,
   OpenClawSettings,
   Selection,
   ViewportState,
@@ -308,6 +309,10 @@ interface AtlasStore {
   setCodexSettings: (patch: Partial<CodexSettings>) => void;
   /** One work root shared by every agent provider on this branch. */
   setAgentWorkspace: (workspace: string) => void;
+  /** Persist a user-supplied Codex session id as the selected node's session seed. */
+  commitCodexSessionIdToNode: (id: string, sessionId: string) => void;
+  /** Persist a user-supplied Claude Code session id as the selected node's session seed. */
+  commitClaudeSessionIdToNode: (id: string, sessionId: string) => void;
   setOpenClawSettings: (patch: Partial<OpenClawSettings>) => void;
   setClaudeSettings: (patch: Partial<ClaudeSettings>) => void;
   loadAiDialogSettingsForNode: (id: string) => void;
@@ -324,8 +329,8 @@ interface AtlasStore {
   setVoiceSessionSummary: (summary: VoiceSessionSummary | null) => void;
   setVoicePartnerSettings: (settings: Partial<VoicePartnerSettings>) => void;
   focusParentNode: () => void;
-  updateNode: (id: string, patch: Partial<Pick<AtlasNode, "title" | "body" | "tags" | "summary" | "nextDecision">>) => void;
-  updateNodeLive: (id: string, patch: Partial<Pick<AtlasNode, "title" | "body" | "tags" | "summary" | "nextDecision">>, options?: { history?: boolean }) => void;
+  updateNode: (id: string, patch: Partial<Pick<AtlasNode, "title" | "body" | "tags" | "summary" | "nextDecision" | "structuredContent">>) => void;
+  updateNodeLive: (id: string, patch: Partial<Pick<AtlasNode, "title" | "body" | "tags" | "summary" | "nextDecision" | "structuredContent">>, options?: { history?: boolean }) => void;
   setNodeReminder: (id: string, reminderAt: string) => void;
   setNodeReminders: (updates: NodeReminderUpdate[]) => NodeReminderUpdateResult;
   clearNodeReminder: (id: string) => void;
@@ -371,7 +376,7 @@ interface AtlasStore {
     root: AtlasNode,
     datasetName?: string,
     attachmentPreviewUrls?: Record<string, string>,
-    options?: { selectedNodeId?: string; requestTitleEdit?: boolean },
+    options?: { selectedNodeId?: string; requestTitleEdit?: boolean; notebookMode?: NotebookMode },
   ) => void;
   applyOutlineSubtree: (rootId: string, outline: OutlineNodeInput, options?: { focusKey?: string }) => void;
   resetNotebook: () => void;
@@ -665,6 +670,76 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   requestNewAgentSession: (enabled = true) => {
     set({ forceNewAgentSession: enabled });
   },
+  commitCodexSessionIdToNode: (id, sessionId) => {
+    const normalized = sessionId.trim().slice(0, 160);
+    set((state) => {
+      const currentNode = findNode(state.atlasRoot, id);
+      if (!currentNode) return {};
+
+      const codexSettings = normalizeCodexSettings({
+        ...state.codexSettings,
+        continueMode: normalized ? "auto" : "new",
+        resumeThreadId: normalized,
+      });
+      const existingSettings = currentNode.aiDialogSettings;
+      const aiDialogSettings = createCurrentAiDialogSettings(
+        existingSettings?.contextOptions ?? state.aiContextOptions,
+        existingSettings?.chatSettings ?? state.chatSettings,
+        codexSettings,
+        existingSettings?.openClawSettings ?? state.openClawSettings,
+        existingSettings?.claudeSettings ?? state.claudeSettings,
+      );
+      if (
+        currentNode.codexThreadId === (normalized || undefined)
+        && JSON.stringify(existingSettings?.codexSettings ?? {}) === JSON.stringify(aiDialogSettings.codexSettings)
+      ) return {};
+
+      const updatedAt = new Date().toISOString();
+      const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => ({
+        ...node,
+        codexThreadId: normalized || undefined,
+        aiDialogSettings,
+        updatedAt,
+      }));
+      persistNotebook(atlasRoot);
+      return { atlasRoot };
+    });
+  },
+  commitClaudeSessionIdToNode: (id, sessionId) => {
+    const normalized = sessionId.trim().slice(0, 160);
+    set((state) => {
+      const currentNode = findNode(state.atlasRoot, id);
+      if (!currentNode) return {};
+
+      const claudeSettings = normalizeClaudeSettings({
+        ...state.claudeSettings,
+        continueMode: normalized ? "auto" : "new",
+        resumeSessionId: normalized,
+      });
+      const existingSettings = currentNode.aiDialogSettings;
+      const aiDialogSettings = createCurrentAiDialogSettings(
+        existingSettings?.contextOptions ?? state.aiContextOptions,
+        existingSettings?.chatSettings ?? state.chatSettings,
+        existingSettings?.codexSettings ?? state.codexSettings,
+        existingSettings?.openClawSettings ?? state.openClawSettings,
+        claudeSettings,
+      );
+      if (
+        currentNode.claudeSessionId === (normalized || undefined)
+        && JSON.stringify(existingSettings?.claudeSettings ?? {}) === JSON.stringify(aiDialogSettings.claudeSettings)
+      ) return {};
+
+      const updatedAt = new Date().toISOString();
+      const atlasRoot = updateNodeById(state.atlasRoot, id, (node) => ({
+        ...node,
+        claudeSessionId: normalized || undefined,
+        aiDialogSettings,
+        updatedAt,
+      }));
+      persistNotebook(atlasRoot);
+      return { atlasRoot };
+    });
+  },
   setAiContextOptions: (patch) => {
     set((state) => ({
       ...withAiDialogSettingsDraft(state, {
@@ -766,13 +841,30 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const path = findNodePath(get().atlasRoot, id);
     const settings = path ? findAiDialogSettingsInPath(path) : undefined;
     set((state) => {
-      const codexSettings = normalizeCodexSettings(settings?.codexSettings ?? DEFAULT_CODEX_SETTINGS);
-      const claudeSettings = normalizeClaudeSettings(settings?.claudeSettings ?? DEFAULT_CLAUDE_SETTINGS);
+      const inheritedCodexThreadId = path ? inferCodexThreadIdFromNodePath(path) : "";
+      const inheritedClaudeSessionId = path ? inferClaudeSessionIdFromNodePath(path) : "";
+      // Workspace bindings are branch-level infrastructure, not provider
+      // settings. The nearest explicit binding therefore wins over an older
+      // workspace draft saved on an ancestor or on the other provider.
+      const inheritedWorkspaceBinding = findInheritedAgentWorkspaceBinding(state.atlasRoot, id);
+      const codexSettings = normalizeCodexSettings({
+        ...(settings?.codexSettings ?? DEFAULT_CODEX_SETTINGS),
+        ...(!settings?.codexSettings?.resumeThreadId && inheritedCodexThreadId
+          ? { resumeThreadId: inheritedCodexThreadId }
+          : {}),
+      });
+      const claudeSettings = normalizeClaudeSettings({
+        ...(settings?.claudeSettings ?? DEFAULT_CLAUDE_SETTINGS),
+        ...(!settings?.claudeSettings?.resumeSessionId && inheritedClaudeSessionId
+          ? { resumeSessionId: inheritedClaudeSessionId }
+          : {}),
+      });
       // A node that recorded a work root for only one provider must not look
       // empty under the other, and a node with no work root at all keeps the
       // one already on screen.
       const workspace =
-        codexSettings.workspace.trim()
+        inheritedWorkspaceBinding?.gitRoot?.trim()
+        || codexSettings.workspace.trim()
         || claudeSettings.workspace.trim()
         || state.codexSettings.workspace.trim()
         || state.claudeSettings.workspace.trim();
@@ -1680,8 +1772,10 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   importNotebook: (root, datasetName, nextAttachmentPreviewUrls = {}, options = {}) => {
     const current = get();
     Object.values(current.attachmentPreviewUrls).forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
+    const notebookMode = normalizeNotebookMode(options.notebookMode ?? root.notebookMode);
     const normalizedRoot = {
       ...ensureNotebookNode(root),
+      notebookMode,
       ...(datasetName ? { title: datasetName, subtitle: datasetName, updatedAt: new Date().toISOString() } : {}),
     };
     const repair = repairDuplicateNodeIds(normalizedRoot);
@@ -1707,6 +1801,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       unreadNotifications,
       notificationPulses: [],
       notificationSnoozePrompt: null,
+      layoutMode: notebookMode === "standard" ? current.layoutMode : "phyllotaxis",
       titleEditRequestId:
         options.requestTitleEdit === false || selectedNode.id === atlasRoot.id ? null : selectedNode.id,
       bodyEditRequestId: null,
@@ -2500,7 +2595,13 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
           ...(result.agentRuntimeRunId
             ? {
                 agentWorkspaceSelectedRunId: result.agentRuntimeRunId,
-                agentWorkspaceVisible: true,
+                // A background result must not open the run dialog over an
+                // input the user is currently editing. The durable run,
+                // notification pulse, and unread marker are still retained;
+                // the user can open it from the Agent runs launcher later.
+                ...(current.agentWorkspaceVisible || !current.commandInputEditing
+                  ? { agentWorkspaceVisible: true }
+                  : {}),
               }
             : {}),
         };
@@ -3613,7 +3714,10 @@ function loadStoredVoicePartnerSettings(): VoicePartnerSettings {
 }
 
 function createInitialNotebook() {
-  return ensureNotebookNode(JSON.parse(JSON.stringify(atlasRoot)) as AtlasNode);
+  return {
+    ...ensureNotebookNode(JSON.parse(JSON.stringify(atlasRoot)) as AtlasNode),
+    notebookMode: "standard" as const,
+  };
 }
 
 function persistNotebook(root: AtlasNode): Promise<void> {
@@ -5744,6 +5848,7 @@ function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCou
   const depth = parentPath.length;
   const base: AtlasNode = {
     ...node,
+    ...(depth === 0 ? { notebookMode: normalizeNotebookMode(node.notebookMode) } : {}),
     nodeType: node.nodeType ?? "note",
     body: node.body ?? node.summary ?? "",
     author: node.author ?? "human",
@@ -5763,6 +5868,10 @@ function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCou
     ...base,
     children: (node.children ?? []).map((child) => ensureNotebookTree(child, [...parentPath, base], node.children.length)),
   };
+}
+
+function normalizeNotebookMode(value: unknown): NotebookMode {
+  return value === "shogi" || value === "chess" || value === "go" ? value : "standard";
 }
 
 interface AiContextTruncationStats {

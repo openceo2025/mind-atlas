@@ -86,6 +86,9 @@ export interface ResonanceLink {
 
 export type AtlasNodeKind = "root" | "workArea" | "artifact" | "event" | "concept" | "thread";
 
+/** The optional feature mode owned by the notebook root. */
+export type NotebookMode = "standard" | "shogi" | "chess" | "go";
+
 export type PlanetTexture = "speckled" | "bands" | "freckles" | "craters" | "mist" | "cell";
 
 export type AiExecutionMode = "chat" | "openai" | "local" | "codex" | "openclaw" | "claude";
@@ -929,6 +932,8 @@ export interface AtlasNode {
   id: string;
   kind: AtlasNodeKind;
   nodeType: NotebookNodeType;
+  /** Persisted on the root node so board-game notebooks reopen in their mode. */
+  notebookMode?: NotebookMode;
   title: string;
   subtitle: string;
   body: string;
@@ -966,10 +971,68 @@ export interface AtlasNode {
   usage?: AiUsage;
   action?: AtlasNodeAction;
   aiDialogSettings?: AiDialogSettings;
+  /** Local-only structured content owned by an optional feature module. */
+  structuredContent?: AtlasStructuredContent;
   reminderAt?: string;
   reminderFiredAt?: string;
   children: AtlasNode[];
 }
+
+export type ShogiRecordFormat = "kif" | "ki2" | "csa" | "new";
+
+export interface ShogiRecordContent {
+  kind: "shogi-record";
+  schemaVersion: 1;
+  role: "record-root" | "move";
+  recordId: string;
+  sourceFormat: ShogiRecordFormat;
+  ply: number;
+  sfen: string;
+  usi?: string;
+  displayText?: string;
+  branchIndex?: number;
+  metadata?: Record<string, string>;
+}
+
+export type ChessRecordFormat = "pgn" | "new";
+
+export interface ChessRecordContent {
+  kind: "chess-record";
+  schemaVersion: 1;
+  role: "record-root" | "move";
+  recordId: string;
+  sourceFormat: ChessRecordFormat;
+  ply: number;
+  fen: string;
+  uci?: string;
+  san?: string;
+  displayText?: string;
+  branchIndex?: number;
+  nags?: number[];
+  metadata?: Record<string, string>;
+}
+
+export type GoRecordFormat = "sgf" | "new";
+
+export interface GoRecordContent {
+  kind: "go-record";
+  schemaVersion: 1;
+  role: "record-root" | "move";
+  recordId: string;
+  sourceFormat: GoRecordFormat;
+  ply: number;
+  boardSize: number;
+  board: string;
+  color?: "B" | "W";
+  vertex?: string;
+  displayText?: string;
+  branchIndex?: number;
+  setupBlack?: string[];
+  setupWhite?: string[];
+  metadata?: Record<string, string>;
+}
+
+export type AtlasStructuredContent = ShogiRecordContent | ChessRecordContent | GoRecordContent;
 
 export interface AgentWorkspaceBinding {
   /** Legacy field name; stores the canonical bound root for either binding kind. */

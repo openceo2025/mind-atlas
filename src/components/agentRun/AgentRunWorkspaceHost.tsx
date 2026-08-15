@@ -24,6 +24,7 @@ export function AgentRunWorkspaceHost() {
   const selectedRunId = useAtlasStore((state) => state.agentWorkspaceSelectedRunId);
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
+  const commandInputEditing = useAtlasStore((state) => state.commandInputEditing);
   const visible = useAtlasStore((state) => state.agentWorkspaceVisible);
   const selectAgentWorkspaceRun = useAtlasStore((state) => state.selectAgentWorkspaceRun);
   const openAgentWorkspaceRun = useAtlasStore((state) => state.openAgentWorkspaceRun);
@@ -130,6 +131,10 @@ export function AgentRunWorkspaceHost() {
     previousSyncState.current = { selectedNodeId, shownRunId, visible };
 
     if (visible && (runChanged || workspaceOpened)) {
+      // Completion of a different background run must never move the Atlas
+      // selection while the Code dock has an active field or prompt draft.
+      // The run remains selectable from the workspace launcher.
+      if (commandInputEditing) return;
       if (selectedNodeRunId === shownRunId) return;
       const manifest = runs.find((entry) => entry.runId === shownRunId);
       const linkedNodeId = manifest ? findNodeIdForRun(atlasRoot, manifest) : "";
@@ -142,7 +147,7 @@ export function AgentRunWorkspaceHost() {
       setLastStoredRunId(selectedNodeRunId);
       selectAgentWorkspaceRun(selectedNodeRunId);
     }
-  }, [atlasRoot, focusNode, runs, selectAgentWorkspaceRun, selectedNodeId, selectedNodeRunId, shownRunId, visible]);
+  }, [atlasRoot, commandInputEditing, focusNode, runs, selectAgentWorkspaceRun, selectedNodeId, selectedNodeRunId, shownRunId, visible]);
 
   const selectRunFromWorkspace = useCallback((nextRunId: string) => {
     rememberRunId(nextRunId);

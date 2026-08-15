@@ -125,6 +125,8 @@ export function CommandDock() {
   const requestNewAgentSession = useAtlasStore((state) => state.requestNewAgentSession);
   const bindAgentWorkspaceToSelectedNode = useAtlasStore((state) => state.bindAgentWorkspaceToSelectedNode);
   const setAgentWorkspace = useAtlasStore((state) => state.setAgentWorkspace);
+  const commitCodexSessionIdToNode = useAtlasStore((state) => state.commitCodexSessionIdToNode);
+  const commitClaudeSessionIdToNode = useAtlasStore((state) => state.commitClaudeSessionIdToNode);
   const selectedNode = findNode(atlasRoot, selectedNodeId);
   const effectiveAiContextOptions = PUBLIC_SERVICE_MODE
     ? { ...aiContextOptions, scope: "path-children" as AiContextScope }
@@ -261,6 +263,11 @@ export function CommandDock() {
     inspectedWorkspaceKind
     && inheritedAgentWorkspace?.gitRoot
     && inheritedWorkspaceKind === inspectedWorkspaceKind
+    // A deliberate edit of the visible work-root string is a deliberate
+    // unbind/rebind choice, even when the edited path is another folder in
+    // the same Git repository. The binding is canonicalized back to the
+    // inspected repository root only after the user presses Bind.
+    && normalizeWorkspacePath(agentWorkspacePath) === normalizeWorkspacePath(inheritedAgentWorkspace.gitRoot)
     && (
       inspectedWorkspaceKind === "git" && inheritedAgentWorkspace.repositoryId && agentWorkspaceInfo?.repositoryId
         ? inheritedAgentWorkspace.repositoryId === agentWorkspaceInfo.repositoryId
@@ -689,6 +696,11 @@ export function CommandDock() {
     if (modelDiscoveryBlocked) {
       recordBlockedSubmission(modelDiscoveryBlockReason);
       return;
+    }
+    if (mode === "codex") {
+      commitCodexSessionIdToNode(selectedNodeId, codexSettings.resumeThreadId ?? "");
+    } else if (mode === "claude") {
+      commitClaudeSessionIdToNode(selectedNodeId, claudeSettings.resumeSessionId ?? "");
     }
     setVoiceError("");
     clearCommandDraftPersistTimer();
@@ -1488,6 +1500,30 @@ export function CommandDock() {
               placeholder={formatAppMessage("ui.commandDock.workspaceFromSelectedNodeOr.f430333")}
             />
           </label>
+          <label className="context-option-field codex-session-id-field">
+            <span>{<I18nText id="label.codexSessionId" />}</span>
+            <input
+              aria-label={formatAppMessage("label.codexSessionId")}
+              value={codexSettings.resumeThreadId ?? ""}
+              autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => {
+                setCommandInputEditing(false);
+                commitCodexSessionIdToNode(selectedNodeId, codexSettings.resumeThreadId ?? "");
+              }}
+              onChange={(event) => {
+                const sessionId = event.target.value;
+                setCodexSettings({
+                  continueMode: sessionId.trim() ? "auto" : "new",
+                  resumeThreadId: sessionId,
+                });
+                requestNewAgentSession(!sessionId.trim());
+              }}
+            />
+          </label>
           <label className="context-option-field">
             <span>Workspace</span>
             <select
@@ -1593,6 +1629,30 @@ export function CommandDock() {
               placeholder={formatAppMessage("ui.commandDock.optionalProjectPath.6fcecc8")}
             />
           </label>
+          <label className="context-option-field agent-session-id-field">
+            <span>{<I18nText id="label.claudeCodeSessionId" />}</span>
+            <input
+              aria-label={formatAppMessage("label.claudeCodeSessionId")}
+              value={claudeSettings.resumeSessionId ?? ""}
+              autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              onFocus={() => setCommandInputEditing(true)}
+              onBlur={() => {
+                setCommandInputEditing(false);
+                commitClaudeSessionIdToNode(selectedNodeId, claudeSettings.resumeSessionId ?? "");
+              }}
+              onChange={(event) => {
+                const sessionId = event.target.value;
+                setClaudeSettings({
+                  continueMode: sessionId.trim() ? "auto" : "new",
+                  resumeSessionId: sessionId,
+                });
+                requestNewAgentSession(!sessionId.trim());
+              }}
+            />
+          </label>
           <label className="context-option-field">
             <span>Workspace</span>
             <select
@@ -1663,6 +1723,10 @@ export function CommandDock() {
               type="button"
               className="agent-btn"
               onClick={() => {
+                // Persist the canonical path that was actually inspected so
+                // the input immediately returns to the new binding and the
+                // same path is shared by Codex, Claude API, and Claude Pro.
+                setAgentWorkspace(inspectedWorkspaceRoot);
                 bindAgentWorkspaceToSelectedNode({
                   gitRoot: inspectedWorkspaceRoot,
                   workspaceKind: inspectedWorkspaceKind === "directory" ? "directory" : "git",

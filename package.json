@@ -37,6 +37,10 @@
     "verify:templates": "node --experimental-strip-types scripts/verify-notebook-templates.ts",
     "verify:layout": "node --experimental-strip-types scripts/verify-layout.ts",
     "verify:node-search": "node --experimental-strip-types scripts/verify-node-search.ts",
+    "verify:shogi": "node --experimental-strip-types scripts/verify-shogi-record.ts",
+    "verify:chess": "node --experimental-strip-types scripts/verify-chess-record.ts",
+    "verify:go": "node --experimental-strip-types scripts/verify-go-record.ts",
+    "verify:board-ui": "node scripts/verify-board-ui.mjs",
     "verify:node-error-acknowledgement": "node --experimental-strip-types scripts/verify-node-error-acknowledgement.ts",
     "verify:ui": "node scripts/verify-ui.mjs",
     "i18n:verify": "node --experimental-strip-types scripts/verify-i18n.ts && node scripts/i18n-scan-hardcoded.mjs",
@@ -48,6 +52,10 @@
   "dependencies": {
     "@react-three/drei": "^10.0.0",
     "@react-three/fiber": "^9.0.0",
+    "@sabaki/go-board": "^1.4.3",
+    "@sabaki/sgf": "^3.5.0",
+    "chessground": "^9.2.1",
+    "chessops": "^0.15.1",
     "fflate": "^0.8.2",
     "html-to-image": "^1.11.13",
     "lucide-react": "^0.475.0",
@@ -55,7 +63,9 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-intl": "^10.1.16",
+    "shogiground": "^0.10.3",
     "three": "^0.173.0",
+    "tsshogi": "^2.3.4",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

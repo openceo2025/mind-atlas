@@ -295,6 +295,26 @@ async function verifyLocalDeveloperModeSurface(browser) {
   await repositoryGuard.getByText("Bound", { exact: true }).waitFor();
   const codexWorkRootInput = page.locator(".code-options-row .codex-workspace-field input").first();
   const boundWorkRoot = await codexWorkRootInput.inputValue();
+  await page.keyboard.press("Control+f");
+  const workspaceChildSearch = page.locator(".node-search-dialog");
+  await workspaceChildSearch.waitFor({ state: "visible" });
+  await workspaceChildSearch.locator('input[type="search"]').fill("Verify Child");
+  await workspaceChildSearch.locator(".node-search-result").first().click();
+  await workspaceChildSearch.waitFor({ state: "detached" });
+  await page.waitForFunction(
+    ({ selector, expected }) => document.querySelector(selector)?.value === expected,
+    { selector: ".code-options-row .codex-workspace-field input", expected: boundWorkRoot },
+  );
+  await repositoryGuard.getByText("Bound", { exact: true }).waitFor();
+  const editedWorkRoot = `${boundWorkRoot}\\src`;
+  await codexWorkRootInput.fill(editedWorkRoot);
+  const rebindRepository = repositoryGuard.getByRole("button", { name: "Rebind this branch" });
+  await rebindRepository.waitFor();
+  await rebindRepository.click();
+  await repositoryGuard.getByText("Bound", { exact: true }).waitFor();
+  if (await codexWorkRootInput.inputValue() !== boundWorkRoot) {
+    throw new Error("Rebinding did not restore the canonical bound work root.");
+  }
   await codexWorkRootInput.fill("");
   const restoreBoundWorkRoot = repositoryGuard.getByRole("button", { name: "Restore bound work root" });
   await restoreBoundWorkRoot.waitFor();
@@ -334,6 +354,43 @@ async function verifyLocalDeveloperModeSurface(browser) {
   if (!claudeWorkRoot.trim()) {
     throw new Error("Switching to Claude Code Pro cleared the work root.");
   }
+  const claudeSessionIdInput = page.locator(".claude-options-row .agent-session-id-field input");
+  await claudeSessionIdInput.waitFor();
+  const importedClaudeSessionId = "019ff06f-8c5c-7b83-a516-4e6c5777e129";
+  await claudeSessionIdInput.fill(importedClaudeSessionId);
+  if (await claudeSessionIdInput.inputValue() !== importedClaudeSessionId) {
+    throw new Error("Claude Code session ID input did not retain the pasted session id.");
+  }
+  await claudeSessionIdInput.blur();
+  await page.waitForTimeout(350);
+  const persistedClaudeSessionId = await page.evaluate(() => new Promise((resolve) => {
+    const open = indexedDB.open("mind-atlas-notebook");
+    open.onerror = () => resolve("");
+    open.onsuccess = () => {
+      const db = open.result;
+      const request = db.transaction("meta", "readonly").objectStore("meta").get("current");
+      request.onerror = () => {
+        db.close();
+        resolve("");
+      };
+      request.onsuccess = () => {
+        const root = request.result?.root;
+        db.close();
+        const visit = (node) => {
+          if (node?.claudeSessionId) return node.claudeSessionId;
+          for (const child of node?.children ?? []) {
+            const found = visit(child);
+            if (found) return found;
+          }
+          return "";
+        };
+        resolve(visit(root));
+      };
+    };
+  }));
+  if (persistedClaudeSessionId !== importedClaudeSessionId) {
+    throw new Error(`Claude Code session ID was not written to the selected node: ${persistedClaudeSessionId}`);
+  }
 
   await backendSelect.selectOption("codex");
   if ((await page.locator(".code-options-row").innerText()).includes("Timeout")) {
@@ -343,10 +400,47 @@ async function verifyLocalDeveloperModeSurface(browser) {
   if (codexWorkRoot !== claudeWorkRoot) {
     throw new Error(`Work root changed when switching provider: codex=${codexWorkRoot} claude=${claudeWorkRoot}`);
   }
+  const codexSessionIdInput = page.locator(".code-options-row .codex-session-id-field input");
+  await codexSessionIdInput.waitFor();
+  const importedCodexSessionId = "019ff06f-8c5c-7b83-a516-4e6c5777e128";
+  await codexSessionIdInput.fill(importedCodexSessionId);
+  if (await codexSessionIdInput.inputValue() !== importedCodexSessionId) {
+    throw new Error("Codex session ID input did not retain the pasted session id.");
+  }
+  await codexSessionIdInput.blur();
+  await page.waitForTimeout(350);
+  const persistedCodexSessionId = await page.evaluate(() => new Promise((resolve) => {
+    const open = indexedDB.open("mind-atlas-notebook");
+    open.onerror = () => resolve("");
+    open.onsuccess = () => {
+      const db = open.result;
+      const request = db.transaction("meta", "readonly").objectStore("meta").get("current");
+      request.onerror = () => {
+        db.close();
+        resolve("");
+      };
+      request.onsuccess = () => {
+        const root = request.result?.root;
+        db.close();
+        const visit = (node) => {
+          if (node?.codexThreadId) return node.codexThreadId;
+          for (const child of node?.children ?? []) {
+            const found = visit(child);
+            if (found) return found;
+          }
+          return "";
+        };
+        resolve(visit(root));
+      };
+    };
+  }));
+  if (persistedCodexSessionId !== importedCodexSessionId) {
+    throw new Error(`Codex session ID was not written to the selected node: ${persistedCodexSessionId}`);
+  }
   const codexModels = await page.locator(".code-options-row select").nth(1).locator("option")
     .evaluateAll((options) => options.map((option) => ({ value: option.getAttribute("value"), label: option.textContent?.trim() })));
-  if (!codexModels.some((option) => option.value === "gpt-5.3-codex-spark")) {
-    throw new Error(`Codex Spark is missing from the model selector: ${JSON.stringify(codexModels)}`);
+  if (!codexModels.length || !codexModels.some((option) => /^(gpt-|codex-)/i.test(option.value ?? ""))) {
+    throw new Error(`The live Codex model selector did not expose a usable Codex model: ${JSON.stringify(codexModels)}`);
   }
 
   await page.getByRole("button", { name: "OpenClaw" }).click();
@@ -371,7 +465,9 @@ async function verifyLocalDeveloperModeSurface(browser) {
     proPresets,
     chatServices,
     claudeWorkRoot,
+    claudeSessionIdInput: importedClaudeSessionId,
     codexWorkRoot,
+    codexSessionIdInput: importedCodexSessionId,
     localSavePrevented,
     repositoryText,
     agentRunsReopened: true,

@@ -1,6 +1,10 @@
 import type {
   AgentExecutionMetadata,
   AgentApprovalRecord,
+  AtlasStructuredContent,
+  ChessRecordContent,
+  GoRecordContent,
+  ShogiRecordContent,
   AgentWorkspaceBinding,
   AiContextOptions,
   AiDialogSettings,
@@ -21,6 +25,7 @@ import type {
   CodexSandboxMode,
   CodexSettings,
   NodeAttachment,
+  NotebookMode,
   NotebookNodeType,
   OpenClawSettings,
   PlanetTexture,
@@ -92,6 +97,7 @@ export function sanitizeNotebookForExport(node: AtlasNode, options: NotebookExpo
   assignOptionalString(sanitized, "reminderFiredAt", source.reminderFiredAt);
 
   if (isVec3(source.position)) sanitized.position = source.position;
+  if (isNotebookMode(source.notebookMode)) sanitized.notebookMode = source.notebookMode;
   if (AI_PROVIDERS.includes(source.provider as AiProvider)) sanitized.provider = source.provider as AiProvider;
   if (AI_EXECUTION_MODES.includes(source.runMode as AiExecutionMode)) sanitized.runMode = source.runMode as AiExecutionMode;
 
@@ -116,7 +122,110 @@ export function sanitizeNotebookForExport(node: AtlasNode, options: NotebookExpo
   const agentApproval = sanitizeAgentApprovalRecord(source.agentApproval);
   if (agentApproval) sanitized.agentApproval = agentApproval;
 
+  const structuredContent = sanitizeStructuredContent(source.structuredContent);
+  if (structuredContent) sanitized.structuredContent = structuredContent;
+
   return sanitized;
+}
+
+function sanitizeStructuredContent(value: unknown): AtlasStructuredContent | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const source = value as { kind?: unknown; schemaVersion?: unknown };
+  if (source.kind === "shogi-record") return sanitizeShogiStructuredContent(value);
+  if (source.kind === "chess-record") return sanitizeChessStructuredContent(value);
+  if (source.kind === "go-record") return sanitizeGoStructuredContent(value);
+  return undefined;
+}
+
+function sanitizeShogiStructuredContent(value: unknown): AtlasStructuredContent | undefined {
+  const source = value as Record<string, unknown>;
+  if (source.schemaVersion !== 1 || (source.role !== "record-root" && source.role !== "move")) return undefined;
+  if (typeof source.recordId !== "string" || !source.recordId || typeof source.sfen !== "string" || !source.sfen) return undefined;
+  if (!["kif", "ki2", "csa", "new"].includes(source.sourceFormat as string)) return undefined;
+  const ply = boundedPly(source.ply);
+  if (ply === undefined) return undefined;
+  const content = {
+    kind: "shogi-record" as const,
+    schemaVersion: 1 as const,
+    role: source.role as "record-root" | "move",
+    recordId: safeBoundedText(source.recordId, "shogi", 240),
+    sourceFormat: source.sourceFormat as "kif" | "ki2" | "csa" | "new",
+    ply,
+    sfen: safeBoundedText(source.sfen, "", 500),
+  } as ShogiRecordContent;
+  addCommonStructuredFields(content as unknown as Record<string, unknown>, source);
+  return content;
+}
+
+function sanitizeChessStructuredContent(value: unknown): AtlasStructuredContent | undefined {
+  const source = value as Record<string, unknown>;
+  if (source.schemaVersion !== 1 || (source.role !== "record-root" && source.role !== "move")) return undefined;
+  if (typeof source.recordId !== "string" || !source.recordId || typeof source.fen !== "string" || !source.fen) return undefined;
+  if (!["pgn", "new"].includes(source.sourceFormat as string)) return undefined;
+  const ply = boundedPly(source.ply);
+  if (ply === undefined) return undefined;
+  const content = {
+    kind: "chess-record" as const,
+    schemaVersion: 1 as const,
+    role: source.role as "record-root" | "move",
+    recordId: safeBoundedText(source.recordId, "chess", 240),
+    sourceFormat: source.sourceFormat as "pgn" | "new",
+    ply,
+    fen: safeBoundedText(source.fen, "", 500),
+  } as ChessRecordContent;
+  addCommonStructuredFields(content as unknown as Record<string, unknown>, source);
+  if (Array.isArray(source.nags)) content.nags = source.nags.filter((nag): nag is number => Number.isInteger(nag) && nag >= 0 && nag <= 255).slice(0, 32);
+  return content;
+}
+
+function sanitizeGoStructuredContent(value: unknown): AtlasStructuredContent | undefined {
+  const source = value as Record<string, unknown>;
+  if (source.schemaVersion !== 1 || (source.role !== "record-root" && source.role !== "move")) return undefined;
+  if (typeof source.recordId !== "string" || !source.recordId || typeof source.board !== "string") return undefined;
+  if (!["sgf", "new"].includes(source.sourceFormat as string)) return undefined;
+  const boardSize = typeof source.boardSize === "number" ? source.boardSize : undefined;
+  if (typeof boardSize !== "number" || !Number.isInteger(boardSize) || boardSize < 2 || boardSize > 25) return undefined;
+  if (source.board.length !== boardSize * boardSize || !/^[.XO]+$/.test(source.board)) return undefined;
+  const ply = boundedPly(source.ply);
+  if (ply === undefined) return undefined;
+  const content = {
+    kind: "go-record" as const,
+    schemaVersion: 1 as const,
+    role: source.role as "record-root" | "move",
+    recordId: safeBoundedText(source.recordId, "go", 240),
+    sourceFormat: source.sourceFormat as "sgf" | "new",
+    ply,
+    boardSize: boardSize as number,
+    board: source.board,
+  } as GoRecordContent;
+  addCommonStructuredFields(content as unknown as Record<string, unknown>, source);
+  if (source.color === "B" || source.color === "W") content.color = source.color;
+  for (const key of ["setupBlack", "setupWhite"] as const) {
+    if (Array.isArray(source[key])) content[key] = source[key].filter((item): item is string => typeof item === "string" && /^[A-Z]{1,2}\d{1,2}$/.test(item)).slice(0, 625);
+  }
+  return content;
+}
+
+function addCommonStructuredFields(content: Record<string, unknown>, source: Record<string, unknown>) {
+  for (const key of ["uci", "san", "vertex", "displayText"] as const) {
+    const text = safeOptionalBoundedText(source[key], 240);
+    if (text) content[key] = text;
+  }
+  if (Number.isInteger(source.branchIndex) && (source.branchIndex as number) >= 0 && (source.branchIndex as number) < 1000) {
+    content.branchIndex = source.branchIndex;
+  }
+  if (source.metadata && typeof source.metadata === "object") {
+    const entries = Object.entries(source.metadata)
+      .filter(([key, item]) => typeof key === "string" && typeof item === "string")
+      .slice(0, 80)
+      .map(([key, item]) => [safeBoundedText(key, "", 120), safeBoundedText(item, "", 1000)] as const)
+      .filter(([key, item]) => key && item);
+    if (entries.length) content.metadata = Object.fromEntries(entries);
+  }
+}
+
+function boundedPly(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 10000 ? value : undefined;
 }
 
 function sanitizeAgentWorkspaceBinding(value: unknown): AgentWorkspaceBinding | undefined {
@@ -262,6 +371,10 @@ function assignOptionalString(
 
 function isNodeAuthor(value: unknown): value is AtlasNode["author"] {
   return value === "human" || value === "ai" || value === "tool" || value === "system";
+}
+
+function isNotebookMode(value: unknown): value is NotebookMode {
+  return value === "standard" || value === "shogi" || value === "chess" || value === "go";
 }
 
 function isVec3(value: unknown): value is [number, number, number] {
