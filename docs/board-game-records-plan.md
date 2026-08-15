@@ -1,15 +1,17 @@
 # Board Game Records and Analysis Plan
 
-Status: canonical implementation brief - Phase 1 shogi, chess, and Go import/view/edit plus mode-aware board layout are implemented locally; analysis remains pending
+Status: canonical implementation brief - Phase 1 shogi, chess, and Go import/view/edit plus mode-aware board layout are implemented in Local Developer Mode and Hosted Public Mode; analysis remains pending
 
-Phase 1 local delivery now covers Shogi KIF/KI2/CSA, Chess PGN, and Go SGF:
-records are converted into Atlas nodes, viewed in the existing attachment
-preview window, edited by legal board moves, navigated through variations, and
-exported back to the canonical format. Hosted public mode does not expose these
-file formats or viewers. Imported notebooks persist a root-level
-`standard`/`shogi`/`chess`/`go` mode. Board mode resets the local workspace
-before import, restores automatically on package reload, and uses a fixed
-board/editor layout on desktop and mobile. Engine analysis and multi-game
+Phase 1 delivery now covers Shogi KIF/KI2/CSA, Chess PGN, and Go SGF in both
+local and hosted modes: records are converted into Atlas nodes, viewed in the
+existing preview window, edited by legal board moves, navigated through
+variations, and exported back to the canonical format. Hosted mode remains
+text-only for ordinary attachments and continues to hide all local developer
+and agent surfaces, but board structured content is allowed through a bounded
+sanitizer so cloud save/load and public sharing preserve the board mode. Imported notebooks persist a root-level
+`standard`/`shogi`/`chess`/`go` mode. Board mode resets the current workspace
+before import, restores automatically on cloud/package reload, and uses a
+fixed board/editor layout on desktop and mobile. Engine analysis and multi-game
 selection remain future work.
 
 Last reviewed: 2026-08-15

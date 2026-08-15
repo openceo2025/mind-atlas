@@ -285,6 +285,8 @@ try {
     if (!mobileEditorState.ok) throw new Error(`Hosted mobile editor is not compact: ${JSON.stringify(mobileEditorState)}`);
     await signedOutMobilePage.close();
 
+    await verifyHostedBoardImport(browser);
+
     mockSessionMode = "active";
     const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
     await seedCompletedOnboarding(page);
@@ -627,6 +629,57 @@ async function verifyAboutEmbeddedTouchScroll(browser) {
     return { before, after, delta: after - before, nodeTapForwarded: true, pointerState };
   } finally {
     await context.close();
+  }
+}
+
+async function verifyHostedBoardImport(browser) {
+  const cases = [
+    {
+      name: "fixture.kif",
+      extension: ".kif",
+      content: "#KIF version=2.0\n\n手合割：平手\n\n手数----指手---------\n   1 ７六歩(77)\n   2 ３四歩(33)\n",
+      mode: "shogi",
+      viewer: ".shogi-viewer",
+    },
+    {
+      name: "fixture.pgn",
+      extension: ".pgn",
+      content: "1. e4 e5 2. Nf3 *",
+      mode: "chess",
+      viewer: ".chess-viewer",
+    },
+    {
+      name: "fixture.sgf",
+      extension: ".sgf",
+      content: "(;GM[1]FF[4]SZ[9];B[dd];W[cc])",
+      mode: "go",
+      viewer: ".go-viewer",
+    },
+  ];
+
+  for (const fixture of cases) {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    try {
+      await seedCompletedOnboarding(page);
+      await page.goto(appUrl, { waitUntil: "networkidle" });
+      await page.waitForSelector("canvas");
+      await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
+      const input = page.locator("input[type=file]");
+      const accept = await input.getAttribute("accept");
+      if (!accept?.includes(fixture.extension)) {
+        throw new Error(`Hosted import selector is missing ${fixture.extension}: ${accept}`);
+      }
+      await input.setInputFiles({ name: fixture.name, mimeType: "text/plain", buffer: Buffer.from(fixture.content) });
+      await page.locator(fixture.viewer).waitFor({ timeout: 15_000 });
+      const mode = await page.locator("main").getAttribute("data-notebook-mode");
+      if (mode !== fixture.mode) throw new Error(`Hosted ${fixture.name} did not set board mode: ${mode}`);
+      if (await page.locator(".panel-attach-preview-button").count()) {
+        throw new Error(`Hosted ${fixture.name} exposed the multimedia attachment control.`);
+      }
+    } finally {
+      await context.close();
+    }
   }
 }
 

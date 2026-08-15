@@ -1,4 +1,5 @@
-import type { AtlasNode, AtlasNodeKind, NotebookNodeType, PlanetTexture, WorkStatus } from "./types";
+import { sanitizeStructuredContentForExport } from "./notebookExport";
+import type { AtlasNode, AtlasNodeKind, NotebookMode, NotebookNodeType, PlanetTexture, WorkStatus } from "./types";
 
 const NODE_KINDS: AtlasNodeKind[] = ["root", "workArea", "artifact", "event", "concept", "thread"];
 const NODE_TYPES: NotebookNodeType[] = ["human_prompt", "ai_reply", "tool_call", "tool_result", "approval_request", "note", "file_context"];
@@ -36,10 +37,21 @@ function toTextOnlyNode(node: AtlasNode, isRoot: boolean): AtlasNode {
     createdAt: dateText(node.createdAt, now),
     updatedAt: dateText(node.updatedAt, now),
     ...(isVec3(node.position) ? { position: node.position } : {}),
+    ...(isRoot && isBoardNotebookMode(node.notebookMode) ? { notebookMode: node.notebookMode } : {}),
+    ...boardStructuredContent(node.structuredContent),
     ...(typeof node.reminderAt === "string" && node.reminderAt ? { reminderAt: node.reminderAt.slice(0, 120) } : {}),
     ...(typeof node.reminderFiredAt === "string" && node.reminderFiredAt ? { reminderFiredAt: node.reminderFiredAt.slice(0, 120) } : {}),
     children: Array.isArray(node.children) ? node.children.map((child) => toTextOnlyNode(child, false)) : [],
   };
+}
+
+function boardStructuredContent(value: unknown): Partial<Pick<AtlasNode, "structuredContent">> {
+  const structuredContent = sanitizeStructuredContentForExport(value);
+  return structuredContent ? { structuredContent } : {};
+}
+
+function isBoardNotebookMode(value: unknown): value is Exclude<NotebookMode, "standard"> {
+  return value === "shogi" || value === "chess" || value === "go";
 }
 
 function boundedText(value: unknown, fallback: string, maxLength: number) {

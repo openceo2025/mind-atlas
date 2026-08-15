@@ -122,13 +122,13 @@ export function sanitizeNotebookForExport(node: AtlasNode, options: NotebookExpo
   const agentApproval = sanitizeAgentApprovalRecord(source.agentApproval);
   if (agentApproval) sanitized.agentApproval = agentApproval;
 
-  const structuredContent = sanitizeStructuredContent(source.structuredContent);
+  const structuredContent = sanitizeStructuredContentForExport(source.structuredContent);
   if (structuredContent) sanitized.structuredContent = structuredContent;
 
   return sanitized;
 }
 
-function sanitizeStructuredContent(value: unknown): AtlasStructuredContent | undefined {
+export function sanitizeStructuredContentForExport(value: unknown): AtlasStructuredContent | undefined {
   if (!value || typeof value !== "object") return undefined;
   const source = value as { kind?: unknown; schemaVersion?: unknown };
   if (source.kind === "shogi-record") return sanitizeShogiStructuredContent(value);

@@ -2757,8 +2757,105 @@ function normalizeCloudAtlasNode(value, depth, state) {
     position: isVec3(value.position) ? value.position : undefined,
     reminderAt: typeof value.reminderAt === "string" && value.reminderAt ? value.reminderAt.slice(0, 120) : undefined,
     reminderFiredAt: typeof value.reminderFiredAt === "string" && value.reminderFiredAt ? value.reminderFiredAt.slice(0, 120) : undefined,
+    notebookMode: isRoot ? normalizeCloudNotebookMode(value.notebookMode) : undefined,
+    structuredContent: normalizeCloudStructuredContent(value.structuredContent),
     children,
   });
+}
+
+function normalizeCloudNotebookMode(value) {
+  return value === "shogi" || value === "chess" || value === "go" ? value : undefined;
+}
+
+function normalizeCloudStructuredContent(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.schemaVersion !== 1) return undefined;
+  const role = value.role === "record-root" || value.role === "move" ? value.role : undefined;
+  const recordId = safeCloudText(value.recordId, "", 240);
+  const sourceFormat = safeCloudText(value.sourceFormat, "", 16);
+  const ply = boundedCloudPly(value.ply);
+  if (!role || !recordId || ply === undefined) return undefined;
+
+  if (value.kind === "shogi-record" && ["kif", "ki2", "csa", "new"].includes(sourceFormat) && typeof value.sfen === "string" && value.sfen) {
+    return compactObject({
+      kind: "shogi-record",
+      schemaVersion: 1,
+      role,
+      recordId,
+      sourceFormat,
+      ply,
+      sfen: value.sfen.slice(0, 500),
+      ...normalizeCloudStructuredCommon(value),
+    });
+  }
+
+  if (value.kind === "chess-record" && ["pgn", "new"].includes(sourceFormat) && typeof value.fen === "string" && value.fen) {
+    const nags = Array.isArray(value.nags)
+      ? value.nags.filter((item) => Number.isInteger(item) && item >= 0 && item <= 255).slice(0, 32)
+      : undefined;
+    return compactObject({
+      kind: "chess-record",
+      schemaVersion: 1,
+      role,
+      recordId,
+      sourceFormat,
+      ply,
+      fen: value.fen.slice(0, 500),
+      nags,
+      ...normalizeCloudStructuredCommon(value),
+    });
+  }
+
+  if (value.kind === "go-record" && ["sgf", "new"].includes(sourceFormat) && typeof value.board === "string") {
+    const boardSize = Number(value.boardSize);
+    if (!Number.isInteger(boardSize) || boardSize < 2 || boardSize > 25 || value.board.length !== boardSize * boardSize || !/^[.XO]+$/.test(value.board)) {
+      return undefined;
+    }
+    const setupBlack = normalizeCloudGoSetup(value.setupBlack);
+    const setupWhite = normalizeCloudGoSetup(value.setupWhite);
+    return compactObject({
+      kind: "go-record",
+      schemaVersion: 1,
+      role,
+      recordId,
+      sourceFormat,
+      ply,
+      boardSize,
+      board: value.board,
+      color: value.color === "B" || value.color === "W" ? value.color : undefined,
+      setupBlack,
+      setupWhite,
+      ...normalizeCloudStructuredCommon(value),
+    });
+  }
+
+  return undefined;
+}
+
+function normalizeCloudStructuredCommon(value) {
+  const result = {};
+  for (const key of ["uci", "san", "vertex", "displayText"]) {
+    if (typeof value[key] === "string" && value[key]) result[key] = value[key].slice(0, 240);
+  }
+  if (Number.isInteger(value.branchIndex) && value.branchIndex >= 0 && value.branchIndex < 1000) result.branchIndex = value.branchIndex;
+  if (value.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata)) {
+    const entries = Object.entries(value.metadata)
+      .filter(([key, item]) => typeof key === "string" && typeof item === "string")
+      .slice(0, 80)
+      .map(([key, item]) => [safeCloudText(key, "", 120), safeCloudText(item, "", 1000)])
+      .filter(([key, item]) => key && item);
+    if (entries.length) result.metadata = Object.fromEntries(entries);
+  }
+  return result;
+}
+
+function normalizeCloudGoSetup(value) {
+  if (!Array.isArray(value)) return undefined;
+  const setup = value.filter((item) => typeof item === "string" && /^[A-Z]{1,2}\d{1,2}$/.test(item)).slice(0, 625);
+  return setup.length ? setup : undefined;
+}
+
+function boundedCloudPly(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 10000 ? value : undefined;
 }
 
 function formatCloudNotebookEntry(row) {

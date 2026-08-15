@@ -37,6 +37,9 @@ task must identify its mode impact before editing.
   authorize usage.
 - Local agent features may stay powerful, but they remain local-only surfaces
   unless an explicit hosted security design and verification gate is added.
+- Hosted Public Mode may expose bounded, structured board-game records (KIF,
+  KI2, CSA, PGN, and SGF) through the shared viewer. This does not unlock
+  arbitrary multimedia attachments, local filesystem access, or agent tools.
 
 ## Required Checks
 

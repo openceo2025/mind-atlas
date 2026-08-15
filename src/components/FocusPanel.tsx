@@ -370,19 +370,21 @@ export function FocusPanel({
         </button>
       </div>
 
-      {attachmentsEnabled ? (
+      {attachmentsEnabled || boardGameMode ? (
         <section className="panel-preview-area" aria-label={formatAppMessage("ui.focusPanel.attachmentPreview.975b51d")}>
           <div className="panel-preview-frame">
-            <label className="icon-button file-button panel-attach-preview-button" aria-label={formatAppMessage("ui.focusPanel.attachFile.56c4761")}>
-              <Paperclip size={17} />
-              <input type="file" multiple onChange={handleAttachmentChange} />
-            </label>
-            <ShogiViewer enabled={attachmentsEnabled} onStatus={setShogiStatus} />
+            {attachmentsEnabled ? (
+              <label className="icon-button file-button panel-attach-preview-button" aria-label={formatAppMessage("ui.focusPanel.attachFile.56c4761")}>
+                <Paperclip size={17} />
+                <input type="file" multiple onChange={handleAttachmentChange} />
+              </label>
+            ) : null}
+            <ShogiViewer enabled={boardGameMode} onStatus={setShogiStatus} />
             {shogiStatus ? <p className="shogi-viewer-status" role="status">{shogiStatus}</p> : null}
-            <ChessViewer enabled={attachmentsEnabled} onStatus={setBoardGameStatus} />
-            <GoViewer enabled={attachmentsEnabled} onStatus={setBoardGameStatus} />
+            <ChessViewer enabled={boardGameMode} onStatus={setBoardGameStatus} />
+            <GoViewer enabled={boardGameMode} onStatus={setBoardGameStatus} />
             {boardGameStatus ? <p className="board-game-viewer-status" role="status">{boardGameStatus}</p> : null}
-            {selectedNode.attachments.length ? (
+            {attachmentsEnabled && selectedNode.attachments.length ? (
               <div className="attachment-list panel-preview-list">
                 {selectedNode.attachments.map((attachment) => (
                   <AttachmentPreviewCard
@@ -393,9 +395,9 @@ export function FocusPanel({
                   />
                 ))}
               </div>
-            ) : (
+            ) : attachmentsEnabled ? (
               <p className="preview-empty">{<I18nText id="ui.focusPanel.noPreview.f4423c3" />}</p>
-            )}
+            ) : null}
           </div>
         </section>
       ) : null}

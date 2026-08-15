@@ -60,7 +60,7 @@ const ROOT_COMMAND_MAX_ZOOM = 1.08;
 const DEFAULT_DATASET_TITLE = "Mind Atlas";
 const MIND_ATLAS_SOURCE_URL = "https://github.com/openceo2025/mind-atlas";
 const IMPORT_ACCEPT_TYPES = ".mindatlas,.mindatlaspkg,.md,.markdown,.opml,.mm,.kif,.ki2,.csa,.pgn,.sgf,application/mindatlas+json,application/x-mindatlas-package,text/markdown,text/plain,text/xml,application/xml";
-const HOSTED_IMPORT_ACCEPT_TYPES = ".mindatlas,.md,.markdown,.opml,.mm,application/mindatlas+json,text/markdown,text/plain,text/xml,application/xml";
+const HOSTED_IMPORT_ACCEPT_TYPES = ".mindatlas,.md,.markdown,.opml,.mm,.kif,.ki2,.csa,.pgn,.sgf,application/mindatlas+json,text/markdown,text/plain,text/xml,application/xml";
 const CLOUD_NOTEBOOK_MAX_BYTES = 10 * 1024 * 1024;
 const CURRENT_CLOUD_NOTEBOOK_SESSION_KEY = "mind-atlas-current-cloud-notebook-v1";
 type StartSpaceSource = "initialize" | "tutorial";
@@ -1386,10 +1386,6 @@ export default function App() {
 
     const shogiFormat = detectShogiRecordFormat(file.name);
     if (shogiFormat) {
-      if (publicServiceMode) {
-        window.alert("将棋棋譜のインポートはローカル開発者モードでのみ利用できます。");
-        return;
-      }
       try {
         const result = await importShogiRecordFile(file);
         resetNotebook();
@@ -1405,10 +1401,6 @@ export default function App() {
 
     const chessFormat = detectChessRecordFormat(file.name);
     if (chessFormat) {
-      if (publicServiceMode) {
-        window.alert("チェス棋譜のインポートはローカル開発者モードでのみ利用できます。");
-        return;
-      }
       try {
         const result = await importChessRecordFile(file);
         resetNotebook();
@@ -1424,10 +1416,6 @@ export default function App() {
 
     const goFormat = detectGoRecordFormat(file.name);
     if (goFormat) {
-      if (publicServiceMode) {
-        window.alert("囲碁棋譜のインポートはローカル開発者モードでのみ利用できます。");
-        return;
-      }
       try {
         const result = await importGoRecordFile(file);
         resetNotebook();
