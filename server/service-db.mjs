@@ -114,12 +114,15 @@ export async function migrateDatabase() {
       visibility text not null default 'private',
       share_token text unique,
       title text not null default '',
+      file_format text not null default 'mindatlas',
       data jsonb not null,
       size_bytes integer not null,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       last_accessed_at timestamptz
     );
+
+    alter table cloud_notebooks add column if not exists file_format text not null default 'mindatlas';
 
     create index if not exists cloud_notebooks_user_updated_idx on cloud_notebooks(user_id, updated_at desc);
     create index if not exists cloud_notebooks_user_created_idx on cloud_notebooks(user_id, created_at asc);
@@ -844,15 +847,24 @@ export async function buildEntitlement(user) {
   };
 }
 
-export async function createCloudNotebook({ userId, title, data, sizeBytes, visibility = "private", shareToken = null, quotaBytes }) {
+export async function createCloudNotebook({
+  userId,
+  title,
+  fileFormat = "mindatlas",
+  data,
+  sizeBytes,
+  visibility = "private",
+  shareToken = null,
+  quotaBytes,
+}) {
   const client = await pool.connect();
   try {
     await client.query("begin");
     const result = await client.query(
       `
-        insert into cloud_notebooks (id, user_id, visibility, share_token, title, data, size_bytes)
-        values ($1, $2, $3, $4, $5, $6::jsonb, $7)
-        returning id, user_id, visibility, share_token, title, size_bytes, created_at, updated_at
+        insert into cloud_notebooks (id, user_id, visibility, share_token, title, file_format, data, size_bytes)
+        values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+        returning id, user_id, visibility, share_token, title, file_format, size_bytes, created_at, updated_at
       `,
       [
         `cld_${crypto.randomUUID()}`,
@@ -860,6 +872,7 @@ export async function createCloudNotebook({ userId, title, data, sizeBytes, visi
         visibility === "public" ? "public" : "private",
         shareToken || null,
         String(title || "Mind Atlas").slice(0, 240),
+        String(fileFormat || "mindatlas").slice(0, 32),
         JSON.stringify(data),
         Math.max(0, Math.round(Number(sizeBytes) || 0)),
       ],
@@ -876,7 +889,7 @@ export async function createCloudNotebook({ userId, title, data, sizeBytes, visi
   }
 }
 
-export async function updateCloudNotebook({ userId, notebookId, title, data, sizeBytes, quotaBytes }) {
+export async function updateCloudNotebook({ userId, notebookId, title, fileFormat = "mindatlas", data, sizeBytes, quotaBytes }) {
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -892,16 +905,18 @@ export async function updateCloudNotebook({ userId, notebookId, title, data, siz
       `
         update cloud_notebooks
         set title = $3,
-            data = $4::jsonb,
-            size_bytes = $5,
+            file_format = $4,
+            data = $5::jsonb,
+            size_bytes = $6,
             updated_at = now()
         where user_id = $1 and id = $2
-        returning id, user_id, visibility, share_token, title, size_bytes, created_at, updated_at
+        returning id, user_id, visibility, share_token, title, file_format, size_bytes, created_at, updated_at
       `,
       [
         userId,
         notebookId,
         String(title || "Mind Atlas").slice(0, 240),
+        String(fileFormat || "mindatlas").slice(0, 32),
         JSON.stringify(data),
         Math.max(0, Math.round(Number(sizeBytes) || 0)),
       ],
@@ -925,7 +940,7 @@ export async function renameCloudNotebook({ userId, notebookId, title, quotaByte
       set title = $3,
           updated_at = now()
       where user_id = $1 and id = $2
-      returning id, user_id, visibility, share_token, title, size_bytes, created_at, updated_at
+      returning id, user_id, visibility, share_token, title, file_format, size_bytes, created_at, updated_at
     `,
     [userId, notebookId, String(title || "Mind Atlas").slice(0, 240)],
   );
@@ -960,7 +975,7 @@ export async function shareCloudNotebook({ userId, notebookId, shareToken, quota
           share_token = coalesce(share_token, $3),
           updated_at = now()
       where user_id = $1 and id = $2
-      returning id, user_id, visibility, share_token, title, size_bytes, created_at, updated_at
+      returning id, user_id, visibility, share_token, title, file_format, size_bytes, created_at, updated_at
     `,
     [userId, notebookId, shareToken],
   );
@@ -974,7 +989,7 @@ export async function shareCloudNotebook({ userId, notebookId, shareToken, quota
 export async function listCloudNotebooks(userId, quotaBytes) {
   const result = await pool.query(
     `
-      select id, visibility, share_token, title, size_bytes, created_at, updated_at
+      select id, visibility, share_token, title, file_format, size_bytes, created_at, updated_at
       from cloud_notebooks
       where user_id = $1
       order by updated_at desc
@@ -991,7 +1006,7 @@ export async function listCloudNotebooks(userId, quotaBytes) {
 export async function getCloudNotebook(userId, notebookId) {
   const result = await pool.query(
     `
-      select id, visibility, share_token, title, data, size_bytes, created_at, updated_at
+      select id, visibility, share_token, title, file_format, data, size_bytes, created_at, updated_at
       from cloud_notebooks
       where user_id = $1 and id = $2
       limit 1
@@ -1011,7 +1026,7 @@ export async function getCloudNotebookByShareToken(shareToken) {
         set last_accessed_at = now()
         where share_token = $1
           and visibility = 'public'
-        returning id, user_id, visibility, share_token, title, data, size_bytes, created_at, updated_at
+        returning id, user_id, visibility, share_token, title, file_format, data, size_bytes, created_at, updated_at
       `,
       [shareToken],
     );

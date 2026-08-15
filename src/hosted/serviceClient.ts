@@ -6,6 +6,8 @@ import type {
   CloudNotebookSaveResult,
   CloudNotebookShareResult,
   HostedServiceSession,
+  NativeBoardRecordPayload,
+  ShogiSourceImportResult,
 } from "../types";
 import { HOSTED_SERVICE_SESSION_REFRESH_EVENT } from "../events";
 import { isAboutDemoMode } from "../aboutDemo";
@@ -67,10 +69,13 @@ export async function listHostedCloudNotebooks(): Promise<CloudNotebookListResul
   return await readHostedJson<CloudNotebookListResult>(response);
 }
 
-export async function saveHostedCloudNotebook(root: AtlasNode, title = root.title): Promise<CloudNotebookSaveResult> {
+export async function saveHostedCloudNotebook(
+  content: AtlasNode | NativeBoardRecordPayload,
+  title = content.title,
+): Promise<CloudNotebookSaveResult> {
   const response = await hostedFetch("/api/cloud/notebooks", {
     method: "POST",
-    body: JSON.stringify({ root, title }),
+    body: JSON.stringify(content.kind === "board-record" ? { record: content, title } : { root: content, title }),
   });
   return await readHostedJson<CloudNotebookSaveResult>(response);
 }
@@ -80,10 +85,14 @@ export async function loadHostedCloudNotebook(id: string): Promise<CloudNotebook
   return await readHostedJson<CloudNotebookLoadResult>(response);
 }
 
-export async function updateHostedCloudNotebook(id: string, root: AtlasNode, title = root.title): Promise<CloudNotebookSaveResult> {
+export async function updateHostedCloudNotebook(
+  id: string,
+  content: AtlasNode | NativeBoardRecordPayload,
+  title = content.title,
+): Promise<CloudNotebookSaveResult> {
   const response = await hostedFetch(`/api/cloud/notebooks/${encodeURIComponent(id)}`, {
     method: "PATCH",
-    body: JSON.stringify({ root, title }),
+    body: JSON.stringify(content.kind === "board-record" ? { record: content, title } : { root: content, title }),
   });
   return await readHostedJson<CloudNotebookSaveResult>(response);
 }
@@ -106,10 +115,13 @@ export async function shareHostedCloudNotebook(id: string): Promise<CloudNoteboo
   return await readHostedJson<CloudNotebookShareResult>(response);
 }
 
-export async function createHostedCloudShare(root: AtlasNode, title = root.title): Promise<CloudNotebookShareResult> {
+export async function createHostedCloudShare(
+  content: AtlasNode | NativeBoardRecordPayload,
+  title = content.title,
+): Promise<CloudNotebookShareResult> {
   const response = await hostedFetch("/api/share/notebooks", {
     method: "POST",
-    body: JSON.stringify({ root, title }),
+    body: JSON.stringify(content.kind === "board-record" ? { record: content, title } : { root: content, title }),
   });
   return await readHostedJson<CloudNotebookShareResult>(response);
 }
@@ -117,6 +129,14 @@ export async function createHostedCloudShare(root: AtlasNode, title = root.title
 export async function loadHostedSharedNotebook(token: string): Promise<CloudNotebookLoadResult> {
   const response = await hostedFetch(`/api/share/notebooks/${encodeURIComponent(token)}`);
   return await readHostedJson<CloudNotebookLoadResult>(response);
+}
+
+export async function importHostedShogiSource(url: string): Promise<ShogiSourceImportResult> {
+  const response = await hostedFetch("/api/board-records/shogi/source", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+  return await readHostedJson<ShogiSourceImportResult>(response);
 }
 
 export function notifyHostedServiceSessionChanged() {

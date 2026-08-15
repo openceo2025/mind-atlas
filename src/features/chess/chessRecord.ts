@@ -13,6 +13,7 @@ import { makeSan, parseSan } from "chessops/san";
 import { makeUci, parseUci } from "chessops/util";
 import type { Position } from "chessops/chess";
 import type { AtlasNode, ChessRecordContent } from "../../types";
+import { decodeRecordComment, encodeRecordComment } from "../board/recordComment.ts";
 
 export interface ChessImportResult {
   root: AtlasNode;
@@ -29,9 +30,13 @@ export function detectChessRecordFormat(fileName: string) {
 export async function importChessRecordFile(file: File): Promise<ChessImportResult> {
   if (!detectChessRecordFormat(file.name)) throw new Error("Unsupported chess record. Use PGN.");
   const text = new TextDecoder("utf-8").decode(new Uint8Array(await file.arrayBuffer())).replace(/^\uFEFF/, "");
+  return importChessRecordText(text, datasetNameFromFile(file.name));
+}
+
+export function importChessRecordText(text: string, datasetName = "Imported chess record"): ChessImportResult {
   const game = parsePgn(text)[0];
   if (!game) throw new Error("The PGN does not contain a chess game.");
-  return gameToAtlas(game, datasetNameFromFile(file.name));
+  return gameToAtlas(game, datasetName);
 }
 
 export function exportChessRecord(root: AtlasNode): string {
@@ -43,7 +48,7 @@ export function exportChessRecord(root: AtlasNode): string {
   const position = positionFromFen(rootContent.fen);
   const game: Game<PgnNodeData> = {
     headers: new Map(Object.entries(rootContent.metadata ?? {})),
-    comments: recordRoot.body ? [recordRoot.body] : undefined,
+    comments: [encodeRecordComment(recordRoot.title, recordRoot.body)],
     moves: new Node<PgnNodeData>(),
   };
   appendPgnChildren(game.moves, recordRoot, position);
@@ -84,11 +89,12 @@ function gameToAtlas(game: Game<PgnNodeData>, datasetName: string): ChessImportR
     fen: makeFen(position.toSetup()),
     metadata: Object.fromEntries(game.headers),
   };
+  const rootText = decodeRecordComment([...(game.comments ?? [])].join("\n"), game.headers.get("Event") || datasetName);
   const recordRoot = makeNode(
     recordRootId,
     "workArea",
-    game.headers.get("Event") || datasetName,
-    [...(game.comments ?? [])].join("\n"),
+    rootText.title,
+    rootText.body,
     now,
     rootContent,
     [],
@@ -103,6 +109,7 @@ function gameToAtlas(game: Game<PgnNodeData>, datasetName: string): ChessImportR
     undefined,
     [recordRoot],
   );
+  root.notebookMode = "chess";
   return { root, recordRootId, datasetName };
 }
 
@@ -133,11 +140,15 @@ function buildMoveChildren(
       branchIndex,
       ...(child.data.nags?.length ? { nags: child.data.nags } : {}),
     };
+    const moveText = decodeRecordComment(
+      [...(child.data.startingComments ?? []), ...(child.data.comments ?? [])].join("\n"),
+      content.displayText || san,
+    );
     const node = makeNode(
       makeId(`chess-move-${content.ply}`),
       "thread",
-      content.displayText || san,
-      [...(child.data.startingComments ?? []), ...(child.data.comments ?? [])].join("\n"),
+      moveText.title,
+      moveText.body,
       now,
       content,
       [],
@@ -158,7 +169,7 @@ function appendPgnChildren(parent: Node<PgnNodeData>, atlasParent: AtlasNode, pa
     const san = content.san || makeSan(parentPosition, move);
     const child = new ChildNode<PgnNodeData>({
       san,
-      ...(atlasChild.body ? { comments: [atlasChild.body] } : {}),
+      comments: [encodeRecordComment(atlasChild.title, atlasChild.body)],
       ...(content.nags?.length ? { nags: content.nags } : {}),
     });
     parent.children.push(child);

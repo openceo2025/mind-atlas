@@ -1,6 +1,6 @@
 # Board Game Records and Analysis Plan
 
-Status: canonical implementation brief - Phase 1 shogi, chess, and Go import/view/edit plus mode-aware board layout are implemented in Local Developer Mode and Hosted Public Mode; analysis remains pending
+Status: canonical implementation brief - Phase 1 import/view/edit, native-format persistence, record merge, and mode-aware board layout are implemented in Local Developer Mode and Hosted Public Mode; analysis remains pending
 
 Phase 1 delivery now covers Shogi KIF/KI2/CSA, Chess PGN, and Go SGF in both
 local and hosted modes: records are converted into Atlas nodes, viewed in the
@@ -13,6 +13,17 @@ sanitizer so cloud save/load and public sharing preserve the board mode. Importe
 before import, restores automatically on cloud/package reload, and uses a
 fixed board/editor layout on desktop and mobile. Engine analysis and multi-game
 selection remain future work.
+
+The persistence and merge follow-up is also complete. Board notebooks use KIF,
+PGN, or SGF at every user-visible save boundary, including hosted cloud storage,
+public share links, and local bridge storage; legacy JSON records remain readable
+and IndexedDB JSON remains an internal crash-recovery representation. A loaded
+record can merge a compatible local file, cloud record, browser snapshot, or
+pasted native record. Shogi additionally supports copied KIF-like text from
+Shogi Wars, Shogi Quest, and Kio, plus exact allowlisted public share URLs from
+Shogi Wars and Shogi Quest through a bounded server-side fetcher. Merge matching
+is path-aware and position-based, appends only missing variations, deduplicates
+title/body text, and preserves edited titles and bodies in native comments.
 
 Last reviewed: 2026-08-15
 
@@ -86,9 +97,10 @@ understood as spatial branches without replacing the general-purpose notebook.
 Board-specific rendering must remain isolated from the ordinary no-record
 experience. The shared core may carry an allowlisted root `notebookMode` and
 route a structured-content node to the existing preview surface, but game
-rules and viewers stay under their own feature modules (`src/features/shogi/`,
-`src/features/chess/`, and `src/features/go/`). Hosted public mode must still
-strip the mode and structured content along with binary attachments.
+  rules and viewers stay under their own feature modules (`src/features/shogi/`,
+  `src/features/chess/`, and `src/features/go/`). Hosted public mode preserves
+  only the bounded native board record and still strips binary attachments,
+  arbitrary multimedia, local filesystem access, and agent execution surfaces.
 
 The default first screen, tutorial, templates, editor, local AI workflow, and
 hosted AI workflow must behave exactly as before when no board-game record is
@@ -327,8 +339,9 @@ is active, game export is disabled with an explanation.
 - Shogi always exports KIF.
 - Chess exports PGN.
 - Go exports SGF.
-- Export uses canonical metadata, never edited node titles.
-- Move-node bodies become comments.
+- Export uses canonical metadata. Edited node titles are encoded in a reserved,
+  versioned comment marker and restored on re-import.
+- Move-node bodies remain ordinary native comments beside that title marker.
 - Ordinary note children are not converted into moves. The first release does
   not export them; it warns when they exist.
 - Child order defines main line first, then variations.
@@ -906,8 +919,8 @@ For each exportable format:
 5. compare canonical moves, branch order, comments, metadata, initial state,
    and result.
 
-Titles are intentionally excluded from canonical equality after users edit
-them. Bodies are included as comments.
+Edited titles and bodies are included in canonical round-trip equality through
+the versioned native comment encoding.
 
 ### 15.3 UI tests
 

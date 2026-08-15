@@ -1,10 +1,11 @@
 import { ChevronLeft, ChevronRight, GitBranch, RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { formatKIFMove, handPieceTypes, Position, Square } from "tsshogi";
 import type { Api } from "shogiground/api";
 import type { Config } from "shogiground/config";
 import type { DropDests, Key, MoveDests, PieceName, RoleString } from "shogiground/types";
 import { findShogiNodeContent, findShogiRecordRoot } from "./shogiRecord";
+import { buildShogiCandidateArrows, buildShogiCandidateTargets } from "./shogiCandidates";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, ShogiRecordContent } from "../../types";
 import { formatAppMessage } from "../../i18n/format";
@@ -58,6 +59,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   const bottomHandRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<Api | null>(null);
   const boardConfigRef = useRef<Config | null>(null);
+  const candidateArrowheadId = useId().replace(/:/g, "");
 
   const boardConfig = useMemo(
     () => (currentContent?.kind === "shogi-record" ? makeBoardConfig(currentContent, handleMove, orientation) : null),
@@ -65,7 +67,8 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   );
   boardConfigRef.current = boardConfig;
 
-  const candidateArrows = useMemo(() => buildCandidateArrows(variations, orientation), [variations, orientation]);
+  const candidateArrows = useMemo(() => buildShogiCandidateArrows(variations, orientation), [variations, orientation]);
+  const candidateTargets = useMemo(() => buildShogiCandidateTargets(candidateArrows), [candidateArrows]);
   const coordinateFiles = orientation === "sente" ? ["9", "8", "7", "6", "5", "4", "3", "2", "1"] : ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
   const coordinateRanks = orientation === "sente" ? JAPANESE_RANKS : [...JAPANESE_RANKS].reverse();
   const turnLabel = currentContent?.sfen.split(" ")[1] === "w" ? "後手番" : "先手番";
@@ -181,7 +184,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
           <div className="shogi-candidate-overlay">
             <svg className="shogi-candidate-arrows" viewBox="0 0 900 900" preserveAspectRatio="none" aria-hidden="true">
               <defs>
-                <marker id="shogi-candidate-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto">
+                <marker id={candidateArrowheadId} markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto">
                   <path d="M0,0 L7,3.5 L0,7 Z" />
                 </marker>
               </defs>
@@ -192,16 +195,18 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
                   y1={candidate.from?.[1]}
                   x2={candidate.to[0]}
                   y2={candidate.to[1]}
-                  markerEnd="url(#shogi-candidate-arrowhead)"
+                  markerEnd={`url(#${candidateArrowheadId})`}
                   onClick={() => focusNode(candidate.node.id)}
                 />
               ))}
             </svg>
-            {candidateArrows.map((candidate) => (
+            {candidateTargets.map((candidate) => (
               <button
                 key={candidate.node.id}
                 type="button"
-                className={`shogi-candidate-arrow-hit ${candidate.from ? "" : "is-drop"}`}
+                className={`shogi-candidate-arrow-hit ${candidate.isDrop ? "is-drop" : ""}`}
+                data-candidate-kind={candidate.isDrop ? "drop" : "move"}
+                data-candidate-square={candidate.toSquare}
                 style={{ left: `${(candidate.to[0] / 9)}%`, top: `${(candidate.to[1] / 9)}%` }}
                 onClick={() => focusNode(candidate.node.id)}
                 aria-label={candidate.label}
@@ -322,58 +327,6 @@ function lastDropPiece(usi: string | undefined, turnColor: "sente" | "gote") {
   if (!usi?.includes("*")) return undefined;
   const role = Object.entries(PIECE_ROLES).find(([, symbol]) => symbol === usi[0])?.[0] as RoleString | undefined;
   return role ? { role, color: turnColor === "sente" ? "gote" as const : "sente" as const } : undefined;
-}
-
-type ShogiCandidateArrow = {
-  node: AtlasNode;
-  label: string;
-  from?: [number, number];
-  to: [number, number];
-};
-
-function buildCandidateArrows(nodes: AtlasNode[], orientation: "sente" | "gote"): ShogiCandidateArrow[] {
-  const groups = new Map<string, Array<{ node: AtlasNode; label: string; from?: string; to: string }>>();
-  for (const node of nodes) {
-    const content = findShogiNodeContent(node);
-    if (!content?.usi) continue;
-    const from = content.usi.includes("*") ? undefined : content.usi.slice(0, 2);
-    const to = content.usi.slice(-2);
-    const key = `${from ?? "drop"}-${to}`;
-    const group = groups.get(key) ?? [];
-    group.push({ node, label: content.displayText || node.title, from, to });
-    groups.set(key, group);
-  }
-
-  return [...groups.values()].flatMap((group) => group.map((candidate, index) => {
-    const offset = (index - (group.length - 1) / 2) * 14;
-    const baseTo = shogiArrowPoint(candidate.to, orientation);
-    const baseFrom = candidate.from ? shogiArrowPoint(candidate.from, orientation) : undefined;
-    const dx = baseTo[0] - (baseFrom?.[0] ?? baseTo[0]);
-    const dy = baseTo[1] - (baseFrom?.[1] ?? baseTo[1]);
-    const length = Math.hypot(dx, dy) || 1;
-    const normal: [number, number] = [-dy / length * offset, dx / length * offset];
-    const to: [number, number] = [baseTo[0] + normal[0], baseTo[1] + normal[1]];
-    const from: [number, number] | undefined = baseFrom
-      ? [baseFrom[0] + normal[0], baseFrom[1] + normal[1]]
-      : undefined;
-    return {
-      node: candidate.node,
-      label: candidate.label,
-      from,
-      to,
-    };
-  }));
-}
-
-function shogiArrowPoint(key: string, orientation: "sente" | "gote"): [number, number] {
-  const file = Number(key[0]);
-  const rank = "abcdefghi".indexOf(key[1]);
-  const column = orientation === "sente" ? 9 - file : file - 1;
-  const row = orientation === "sente" ? rank : 8 - rank;
-  return [
-    (column + 0.5) * 100,
-    (row + 0.5) * 100,
-  ];
 }
 
 function nearestRecordNode(root: AtlasNode, nodeId: string, recordRootId: string) {

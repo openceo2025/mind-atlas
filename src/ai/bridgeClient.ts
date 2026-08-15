@@ -14,6 +14,7 @@ import type {
   OpenClawOptionsResult,
   ProviderUsageResult,
   RealtimeSessionConfig,
+  ShogiSourceImportResult,
   TextPartnerTurnPayload,
   TextPartnerTurnResult,
   WebSearchResult,
@@ -211,6 +212,15 @@ export async function webSearch(query: string): Promise<WebSearchResult> {
   const result = await readJsonResponse<WebSearchResult>(response);
   notifyHostedServiceSessionChanged();
   return result;
+}
+
+export async function importBridgeShogiSource(url: string): Promise<ShogiSourceImportResult> {
+  const response = await fetchBridge("/api/board-records/shogi/source", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  return await readJsonResponse<ShogiSourceImportResult>(response);
 }
 
 export async function saveCloudNotebookPackage(blob: Blob, fileName: string): Promise<CloudNotebookSaveResult> {

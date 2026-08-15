@@ -2170,6 +2170,126 @@ h1 {
   backdrop-filter: blur(18px);
 }
 
+.board-record-dialog {
+  grid-template-rows: auto;
+  overflow: hidden;
+}
+
+.board-record-dialog-body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  max-height: min(590px, calc(var(--app-height) - 130px));
+  overflow-y: auto;
+  padding: 14px 16px 16px;
+  overscroll-behavior: contain;
+}
+
+.board-record-source-section {
+  display: grid;
+  gap: 8px;
+}
+
+.board-record-source-section h3 {
+  margin: 0;
+  color: #fff4c5;
+  font-size: 13px;
+}
+
+.board-record-source-section textarea {
+  width: 100%;
+  min-height: 118px;
+  resize: vertical;
+  border: 1px solid rgba(219, 234, 211, 0.18);
+  border-radius: 8px;
+  padding: 10px 11px;
+  background: rgba(2, 5, 4, 0.72);
+  color: #edf7e8;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+.board-record-source-section > .primary-button {
+  justify-self: end;
+  min-height: 36px;
+}
+
+.board-record-file-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid rgba(141, 245, 207, 0.28);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: rgba(141, 245, 207, 0.08);
+  color: #dff9e9;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.board-record-file-action input {
+  display: none;
+}
+
+.board-record-source-list {
+  display: grid;
+  gap: 6px;
+  max-height: 184px;
+  overflow-y: auto;
+}
+
+.board-record-source-list button {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid rgba(219, 234, 211, 0.12);
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: rgba(3, 7, 6, 0.62);
+  color: #edf7e8;
+  cursor: pointer;
+  text-align: start;
+}
+
+.board-record-source-list button span {
+  overflow: hidden;
+  color: #fff4c5;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-record-source-list button small,
+.board-record-source-list p {
+  margin: 0;
+  color: #9fb5a9;
+  font-size: 11px;
+}
+
+.board-record-source-list button:disabled,
+.board-record-file-action:has(input:disabled) {
+  cursor: default;
+  opacity: 0.55;
+}
+
+@media (max-width: 620px) {
+  .board-record-dialog-body {
+    gap: 12px;
+    max-height: calc(var(--app-height) - 96px);
+    padding: 12px;
+  }
+
+  .board-record-source-section textarea {
+    min-height: 96px;
+  }
+
+  .board-record-source-section > .primary-button {
+    justify-self: stretch;
+  }
+}
+
 .voice-settings-form {
   display: grid;
   gap: 12px;
@@ -9377,5 +9497,57 @@ button:disabled,
     overflow-x: auto !important;
     overflow-y: hidden !important;
     margin: 0 !important;
+  }
+
+  .app-shell.is-board-game-mode .shogi-file-coordinates,
+  .app-shell.is-board-game-mode .shogi-rank-coordinates {
+    font-size: 7px;
+    line-height: 1;
+  }
+
+  .app-shell.is-board-game-mode .shogi-board-frame {
+    width: calc(100% - 10px);
+    margin-top: 8px;
+    margin-right: 10px;
+    justify-self: start;
+  }
+
+  .app-shell.is-board-game-mode .shogi-file-coordinates {
+    top: -7px;
+  }
+
+  .app-shell.is-board-game-mode .shogi-rank-coordinates {
+    right: -8px;
+  }
+
+  .app-shell.is-board-game-mode .board-mobile-node-title,
+  .app-shell.is-board-game-mode .board-mobile-node-body {
+    max-width: min(132px, 38vw);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .app-shell.is-board-game-mode .board-mobile-node-title {
+    min-height: 20px;
+    padding: 2px 4px;
+    font-size: 11px;
+    line-height: 1.15;
+  }
+
+  .app-shell.is-board-game-mode .board-mobile-node-body {
+    min-height: 24px;
+    max-height: 34px;
+    padding: 2px 4px;
+    font-size: 10px;
+    line-height: 1.2;
+  }
+
+  .app-shell.is-board-game-mode .board-mobile-node-input:focus {
+    border: 0;
+    box-shadow: none;
+    outline: 0;
+    background: transparent;
   }
 }

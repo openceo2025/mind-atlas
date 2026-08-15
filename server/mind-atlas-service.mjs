@@ -52,6 +52,7 @@ import {
   encodePromotionContext,
   promotionContextFromGoogleStart,
 } from "./promotion-attribution.mjs";
+import { fetchSupportedShogiSource } from "./shogi-source.mjs";
 
 const serviceHost = getEnv("MIND_ATLAS_SERVICE_HOST", "127.0.0.1");
 const servicePort = readIntEnv("MIND_ATLAS_SERVICE_PORT", 8788);
@@ -284,6 +285,11 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/share/notebooks") {
       await handleCloudNotebookShare(request, response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/board-records/shogi/source") {
+      await handleShogiSourceImport(request, response);
       return;
     }
 
@@ -710,11 +716,12 @@ async function handleCloudNotebookSave(request, response) {
   const user = await requireUser(request);
   enforceUserRateLimit(user.id, "cloud", 30);
   const payload = await readJson(request, cloudNotebookMaxBytes + 64 * 1024);
-  const { root, title, sizeBytes } = normalizeCloudNotebookPayload(payload);
+  const { data, title, fileFormat, sizeBytes } = normalizeCloudNotebookPayload(payload);
   const result = await createCloudNotebook({
     userId: user.id,
     title,
-    data: root,
+    fileFormat,
+    data,
     sizeBytes,
     visibility: "private",
     quotaBytes: cloudNotebookMaxBytes,
@@ -742,7 +749,7 @@ async function handleCloudNotebookLoad(request, response, id) {
   if (!notebook) throw new ServiceError(404, "Cloud notebook was not found");
   sendJson(response, 200, {
     entry: formatCloudNotebookEntry(notebook),
-    root: notebook.data,
+    ...cloudNotebookContentResponse(notebook),
   });
 }
 
@@ -752,13 +759,14 @@ async function handleCloudNotebookUpdate(request, response, id) {
   const notebookId = decodeURIComponent(id || "");
   if (!isCloudNotebookId(notebookId)) throw new ServiceError(400, "Invalid cloud notebook id");
   const payload = await readJson(request, cloudNotebookMaxBytes + 64 * 1024);
-  if (payload && typeof payload === "object" && "root" in payload) {
-    const { root, title, sizeBytes } = normalizeCloudNotebookPayload(payload);
+  if (payload && typeof payload === "object" && ("root" in payload || "record" in payload)) {
+    const { data, title, fileFormat, sizeBytes } = normalizeCloudNotebookPayload(payload);
     const result = await updateCloudNotebook({
       userId: user.id,
       notebookId,
       title,
-      data: root,
+      fileFormat,
+      data,
       sizeBytes,
       quotaBytes: cloudNotebookMaxBytes,
     });
@@ -811,12 +819,13 @@ async function handleCloudNotebookShare(request, response) {
   const user = await requireUser(request);
   enforceUserRateLimit(user.id, "cloud-share", 20);
   const payload = await readJson(request, cloudNotebookMaxBytes + 64 * 1024);
-  const { root, title, sizeBytes } = normalizeCloudNotebookPayload(payload);
+  const { data, title, fileFormat, sizeBytes } = normalizeCloudNotebookPayload(payload);
   const token = createShareToken();
   const result = await createCloudNotebook({
     userId: user.id,
     title,
-    data: root,
+    fileFormat,
+    data,
     sizeBytes,
     visibility: "public",
     shareToken: token,
@@ -881,8 +890,19 @@ async function handleCloudNotebookPublicLoad(request, response, tokenSegment) {
   });
   sendJson(response, 200, {
     entry: formatCloudNotebookEntry(notebook),
-    root: notebook.data,
+    ...cloudNotebookContentResponse(notebook),
   });
+}
+
+async function handleShogiSourceImport(request, response) {
+  const payload = await readJson(request, 16 * 1024);
+  const sourceUrl = stringValue(payload?.url).trim();
+  if (!sourceUrl || sourceUrl.length > 1000) throw new ServiceError(400, "A supported shogi share URL is required");
+  try {
+    sendJson(response, 200, await fetchSupportedShogiSource(sourceUrl));
+  } catch (error) {
+    throw new ServiceError(400, "shogi_source_unavailable", stringValue(error?.message || error));
+  }
 }
 
 async function handleTextPartnerTurn(request, response) {
@@ -2708,9 +2728,23 @@ const cloudNodeTypes = new Set(["human_prompt", "ai_reply", "tool_call", "tool_r
 const cloudStatuses = new Set(["waiting", "done"]);
 const cloudTextures = new Set(["speckled", "bands", "freckles", "craters", "mist", "cell"]);
 const cloudAuthors = new Set(["human", "ai", "tool", "system"]);
+const nativeBoardRecordModes = new Map([
+  ["kif", "shogi"],
+  ["pgn", "chess"],
+  ["sgf", "go"],
+]);
 
 function normalizeCloudNotebookPayload(payload) {
   if (!payload || typeof payload !== "object") throw new ServiceError(400, "Cloud notebook payload is invalid");
+  if (payload.record !== undefined) {
+    const record = normalizeCloudBoardRecord(payload.record);
+    const title = safeCloudText(payload.title || record.title || "Mind Atlas", "Mind Atlas", 240);
+    const sizeBytes = Buffer.byteLength(JSON.stringify(record), "utf8");
+    if (sizeBytes > cloudNotebookMaxBytes) {
+      throw new ServiceError(413, "cloud_notebook_too_large", "Board record is too large to save");
+    }
+    return { data: record, title, fileFormat: record.format, sizeBytes };
+  }
   const rootInput = payload.root ?? payload;
   const state = { count: 0 };
   const root = normalizeCloudAtlasNode(rootInput, 0, state);
@@ -2719,7 +2753,31 @@ function normalizeCloudNotebookPayload(payload) {
   if (encoded > cloudNotebookMaxBytes) {
     throw new ServiceError(413, "cloud_notebook_too_large", "Cloud notebook is too large to save");
   }
-  return { root, title, sizeBytes: encoded };
+  return { data: root, title, fileFormat: "mindatlas", sizeBytes: encoded };
+}
+
+function normalizeCloudBoardRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ServiceError(400, "Board record payload is invalid");
+  }
+  const format = stringValue(value.format).toLowerCase();
+  const expectedMode = nativeBoardRecordModes.get(format);
+  if (!expectedMode || value.kind !== "board-record" || value.schemaVersion !== 1 || value.mode !== expectedMode) {
+    throw new ServiceError(400, "Board record format does not match its game mode");
+  }
+  const text = typeof value.text === "string" ? value.text : "";
+  if (!text.trim()) throw new ServiceError(400, "Board record text is empty");
+  if (Buffer.byteLength(text, "utf8") > cloudNotebookMaxBytes) {
+    throw new ServiceError(413, "cloud_notebook_too_large", "Board record is too large to save");
+  }
+  return {
+    kind: "board-record",
+    schemaVersion: 1,
+    mode: expectedMode,
+    format,
+    title: safeCloudText(value.title, "Mind Atlas", 240),
+    text,
+  };
 }
 
 function normalizeCloudAtlasNode(value, depth, state) {
@@ -2860,15 +2918,26 @@ function boundedCloudPly(value) {
 
 function formatCloudNotebookEntry(row) {
   const title = stringValue(row.title) || "Mind Atlas";
+  const fileFormat = nativeBoardRecordModes.has(row.file_format) ? row.file_format : "mindatlas";
   return {
     id: row.id,
-    name: `${sanitizeFileLabel(title)}.mindatlas`,
+    name: `${sanitizeFileLabel(title)}.${fileFormat}`,
     title,
+    fileFormat,
+    ...(fileFormat !== "mindatlas" ? { notebookMode: nativeBoardRecordModes.get(fileFormat) } : {}),
     size: Number(row.size_bytes ?? 0),
     updatedAt: dateIso(row.updated_at),
     visibility: row.visibility === "public" ? "public" : "private",
     ...(row.share_token ? { shareToken: row.share_token } : {}),
   };
+}
+
+function cloudNotebookContentResponse(row) {
+  const fileFormat = stringValue(row.file_format).toLowerCase();
+  if (nativeBoardRecordModes.has(fileFormat)) {
+    return { record: normalizeCloudBoardRecord(row.data) };
+  }
+  return { root: row.data };
 }
 
 function createShareToken() {

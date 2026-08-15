@@ -136,7 +136,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
               type="button"
               className={`go-point ${sign === 1 ? "is-black" : sign === -1 ? "is-white" : ""} ${isStarPoint(x, y, currentContent.boardSize) ? "is-star" : ""} ${isLast ? "is-last" : ""} ${isCandidate ? "is-candidate" : ""}`}
               onClick={() => isCandidate ? focusNode(candidateNodes[0].id) : sign === 0 ? addMove(vertex) : onStatus?.("その交点にはすでに石があります。")}
-              aria-label={`${vertexLabel}${sign === 1 ? " 黒" : sign === -1 ? " 白" : ""}${isCandidate ? " 候補手" : ""}`}
+              aria-label={`${vertexLabel}${sign === 1 ? " 黒" : sign === -1 ? " 白" : ""}${isCandidate ? ` ${formatAppMessage("board.candidateMoves")}` : ""}`}
             >
               <span aria-hidden="true" />
             </button>

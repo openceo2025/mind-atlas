@@ -107,6 +107,7 @@ for (const route of [
   "/api/billing/stripe/webhook",
   "/api/cloud/notebooks",
   "/api/share/notebooks",
+  "/api/board-records/shogi/source",
   "/api/ai/text-partner-turn",
   "/api/realtime/calls",
   "/api/audio/transcriptions",
@@ -265,6 +266,7 @@ assert.ok(serviceDb.includes("export async function reserveCredit"), "service DB
 assert.ok(serviceDb.includes("export async function settleCreditReservation"), "service DB should expose reservation settlement");
 assert.ok(serviceDb.includes("create table if not exists stripe_events"), "service DB should store Stripe webhook event ids");
 assert.ok(serviceDb.includes("create table if not exists cloud_notebooks"), "service DB should store hosted cloud notebooks");
+assert.ok(serviceDb.includes("file_format text not null default 'mindatlas'"), "hosted cloud notebooks should record their native file format");
 assert.ok(serviceDb.includes("export async function createCloudNotebook"), "service DB should create hosted cloud notebooks");
 assert.ok(serviceDb.includes("export async function updateCloudNotebook"), "service DB should update hosted cloud notebooks");
 assert.ok(serviceDb.includes("export async function renameCloudNotebook"), "service DB should rename hosted cloud notebooks");
@@ -274,6 +276,9 @@ assert.ok(serviceDb.includes("pruneCloudNotebookQuota"), "hosted cloud notebooks
 assert.ok(server.includes("handleCloudNotebookUpdate"), "hosted service should expose cloud notebook update");
 assert.ok(server.includes("handleCloudNotebookDelete"), "hosted service should expose cloud notebook delete");
 assert.ok(server.includes("handleCloudNotebookShareExisting"), "hosted service should expose existing cloud notebook share");
+assert.ok(server.includes("normalizeCloudBoardRecord"), "hosted service should validate native KIF, PGN, and SGF payloads");
+assert.ok(server.includes("cloudNotebookContentResponse"), "hosted cloud load/share should return native board records without Atlas JSON");
+assert.ok(server.includes("fetchSupportedShogiSource"), "hosted service should use the allowlisted shogi source fetcher");
 assert.ok(serviceDb.includes("export async function refundStaleCreditReservations"), "service DB should expose stale reservation cleanup");
 assert.ok(serviceDb.includes("export async function deleteExpiredSessions"), "service DB should expose session cleanup");
 assert.equal(serviceDb.includes("email text unique not null"), false, "Google email should not be a unique identity key");

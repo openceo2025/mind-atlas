@@ -31,6 +31,7 @@ const fixtures = {
 
 try {
   if (testScope === "all" || testScope === "shogi") await verifyShogi();
+  if (testScope === "all" || testScope === "shogi-candidates") await verifyShogiCandidateBranches();
   if (testScope === "all" || testScope === "chess") await verifyChess();
   if (testScope === "all" || testScope === "chess-special") await verifyChessSpecialMoves();
   if (testScope === "all" || testScope === "go") await verifyGo();
@@ -93,9 +94,13 @@ async function verifyBoardExport(page, mode) {
   const extension = fixture.name.slice(fixture.name.lastIndexOf("."));
   const format = extension.slice(1).toUpperCase();
   await page.getByLabel(/Open atlas menu|Mind Atlasメニューを開く/).click();
-  const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: new RegExp(format, "i") }).click();
-  const download = await downloadPromise;
+  const exportButton = page.getByRole("button", {
+    name: new RegExp(`(?:Export\\s+${format}\\s+record|${format}棋譜をエクスポート)`, "i"),
+  });
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    exportButton.click(),
+  ]);
   if (!download.suggestedFilename().toLowerCase().endsWith(extension)) {
     throw new Error(`${mode} export used the wrong file extension: ${download.suggestedFilename()}`);
   }
@@ -204,6 +209,68 @@ async function playShogiMove(page, move) {
   await page.mouse.down();
   await page.mouse.move(to.x, to.y, { steps: 8 });
   await page.mouse.up();
+}
+
+async function verifyShogiCandidateBranches() {
+  const { context, page } = await createPage({ width: 980, height: 900 });
+  try {
+    const promotionBranches = `後手の持駒：なし
+  ９ ８ ７ ６ ５ ４ ３ ２ １
++---------------------------+
+| ・ ・ ・ ・v玉 ・ ・ ・ ・|一
+| ・ ・ ・ ・ ・ ・ ・ ・ ・|二
+| ・ ・ ・ ・ ・ ・ ・ ・ ・|三
+| ・ 飛 ・ ・ ・ ・ ・ ・ ・|四
+| ・ ・ ・ ・ ・ ・ ・ ・ ・|五
+| ・ ・ ・ ・ ・ ・ ・ ・ ・|六
+| ・ ・ ・ ・ ・ ・ ・ ・ ・|七
+| ・ ・ ・ ・ ・ ・ ・ ・ ・|八
+| ・ ・ ・ ・ 玉 ・ ・ ・ ・|九
++---------------------------+
+先手の持駒：なし
+先手番
+手数----指手---------消費時間--
+   1 ８二飛(84)   ( 0:00/00:00:00)+
+
+変化：1手
+   1 ８二飛成(84) ( 0:00/00:00:00)
+`;
+    await importRecord(page, "promotion-branches.kif", promotionBranches, ".shogi-viewer");
+    await page.waitForTimeout(300);
+    const state = await page.evaluate(() => {
+      const board = document.querySelector(".shogi-board-host")?.getBoundingClientRect();
+      const targets = [...document.querySelectorAll(".shogi-candidate-arrow-hit[data-candidate-square='8b']")]
+        .map((target) => {
+          const rect = target.getBoundingClientRect();
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        });
+      const lines = [...document.querySelectorAll(".shogi-candidate-arrows line")]
+        .map((line) => ["x1", "y1", "x2", "y2"].map((name) => Number(line.getAttribute(name))));
+      return board ? {
+        board: { x: board.x, y: board.y, width: board.width, height: board.height },
+        targets,
+        lines,
+      } : null;
+    });
+    if (!state || state.targets.length !== 2 || state.lines.length !== 2 || state.lines.some((line) => line.some((value) => !Number.isFinite(value)))) {
+      throw new Error(`Shogi promotion candidates did not render two finite arrows: ${JSON.stringify(state)}`);
+    }
+    const destination = {
+      x: state.board.x + state.board.width * 1.5 / 9,
+      y: state.board.y + state.board.height * 1.5 / 9,
+    };
+    const [first, second] = state.targets;
+    const targetXs = [first.x, second.x].sort((a, b) => a - b);
+    if (!(targetXs[0] < destination.x && targetXs[1] > destination.x) || Math.abs(first.y - destination.y) > 2 || Math.abs(second.y - destination.y) > 2) {
+      throw new Error(`Shogi promotion targets do not straddle 8b: ${JSON.stringify({ destination, targets: state.targets })}`);
+    }
+    const cellWidth = state.board.width / 9;
+    if (state.targets.some((target) => Math.abs(target.x - destination.x) >= cellWidth / 2)) {
+      throw new Error(`Shogi promotion target escaped its destination cell: ${JSON.stringify({ destination, targets: state.targets })}`);
+    }
+  } finally {
+    await context.close();
+  }
 }
 
 async function verifyChess() {
@@ -427,6 +494,30 @@ async function verifyMobileLayout(mode) {
     if (await titleInputs.count()) {
       const activeTitle = await titleInputs.last().boundingBox();
       if (activeTitle && !rectsOverlap(activeTitle, universe)) throw new Error(`${mode} active node title is outside the compact universe.`);
+    }
+    const compactFields = await page.locator(".board-mobile-node-title, .board-mobile-node-body").evaluateAll((fields) => fields.map((field) => {
+      const rect = field.getBoundingClientRect();
+      const style = getComputedStyle(field);
+      return { width: rect.width, border: style.borderTopWidth, outline: style.outlineWidth, background: style.backgroundColor };
+    }));
+    if (!compactFields.length || compactFields.some((field) => field.width > 134 || field.border !== "0px")) {
+      throw new Error(`${mode} mobile node text fields are not compact and borderless: ${JSON.stringify(compactFields)}`);
+    }
+    if (mode === "shogi") {
+      const coordinateState = await page.evaluate(() => {
+        const board = document.querySelector(".shogi-board-host")?.getBoundingClientRect();
+        const file = document.querySelector(".shogi-file-coordinates span")?.getBoundingClientRect();
+        const rank = document.querySelector(".shogi-rank-coordinates span")?.getBoundingClientRect();
+        return board && file && rank ? {
+          board: rectJson(board), file: rectJson(file), rank: rectJson(rank),
+        } : null;
+        function rectJson(rect) { return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; }
+      });
+      if (!coordinateState
+        || coordinateState.file.y + coordinateState.file.height > coordinateState.board.y + 1
+        || coordinateState.rank.x < coordinateState.board.x + coordinateState.board.width - 1) {
+        throw new Error(`Shogi mobile coordinates still overlap board pieces: ${JSON.stringify(coordinateState)}`);
+      }
     }
     await captureScreenshot(page, `${mode}-mobile`);
   } finally {

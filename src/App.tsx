@@ -1,7 +1,7 @@
 import { FocusPanel } from "./components/FocusPanel";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CalendarDays, CloudDownload, CloudUpload, CreditCard, Download, FileText, GitBranch, Github, GraduationCap, History, Info, Languages, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Search, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
 import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { downloadCloudNotebookPackage, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
+import { downloadCloudNotebookPackage, importBridgeShogiSource, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { createAboutDemoNotebook, getAboutDemoAttachmentPreviewUrls, getAboutDemoLayoutMode, getAboutDemoNotification, getAboutDemoOverviewFocusRequest, getAboutDemoSelectedNodeId, readAboutDemoConfig } from "./aboutDemo";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
 import { CommandDock } from "./components/CommandDock";
@@ -32,6 +32,7 @@ import {
   listHostedCloudNotebooks,
   loadHostedCloudNotebook,
   loadHostedSharedNotebook,
+  importHostedShogiSource,
   logoutHostedService,
   openHostedBillingPortal,
   renameHostedCloudNotebook,
@@ -45,7 +46,19 @@ import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
 import type { AtlasNode, CloudNotebookEntry, CloudNotebookListResult, HostedServiceSession, NotebookMode, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
 import type { NotebookPersistenceStatus, NotebookSnapshot } from "./notebookPersistence";
+import { loadNotebookSnapshot } from "./notebookPersistence";
 import { formatAppMessage } from "./i18n/format";
+import {
+  BOARD_RECORD_FORMATS,
+  exportNativeBoardRecord,
+  importNativeBoardRecord,
+  importNativeBoardRecordFile,
+  importNativeBoardRecordText,
+  isBoardNotebookMode,
+  nativeBoardRecordFileName,
+  nativeBoardRecordSizeBytes,
+} from "./features/board/boardRecord";
+import { mergeBoardRecords } from "./features/board/boardRecordMerge";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const WORKSPACE_PANEL_EXIT_MS = 960;
@@ -58,17 +71,13 @@ const DEFAULT_DATASET_TITLE = "Mind Atlas";
 const MIND_ATLAS_SOURCE_URL = "https://github.com/openceo2025/mind-atlas";
 const IMPORT_ACCEPT_TYPES = ".mindatlas,.mindatlaspkg,.md,.markdown,.opml,.mm,.kif,.ki2,.csa,.pgn,.sgf,application/mindatlas+json,application/x-mindatlas-package,text/markdown,text/plain,text/xml,application/xml";
 const HOSTED_IMPORT_ACCEPT_TYPES = ".mindatlas,.md,.markdown,.opml,.mm,.kif,.ki2,.csa,.pgn,.sgf,application/mindatlas+json,text/markdown,text/plain,text/xml,application/xml";
-const BOARD_RECORD_FORMATS: Record<Exclude<NotebookMode, "standard">, { label: string; extension: string }> = {
-  shogi: { label: "KIF", extension: "kif" },
-  chess: { label: "PGN", extension: "pgn" },
-  go: { label: "SGF", extension: "sgf" },
-};
 const CLOUD_NOTEBOOK_MAX_BYTES = 10 * 1024 * 1024;
 const CURRENT_CLOUD_NOTEBOOK_SESSION_KEY = "mind-atlas-current-cloud-notebook-v1";
 type StartSpaceSource = "initialize" | "tutorial";
 type TutorialCompletionStep = "complete" | "choice" | null;
 type CloudLoadCloseOptions = { closeCloudDialog: boolean; closeStartSpace: boolean };
 type PendingWorkspaceSwitch = { nextName: string };
+type BoardRecordDialogMode = "merge" | "import-shogi" | null;
 const MODE_OPTIONS: Array<{ mode: AtlasLayoutMode; icon: "orbit" | "tree" | "mind" | "calendar" }> = [
   { mode: "phyllotaxis", icon: "orbit" },
   { mode: "tree", icon: "tree" },
@@ -84,10 +93,6 @@ const UNIVERSE_TITLE_PLACEHOLDER_ALIASES = [
 function localizedAboutUrl(locale: string) {
   const publicLocale = locale === "en-XA" ? "en" : locale === "ar-XB" ? "ar" : locale;
   return `/${encodeURIComponent(publicLocale)}/about.html`;
-}
-
-function isBoardNotebookMode(value: unknown): value is Exclude<NotebookMode, "standard"> {
-  return value === "shogi" || value === "chess" || value === "go";
 }
 
 const KEYBOARD_OVERLAY_INPUT_SELECTOR =
@@ -255,6 +260,9 @@ export default function App() {
   const [nodeSearchOpen, setNodeSearchOpen] = useState(false);
   const [textImportValue, setTextImportValue] = useState("");
   const [mergePreview, setMergePreview] = useState<MergePreviewState | null>(null);
+  const [boardRecordDialogMode, setBoardRecordDialogMode] = useState<BoardRecordDialogMode>(null);
+  const [boardRecordDialogBusy, setBoardRecordDialogBusy] = useState(false);
+  const [boardRecordDialogError, setBoardRecordDialogError] = useState("");
   const [sharedNotebookRoot, setSharedNotebookRoot] = useState<AtlasNode | null>(null);
   const [sharedNotebookImporting, setSharedNotebookImporting] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
@@ -476,6 +484,7 @@ export default function App() {
     setNodeSearchOpen(false);
     setTextImportOpen(false);
     setMergePreview(null);
+    setBoardRecordDialogMode(null);
     setSharedNotebookRoot(null);
     setAiFeatureDialogOpen(false);
     setMobilePanelTab(aboutDemoConfig.kind === "app" ? "command" : "editor");
@@ -599,6 +608,7 @@ export default function App() {
     setCloudLoadOpen(false);
     setTextImportOpen(false);
     setMergePreview(null);
+    setBoardRecordDialogMode(null);
     removeSharedNotebookHash();
     setSharedNotebookRoot(null);
     setOutlineEditorOpen(false);
@@ -650,8 +660,14 @@ export default function App() {
       const hostedShareToken = readHostedShareTokenFromUrl();
       if (hostedShareToken) {
         void loadHostedSharedNotebook(hostedShareToken)
-          .then((result) => {
+          .then(async (result) => {
             if (cancelled) return;
+            if (result.record) {
+              const imported = await importNativeBoardRecord(result.record);
+              if (!cancelled) setSharedNotebookRoot(imported.root);
+              return;
+            }
+            if (!result.root) throw new Error("Shared notebook content is missing.");
             setSharedNotebookRoot(createTextOnlyNotebookRoot(result.root));
           })
           .catch((error) => {
@@ -958,19 +974,8 @@ export default function App() {
     if (!isBoardGameMode) return;
     try {
       await saveNotebookNow();
-      let content = "";
-      let extension = boardRecordFormat?.extension ?? "txt";
-      if (notebookMode === "shogi") {
-        const { exportShogiRecord } = await import("./features/shogi/shogiRecord");
-        content = exportShogiRecord(atlasRoot);
-      } else if (notebookMode === "chess") {
-        const { exportChessRecord } = await import("./features/chess/chessRecord");
-        content = exportChessRecord(atlasRoot);
-      } else if (notebookMode === "go") {
-        const { exportGoRecord } = await import("./features/go/goRecord");
-        content = exportGoRecord(atlasRoot);
-      }
-      downloadBlob(new Blob([content], { type: "text/plain;charset=utf-8" }), `${datasetFileName(atlasRoot.title)}.${extension}`);
+      const record = await exportNativeBoardRecord(atlasRoot);
+      downloadBlob(new Blob([record.text], { type: "text/plain;charset=utf-8" }), nativeBoardRecordFileName(record));
       setMenuOpen(false);
     } catch (error) {
       console.error("Board record export failed", error);
@@ -978,13 +983,19 @@ export default function App() {
     }
   };
 
-  const prepareHostedCloudNotebook = () => {
+  const prepareHostedCloudNotebook = async () => {
+    if (isBoardGameMode) {
+      const record = await exportNativeBoardRecord(atlasRoot);
+      const sizeBytes = nativeBoardRecordSizeBytes(record);
+      if (sizeBytes > CLOUD_NOTEBOOK_MAX_BYTES) throw new Error(t("dialog.cloud.tooLarge"));
+      return { content: record, baselineRoot: atlasRoot, sizeBytes };
+    }
     const root = createTextOnlyNotebookRoot(atlasRoot);
     const sizeBytes = textOnlyNotebookSizeBytes(root);
     if (sizeBytes > CLOUD_NOTEBOOK_MAX_BYTES) {
       throw new Error(t("dialog.cloud.tooLarge"));
     }
-    return { root, sizeBytes };
+    return { content: root, baselineRoot: root, sizeBytes };
   };
 
   const rememberCurrentCloudNotebook = (entry: CloudNotebookEntry, root: AtlasNode = useAtlasStore.getState().atlasRoot) => {
@@ -1012,12 +1023,23 @@ export default function App() {
           startHostedGoogleLogin("cloud_save");
           return;
         }
-        const { root } = prepareHostedCloudNotebook();
-        const saved = await saveHostedCloudNotebook(root, root.title || atlasRoot.title || "Mind Atlas");
-        rememberCurrentCloudNotebook(saved, root);
+        const { content, baselineRoot } = await prepareHostedCloudNotebook();
+        const saved = await saveHostedCloudNotebook(content, content.title || atlasRoot.title || "Mind Atlas");
+        rememberCurrentCloudNotebook(saved, baselineRoot);
         const prunedText = saved.prunedCount ? t("dialog.cloud.oldSavesDeleted", { count: saved.prunedCount }) : "";
         setCloudStatus(t("status.cloud.savedPruned", { name: saved.title || saved.name, detail: prunedText }));
         window.alert(t("dialog.cloud.saved", { name: saved.title || saved.name, detail: prunedText ? `\n${prunedText}` : "" }));
+        setMenuOpen(false);
+        return;
+      }
+      if (isBoardGameMode) {
+        const record = await exportNativeBoardRecord(atlasRoot);
+        const saved = await saveCloudNotebookPackage(
+          new Blob([record.text], { type: "text/plain;charset=utf-8" }),
+          nativeBoardRecordFileName(record),
+        );
+        setCloudStatus(t("status.cloud.saved", { name: saved.name }));
+        window.alert(t("dialog.cloud.localSaved", { name: saved.name }));
         setMenuOpen(false);
         return;
       }
@@ -1207,13 +1229,29 @@ export default function App() {
       if (publicServiceMode) {
         if (!entry.id) throw new Error("Cloud notebook id is missing.");
         const result = await loadHostedCloudNotebook(entry.id);
-        const root = createTextOnlyNotebookRoot(result.root);
+        const imported = result.record ? await importNativeBoardRecord(result.record) : null;
+        if (!imported && !result.root) throw new Error("Cloud notebook content is missing.");
+        const root = imported ? imported.root : createTextOnlyNotebookRoot(result.root!);
         analyticsIgnoreNextNotebookRef.current = true;
-        importNotebook(root, undefined, {});
+        if (imported) resetNotebook();
+        importNotebook(root, undefined, {}, imported
+          ? { selectedNodeId: imported.recordRootId, requestTitleEdit: false, notebookMode: imported.mode }
+          : {});
         rememberCurrentCloudNotebook(result.entry, useAtlasStore.getState().atlasRoot);
         return true;
       }
       const blob = await downloadCloudNotebookPackage(entry.name);
+      if (/\.(kif|pgn|sgf)$/i.test(entry.name)) {
+        const file = new File([blob], entry.name, { type: "text/plain" });
+        const imported = await importNativeBoardRecordFile(file);
+        resetNotebook();
+        importNotebook(imported.root, imported.datasetName, {}, {
+          selectedNodeId: imported.recordRootId,
+          requestTitleEdit: false,
+          notebookMode: imported.mode,
+        });
+        return true;
+      }
       const file = new File([blob], entry.name, { type: "application/x-mindatlas-package" });
       const { root, attachmentPreviewUrls, attachmentBlobs } = await importNotebookPackage(file);
       await replaceStoredAttachmentBlobs(root, attachmentBlobs);
@@ -1268,9 +1306,9 @@ export default function App() {
       setCloudError("");
       setCloudStatus(t("status.cloud.savingShort"));
       await saveNotebookNow();
-      const { root } = prepareHostedCloudNotebook();
-      const saved = await saveHostedCloudNotebook(root, title.trim());
-      rememberCurrentCloudNotebook(saved, root);
+      const { content, baselineRoot } = await prepareHostedCloudNotebook();
+      const saved = await saveHostedCloudNotebook(content, title.trim());
+      rememberCurrentCloudNotebook(saved, baselineRoot);
       setCloudStatus(t("status.cloud.saved", { name: saved.title || saved.name }));
       await refreshCloudNotebooks();
       return saved;
@@ -1296,9 +1334,9 @@ export default function App() {
       setCloudError("");
       setCloudStatus(t("status.cloud.overwriting"));
       await saveNotebookNow();
-      const { root } = prepareHostedCloudNotebook();
-      const saved = await updateHostedCloudNotebook(entry.id, root, entry.title || root.title || atlasRoot.title || "Mind Atlas");
-      rememberCurrentCloudNotebook(saved, root);
+      const { content, baselineRoot } = await prepareHostedCloudNotebook();
+      const saved = await updateHostedCloudNotebook(entry.id, content, entry.title || content.title || atlasRoot.title || "Mind Atlas");
+      rememberCurrentCloudNotebook(saved, baselineRoot);
       setCloudStatus(t("status.cloud.overwritten", { name: saved.title || saved.name }));
       await refreshCloudNotebooks();
       return true;
@@ -1319,7 +1357,7 @@ export default function App() {
 
   const handleHostedRenameCloudNotebook = async (entry: CloudNotebookEntry) => {
     if (!publicServiceMode || !entry.id) return;
-    const title = window.prompt(formatAppMessage("ui.app.renameCloudFile.88036dc"), entry.title || entry.name.replace(/\.mindatlas$/i, ""));
+    const title = window.prompt(formatAppMessage("ui.app.renameCloudFile.88036dc"), entry.title || entry.name.replace(/\.(mindatlas|kif|pgn|sgf)$/i, ""));
     if (!title?.trim()) return;
     try {
       setCloudLoading(true);
@@ -1513,6 +1551,133 @@ export default function App() {
     if (!file) return;
     handleImportFile(file);
     event.target.value = "";
+  };
+
+  const openBoardRecordDialog = (mode: Exclude<BoardRecordDialogMode, null>) => {
+    setBoardRecordDialogError("");
+    setBoardRecordDialogMode(mode);
+    setMenuOpen(false);
+    if (mode === "merge") {
+      void refreshNotebookSnapshots();
+      if (cloudNotebooksAvailable) void refreshCloudNotebooks();
+    }
+  };
+
+  const importBoardRecordSourceText = async (mode: Exclude<NotebookMode, "standard">, value: string) => {
+    const source = value.trim();
+    if (!source) throw new Error(t("board.record.sourceRequired"));
+    if (mode === "shogi" && /^https?:\/\//i.test(source)) {
+      const result = publicServiceMode
+        ? await importHostedShogiSource(source)
+        : await importBridgeShogiSource(source);
+      return await importNativeBoardRecordText("shogi", result.text, result.datasetName);
+    }
+    return await importNativeBoardRecordText(mode, source, `${BOARD_RECORD_FORMATS[mode].label} record`);
+  };
+
+  const readBoardRecordCloudSource = async (entry: CloudNotebookEntry) => {
+    if (publicServiceMode) {
+      if (!entry.id) throw new Error("Cloud notebook id is missing.");
+      const result = await loadHostedCloudNotebook(entry.id);
+      if (result.record) return (await importNativeBoardRecord(result.record)).root;
+      if (result.root && isBoardNotebookMode(result.root.notebookMode)) return result.root;
+      throw new Error(t("board.merge.notBoardRecord"));
+    }
+
+    const blob = await downloadCloudNotebookPackage(entry.name);
+    if (/\.(kif|pgn|sgf)$/i.test(entry.name)) {
+      return (await importNativeBoardRecordFile(new File([blob], entry.name, { type: "text/plain" }))).root;
+    }
+    if (/\.mindatlaspkg$/i.test(entry.name)) {
+      const imported = await importNotebookPackage(new File([blob], entry.name, { type: "application/x-mindatlas-package" }));
+      if (isBoardNotebookMode(imported.root.notebookMode)) return imported.root;
+    }
+    throw new Error(t("board.merge.notBoardRecord"));
+  };
+
+  const applyBoardRecordMerge = async (sourceRoot: AtlasNode) => {
+    const result = mergeBoardRecords(atlasRoot, sourceRoot);
+    const nextSelectedId = findNode(result.root, selectedNodeId)?.id ?? result.root.children[0]?.id ?? result.root.id;
+    analyticsIgnoreNextNotebookRef.current = true;
+    importNotebook(result.root, result.root.title, {}, {
+      selectedNodeId: nextSelectedId,
+      requestTitleEdit: false,
+      notebookMode,
+    });
+    setBoardRecordDialogMode(null);
+    setBoardRecordDialogError("");
+    setCloudStatus(t("board.merge.completed", {
+      matched: result.matchedNodes,
+      added: result.addedBranches,
+      notes: result.mergedTextNodes,
+    }));
+  };
+
+  const runBoardRecordDialogAction = async (action: () => Promise<void>) => {
+    if (boardRecordDialogBusy) return;
+    try {
+      setBoardRecordDialogBusy(true);
+      setBoardRecordDialogError("");
+      await action();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setBoardRecordDialogError(message);
+    } finally {
+      setBoardRecordDialogBusy(false);
+    }
+  };
+
+  const handleMergeBoardRecordFile = (file: File) => {
+    void runBoardRecordDialogAction(async () => {
+      const imported = await importNativeBoardRecordFile(file);
+      await applyBoardRecordMerge(imported.root);
+    });
+  };
+
+  const handleBoardRecordDialogFile = (file: File) => {
+    if (boardRecordDialogMode === "merge") {
+      handleMergeBoardRecordFile(file);
+      return;
+    }
+    setBoardRecordDialogMode(null);
+    handleImportFile(file);
+  };
+
+  const handleMergeBoardRecordCloud = (entry: CloudNotebookEntry) => {
+    void runBoardRecordDialogAction(async () => {
+      await applyBoardRecordMerge(await readBoardRecordCloudSource(entry));
+    });
+  };
+
+  const handleMergeBoardRecordSnapshot = (snapshot: NotebookSnapshot) => {
+    void runBoardRecordDialogAction(async () => {
+      await applyBoardRecordMerge(await loadNotebookSnapshot(snapshot.id));
+    });
+  };
+
+  const handleBoardRecordText = (value: string) => {
+    if (boardRecordDialogMode === "merge" && isBoardNotebookMode(notebookMode)) {
+      void runBoardRecordDialogAction(async () => {
+        const imported = await importBoardRecordSourceText(notebookMode, value);
+        await applyBoardRecordMerge(imported.root);
+      });
+      return;
+    }
+    if (boardRecordDialogMode !== "import-shogi") return;
+    requestWorkspaceSwitch(t("board.shogi.importTitle"), () => {
+      void runBoardRecordDialogAction(async () => {
+        const imported = await importBoardRecordSourceText("shogi", value);
+        resetNotebook();
+        analyticsIgnoreNextNotebookRef.current = true;
+        importNotebook(imported.root, imported.datasetName, {}, {
+          selectedNodeId: imported.recordRootId,
+          requestTitleEdit: false,
+          notebookMode: "shogi",
+        });
+        forgetCurrentCloudNotebook();
+        setBoardRecordDialogMode(null);
+      });
+    });
   };
 
   const parseTextImportMarkdown = () => importMarkdownText(textImportValue, selectedNode.title || "Imported text outline").root;
@@ -2163,14 +2328,16 @@ export default function App() {
                   </span>
                 </button>
               ) : null}
-              <button type="button" onClick={handleExportLight}>
-                <Download size={15} />
-                <span>
-                  {t("menu.exportText")}
-                  <small>{t("menu.exportText.detail")}</small>
-                </span>
-              </button>
-              {!publicServiceMode ? (
+              {!isBoardGameMode ? (
+                <button type="button" onClick={handleExportLight}>
+                  <Download size={15} />
+                  <span>
+                    {t("menu.exportText")}
+                    <small>{t("menu.exportText.detail")}</small>
+                  </span>
+                </button>
+              ) : null}
+              {!publicServiceMode && !isBoardGameMode ? (
                 <button type="button" onClick={handleExportPackage}>
                   <Download size={15} />
                   <span>
@@ -2179,7 +2346,7 @@ export default function App() {
                   </span>
                 </button>
               ) : null}
-              {!publicServiceMode ? (
+              {!publicServiceMode && !isBoardGameMode ? (
                 <button type="button" onClick={handleCreateSharedNotebookLink} disabled={shareBusy}>
                   <Share2 size={15} />
                   <span>
@@ -2235,13 +2402,32 @@ export default function App() {
                 <Upload size={15} /> {t("menu.import")}
                 <input type="file" accept={publicServiceMode ? HOSTED_IMPORT_ACCEPT_TYPES : IMPORT_ACCEPT_TYPES} onChange={handleImport} />
               </label>
-              <button type="button" onClick={() => { setTextImportOpen(true); setMenuOpen(false); }}>
-                <FileText size={15} />
-                <span>
-                  {t("menu.importOutline")}
-                  <small>{t("menu.importOutline.detail")}</small>
-                </span>
-              </button>
+              {isBoardGameMode ? (
+                <button type="button" onClick={() => openBoardRecordDialog("merge")}>
+                  <GitBranch size={15} />
+                  <span>
+                    {t("board.merge.open", { format: boardRecordFormat?.label ?? "" })}
+                    <small>{t("board.merge.detail")}</small>
+                  </span>
+                </button>
+              ) : (
+                <button type="button" onClick={() => openBoardRecordDialog("import-shogi")}>
+                  <GitBranch size={15} />
+                  <span>
+                    {t("board.shogi.importApps")}
+                    <small>{t("board.shogi.importApps.detail")}</small>
+                  </span>
+                </button>
+              )}
+              {!isBoardGameMode ? (
+                <button type="button" onClick={() => { setTextImportOpen(true); setMenuOpen(false); }}>
+                  <FileText size={15} />
+                  <span>
+                    {t("menu.importOutline")}
+                    <small>{t("menu.importOutline.detail")}</small>
+                  </span>
+                </button>
+              ) : null}
             </div>
             <div className="context-menu-section" aria-label={t("menu.background")}>
               <span className="context-menu-section-title">{t("menu.background")}</span>
@@ -2542,6 +2728,27 @@ export default function App() {
           onChange={setMergePreview}
           onApply={handleApplyPreviewMerge}
           onClose={() => setMergePreview(null)}
+        />
+      ) : null}
+      {boardRecordDialogMode ? (
+        <BoardRecordDialog
+          action={boardRecordDialogMode}
+          mode={boardRecordDialogMode === "import-shogi" ? "shogi" : isBoardNotebookMode(notebookMode) ? notebookMode : "shogi"}
+          notebooks={cloudNotebooks}
+          snapshots={notebookSnapshots}
+          cloudAvailable={cloudNotebooksAvailable}
+          hosted={publicServiceMode}
+          busy={boardRecordDialogBusy}
+          error={boardRecordDialogError}
+          onClose={() => setBoardRecordDialogMode(null)}
+          onRefresh={() => {
+            void refreshNotebookSnapshots();
+            if (cloudNotebooksAvailable) void refreshCloudNotebooks();
+          }}
+          onFile={handleBoardRecordDialogFile}
+          onText={handleBoardRecordText}
+          onCloud={handleMergeBoardRecordCloud}
+          onSnapshot={handleMergeBoardRecordSnapshot}
         />
       ) : null}
       {voiceLogReadable && voiceLogOpen ? (
@@ -2968,6 +3175,137 @@ function NodeSearchDialog({
               </span>
             </button>
           ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function BoardRecordDialog({
+  action,
+  mode,
+  notebooks,
+  snapshots,
+  cloudAvailable,
+  hosted,
+  busy,
+  error,
+  onClose,
+  onRefresh,
+  onFile,
+  onText,
+  onCloud,
+  onSnapshot,
+}: {
+  action: Exclude<BoardRecordDialogMode, null>;
+  mode: Exclude<NotebookMode, "standard">;
+  notebooks: CloudNotebookEntry[];
+  snapshots: NotebookSnapshot[];
+  cloudAvailable: boolean;
+  hosted: boolean;
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onRefresh: () => void;
+  onFile: (file: File) => void;
+  onText: (value: string) => void;
+  onCloud: (entry: CloudNotebookEntry) => void;
+  onSnapshot: (snapshot: NotebookSnapshot) => void;
+}) {
+  const t = useMessage();
+  const [sourceText, setSourceText] = useState("");
+  const format = BOARD_RECORD_FORMATS[mode];
+  const accept = mode === "shogi" ? ".kif,.ki2,.csa,text/plain" : mode === "chess" ? ".pgn,text/plain" : ".sgf,text/plain";
+  const compatibleCloud = notebooks.filter((entry) => {
+    if (entry.fileFormat === format.extension || entry.notebookMode === mode) return true;
+    if (entry.fileFormat === "mindatlas" || /\.mindatlaspkg$/i.test(entry.name)) return true;
+    return entry.name.toLowerCase().endsWith("." + format.extension);
+  });
+  const isMerge = action === "merge";
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="notebook-history-dialog board-record-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={isMerge ? t("board.merge.title", { format: format.label }) : t("board.shogi.importTitle")}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="voice-log-header">
+          <div>
+            <h2>{isMerge ? t("board.merge.title", { format: format.label }) : t("board.shogi.importTitle")}</h2>
+            <p>{isMerge ? t("board.merge.description") : t("board.shogi.importDescription")}</p>
+          </div>
+          <div className="voice-log-actions">
+            {isMerge ? (
+              <button className="icon-button" type="button" onClick={onRefresh} aria-label={t("common.refresh")} disabled={busy}>
+                <RefreshCw size={16} />
+              </button>
+            ) : null}
+            <button className="icon-button" type="button" onClick={onClose} aria-label={t("common.close")} disabled={busy}>
+              <X size={17} />
+            </button>
+          </div>
+        </header>
+        {error ? <p className="notebook-history-error">{error}</p> : null}
+        <div className="board-record-dialog-body">
+          <section className="board-record-source-section">
+            <h3>{t("board.source.file")}</h3>
+            <label className="board-record-file-action">
+              <Upload size={16} />
+              <span>{t("board.source.chooseFile", { format: format.label })}</span>
+              <input
+                type="file"
+                accept={accept}
+                disabled={busy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) onFile(file);
+                  event.target.value = "";
+                }}
+              />
+            </label>
+          </section>
+          <section className="board-record-source-section">
+            <h3>{mode === "shogi" ? t("board.source.pasteOrUrl") : t("board.source.paste")}</h3>
+            <textarea
+              value={sourceText}
+              onChange={(event) => setSourceText(event.target.value)}
+              placeholder={mode === "shogi" ? t("board.shogi.sourcePlaceholder") : t("board.source.textPlaceholder", { format: format.label })}
+              disabled={busy}
+              spellCheck={false}
+            />
+            <button className="primary-button" type="button" disabled={busy || !sourceText.trim()} onClick={() => onText(sourceText)}>
+              {busy ? t("common.loading") : isMerge ? t("board.merge.action") : t("board.import.action")}
+            </button>
+          </section>
+          {isMerge && cloudAvailable ? (
+            <section className="board-record-source-section">
+              <h3>{t("board.source.cloud")}</h3>
+              <div className="board-record-source-list">
+                {compatibleCloud.length ? compatibleCloud.map((entry) => (
+                  <button key={cloudNotebookKey(entry)} type="button" disabled={busy} onClick={() => onCloud(entry)}>
+                    <span>{entry.title || entry.name}</span>
+                    <small>{hosted ? entry.name : entry.name + " · " + formatBytes(entry.size)}</small>
+                  </button>
+                )) : <p>{t("board.source.cloudEmpty")}</p>}
+              </div>
+            </section>
+          ) : null}
+          {isMerge ? (
+            <section className="board-record-source-section">
+              <h3>{t("board.source.history")}</h3>
+              <div className="board-record-source-list">
+                {snapshots.length ? snapshots.map((snapshot) => (
+                  <button key={snapshot.id} type="button" disabled={busy} onClick={() => onSnapshot(snapshot)}>
+                    <span>{snapshot.title}</span>
+                    <small>{formatFullDateTime(snapshot.createdAt)} · {snapshot.nodeCount} {t("board.source.nodes")}</small>
+                  </button>
+                )) : <p>{t("board.source.historyEmpty")}</p>}
+              </div>
+            </section>
+          ) : null}
         </div>
       </section>
     </div>

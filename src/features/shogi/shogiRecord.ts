@@ -9,6 +9,7 @@ import {
   type ImmutableNode,
 } from "tsshogi";
 import type { AtlasNode, ShogiRecordContent, ShogiRecordFormat } from "../../types";
+import { decodeRecordComment, encodeRecordComment } from "../board/recordComment.ts";
 
 export interface ShogiImportResult {
   root: AtlasNode;
@@ -33,8 +34,26 @@ export function detectShogiRecordFormat(fileName: string): ShogiFileFormat | nul
 export async function importShogiRecordFile(file: File): Promise<ShogiImportResult> {
   const format = detectShogiRecordFormat(file.name);
   if (!format) throw new Error("Unsupported shogi record. Use KIF, KI2, or CSA.");
-  const record = parseRecord(await decodeShogiFile(file), format);
-  return recordToAtlas(record, format, datasetNameFromFile(file.name));
+  return importShogiRecordText(await decodeShogiFile(file), datasetNameFromFile(file.name), format);
+}
+
+export function importShogiRecordText(
+  text: string,
+  datasetName = "Imported shogi record",
+  preferredFormat?: ShogiFileFormat,
+): ShogiImportResult {
+  const formats = preferredFormat
+    ? [preferredFormat, ...(["kif", "ki2", "csa"] as const).filter((format) => format !== preferredFormat)]
+    : (["kif", "ki2", "csa"] as const);
+  const failures: string[] = [];
+  for (const format of formats) {
+    try {
+      return recordToAtlas(parseRecord(text.replace(/^#\s*----\s*KIF形式\s*----\s*$/m, ""), format), format, datasetName);
+    } catch (error) {
+      failures.push(`${format.toUpperCase()}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new Error(`The pasted text is not a supported KIF, KI2, or CSA record.\n${failures.join("\n")}`);
 }
 
 export function exportShogiRecord(root: AtlasNode): string {
@@ -48,7 +67,7 @@ export function exportShogiRecord(root: AtlasNode): string {
   if (!position) throw new Error("The saved starting position is invalid.");
   const record = new TsshogiRecord(position);
   applyMetadata(record, rootContent.metadata ?? {});
-  record.first.comment = recordRoot.body;
+  record.first.comment = encodeRecordComment(recordRoot.title, recordRoot.body);
   const nativeByAtlasId = new Map<string, ImmutableNode>([[recordRoot.id, record.first]]);
   appendChildren(record, recordRoot, record.first, nativeByAtlasId);
   return exportKIF(record);
@@ -90,11 +109,12 @@ function recordToAtlas(
     sfen: record.first.sfen || DEFAULT_SFEN,
     metadata,
   };
+  const rootText = decodeRecordComment(record.first.comment, metadata.title || datasetName);
   const recordRoot: AtlasNode = makeNode(
     recordRootId,
     "workArea",
-    metadata.title || datasetName,
-    record.first.comment,
+    rootText.title,
+    rootText.body,
     now,
     recordRootContent,
     [],
@@ -110,6 +130,7 @@ function recordToAtlas(
     undefined,
     [recordRoot],
   );
+  notebookRoot.notebookMode = "shogi";
   return { root: notebookRoot, recordRootId, datasetName, format };
 }
 
@@ -136,7 +157,8 @@ function buildMoveChildren(
       displayText: move.displayText,
       branchIndex: move.branchIndex,
     };
-    const node = makeNode(moveId, "thread", move.displayText || `Move ${move.ply}`, move.comment, now, content, []);
+    const moveText = decodeRecordComment(move.comment, move.displayText || `Move ${move.ply}`);
+    const node = makeNode(moveId, "thread", moveText.title, moveText.body, now, content, []);
     node.sourceParentId = parentId;
     node.children = buildMoveChildren(move, node.id, recordId, format, now);
     children.push(node);
@@ -161,7 +183,7 @@ function appendChildren(
     const move = record.position.createMoveByUSI(content.usi);
     if (!move || !record.append(move)) throw new Error(`Illegal or unsupported move: ${content.usi}.`);
     const nativeChild = record.current;
-    nativeChild.comment = atlasChild.body;
+    nativeChild.comment = encodeRecordComment(atlasChild.title, atlasChild.body);
     nativeByAtlasId.set(atlasChild.id, nativeChild);
     appendChildren(record, atlasChild, nativeChild, nativeByAtlasId);
   });

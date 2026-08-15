@@ -4034,6 +4034,7 @@ function BoardMobileNodeTitle({
     return (
       <div
         className="board-mobile-node-title board-mobile-node-preview"
+        style={{ width: boardMobileTextWidth(node.title, formatAppMessage("node.untitled"), 52, 132) }}
         role="button"
         tabIndex={0}
         onPointerDown={(event) => event.stopPropagation()}
@@ -4056,6 +4057,7 @@ function BoardMobileNodeTitle({
   return (
     <input
       className="board-mobile-node-title board-mobile-node-input"
+      style={{ width: boardMobileTextWidth(node.title, formatAppMessage("node.untitled"), 52, 132) }}
       data-node-id={node.id}
       value={node.title}
       placeholder={formatAppMessage("node.untitled")}
@@ -4068,19 +4070,34 @@ function BoardMobileNodeTitle({
 }
 
 function BoardMobileNodeBody({ node, onChange }: { node: AtlasNode; onChange: (body: string) => void }) {
+  const memoPlaceholder = formatAppMessage("ui.focusPanel.memoDetailsOrContext.0f619ba")
+    .split(/[、，,;；:\s]+/u)[0]
+    .trim() || "Memo";
   return (
     <textarea
       className="board-mobile-node-body board-mobile-node-input"
+      style={{ width: boardMobileTextWidth(node.body, memoPlaceholder, 48, 132) }}
       data-node-id={node.id}
       value={node.body}
-      placeholder={formatAppMessage("ui.focusPanel.memoDetailsOrContext.0f619ba")}
-      aria-label={formatAppMessage("ui.focusPanel.memoDetailsOrContext.0f619ba")}
+      placeholder={memoPlaceholder}
+      aria-label={memoPlaceholder}
       rows={2}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
       onChange={(event) => onChange(event.target.value)}
     />
   );
+}
+
+function boardMobileTextWidth(value: string, placeholder: string, minimum: number, maximum: number) {
+  const longestLine = (value || placeholder).split("\n").reduce((longest, line) => (
+    Array.from(line).length > Array.from(longest).length ? line : longest
+  ), "");
+  const units = Array.from(longestLine).reduce(
+    (total, character) => total + (/^[\x00-\x7f]$/.test(character) ? 0.62 : 1),
+    0,
+  );
+  return `${Math.max(minimum, Math.min(maximum, Math.ceil(units * 11 + 14)))}px`;
 }
 
 function SpaceNodePreview({

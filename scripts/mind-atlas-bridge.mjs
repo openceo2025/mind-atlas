@@ -30,6 +30,7 @@ import {
 import { createHandoffCoordinator } from "./agent-runtime/handoff-coordinator.mjs";
 import { createAgentRunStore } from "./agent-runtime/run-journal.mjs";
 import { createAgentRuntimeManager } from "./agent-runtime/runtime-manager.mjs";
+import { fetchSupportedShogiSource } from "../server/shogi-source.mjs";
 
 loadLocalEnvFiles();
 
@@ -598,6 +599,18 @@ const server = createBridgeServer(async (request, response) => {
       const payload = await readJson(request);
       const result = await createWebSearchResponse(payload);
       sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/board-records/shogi/source") {
+      const payload = await readJson(request);
+      const sourceUrl = stringOr(payload?.url, "").trim();
+      if (!sourceUrl || sourceUrl.length > 1000) throw new BridgeError(400, "A supported shogi share URL is required");
+      try {
+        sendJson(response, 200, await fetchSupportedShogiSource(sourceUrl));
+      } catch (error) {
+        throw new BridgeError(400, error instanceof Error ? error.message : "The shogi share URL could not be loaded");
+      }
       return;
     }
 
@@ -4215,7 +4228,7 @@ async function listCloudNotebooks() {
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const name = entry.name;
-    if (!name.toLowerCase().endsWith(".mindatlaspkg")) continue;
+    if (!isSupportedCloudNotebookName(name)) continue;
     const filePath = join(cloudNotebookDir, name);
     const stats = await stat(filePath);
     notebooks.push({
@@ -4255,7 +4268,7 @@ async function sendCloudNotebookPackage(rawName, response) {
   if (!existsSync(filePath)) throw new BridgeError(404, "Cloud notebook package not found");
   const bytes = readFileSync(filePath);
   response.writeHead(200, {
-    "Content-Type": "application/x-mindatlas-package",
+    "Content-Type": cloudNotebookContentType(name),
     "Content-Disposition": `attachment; filename="${encodeURIComponent(basename(filePath))}"`,
     "Content-Length": String(bytes.byteLength),
   });
@@ -4263,7 +4276,10 @@ async function sendCloudNotebookPackage(rawName, response) {
 }
 
 function createCloudNotebookFileName(originalName) {
-  const extension = extname(originalName).toLowerCase() === ".mindatlaspkg" ? ".mindatlaspkg" : ".mindatlaspkg";
+  const requestedExtension = extname(originalName).toLowerCase();
+  const extension = [".mindatlaspkg", ".kif", ".pgn", ".sgf"].includes(requestedExtension)
+    ? requestedExtension
+    : ".mindatlaspkg";
   const sanitizedBase = basename(originalName, extname(originalName))
     .trim()
     .replace(/[\\/:*?"<>|]+/g, "-")
@@ -4276,6 +4292,16 @@ function createCloudNotebookFileName(originalName) {
     if (!existsSync(join(cloudNotebookDir, candidate))) return candidate;
     index += 1;
   }
+}
+
+function isSupportedCloudNotebookName(name) {
+  return [".mindatlaspkg", ".kif", ".pgn", ".sgf"].includes(extname(String(name)).toLowerCase());
+}
+
+function cloudNotebookContentType(name) {
+  return extname(String(name)).toLowerCase() === ".mindatlaspkg"
+    ? "application/x-mindatlas-package"
+    : "text/plain; charset=utf-8";
 }
 
 function stripExistingCloudNotebookSequence(name, extension) {
@@ -4292,8 +4318,8 @@ function stripExistingCloudNotebookSequence(name, extension) {
 
 function safeCloudNotebookPath(name) {
   const safeName = basename(name);
-  if (!safeName.toLowerCase().endsWith(".mindatlaspkg")) {
-    throw new BridgeError(400, "Cloud notebook file must be a .mindatlaspkg package");
+  if (!isSupportedCloudNotebookName(safeName)) {
+    throw new BridgeError(400, "Cloud notebook file must be .mindatlaspkg, .kif, .pgn, or .sgf");
   }
   const resolved = resolve(cloudNotebookDir, safeName);
   const relativePath = relative(cloudNotebookDir, resolved);

@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, GitBranch, RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Chess } from "chessops/chess";
 import { chessgroundDests, chessgroundMove } from "chessops/compat";
 import { makeFen, parseFen } from "chessops/fen";
@@ -54,6 +54,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<Api | null>(null);
   const configRef = useRef<Config | null>(null);
+  const candidateArrowheadId = useId().replace(/:/g, "");
   const [libraryReady, setLibraryReady] = useState(false);
   const [libraryError, setLibraryError] = useState("");
   const [orientation, setOrientation] = useState<"white" | "black">("white");
@@ -188,7 +189,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
         <div className="chess-candidate-overlay">
           <svg className="chess-candidate-arrows" viewBox="0 0 800 800" preserveAspectRatio="none" aria-hidden="true">
             <defs>
-              <marker id="chess-candidate-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto">
+              <marker id={candidateArrowheadId} markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto">
                 <path d="M0,0 L7,3.5 L0,7 Z" />
               </marker>
             </defs>
@@ -199,7 +200,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
                 y1={candidate.from[1]}
                 x2={candidate.to[0]}
                 y2={candidate.to[1]}
-                markerEnd="url(#chess-candidate-arrowhead)"
+                markerEnd={`url(#${candidateArrowheadId})`}
                 onClick={() => focusNode(candidate.node.id)}
               />
             ))}

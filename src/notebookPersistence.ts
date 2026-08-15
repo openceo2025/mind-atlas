@@ -99,6 +99,19 @@ export async function restoreNotebookSnapshot(id: string) {
   }
 }
 
+export async function loadNotebookSnapshot(id: string) {
+  if (isAboutDemoMode()) throw new Error("Notebook history is disabled in the Mind Atlas demo.");
+  const db = await openNotebookDb();
+  if (!db) throw new Error("IndexedDB is not available in this browser.");
+  try {
+    const snapshot = await runStoreRequest<StoredNotebookSnapshot | undefined>(db, SNAPSHOT_STORE, "readonly", (store) => store.get(id));
+    if (!snapshot) throw new Error("Notebook snapshot was not found.");
+    return snapshot.root;
+  } finally {
+    db.close();
+  }
+}
+
 export async function clearPersistedNotebook() {
   if (isAboutDemoMode()) return;
   if (typeof window !== "undefined") {

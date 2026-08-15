@@ -1,6 +1,7 @@
 import GoBoard, { type Sign, type Vertex } from "@sabaki/go-board";
 import sgf, { type SgfNode } from "@sabaki/sgf";
 import type { AtlasNode, GoRecordContent } from "../../types";
+import { decodeRecordComment, encodeRecordComment } from "../board/recordComment.ts";
 
 export interface GoImportResult {
   root: AtlasNode;
@@ -19,9 +20,13 @@ export function detectGoRecordFormat(fileName: string): GoFileFormat | null {
 export async function importGoRecordFile(file: File): Promise<GoImportResult> {
   if (!detectGoRecordFormat(file.name)) throw new Error("Unsupported Go record. Use SGF.");
   const text = new TextDecoder("utf-8").decode(new Uint8Array(await file.arrayBuffer())).replace(/^\uFEFF/, "");
+  return importGoRecordText(text, datasetNameFromFile(file.name));
+}
+
+export function importGoRecordText(text: string, datasetName = "Imported Go record"): GoImportResult {
   const tree = sgf.parse(text)[0];
   if (!tree) throw new Error("The SGF does not contain a Go game.");
-  return treeToAtlas(tree, datasetNameFromFile(file.name));
+  return treeToAtlas(tree, datasetName);
 }
 
 export function exportGoRecord(root: AtlasNode): string {
@@ -40,7 +45,7 @@ export function exportGoRecord(root: AtlasNode): string {
       ...Object.fromEntries(Object.entries(rootContent.metadata ?? {}).map(([key, value]) => [key, [value]])),
       ...(rootContent.setupBlack?.length ? { AB: rootContent.setupBlack.map((value) => sgfVertexFromDisplay(value, rootContent.boardSize)) } : {}),
       ...(rootContent.setupWhite?.length ? { AW: rootContent.setupWhite.map((value) => sgfVertexFromDisplay(value, rootContent.boardSize)) } : {}),
-      ...(recordRoot.body ? { C: [recordRoot.body] } : {}),
+      C: [encodeRecordComment(recordRoot.title, recordRoot.body)],
     },
     children: [],
   };
@@ -120,7 +125,8 @@ function treeToAtlas(tree: SgfNode, datasetName: string): GoImportResult {
     ...(readSetup(rootData, "AW", boardSize).length ? { setupWhite: readSetup(rootData, "AW", boardSize) } : {}),
     metadata: readMetadata(rootData),
   };
-  const recordRoot = makeNode(recordRootId, "workArea", first(rootData.GN) || datasetName, first(rootData.C) || "", now, rootContent, []);
+  const rootText = decodeRecordComment(first(rootData.C), first(rootData.GN) || datasetName);
+  const recordRoot = makeNode(recordRootId, "workArea", rootText.title, rootText.body, now, rootContent, []);
   recordRoot.children = buildChildren(tree, recordRoot.id, recordId, boardSize, initialBoard, now, 0);
   const root = makeNode(
     "atlas-root",
@@ -131,6 +137,7 @@ function treeToAtlas(tree: SgfNode, datasetName: string): GoImportResult {
     undefined,
     [recordRoot],
   );
+  root.notebookMode = "go";
   return { root, recordRootId, datasetName };
 }
 
@@ -171,7 +178,8 @@ function buildChildren(
       displayText,
       branchIndex,
     };
-    const node = makeNode(makeId(`go-move-${ply + 1}`), "thread", displayText, first(child.data.C) || "", now, content, []);
+    const moveText = decodeRecordComment(first(child.data.C), displayText);
+    const node = makeNode(makeId(`go-move-${ply + 1}`), "thread", moveText.title, moveText.body, now, content, []);
     node.sourceParentId = parentId;
     node.children = buildChildren(child, node.id, recordId, boardSize, nextBoard, now, ply + 1);
     return node;
@@ -188,7 +196,7 @@ function appendChildren(parent: SgfNode, atlasParent: AtlasNode, nextId: number)
       parentId: parent.id,
       data: {
         [content.color]: [content.vertex === "pass" ? "" : sgfVertexFromDisplay(content.vertex || "", content.boardSize)],
-        ...(atlasChild.body ? { C: [atlasChild.body] } : {}),
+        C: [encodeRecordComment(atlasChild.title, atlasChild.body)],
       },
       children: [],
     };

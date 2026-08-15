@@ -833,6 +833,8 @@ export interface CloudNotebookEntry {
   updatedAt: string;
   visibility?: "private" | "public";
   shareToken?: string;
+  fileFormat?: CloudNotebookFileFormat;
+  notebookMode?: NotebookMode;
 }
 
 export interface CloudNotebookListResult {
@@ -855,7 +857,8 @@ export interface CloudNotebookSaveResult extends CloudNotebookEntry {
 
 export interface CloudNotebookLoadResult {
   entry: CloudNotebookEntry;
-  root: AtlasNode;
+  root?: AtlasNode;
+  record?: NativeBoardRecordPayload;
 }
 
 export interface CloudNotebookShareResult {
@@ -876,6 +879,26 @@ export interface CloudNotebookDeleteResult {
     usedBytes: number;
     limitBytes: number;
   };
+}
+
+export type NativeBoardRecordFormat = "kif" | "pgn" | "sgf";
+export type CloudNotebookFileFormat = "mindatlas" | NativeBoardRecordFormat;
+
+export interface NativeBoardRecordPayload {
+  kind: "board-record";
+  schemaVersion: 1;
+  mode: Exclude<NotebookMode, "standard">;
+  format: NativeBoardRecordFormat;
+  title: string;
+  text: string;
+}
+
+export interface ShogiSourceImportResult {
+  provider: "shogi-wars" | "shogi-quest";
+  datasetName: string;
+  fileName: string;
+  format: "csa";
+  text: string;
 }
 
 export interface RealtimeSessionConfig {
