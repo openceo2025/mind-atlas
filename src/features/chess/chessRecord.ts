@@ -125,7 +125,7 @@ function buildMoveChildren(
       role: "move",
       recordId,
       sourceFormat: "pgn",
-      ply: parentPosition.fullmoves * 2 - (parentPosition.turn === "white" ? 2 : 1),
+      ply: parentPosition.fullmoves * 2 - (parentPosition.turn === "white" ? 1 : 0),
       fen: makeFen(before.toSetup()),
       uci: makeUci(move),
       san,

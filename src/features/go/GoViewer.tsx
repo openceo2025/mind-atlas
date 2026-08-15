@@ -4,6 +4,7 @@ import GoBoard, { type Sign, type Vertex } from "@sabaki/go-board";
 import { findGoNodeContent, findGoRecordRoot, goRecordPath, goVertexToSgf, nearestGoRecordNode, nextGoSign, boardFromGoContent } from "./goRecord";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, GoRecordContent } from "../../types";
+import { formatAppMessage } from "../../i18n/format";
 
 interface GoViewerProps {
   enabled?: boolean;
@@ -28,6 +29,15 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
   const [flipped, setFlipped] = useState(false);
 
   if (!enabled || !recordRoot || !rootContent || !currentContent || !selectedNode || !board) return null;
+
+  const lastVertex = currentContent.vertex && currentContent.vertex !== "pass" ? board.parseVertex(currentContent.vertex) : null;
+  const candidateCounts = new Map<string, number>();
+  for (const variation of variations) {
+    const content = findGoNodeContent(variation);
+    if (!content?.vertex || content.vertex === "pass") continue;
+    candidateCounts.set(content.vertex, (candidateCounts.get(content.vertex) ?? 0) + 1);
+  }
+  const turnLabel = nextGoSign(rootContent, currentNode ?? recordRoot) === 1 ? "黒番" : "白番";
 
   const addMove = (vertex: Vertex, pass = false) => {
     const parent = currentNode ?? recordRoot;
@@ -79,12 +89,13 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
       <div className="go-viewer-toolbar">
         <span className="go-viewer-label">囲碁</span>
         <span className="go-viewer-position">{currentContent.ply === 0 ? "開始局面" : `${currentContent.ply} 手目`}</span>
+        <span className="board-turn-indicator">{turnLabel}</span>
         <button
           type="button"
           className="go-viewer-icon"
           onClick={() => setFlipped((current) => !current)}
-          aria-label="盤面を反転"
-          title="盤面を反転"
+          aria-label={formatAppMessage("board.flip")}
+          title={formatAppMessage("board.flip")}
         >
           <RotateCcw size={14} />
         </button>
@@ -104,20 +115,25 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
           const y = Math.floor(index / currentContent.boardSize);
           const vertex: Vertex = [x, y];
           const sign = board.get(vertex);
+          const vertexLabel = board.stringifyVertex(vertex);
+          const candidateCount = candidateCounts.get(vertexLabel) ?? 0;
+          const isLast = Boolean(lastVertex && lastVertex[0] === x && lastVertex[1] === y);
           return (
             <button
               key={`${x}-${y}`}
               type="button"
-              className={`go-point ${sign === 1 ? "is-black" : sign === -1 ? "is-white" : ""} ${isStarPoint(x, y, currentContent.boardSize) ? "is-star" : ""}`}
+              className={`go-point ${sign === 1 ? "is-black" : sign === -1 ? "is-white" : ""} ${isStarPoint(x, y, currentContent.boardSize) ? "is-star" : ""} ${isLast ? "is-last" : ""} ${candidateCount ? "is-candidate" : ""}`}
+              data-candidate-count={candidateCount > 1 ? candidateCount : undefined}
               onClick={() => sign === 0 ? addMove(vertex) : onStatus?.("その交点にはすでに石があります。")}
-              aria-label={`${board.stringifyVertex(vertex)}${sign === 1 ? " 黒" : sign === -1 ? " 白" : ""}`}
+              aria-label={`${vertexLabel}${sign === 1 ? " 黒" : sign === -1 ? " 白" : ""}${candidateCount ? ` 候補手 ${candidateCount}` : ""}`}
             >
-              <span aria-hidden="true" />
+              <span aria-hidden="true" data-candidate-count={candidateCount > 1 ? candidateCount : undefined} />
             </button>
           );
         })}
       </div>
-      <div className="go-variations" aria-label="候補手">
+      <div className="go-variations" aria-label={formatAppMessage("board.candidateMoves")}>
+        <span className="board-variation-label">{formatAppMessage("board.candidateMoves")}</span>
         {variations.length ? <GitBranch size={13} /> : null}
         {variations.map((node) => (
           <button key={node.id} type="button" className={node.id === currentNode?.id ? "is-active" : ""} onClick={() => focusNode(node.id)}>

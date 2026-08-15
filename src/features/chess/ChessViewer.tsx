@@ -1,22 +1,39 @@
 import { ChevronLeft, ChevronRight, GitBranch, RotateCcw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess } from "chessops/chess";
+import { chessgroundDests, chessgroundMove } from "chessops/compat";
 import { makeFen, parseFen } from "chessops/fen";
 import { makeSan } from "chessops/san";
-import { parseUci } from "chessops/util";
+import type { Role } from "chessops/types";
+import { parseSquare, parseUci } from "chessops/util";
 import type { Api } from "chessground/api";
 import type { Config } from "chessground/config";
+import type { DrawShape } from "chessground/draw";
+import type { Key } from "chessground/types";
 import { Chessground } from "chessground";
 import "chessground/assets/chessground.base.css";
 import "chessground/assets/chessground.cburnett.css";
 import { findChessNodeContent, findChessRecordRoot, nearestChessRecordNode } from "./chessRecord";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, ChessRecordContent } from "../../types";
+import { formatAppMessage } from "../../i18n/format";
+
+const PROMOTION_OPTIONS: Array<{ role: Role; label: string; suffix: string }> = [
+  { role: "queen", label: "Q", suffix: "q" },
+  { role: "rook", label: "R", suffix: "r" },
+  { role: "bishop", label: "B", suffix: "b" },
+  { role: "knight", label: "N", suffix: "n" },
+];
 
 interface ChessViewerProps {
   enabled?: boolean;
   onStatus?: (message: string) => void;
 }
+
+type PendingPromotion = {
+  baseUci: string;
+  options: typeof PROMOTION_OPTIONS;
+};
 
 export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -37,7 +54,9 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
   const [libraryReady, setLibraryReady] = useState(false);
   const [libraryError, setLibraryError] = useState("");
   const [orientation, setOrientation] = useState<"white" | "black">("white");
-  configRef.current = currentContent ? makeBoardConfig(currentContent, handleMove, orientation) : null;
+  const [pendingPromotion, setPendingPromotion] = useState<PendingPromotion | null>(null);
+  const candidateShapes = useMemo(() => makeCandidateShapes(variations), [variations]);
+  configRef.current = currentContent ? makeBoardConfig(currentContent, handleBoardMove, orientation, candidateShapes) : null;
 
   useEffect(() => {
     if (!enabled || !recordRoot || !boardRef.current) return;
@@ -57,26 +76,52 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
 
   useEffect(() => {
     if (!apiRef.current || !currentContent) return;
-    apiRef.current.set(makeBoardConfig(currentContent, handleMove, orientation));
-  }, [currentContent?.fen, currentNode?.id, orientation, recordRoot?.id]);
+    setPendingPromotion(null);
+    apiRef.current.set(makeBoardConfig(currentContent, handleBoardMove, orientation, candidateShapes));
+  }, [candidateShapes, currentContent?.fen, currentContent?.uci, currentNode?.id, orientation, recordRoot?.id]);
 
   if (!enabled || !recordRoot || !currentContent || !selectedNode) return null;
 
-  function handleMove(orig: string, dest: string) {
+  function handleBoardMove(orig: string, dest: string) {
     const parent = currentNode ?? recordRoot;
     if (!parent) return;
     const content = findChessNodeContent(parent);
     if (!content) return;
     const position = positionFromFen(content.fen);
-    const uci = normalizeCastling(`${orig}${dest}`);
+    const baseUci = normalizeCastling(`${orig}${dest}`);
+    const from = parseSquare(baseUci.slice(0, 2));
+    const to = parseSquare(baseUci.slice(2, 4));
+    const piece = from === undefined ? undefined : position.board.get(from);
+    const reachesBackRank = to !== undefined && (to < 8 || to >= 56);
+    if (piece?.role === "pawn" && reachesBackRank) {
+      const options = PROMOTION_OPTIONS.filter(({ suffix }) => {
+        const move = parseUci(`${baseUci}${suffix}`);
+        return Boolean(move && position.isLegal(move));
+      });
+      if (options.length) {
+        setPendingPromotion({ baseUci, options });
+        return;
+      }
+    }
+    commitMove(baseUci);
+  }
+
+  function commitMove(uci: string) {
+    const parent = currentNode ?? recordRoot;
+    if (!parent) return;
+    const content = findChessNodeContent(parent);
+    if (!content) return;
+    const position = positionFromFen(content.fen);
     const move = parseUci(uci);
     if (!move || !position.isLegal(move)) {
       onStatus?.("その手は現在の局面では指せません。");
-      apiRef.current?.set(makeBoardConfig(content, handleMove, orientation));
+      apiRef.current?.set(makeBoardConfig(content, handleBoardMove, orientation, candidateShapes));
+      setPendingPromotion(null);
       return;
     }
     const existing = parent.children.find((child) => findChessNodeContent(child)?.uci === uci);
     if (existing) {
+      setPendingPromotion(null);
       focusNode(existing.id);
       return;
     }
@@ -99,6 +144,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
       displayText,
       branchIndex: parent.children.filter((child) => findChessNodeContent(child)?.role === "move").length,
     };
+    setPendingPromotion(null);
     updateNode(childId, { structuredContent: nextContent });
     focusNode(childId);
   }
@@ -107,17 +153,20 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     if (node) focusNode(node.id);
   };
 
+  const turnLabel = currentContent.fen.split(" ")[1] === "b" ? "Black" : "White";
+
   return (
     <section className="chess-viewer" aria-label="Chess record viewer">
       <div className="chess-viewer-toolbar">
         <span className="chess-viewer-label">チェス</span>
         <span className="chess-viewer-position">{currentContent.ply === 0 ? "開始局面" : `${currentContent.ply} ply`}</span>
+        <span className="board-turn-indicator">{turnLabel}</span>
         <button
           type="button"
           className="chess-viewer-icon"
           onClick={() => setOrientation((current) => current === "white" ? "black" : "white")}
-          aria-label="盤面を反転"
-          title="盤面を反転"
+          aria-label={formatAppMessage("board.flip")}
+          title={formatAppMessage("board.flip")}
         >
           <RotateCcw size={14} />
         </button>
@@ -128,40 +177,100 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
           <ChevronRight size={14} />
         </button>
       </div>
-      <div className="chess-board-host" ref={boardRef} />
-      {!libraryReady && !libraryError ? <p className="chess-viewer-note">チェス盤を準備しています...</p> : null}
-      {libraryError ? <p className="chess-viewer-note is-error">{libraryError}</p> : null}
-      <div className="chess-variations" aria-label="候補手">
+      <div className="chess-board-frame">
+        <div className="chess-board-host" ref={boardRef} />
+        {pendingPromotion ? (
+          <div className="chess-promotion-picker" role="dialog" aria-label={formatAppMessage("board.chess.promotion")}>
+            {pendingPromotion.options.map((option) => (
+              <button key={option.role} type="button" onClick={() => commitMove(`${pendingPromotion.baseUci}${option.suffix}`)}>
+                {option.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="is-cancel"
+              onClick={() => {
+                setPendingPromotion(null);
+                apiRef.current?.set(makeBoardConfig(currentContent, handleBoardMove, orientation, candidateShapes));
+              }}
+            >
+              {formatAppMessage("common.cancel")}
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <div className="chess-variations" aria-label={formatAppMessage("board.candidateMoves")}>
+        <span className="board-variation-label">{formatAppMessage("board.candidateMoves")}</span>
         {variations.length ? <GitBranch size={13} /> : null}
         {variations.map((node) => (
-          <button key={node.id} type="button" className={node.id === currentNode?.id ? "is-active" : ""} onClick={() => focusNode(node.id)}>
+          <button key={node.id} type="button" onClick={() => focusNode(node.id)}>
             {findChessNodeContent(node)?.displayText || node.title}
           </button>
         ))}
       </div>
+      {!libraryReady && !libraryError ? <p className="chess-viewer-note">チェス盤を準備しています...</p> : null}
+      {libraryError ? <p className="chess-viewer-note is-error">{libraryError}</p> : null}
     </section>
   );
 }
 
-function makeBoardConfig(content: ChessRecordContent, onMove: (orig: string, dest: string) => void, orientation: "white" | "black"): Config {
-  const turnColor = content.fen.split(" ")[1] === "b" ? "black" : "white";
+function makeBoardConfig(
+  content: ChessRecordContent,
+  onMove: (orig: string, dest: string) => void,
+  orientation: "white" | "black",
+  candidateShapes: DrawShape[],
+): Config {
+  const position = positionFromFen(content.fen);
+  const turnColor = position.turn;
   return {
     fen: content.fen as never,
     orientation,
     turnColor,
+    check: position.isCheck() ? turnColor : false,
+    lastMove: makeLastMove(content.uci),
     coordinates: true,
     blockTouchScroll: true,
     movable: {
-      free: true,
-      color: "both",
+      free: false,
+      color: turnColor,
+      dests: chessgroundDests(position) as Map<Key, Key[]>,
       showDests: true,
+      rookCastle: true,
       events: { after: onMove },
     },
+    premovable: { enabled: false },
     draggable: { enabled: true },
     selectable: { enabled: true },
-    drawable: { enabled: false, visible: false },
+    drawable: { enabled: false, visible: true, autoShapes: candidateShapes },
+    highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 180 },
   };
+}
+
+function makeCandidateShapes(nodes: AtlasNode[]): DrawShape[] {
+  const groups = new Map<string, { orig: Key; dest: Key; labels: string[] }>();
+  for (const node of nodes) {
+    const content = findChessNodeContent(node);
+    const move = content?.uci ? parseUci(content.uci) : undefined;
+    if (!move || !("from" in move)) continue;
+    const [orig, dest] = chessgroundMove(move) as Key[];
+    const key = `${orig}-${dest}`;
+    const group = groups.get(key) ?? { orig, dest, labels: [] };
+    group.labels.push(content?.displayText || node.title);
+    groups.set(key, group);
+  }
+  return [...groups.values()].map((group) => ({
+    orig: group.orig,
+    dest: group.dest,
+    brush: "green",
+    modifiers: { lineWidth: 7 },
+    label: group.labels.length > 1 ? { text: String(group.labels.length) } : undefined,
+  }));
+}
+
+function makeLastMove(uci?: string): Key[] | undefined {
+  const move = uci ? parseUci(uci) : undefined;
+  return move ? chessgroundMove(move) as Key[] : undefined;
 }
 
 function positionFromFen(fen: string) {

@@ -1,10 +1,13 @@
 import { ChevronLeft, ChevronRight, GitBranch, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { formatKIFMove, Position } from "tsshogi";
+import { formatKIFMove, handPieceTypes, Position, Square } from "tsshogi";
 import type { Api } from "shogiground/api";
+import type { Config } from "shogiground/config";
+import type { DropDests, Key, MoveDests, PieceName, RoleString } from "shogiground/types";
 import { findShogiNodeContent, findShogiRecordRoot } from "./shogiRecord";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, ShogiRecordContent } from "../../types";
+import { formatAppMessage } from "../../i18n/format";
 
 const PIECE_ROLES: Record<string, string> = {
   pawn: "P",
@@ -16,6 +19,18 @@ const PIECE_ROLES: Record<string, string> = {
   rook: "R",
   king: "K",
 };
+
+const PROMOTED_ROLES: Record<string, string> = {
+  pawn: "tokin",
+  lance: "promotedlance",
+  knight: "promotedknight",
+  silver: "promotedsilver",
+  bishop: "horse",
+  rook: "dragon",
+};
+
+const UNPROMOTED_ROLES = Object.fromEntries(Object.entries(PROMOTED_ROLES).map(([base, promoted]) => [promoted, base]));
+const JAPANESE_RANKS = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
 
 interface ShogiViewerProps {
   enabled?: boolean;
@@ -37,19 +52,23 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   const variations = (currentNode ?? recordRoot)?.children.filter((node) => findShogiNodeContent(node)?.role === "move") ?? [];
   const [libraryReady, setLibraryReady] = useState(false);
   const [libraryError, setLibraryError] = useState("");
-  const [selectedSquare, setSelectedSquare] = useState("");
   const [orientation, setOrientation] = useState<"sente" | "gote">("sente");
   const boardRef = useRef<HTMLDivElement>(null);
   const topHandRef = useRef<HTMLDivElement>(null);
   const bottomHandRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<Api | null>(null);
-  const boardConfigRef = useRef<ReturnType<typeof makeBoardConfig> | null>(null);
+  const boardConfigRef = useRef<Config | null>(null);
 
   const boardConfig = useMemo(
-    () => (currentContent?.kind === "shogi-record" ? makeBoardConfig(currentContent.sfen, (usi) => handleMove(usi), orientation) : null),
-    [currentContent?.sfen, currentNode?.id, orientation, recordRoot?.id],
+    () => (currentContent?.kind === "shogi-record" ? makeBoardConfig(currentContent, handleMove, orientation) : null),
+    [currentContent?.sfen, currentContent?.usi, currentNode?.id, orientation, recordRoot?.id],
   );
   boardConfigRef.current = boardConfig;
+
+  const candidateMarkers = useMemo(() => groupCandidateMoves(variations), [variations]);
+  const coordinateFiles = orientation === "sente" ? ["9", "8", "7", "6", "5", "4", "3", "2", "1"] : ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+  const coordinateRanks = orientation === "sente" ? JAPANESE_RANKS : [...JAPANESE_RANKS].reverse();
+  const turnLabel = currentContent?.sfen.split(" ")[1] === "w" ? "後手番" : "先手番";
 
   useEffect(() => {
     let cancelled = false;
@@ -89,7 +108,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
     if (!content) return;
     const position = Position.newBySFEN(content.sfen);
     const move = position?.createMoveByUSI(usi);
-    if (!position || !move) {
+    if (!position || !move || !position.isValidMove(move)) {
       onStatus?.("その手は現在の局面では指せません。");
       if (boardConfigRef.current) apiRef.current?.set(boardConfigRef.current, true);
       return;
@@ -123,30 +142,6 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
     focusNode(childId);
   }
 
-  const handleBoardPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    const boardElement = boardRef.current;
-    const boardBounds = boardElement?.getBoundingClientRect();
-    if (!boardElement || !boardBounds) return;
-    const piece = Array.from(boardElement.querySelectorAll("piece")).find((candidate) => {
-      const bounds = candidate.getBoundingClientRect();
-      return event.clientX >= bounds.left && event.clientX <= bounds.right && event.clientY >= bounds.top && event.clientY <= bounds.bottom;
-    }) as (HTMLElement & { sgKey?: string }) | undefined;
-    const target = document.elementFromPoint(event.clientX, event.clientY) as (HTMLElement & { sgKey?: string }) | null;
-    const square = target?.closest("piece, sq") as (HTMLElement & { sgKey?: string }) | null;
-    const key = piece?.sgKey ?? square?.sgKey ?? shogiKeyAtPoint(boardBounds, event.clientX, event.clientY);
-    if (!key) return;
-    if (!selectedSquare && piece?.sgKey) {
-      setSelectedSquare(key);
-      return;
-    }
-    if (selectedSquare) {
-      const from = selectedSquare;
-      setSelectedSquare("");
-      handleMove(`${from}${key}`);
-    }
-  };
-
   const jumpTo = (node: AtlasNode | null) => {
     if (node) focusNode(node.id);
   };
@@ -156,15 +151,13 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       <div className="shogi-viewer-toolbar">
         <span className="shogi-viewer-label">将棋</span>
         <span className="shogi-viewer-position">{currentContent.ply === 0 ? "開始局面" : `${currentContent.ply}手目`}</span>
+        <span className="board-turn-indicator">{turnLabel}</span>
         <button
           type="button"
           className="shogi-viewer-icon"
-          onClick={() => {
-            setSelectedSquare("");
-            setOrientation((current) => current === "sente" ? "gote" : "sente");
-          }}
-          aria-label="盤面を反転"
-          title="盤面を反転"
+          onClick={() => setOrientation((current) => current === "sente" ? "gote" : "sente")}
+          aria-label={formatAppMessage("board.shogi.flip")}
+          title={formatAppMessage("board.shogi.flip")}
         >
           <RotateCcw size={14} />
         </button>
@@ -175,59 +168,164 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
           <ChevronRight size={14} />
         </button>
       </div>
-      <div className="shogi-board-shell">
+      <div className={`shogi-board-shell orientation-${orientation}`}>
         <div className="shogi-hand-host" ref={topHandRef} />
-        <div className="shogi-board-host" ref={boardRef} onPointerDownCapture={handleBoardPointerDown} />
+        <div className="shogi-board-frame">
+          <div className={`shogi-board-host orientation-${orientation}`} ref={boardRef} />
+          <div className="shogi-file-coordinates" aria-hidden="true">
+            {coordinateFiles.map((file) => <span key={file}>{file}</span>)}
+          </div>
+          <div className="shogi-rank-coordinates" aria-hidden="true">
+            {coordinateRanks.map((rank) => <span key={rank}>{rank}</span>)}
+          </div>
+          <div className="shogi-candidate-overlay" aria-hidden="true">
+            {candidateMarkers.map((candidate) => (
+              <span
+                key={candidate.destination}
+                className="shogi-candidate-marker"
+                style={candidateMarkerStyle(candidate.destination, orientation)}
+                title={candidate.labels.join(" / ")}
+              >
+                {candidate.labels.length > 1 ? candidate.labels.length : ""}
+              </span>
+            ))}
+          </div>
+        </div>
         <div className="shogi-hand-host" ref={bottomHandRef} />
       </div>
-      {!libraryReady && !libraryError ? <p className="shogi-viewer-note">将棋盤を準備しています...</p> : null}
-      {libraryError ? <p className="shogi-viewer-note is-error">{libraryError}</p> : null}
-      <div className="shogi-variations" aria-label="候補手">
+      <div className="shogi-variations" aria-label={formatAppMessage("board.candidateMoves")}>
+        <span className="board-variation-label">{formatAppMessage("board.candidateMoves")}</span>
         {variations.length ? <GitBranch size={13} /> : null}
         {variations.map((node) => (
-          <button key={node.id} type="button" className={node.id === currentNode?.id ? "is-active" : ""} onClick={() => focusNode(node.id)}>
+          <button key={node.id} type="button" onClick={() => focusNode(node.id)}>
             {findShogiNodeContent(node)?.displayText || node.title}
           </button>
         ))}
       </div>
+      {!libraryReady && !libraryError ? <p className="shogi-viewer-note">将棋盤を準備しています...</p> : null}
+      {libraryError ? <p className="shogi-viewer-note is-error">{libraryError}</p> : null}
     </section>
   );
 }
 
-function shogiKeyAtPoint(bounds: DOMRect, clientX: number, clientY: number) {
-  const fileIndex = Math.floor(((clientX - bounds.left) / bounds.width) * 9);
-  const rankIndex = Math.floor(((clientY - bounds.top) / bounds.height) * 9);
-  if (fileIndex < 0 || fileIndex > 8 || rankIndex < 0 || rankIndex > 8) return undefined;
-  return `${9 - fileIndex}${"abcdefghi"[rankIndex]}`;
-}
-
-function makeBoardConfig(sfen: string, onMove: (usi: string) => void, orientation: "sente" | "gote") {
-  const [board = "", turn = "b", hands = "-"] = sfen.split(" ");
+function makeBoardConfig(content: ShogiRecordContent, onMove: (usi: string) => void, orientation: "sente" | "gote"): Config {
+  const position = Position.newBySFEN(content.sfen);
+  const [board = "", turn = "b", hands = "-"] = content.sfen.split(" ");
   const turnColor = turn === "w" ? "gote" : "sente";
+  if (!position) {
+    return { sfen: { board, hands }, orientation, viewOnly: true };
+  }
+  const { moveDests, dropDests } = makeLegalDests(position, turnColor);
   return {
     sfen: { board, hands },
     orientation,
-    turnColor: turnColor as "sente" | "gote",
-    // The viewer validates the resulting USI through tsshogi. Keeping both
-    // colors selectable also makes imported handicap/analysis positions
-    // editable when the record's side-to-move metadata is incomplete.
-    activeColor: "both" as const,
-    coordinates: { enabled: true, files: "numeric" as const, ranks: "numeric" as const },
+    turnColor,
+    activeColor: turnColor,
+    checks: position.checked ? turnColor : false,
+    lastDests: lastMoveSquares(content.usi),
+    lastPiece: lastDropPiece(content.usi, turnColor),
+    coordinates: { enabled: false },
     scaleDownPieces: false,
     blockTouchScroll: true,
+    highlight: { lastDests: true, check: true, checkRoles: ["king"], hovered: true },
+    hands: { roles: ["rook", "bishop", "gold", "silver", "knight", "lance", "pawn"] },
     movable: {
-      free: true,
+      free: false,
+      dests: moveDests,
       showDests: true,
-      events: { after: (orig: string, dest: string, prom: boolean) => onMove(`${orig}${dest}${prom ? "+" : ""}`) },
+      events: { after: (orig, dest, promoted) => onMove(`${orig}${dest}${promoted ? "+" : ""}`) },
     },
     droppable: {
-      free: true,
+      free: false,
+      dests: dropDests,
       showDests: true,
-      events: { after: (piece: { role: string }, key: string, prom: boolean) => onMove(`${PIECE_ROLES[piece.role] ?? "P"}*${key}${prom ? "+" : ""}`) },
+      events: { after: (piece, key) => onMove(`${PIECE_ROLES[piece.role] ?? "P"}*${key}`) },
     },
-    promotion: { movePromotionDialog: () => true, dropPromotionDialog: () => true },
+    premovable: { enabled: false },
+    predroppable: { enabled: false },
+    promotion: {
+      promotesTo: (role) => PROMOTED_ROLES[role],
+      unpromotesTo: (role) => UNPROMOTED_ROLES[role],
+      movePromotionDialog: (orig, dest) => isOptionalPromotion(position, orig, dest),
+      forceMovePromotion: (orig, dest) => isForcedPromotion(position, orig, dest),
+      dropPromotionDialog: () => false,
+      forceDropPromotion: () => false,
+    },
     drawable: { enabled: false, visible: false },
-    animation: { enabled: true, duration: 180 },
+    animation: { enabled: true, hands: true, duration: 180 },
+  };
+}
+
+function makeLegalDests(position: Position, turnColor: "sente" | "gote") {
+  const moveDests: MoveDests = new Map();
+  for (const from of position.board.listSquaresByColor(position.color)) {
+    const destinations: Key[] = [];
+    for (const to of Square.all) {
+      const move = position.createMove(from, to);
+      if (!move) continue;
+      if (position.isValidMove(move) || position.isValidMove(move.withPromote())) destinations.push(to.usi as Key);
+    }
+    if (destinations.length) moveDests.set(from.usi as Key, destinations);
+  }
+
+  const dropDests: DropDests = new Map();
+  for (const pieceType of handPieceTypes) {
+    if (position.hand(position.color).count(pieceType) <= 0) continue;
+    const destinations: Key[] = [];
+    for (const to of Square.all) {
+      const move = position.createMove(pieceType, to);
+      if (move && position.isValidMove(move)) destinations.push(to.usi as Key);
+    }
+    if (destinations.length) dropDests.set(`${turnColor} ${pieceType}` as PieceName, destinations);
+  }
+  return { moveDests, dropDests };
+}
+
+function isOptionalPromotion(position: Position, orig: Key, dest: Key) {
+  const move = position.createMoveByUSI(`${orig}${dest}`);
+  if (!move || !PROMOTED_ROLES[move.pieceType]) return false;
+  return position.isValidMove(move) && position.isValidMove(move.withPromote());
+}
+
+function isForcedPromotion(position: Position, orig: Key, dest: Key) {
+  const move = position.createMoveByUSI(`${orig}${dest}`);
+  if (!move || !PROMOTED_ROLES[move.pieceType]) return false;
+  return !position.isValidMove(move) && position.isValidMove(move.withPromote());
+}
+
+function lastMoveSquares(usi?: string): Key[] | undefined {
+  if (!usi) return undefined;
+  if (usi.includes("*")) return [usi.slice(2, 4) as Key];
+  return [usi.slice(0, 2) as Key, usi.slice(2, 4) as Key];
+}
+
+function lastDropPiece(usi: string | undefined, turnColor: "sente" | "gote") {
+  if (!usi?.includes("*")) return undefined;
+  const role = Object.entries(PIECE_ROLES).find(([, symbol]) => symbol === usi[0])?.[0] as RoleString | undefined;
+  return role ? { role, color: turnColor === "sente" ? "gote" as const : "sente" as const } : undefined;
+}
+
+function groupCandidateMoves(nodes: AtlasNode[]) {
+  const groups = new Map<string, string[]>();
+  for (const node of nodes) {
+    const content = findShogiNodeContent(node);
+    if (!content?.usi) continue;
+    const destination = content.usi.includes("*") ? content.usi.slice(2, 4) : content.usi.slice(2, 4);
+    const labels = groups.get(destination) ?? [];
+    labels.push(content.displayText || node.title);
+    groups.set(destination, labels);
+  }
+  return [...groups].map(([destination, labels]) => ({ destination, labels }));
+}
+
+function candidateMarkerStyle(key: string, orientation: "sente" | "gote") {
+  const file = Number(key[0]);
+  const rank = "abcdefghi".indexOf(key[1]);
+  const column = orientation === "sente" ? 9 - file : file - 1;
+  const row = orientation === "sente" ? rank : 8 - rank;
+  return {
+    left: `${((column + 0.5) / 9) * 100}%`,
+    top: `${((row + 0.5) / 9) * 100}%`,
   };
 }
 

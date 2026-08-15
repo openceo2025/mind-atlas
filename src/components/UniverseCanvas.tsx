@@ -413,6 +413,7 @@ export function UniverseCanvas({
   tutorialRootBirthUnlocked,
   embedInteractionLocked = false,
   attachmentsEnabled = true,
+  boardGameMode = false,
   onRuntimeResume,
 }: {
   theme: AtlasTheme;
@@ -425,6 +426,7 @@ export function UniverseCanvas({
   tutorialRootBirthUnlocked?: boolean;
   embedInteractionLocked?: boolean;
   attachmentsEnabled?: boolean;
+  boardGameMode?: boolean;
   onRuntimeResume?: () => void;
 }) {
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeContextMenuState | null>(null);
@@ -572,6 +574,7 @@ export function UniverseCanvas({
           initialCameraPose={initialCameraPose}
           tutorialRootBirthUnlocked={Boolean(tutorialRootBirthUnlocked)}
           embedInteractionLocked={embedInteractionLocked}
+          boardGameMode={boardGameMode}
         />
         <SpatialOverlayLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} />
         <NotebookNodes
@@ -973,6 +976,7 @@ function NavigationController({
   initialCameraPose,
   tutorialRootBirthUnlocked,
   embedInteractionLocked,
+  boardGameMode,
 }: {
   theme: AtlasTheme;
   vrPanEnabled: boolean;
@@ -982,6 +986,7 @@ function NavigationController({
   initialCameraPose: PersistedCameraPose | null;
   tutorialRootBirthUnlocked: boolean;
   embedInteractionLocked: boolean;
+  boardGameMode: boolean;
 }) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const focusRequest = useAtlasStore((state) => state.focusRequest);
@@ -992,6 +997,7 @@ function NavigationController({
   const stableLayoutMetrics = getStableLayoutMetrics(size.width, size.height);
   const { keyboardPortraitLock } = stableLayoutMetrics;
   const mobilePortraitCamera = isMobilePortraitCamera(stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
+  const boardGamePortraitCamera = boardGameMode && stableLayoutMetrics.width <= 980 && stableLayoutMetrics.height > stableLayoutMetrics.width;
   const mobileCamera = isMobileCamera(stableLayoutMetrics.width, stableLayoutMetrics.height);
   const mobileLandscapeCamera = isMobileLandscapeCamera(stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
   const initialCenteredRef = useRef(false);
@@ -1252,15 +1258,22 @@ function NavigationController({
         : getFocusTargetOffset(
             targetRadius,
             focusDistance,
-            false,
+            boardGamePortraitCamera,
           );
-    const focusScreenOffset = getGeneratedLayoutFocusScreenOffset(
+    const baseFocusScreenOffset = getGeneratedLayoutFocusScreenOffset(
       layoutMode,
       layoutViewport,
       stableLayoutMetrics.width,
       stableLayoutMetrics.height,
-      getVisibleCommandDockReservedBottom(stableLayoutMetrics.height),
+      boardGameMode ? 0 : getVisibleCommandDockReservedBottom(stableLayoutMetrics.height),
+      boardGameMode,
     );
+    const focusScreenOffset = boardGamePortraitCamera
+      ? {
+          ...baseFocusScreenOffset,
+          x: baseFocusScreenOffset.x + clamp(stableLayoutMetrics.width * 0.12, 18, 30),
+        }
+      : baseFocusScreenOffset;
     const focusWorldPerPixel = getWorldUnitsPerPixel(focusDistance, stableLayoutMetrics.height, perspective.fov);
     const current = yawPitchRef.current;
     const targetYaw = closestAngle(current.yaw, targetAngles.yaw);
@@ -1309,6 +1322,7 @@ function NavigationController({
     };
   }, [
     atlasRoot,
+    boardGameMode,
     focusRequest,
     keyboardPortraitLock,
     layoutMode,
@@ -5543,8 +5557,11 @@ function getGeneratedLayoutFocusScreenOffset(
   viewportWidth: number,
   viewportHeight: number,
   extraBottomReservedPx = 0,
+  skipReservedArea = false,
 ) {
-  const baseReserved = getGeneratedLayoutReservedScreenArea(viewport, viewportWidth, viewportHeight);
+  const baseReserved = skipReservedArea
+    ? { left: 0, right: 0, top: 0, bottom: 0 }
+    : getGeneratedLayoutReservedScreenArea(viewport, viewportWidth, viewportHeight);
   const reserved = {
     ...baseReserved,
     bottom: Math.min(viewportHeight - 1, baseReserved.bottom + Math.max(0, extraBottomReservedPx)),

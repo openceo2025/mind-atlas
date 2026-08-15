@@ -312,17 +312,24 @@ export default function App() {
   const notebookMode: NotebookMode = atlasRoot.notebookMode ?? "standard";
   const isBoardGameMode = notebookMode !== "standard";
   const appliedBoardModeRef = useRef<NotebookMode | null>(null);
+  const appliedBoardLayoutRef = useRef("");
   useEffect(() => {
     if (!isBoardGameMode) {
       appliedBoardModeRef.current = null;
+      appliedBoardLayoutRef.current = "";
       return;
     }
-    if (appliedBoardModeRef.current === notebookMode) return;
+    const enteringBoardMode = appliedBoardModeRef.current !== notebookMode;
     appliedBoardModeRef.current = notebookMode;
-    if (layoutMode !== "phyllotaxis") {
+    if (enteringBoardMode && layoutMode !== "phyllotaxis") {
+      appliedBoardLayoutRef.current = "";
       setLayoutMode("phyllotaxis");
       persistUiStatePatch({ layoutMode: "phyllotaxis" });
+      return;
     }
+    const key = `${notebookMode}:${layoutMode}`;
+    if (appliedBoardLayoutRef.current === key) return;
+    appliedBoardLayoutRef.current = key;
     const frame = window.requestAnimationFrame(() => focusNode(selectedNodeId));
     return () => window.cancelAnimationFrame(frame);
   }, [focusNode, isBoardGameMode, layoutMode, notebookMode, selectedNodeId, setLayoutMode]);
@@ -1996,6 +2003,7 @@ export default function App() {
         tutorialRootBirthUnlocked={onboarding.showRootPulse}
         embedInteractionLocked={Boolean(aboutDemoConfig)}
         attachmentsEnabled={attachmentsEnabled}
+        boardGameMode={isBoardGameMode}
         onRuntimeResume={handleCanvasRuntimeResume}
       />
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
