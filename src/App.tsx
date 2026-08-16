@@ -1631,7 +1631,10 @@ export default function App() {
 
   const applyBoardRecordMerge = async (sourceRoot: AtlasNode) => {
     const result = mergeBoardRecords(atlasRoot, sourceRoot);
-    const nextSelectedId = findNode(result.root, selectedNodeId)?.id ?? result.root.children[0]?.id ?? result.root.id;
+    const nextSelectedId = result.lastAddedNodeId
+      ?? findNode(result.root, selectedNodeId)?.id
+      ?? result.root.children[0]?.id
+      ?? result.root.id;
     analyticsIgnoreNextNotebookRef.current = true;
     importNotebook(result.root, result.root.title, {}, {
       selectedNodeId: nextSelectedId,

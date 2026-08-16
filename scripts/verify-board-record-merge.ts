@@ -64,15 +64,27 @@ function verifyMerge(destination: AtlasNode, source: AtlasNode, label: string) {
   if (sharedMove.body !== "Shared destination note\nShared source note") throw new Error(label + " shared-node notes were not merged.");
   if (sharedMove.title !== "Source move title") throw new Error(label + " did not preserve the edited move title.");
   if (sharedMove.children.length !== 2 || first.addedBranches !== 1) throw new Error(label + " variation was not added exactly once.");
+  if (!first.lastAddedNodeId || !findNode(first.root, first.lastAddedNodeId) || first.lastAddedNodeId === sharedMove.id) {
+    throw new Error(label + " did not identify the tail of the newly merged branch.");
+  }
 
   const repeated = mergeBoardRecords(first.root, source);
   const repeatedRoot = repeated.root.children[0];
   const repeatedShared = repeatedRoot?.children[0];
-  if (repeated.addedBranches !== 0 || repeatedRoot?.title !== recordRoot.title || repeatedShared?.body !== sharedMove.body) {
+  if (repeated.addedBranches !== 0 || repeated.lastAddedNodeId !== null || repeatedRoot?.title !== recordRoot.title || repeatedShared?.body !== sharedMove.body) {
     throw new Error(label + " repeated merge was not idempotent.");
   }
   console.log("verify:board-record-merge:" + label + ":passed");
   return repeated.root;
+}
+
+function findNode(root: AtlasNode, id: string): AtlasNode | null {
+  if (root.id === id) return root;
+  for (const child of root.children) {
+    const found = findNode(child, id);
+    if (found) return found;
+  }
+  return null;
 }
 
 function assertAnnotations(root: AtlasNode, label: string) {

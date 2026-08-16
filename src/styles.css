@@ -3625,6 +3625,12 @@ h1 {
   inset: 0;
 }
 
+.shogi-board-host,
+.shogi-board-host .sg-wrap,
+.shogi-board-host sg-board {
+  overflow: visible;
+}
+
 .shogi-board-host svg {
   pointer-events: none;
 }

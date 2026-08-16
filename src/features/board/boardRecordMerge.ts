@@ -6,6 +6,7 @@ export interface BoardRecordMergeResult {
   matchedNodes: number;
   addedBranches: number;
   mergedTextNodes: number;
+  lastAddedNodeId: string | null;
 }
 
 export function mergeBoardRecords(destination: AtlasNode, source: AtlasNode): BoardRecordMergeResult {
@@ -21,7 +22,7 @@ export function mergeBoardRecords(destination: AtlasNode, source: AtlasNode): Bo
   if (!targetRecordRoot || !sourceRecordRoot) throw new Error("A record root could not be found.");
   assertSameGame(targetRecordRoot, sourceRecordRoot, destinationMode);
 
-  const state = { matchedNodes: 1, addedBranches: 0, mergedTextNodes: 0 };
+  const state = { matchedNodes: 1, addedBranches: 0, mergedTextNodes: 0, lastAddedNodeId: null as string | null };
   // Keep the notebook user's record title stable; imported source names are
   // metadata, not a new title to append on every merge.
   mergeNodeText(targetRecordRoot, sourceRecordRoot, destinationMode, state, { preserveDestinationTitle: true });
@@ -55,6 +56,7 @@ function mergeChildren(
     targetParent.children.push(clone);
     targetMoveChildren.push(clone);
     state.addedBranches += 1;
+    state.lastAddedNodeId = findRecordTail(clone, mode).id;
   }
   targetParent.children.forEach((child, branchIndex) => {
     if (isMoveNode(child, mode) && child.structuredContent) child.structuredContent.branchIndex = branchIndex;
@@ -196,6 +198,22 @@ function isRecordRoot(node: AtlasNode, mode: BoardNotebookMode) {
 
 function isMoveNode(node: AtlasNode, mode: BoardNotebookMode) {
   return node.structuredContent?.kind === `${mode}-record` && node.structuredContent.role === "move";
+}
+
+function findRecordTail(node: AtlasNode, mode: BoardNotebookMode): AtlasNode {
+  const moveChildren = node.children.filter((child) => isMoveNode(child, mode));
+  if (!moveChildren.length) return node;
+  return moveChildren.reduce((tail, child) => {
+    const candidate = findRecordTail(child, mode);
+    const tailPly = recordPly(tail);
+    const candidatePly = recordPly(candidate);
+    return candidatePly >= tailPly ? candidate : tail;
+  }, moveChildren[0]);
+}
+
+function recordPly(node: AtlasNode) {
+  const content = node.structuredContent;
+  return content && "ply" in content && typeof content.ply === "number" ? content.ply : -1;
 }
 
 function boardMode(value: NotebookMode | undefined) {

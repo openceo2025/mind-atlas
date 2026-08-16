@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, GitBranch, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, GitBranch, RotateCcw, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Chess } from "chessops/chess";
 import { chessgroundDests, chessgroundMove } from "chessops/compat";
@@ -60,6 +60,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [pendingPromotion, setPendingPromotion] = useState<PendingPromotion | null>(null);
   const candidateArrows = useMemo(() => buildCandidateArrows(variations, orientation), [variations, orientation]);
+  const branchTail = currentNode ? findRecordTail(currentNode) : recordRoot ? findRecordTail(recordRoot) : null;
   configRef.current = currentContent ? makeBoardConfig(currentContent, handleBoardMove, orientation) : null;
 
   useEffect(() => {
@@ -177,11 +178,17 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
         >
           <RotateCcw size={14} />
         </button>
+        <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(recordRoot)} disabled={!recordRoot || currentNode?.id === recordRoot.id} aria-label="初期局面に戻る" title="初期局面に戻る">
+          <SkipBack size={14} />
+        </button>
         <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(parentNode)} disabled={!parentNode} aria-label="一手戻る">
           <ChevronLeft size={14} />
         </button>
         <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(variations[0] ?? null)} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
+        </button>
+        <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(branchTail)} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label="現在の分岐の末端へ進む" title="現在の分岐の末端へ進む">
+          <SkipForward size={14} />
         </button>
       </div>
       <div className="chess-board-frame">
@@ -364,4 +371,9 @@ function findPath(root: AtlasNode, targetId: string, path: AtlasNode[] = []): At
     if (found) return found;
   }
   return null;
+}
+
+function findRecordTail(node: AtlasNode): AtlasNode {
+  const next = node.children.find((child) => findChessNodeContent(child)?.role === "move");
+  return next ? findRecordTail(next) : node;
 }

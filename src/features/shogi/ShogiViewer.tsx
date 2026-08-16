@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, GitBranch, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, GitBranch, RotateCcw, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { formatKIFMove, handPieceTypes, Position, Square } from "tsshogi";
 import type { Api } from "shogiground/api";
@@ -69,6 +69,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
 
   const candidateArrows = useMemo(() => buildShogiCandidateArrows(variations, orientation), [variations, orientation]);
   const candidateTargets = useMemo(() => buildShogiCandidateTargets(candidateArrows), [candidateArrows]);
+  const branchTail = currentNode ? findRecordTail(currentNode) : recordRoot ? findRecordTail(recordRoot) : null;
   const coordinateFiles = orientation === "sente" ? ["9", "8", "7", "6", "5", "4", "3", "2", "1"] : ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
   const coordinateRanks = orientation === "sente" ? JAPANESE_RANKS : [...JAPANESE_RANKS].reverse();
   const turnLabel = currentContent?.sfen.split(" ")[1] === "w" ? "後手番" : "先手番";
@@ -164,11 +165,17 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
         >
           <RotateCcw size={14} />
         </button>
+        <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(recordRoot)} disabled={!recordRoot || currentNode?.id === recordRoot.id} aria-label="初期局面に戻る" title="初期局面に戻る">
+          <SkipBack size={14} />
+        </button>
         <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(parentNode)} disabled={!parentNode} aria-label="一手戻る">
           <ChevronLeft size={14} />
         </button>
         <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(variations[0] ?? null)} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
+        </button>
+        <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(branchTail)} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label="現在の分岐の末端へ進む" title="現在の分岐の末端へ進む">
+          <SkipForward size={14} />
         </button>
       </div>
       <div className={`shogi-board-shell orientation-${orientation}`}>
@@ -344,4 +351,9 @@ function findPath(root: AtlasNode, targetId: string, path: AtlasNode[] = []): At
     if (found) return found;
   }
   return null;
+}
+
+function findRecordTail(node: AtlasNode): AtlasNode {
+  const next = node.children.find((child) => findShogiNodeContent(child)?.role === "move");
+  return next ? findRecordTail(next) : node;
 }

@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, GitBranch, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, GitBranch, RotateCcw, SkipBack, SkipForward } from "lucide-react";
 import { useMemo, useState } from "react";
 import GoBoard, { type Sign, type Vertex } from "@sabaki/go-board";
 import { findGoNodeContent, findGoRecordRoot, goRecordPath, goVertexToSgf, nearestGoRecordNode, nextGoSign, boardFromGoContent } from "./goRecord";
@@ -28,6 +28,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
     .filter((value): value is string => Boolean(value));
   const parentNode = path.length > 1 ? path[path.length - 2] : null;
   const variations = (currentNode ?? recordRoot)?.children.filter((node) => findGoNodeContent(node)?.role === "move") ?? [];
+  const branchTail = currentNode ? findRecordTail(currentNode) : recordRoot ? findRecordTail(recordRoot) : null;
   const board = useMemo(() => (currentContent ? boardFromGoContent(currentContent) : null), [currentContent?.board, currentContent?.boardSize]);
   const [flipped, setFlipped] = useState(false);
 
@@ -109,11 +110,17 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
         >
           <RotateCcw size={14} />
         </button>
+        <button type="button" className="go-viewer-icon" onClick={() => recordRoot && focusNode(recordRoot.id)} disabled={!recordRoot || currentNode?.id === recordRoot.id} aria-label="初期局面に戻る" title="初期局面に戻る">
+          <SkipBack size={14} />
+        </button>
         <button type="button" className="go-viewer-icon" onClick={() => parentNode && focusNode(parentNode.id)} disabled={!parentNode} aria-label="一手戻る">
           <ChevronLeft size={14} />
         </button>
         <button type="button" className="go-viewer-icon" onClick={() => variations[0] && focusNode(variations[0].id)} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
+        </button>
+        <button type="button" className="go-viewer-icon" onClick={() => branchTail && focusNode(branchTail.id)} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label="現在の分岐の末端へ進む" title="現在の分岐の末端へ進む">
+          <SkipForward size={14} />
         </button>
         <button type="button" className="go-viewer-icon" onClick={() => addMove([-1, -1], true)} aria-label="パス">
           Pass
@@ -174,4 +181,9 @@ function isStarPoint(x: number, y: number, size: number) {
   if (size < 7) return false;
   const points = size >= 13 ? [3, size - 4, Math.floor(size / 2)] : [2, size - 3];
   return points.includes(x) && points.includes(y);
+}
+
+function findRecordTail(node: AtlasNode): AtlasNode {
+  const next = node.children.find((child) => findGoNodeContent(child)?.role === "move");
+  return next ? findRecordTail(next) : node;
 }
