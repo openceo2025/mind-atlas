@@ -1335,6 +1335,12 @@ function NavigationController({
     if (initialCenteredRef.current) return;
     initialCenteredRef.current = true;
 
+    // Board notebooks receive an explicit focus request for their selected
+    // record node. Do not let the generic restored-pose pass overwrite that
+    // request on the same frame; doing so leaves the first record node at its
+    // phyllotaxis position instead of centered in the Atlas viewport.
+    if (boardGameMode) return;
+
     requestAnimationFrame(() => {
       const initialOffset = getInitialCameraOffset(mobilePortraitCamera);
       const restoredPose = initialCameraPoseRef.current;
@@ -1351,7 +1357,7 @@ function NavigationController({
       applyCameraPose(perspective, yawPitchRef.current);
       setViewportFromCameraState(yawPitchRef.current, true);
     });
-  }, [mobilePortraitCamera, perspective]);
+  }, [boardGameMode, mobilePortraitCamera, perspective]);
 
   useEffect(() => {
     if (!pageActive || !vrPanEnabled || typeof window === "undefined") {

@@ -22,7 +22,9 @@ export function mergeBoardRecords(destination: AtlasNode, source: AtlasNode): Bo
   assertSameGame(targetRecordRoot, sourceRecordRoot, destinationMode);
 
   const state = { matchedNodes: 1, addedBranches: 0, mergedTextNodes: 0 };
-  mergeNodeText(targetRecordRoot, sourceRecordRoot, state);
+  // Keep the notebook user's record title stable; imported source names are
+  // metadata, not a new title to append on every merge.
+  mergeNodeText(targetRecordRoot, sourceRecordRoot, destinationMode, state, { preserveDestinationTitle: true });
   mergeMetadata(targetRecordRoot, sourceRecordRoot);
   const recordId = targetRecordRoot.structuredContent?.recordId;
   if (!recordId) throw new Error("The destination record id is missing.");
@@ -45,7 +47,7 @@ function mergeChildren(
     const match = key ? targetMoveChildren.find((node) => positionKey(node, mode) === key) : undefined;
     if (match) {
       state.matchedNodes += 1;
-      mergeNodeText(match, sourceChild, state);
+      mergeNodeText(match, sourceChild, mode, state);
       mergeChildren(match, sourceChild, mode, recordId, state);
       continue;
     }
@@ -94,9 +96,13 @@ function mergeMetadata(destination: AtlasNode, source: AtlasNode) {
 function mergeNodeText(
   destination: AtlasNode,
   source: AtlasNode,
+  mode: BoardNotebookMode,
   state: Pick<BoardRecordMergeResult, "mergedTextNodes">,
+  options: { preserveDestinationTitle?: boolean } = {},
 ) {
-  const title = mergeTitle(destination.title, source.title);
+  const title = options.preserveDestinationTitle
+    ? destination.title
+    : mergeTitle(destination, source, mode);
   const body = mergeBody(destination.body, source.body);
   if (title === destination.title && body === destination.body) return;
   destination.title = title;
@@ -107,14 +113,39 @@ function mergeNodeText(
 }
 
 export function mergeBoardRecordTitle(destination: string, source: string) {
-  return mergeTitle(destination, source);
+  return mergeSimpleTitle(destination, source);
 }
 
 export function mergeBoardRecordBody(destination: string, source: string) {
   return mergeBody(destination, source);
 }
 
-function mergeTitle(destination: string, source: string) {
+function mergeTitle(destinationNode: AtlasNode, sourceNode: AtlasNode, mode: BoardNotebookMode) {
+  const destination = String(destinationNode.title ?? "").trim();
+  const source = String(sourceNode.title ?? "").trim();
+  const destinationDefault = isGeneratedBoardTitle(destinationNode, mode);
+  const sourceDefault = isGeneratedBoardTitle(sourceNode, mode);
+  if (destinationDefault && sourceDefault) return destination || source;
+  if (destinationDefault && !sourceDefault) return source || destination;
+  if (!destinationDefault && sourceDefault) return destination || source;
+
+  return mergeSimpleTitle(destination, source);
+}
+
+function isGeneratedBoardTitle(node: AtlasNode, mode: BoardNotebookMode) {
+  const content = node.structuredContent;
+  if (!content || content.kind !== `${mode}-record`) return false;
+  if (content.role === "record-root") return true;
+  const generated = String(content.displayText ?? "").trim();
+  if (generated && normalizeTitle(generated) === normalizeTitle(node.title)) return true;
+  return normalizeTitle(node.title) === normalizeTitle(`Move ${content.ply}`);
+}
+
+function normalizeTitle(value: string) {
+  return String(value ?? "").trim().replace(/\s+/g, " ");
+}
+
+function mergeSimpleTitle(destination: string, source: string) {
   const parts: string[] = [];
   for (const value of [destination, source]) {
     for (const part of String(value ?? "").split(/\s+\/\s+/)) {

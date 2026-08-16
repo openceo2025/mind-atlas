@@ -19,8 +19,8 @@ const warsProps = {
 const warsAttribute = JSON.stringify(warsProps).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 const warsHtml = '<div data-react-props="' + warsAttribute + '" data-react-cache-id="fixture"></div>';
 const wars = parseShogiWarsHtml(warsHtml, new URL("https://shogiwars.heroz.jp/games/fixture-wars?ply=0"));
-const warsRecord = importShogiRecordText(wars.text, wars.datasetName, "csa");
-if (wars.provider !== "shogi-wars" || countNodes(warsRecord.root) !== 5) {
+const warsRecord = importShogiRecordText(wars.text, wars.datasetName, wars.format);
+if (wars.provider !== "shogi-wars" || wars.format !== "csa" || countNodes(warsRecord.root) !== 5 || warsRecord.root.children[0]?.children.length !== 1) {
   throw new Error("Shogi Wars public-page parsing failed.");
 }
 
@@ -29,8 +29,8 @@ const questHtml = [
   "<script>window.__NUXT__=(function(a,b){var x={};x.position={moves:[{m:a},{m:b}]};return x}(\"7776FU\",\"3334FU\"))</script>",
 ].join("");
 const quest = parseShogiQuestHtml(questHtml, new URL("https://kifu.questgames.net/shogi/games/fixture123"));
-const questRecord = importShogiRecordText(quest.text, quest.datasetName, "csa");
-if (quest.provider !== "shogi-quest" || countNodes(questRecord.root) !== 5) {
+const questRecord = importShogiRecordText(quest.text, quest.datasetName, quest.format);
+if (quest.provider !== "shogi-quest" || quest.format !== "csa" || countNodes(questRecord.root) !== 5 || questRecord.root.children[0]?.children.length !== 1) {
   throw new Error("Shogi Quest public-page parsing failed.");
 }
 

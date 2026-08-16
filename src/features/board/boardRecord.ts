@@ -83,10 +83,15 @@ export async function importNativeBoardRecordFile(file: File) {
   throw new Error("Use KIF, KI2, CSA, PGN, or SGF.");
 }
 
-export async function importNativeBoardRecordText(mode: BoardNotebookMode, text: string, datasetName: string) {
+export async function importNativeBoardRecordText(
+  mode: BoardNotebookMode,
+  text: string,
+  datasetName: string,
+  preferredFormat?: "kif" | "ki2" | "csa",
+) {
   if (mode === "shogi") {
     const { importShogiRecordText } = await import("../shogi/shogiRecord.ts");
-    return { ...importShogiRecordText(text, datasetName), mode };
+    return { ...importShogiRecordText(text, datasetName, preferredFormat), mode };
   }
   if (mode === "chess") {
     const { importChessRecordText } = await import("../chess/chessRecord.ts");

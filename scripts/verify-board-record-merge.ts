@@ -51,6 +51,7 @@ function annotateRoots(destination: AtlasNode, source: AtlasNode) {
   sourceRecord.body = "Source body";
   destinationFirst.body = "Shared destination note";
   sourceFirst.body = "Shared source note";
+  sourceFirst.title = "Source move title";
 }
 
 function verifyMerge(destination: AtlasNode, source: AtlasNode, label: string) {
@@ -58,9 +59,10 @@ function verifyMerge(destination: AtlasNode, source: AtlasNode, label: string) {
   const recordRoot = first.root.children[0];
   const sharedMove = recordRoot?.children[0];
   if (!recordRoot || !sharedMove) throw new Error(label + " merge lost the shared path.");
-  if (recordRoot.title !== "Destination title / Source title") throw new Error(label + " merge title order is wrong.");
+  if (recordRoot.title !== "Destination title") throw new Error(label + " merge changed the record-root title.");
   if (recordRoot.body !== "Destination body\nSource body") throw new Error(label + " merge body order is wrong.");
   if (sharedMove.body !== "Shared destination note\nShared source note") throw new Error(label + " shared-node notes were not merged.");
+  if (sharedMove.title !== "Source move title") throw new Error(label + " did not preserve the edited move title.");
   if (sharedMove.children.length !== 2 || first.addedBranches !== 1) throw new Error(label + " variation was not added exactly once.");
 
   const repeated = mergeBoardRecords(first.root, source);
@@ -76,7 +78,7 @@ function verifyMerge(destination: AtlasNode, source: AtlasNode, label: string) {
 function assertAnnotations(root: AtlasNode, label: string) {
   const recordRoot = root.children[0];
   const sharedMove = recordRoot?.children[0];
-  if (recordRoot?.title !== "Destination title / Source title" || recordRoot.body !== "Destination body\nSource body") {
+  if (recordRoot?.title !== "Destination title" || recordRoot.body !== "Destination body\nSource body") {
     throw new Error(label + " merged root annotations did not survive native export.");
   }
   if (sharedMove?.body !== "Shared destination note\nShared source note") {

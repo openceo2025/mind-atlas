@@ -1598,7 +1598,7 @@ export default function App() {
       const result = publicServiceMode
         ? await importHostedShogiSource(supportedShogiSourceUrl)
         : await importBridgeShogiSource(supportedShogiSourceUrl);
-      return await importNativeBoardRecordText("shogi", result.text, result.datasetName);
+      return await importNativeBoardRecordText("shogi", result.text, result.datasetName, result.format);
     }
     if (mode === "shogi" && /https?:\/\//i.test(source)) {
       throw new Error(t("board.shogi.unsupportedSourceUrl"));
