@@ -229,6 +229,26 @@
   color: rgba(243, 245, 221, 0.5);
 }
 
+.board-node-label-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.board-node-body-preview {
+  max-width: min(220px, 52vw);
+  overflow: hidden;
+  color: rgba(243, 245, 221, 0.72);
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
 .board-mobile-node-preview {
   overflow: hidden;
   text-overflow: ellipsis;

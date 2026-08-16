@@ -3181,6 +3181,7 @@ function HierarchyNode({
   const snoozeNodeNotification = useAtlasStore((state) => state.snoozeNodeNotification);
   const birthMarks = useAtlasStore((state) => state.birthMarks);
   const zoom = useAtlasStore((state) => state.viewport.zoom);
+  const boardGameMode = notebookMode !== "standard";
   const boardGameMobile = notebookMode !== "standard" && isMobileBoardGameViewport();
   const hiddenDragEdgeNodeId = useHiddenDragEdgeNodeId();
   const { camera, scene } = useThree();
@@ -3260,6 +3261,7 @@ function HierarchyNode({
   const calendarLabelEligible = layoutMode !== "calendar" || labelScale > 0;
   const labelVisible = calendarLabelEligible && (isSelected || isLabelAnchor || (baseLabelVisible && labelVisibleNodeIds.has(node.id)));
   const interactiveLabelVisible = !mobileLabelScope || isSelected || isMultiSelected || isAiContextPreviewNode;
+  const showBoardChildBodyPreview = boardGameMode && isDirectChildOfSelected && !isSelected;
   const [layoutEdgeHidden, setLayoutEdgeHidden] = useState(false);
   const parentEdgeVisible = !suppressParentEdge && path.length > 2 && hiddenDragEdgeNodeId !== node.id && !layoutEdgeHidden;
   const lowQuality = renderQuality === "low";
@@ -3997,12 +3999,15 @@ function HierarchyNode({
       {labelVisible && boardGameMobile ? (
         <>
           <Html center position={[0, radius + 24, 16]} transform={false} zIndexRange={isLabelAnchor ? [4, 1] : [2, 0]}>
-            <BoardMobileNodeTitle
-              node={node}
-              isSelected={isSelected}
-              onFocusNode={() => focusNode(node.id)}
-              onChange={(title) => updateNode(node.id, { title })}
-            />
+            <div className="board-node-label-stack">
+              <BoardMobileNodeTitle
+                node={node}
+                isSelected={isSelected}
+                onFocusNode={() => focusNode(node.id)}
+                onChange={(title) => updateNode(node.id, { title })}
+              />
+              {showBoardChildBodyPreview ? <BoardNodeBodyPreview node={node} /> : null}
+            </div>
           </Html>
           {isSelected ? (
             <Html center position={[0, -radius - 14, 16]} transform={false} zIndexRange={[4, 1]}>
@@ -4016,7 +4021,7 @@ function HierarchyNode({
       ) : labelVisible ? (
         <Html center position={[0, -radius - 14, 16]} transform={false} zIndexRange={isLabelAnchor ? [4, 1] : [2, 0]}>
           <div
-            className={layoutMode === "calendar" ? "calendar-node-label" : undefined}
+            className={`${layoutMode === "calendar" ? "calendar-node-label " : ""}${boardGameMode ? "board-node-label-stack" : ""}`}
             style={layoutMode === "calendar" ? { transform: `scale(${labelScale})` } : undefined}
           >
             {interactiveLabelVisible ? (
@@ -4039,11 +4044,32 @@ function HierarchyNode({
                 onFocusNode={() => focusNode(node.id)}
               />
             )}
+            {showBoardChildBodyPreview ? <BoardNodeBodyPreview node={node} /> : null}
           </div>
         </Html>
       ) : null}
     </group>
   );
+}
+
+function BoardNodeBodyPreview({ node }: { node: AtlasNode }) {
+  const preview = getBoardNodeBodyPreview(node.body);
+  if (!preview) return null;
+  return (
+    <div className="board-node-body-preview" data-node-body-preview={node.id} aria-label={preview}>
+      {preview}
+    </div>
+  );
+}
+
+function getBoardNodeBodyPreview(body: string) {
+  const lines = String(body ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const firstLine = lines[0]?.trim() ?? "";
+  if (!firstLine) return "";
+  const characters = Array.from(firstLine);
+  const preview = characters.slice(0, 10).join("");
+  const hasMore = characters.length > 10 || lines.slice(1).some((line) => line.trim().length > 0);
+  return hasMore ? `${preview}…` : preview;
 }
 
 function BoardMobileNodeTitle({

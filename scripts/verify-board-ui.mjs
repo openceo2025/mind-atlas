@@ -162,6 +162,7 @@ async function verifyShogi() {
     await verifyBoardExport(page, "shogi");
     await assertBoardModeLayout(page, "shogi", false);
     await assertDesktopBoardFocusCenter(page, "shogi");
+    await verifyBoardChildBodyPreview(page, "shogi");
     await assertDesktopInputLayer(page);
     await captureScreenshot(page, "shogi-desktop");
     await expectTexts(page.locator(".shogi-file-coordinates span"), ["9", "8", "7", "6", "5", "4", "3", "2", "1"], "shogi files");
@@ -216,6 +217,18 @@ async function verifyShogi() {
     await verifyGeneratedLayoutFocus(page, "マインドマップ");
   } finally {
     await context.close();
+  }
+}
+
+async function verifyBoardChildBodyPreview(page, mode) {
+  await page.getByRole("button", { name: "一手進む" }).click();
+  await page.locator(".node-body-input").fill("1234567890AB\nsecond line");
+  await page.getByRole("button", { name: "一手戻る" }).click();
+  const preview = page.locator(".board-node-body-preview").filter({ hasText: "1234567890…" }).first();
+  await preview.waitFor({ state: "visible", timeout: 5_000 });
+  const text = (await preview.textContent())?.trim();
+  if (text !== "1234567890…") {
+    throw new Error(`${mode} board child body preview was not limited to the first ten characters: ${text}`);
   }
 }
 
@@ -300,6 +313,7 @@ async function verifyChess() {
     await verifyBoardExport(page, "chess");
     await assertBoardModeLayout(page, "chess", false);
     await assertDesktopBoardFocusCenter(page, "chess");
+    await verifyBoardChildBodyPreview(page, "chess");
     await assertDesktopInputLayer(page);
     await captureScreenshot(page, "chess-desktop");
     if (await page.locator(".chess-candidate-arrows line").count() < 1) throw new Error("Chess root candidate arrow is missing.");
@@ -449,6 +463,7 @@ async function verifyGo() {
     await verifyBoardExport(page, "go");
     await assertBoardModeLayout(page, "go", false);
     await assertDesktopBoardFocusCenter(page, "go");
+    await verifyBoardChildBodyPreview(page, "go");
     await assertDesktopInputLayer(page);
     await captureScreenshot(page, "go-desktop");
     await page.getByRole("button", { name: "一手進む" }).click();
