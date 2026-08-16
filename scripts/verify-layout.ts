@@ -1,5 +1,15 @@
 import assert from "node:assert/strict";
 import { deriveAtlasLayout, deriveAtlasLayoutFrame, getManualChildSpreadLimit, getStoredPositionForWorldDirection, stabilizePhyllotaxisPositions, type Vec3 } from "../src/layout/atlasLayout.ts";
+import { buildAtlasRenderProjection, updateAtlasRenderIndex } from "../src/layout/atlasRenderIndex.ts";
+import {
+  BOARD_MOBILE_ACTIVE_NODE_DIAMETER_RATIO,
+  BOARD_MOBILE_NODE_WORLD_SCALE,
+  BOARD_MOBILE_REFERENCE_ACTIVE_NODE_DIAMETER_PX,
+  BOARD_MOBILE_REFERENCE_NODE_VIEW_HEIGHT_PX,
+  getBoardMobileFocusDistance,
+  getBoardMobileTargetNodeDiameterPx,
+  getProjectedDiameterPx,
+} from "../src/layout/boardCamera.ts";
 import { createNotebookFromTemplate } from "../src/notebookTemplates.ts";
 import type { AtlasNode } from "../src/types.ts";
 
@@ -112,6 +122,71 @@ assert.ok(focusedMindMapFrame.visibleIds.has("alpha"));
 assert.ok(focusedMindMapFrame.visibleIds.has("atlas-root"), "mind map should show focused parent");
 assert.ok(focusedMindMapFrame.visibleIds.has("beta"), "mind map should show focused siblings near parent context");
 assertMinDistance(focusedMindMapFrame, 46, "mind map visible nodes should not collapse onto each other");
+
+const boardWorldDiameter = 28 * 2 * BOARD_MOBILE_NODE_WORLD_SCALE;
+const boardReferenceDistance = getBoardMobileFocusDistance(
+  boardWorldDiameter,
+  BOARD_MOBILE_REFERENCE_NODE_VIEW_HEIGHT_PX,
+  45,
+);
+assert.ok(Math.abs(getBoardMobileTargetNodeDiameterPx(BOARD_MOBILE_REFERENCE_NODE_VIEW_HEIGHT_PX) - 57) < 0.000001);
+assert.ok(
+  Math.abs(
+    getProjectedDiameterPx(boardWorldDiameter, boardReferenceDistance, BOARD_MOBILE_REFERENCE_NODE_VIEW_HEIGHT_PX, 45) -
+      BOARD_MOBILE_REFERENCE_ACTIVE_NODE_DIAMETER_PX,
+  ) < 0.000001,
+  "board camera should reproduce the measured 57px node in the 359px Atlas viewport",
+);
+for (const viewportHeight of [240, 359, 520]) {
+  const distance = getBoardMobileFocusDistance(boardWorldDiameter, viewportHeight, 45);
+  const projected = getProjectedDiameterPx(boardWorldDiameter, distance, viewportHeight, 45);
+  assert.ok(
+    Math.abs(projected / viewportHeight - BOARD_MOBILE_ACTIVE_NODE_DIAMETER_RATIO) < 0.000001,
+    `board focus ratio should stay stable at ${viewportHeight}px`,
+  );
+}
+
+const hugeBoardRoot = node(
+  "atlas-root",
+  "Huge record",
+  Array.from({ length: 10_000 }, (_, index) => node(`move-${index}`, `Move ${index}`)),
+);
+const hugeBoardIndex = updateAtlasRenderIndex(hugeBoardRoot);
+const hugeBoardProjection = buildAtlasRenderProjection({
+  index: hugeBoardIndex,
+  anchorNodeId: "move-9999",
+  priorityNodeIds: ["move-9999"],
+  maxNodes: 240,
+});
+assert.equal(hugeBoardProjection.size, 240, "large board records should have a fixed render projection budget");
+assert.ok(hugeBoardProjection.has("move-9999"), "the active board node must survive render projection");
+const hugeBoardFrame = deriveAtlasLayoutFrame(hugeBoardRoot, "phyllotaxis", undefined, {
+  renderProjection: { index: hugeBoardIndex, nodeIds: hugeBoardProjection },
+});
+assert.equal(hugeBoardFrame.visibleIds.size, 241, "projected layout should contain only the root plus the render budget");
+const updatedHugeBoardRoot = { ...hugeBoardRoot, children: [...hugeBoardRoot.children] };
+updatedHugeBoardRoot.children[9999] = { ...updatedHugeBoardRoot.children[9999], body: "Edited note" };
+const updatedHugeBoardIndex = updateAtlasRenderIndex(updatedHugeBoardRoot, hugeBoardIndex);
+assert.equal(updatedHugeBoardIndex.entries.size, hugeBoardIndex.entries.size, "text edits must not rebuild or duplicate the topology index");
+assert.equal(updatedHugeBoardIndex.entries.get("move-0")?.node, hugeBoardRoot.children[0], "unchanged branches should retain their indexed node identity");
+assert.equal(updatedHugeBoardIndex.entries.get("move-9999")?.node.body, "Edited note", "the changed branch should update in the index");
+
+let deepMove = node("deep-9999", "Deep move 9999");
+for (let index = 9998; index >= 0; index -= 1) deepMove = node(`deep-${index}`, `Deep move ${index}`, [deepMove]);
+const deepBoardRoot = node("atlas-root", "Deep record", [deepMove]);
+const deepBoardIndex = updateAtlasRenderIndex(deepBoardRoot);
+const deepBoardProjection = buildAtlasRenderProjection({
+  index: deepBoardIndex,
+  anchorNodeId: "deep-9999",
+  priorityNodeIds: ["deep-9999"],
+  maxNodes: 240,
+});
+const deepBoardFrame = deriveAtlasLayoutFrame(deepBoardRoot, "phyllotaxis", undefined, {
+  renderProjection: { index: deepBoardIndex, nodeIds: deepBoardProjection },
+});
+assert.equal(deepBoardProjection.size, 240, "a ten-thousand-ply record should retain a fixed render budget");
+assert.equal(deepBoardFrame.visibleIds.size, 241, "deep projected layout should not materialize every ancestor as a rendered node");
+assert.ok(deepBoardFrame.positions.has("deep-9999"), "the deepest active position should remain drawable");
 
 const travelTemplate = createNotebookFromTemplate("travel", "en");
 assertWideTemplatePositions(travelTemplate);

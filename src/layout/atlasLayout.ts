@@ -1,4 +1,5 @@
 import type { AtlasNode } from "../types.ts";
+import type { AtlasRenderIndex } from "./atlasRenderIndex.ts";
 import { formatAppMessage } from "../i18n/format.ts";
 import { currentAppLocale } from "../i18n/locales.ts";
 import { CALENDAR_LAYOUT_PLANE_Z, deriveCalendarLayout } from "./calendarLayout.ts";
@@ -15,6 +16,8 @@ export interface AtlasLayoutOptions {
   viewportWidth?: number;
   viewportHeight?: number;
   locale?: string;
+  nodePaths?: AtlasNode[][];
+  renderProjection?: { index: AtlasRenderIndex; nodeIds: ReadonlySet<string> };
 }
 
 export interface AtlasLayoutFrame {
@@ -90,7 +93,7 @@ type MindMapLayoutMetrics = {
 export function deriveAtlasLayout(
   tree: AtlasNode,
   mode: AtlasLayoutMode = "phyllotaxis",
-  overrides: AtlasPositionOverrides = collectPositionOverrides(tree),
+  overrides?: AtlasPositionOverrides,
   options: AtlasLayoutOptions = {},
 ): Map<string, Vec3> {
   return deriveAtlasLayoutFrame(tree, mode, overrides, options).positions;
@@ -99,7 +102,7 @@ export function deriveAtlasLayout(
 export function deriveAtlasLayoutFrame(
   tree: AtlasNode,
   mode: AtlasLayoutMode = "phyllotaxis",
-  overrides: AtlasPositionOverrides = collectPositionOverrides(tree),
+  overrides?: AtlasPositionOverrides,
   options: AtlasLayoutOptions = {},
 ): AtlasLayoutFrame {
   let positions: Map<string, Vec3>;
@@ -112,7 +115,14 @@ export function deriveAtlasLayoutFrame(
 
   switch (mode) {
     case "phyllotaxis": {
-      positions = derivePhyllotaxisLayout(tree, overrides);
+      if (options.renderProjection) {
+        positions = deriveIndexedPhyllotaxisProjection(tree, options.renderProjection.index, options.renderProjection.nodeIds, overrides);
+      } else {
+        const effectiveOverrides = overrides ?? collectPositionOverrides(tree);
+        positions = options.nodePaths
+          ? derivePhyllotaxisLayoutProjection(tree, options.nodePaths, effectiveOverrides)
+          : derivePhyllotaxisLayout(tree, effectiveOverrides);
+      }
       visibleIds = new Set(positions.keys());
       break;
     }
@@ -154,6 +164,57 @@ export function deriveAtlasLayoutFrame(
     overlay,
     bounds: getLayoutBounds(positions, visibleIds, boundsPoints),
   };
+}
+
+function deriveIndexedPhyllotaxisProjection(
+  tree: AtlasNode,
+  index: AtlasRenderIndex,
+  nodeIds: ReadonlySet<string>,
+  overrides?: AtlasPositionOverrides,
+) {
+  const positions = new Map<string, Vec3>([[tree.id, [0, 0, 0]]]);
+  const requiredNodeIds = new Set<string>([tree.id]);
+  for (const nodeId of nodeIds) {
+    let currentId: string | null = nodeId;
+    while (currentId && !requiredNodeIds.has(currentId)) {
+      requiredNodeIds.add(currentId);
+      currentId = index.entries.get(currentId)?.parentId ?? null;
+    }
+  }
+
+  const overrideMap = normalizeOverrides(overrides ?? new Map());
+  const directions = new Map<string, Vec3>([[tree.id, [0, 0, 1]]]);
+  const orderedEntries = [...requiredNodeIds]
+    .map((nodeId) => index.entries.get(nodeId))
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+    .sort((left, right) => left.depth - right.depth || left.childIndex - right.childIndex);
+
+  for (const entry of orderedEntries) {
+    if (entry.depth === 0 || !entry.parentId) continue;
+    const parentDirection = directions.get(entry.parentId) ?? [0, 0, 1];
+    const override = overrideMap.get(entry.node.id) ?? entry.node.position;
+    const direction = override
+      ? entry.depth === 1
+        ? clampDirection(override, TOP_LEVEL_DRAG_PLANAR_LIMIT)
+        : directionFromStoredChildPosition(parentDirection, override, entry.depth, entry.siblingCount)
+      : entry.depth === 1
+        ? getPhyllotaxisTopLevelDirection(entry.childIndex)
+        : getPhyllotaxisChildDirection(parentDirection, entry.depth, entry.siblingCount, entry.childIndex, entry.parentId);
+    directions.set(entry.node.id, direction);
+    if (nodeIds.has(entry.node.id)) positions.set(entry.node.id, scale(direction, getShellRadius(entry.depth)));
+  }
+
+  return positions;
+}
+
+function derivePhyllotaxisLayoutProjection(tree: AtlasNode, nodePaths: AtlasNode[][], overrides: AtlasPositionOverrides) {
+  const positions = new Map<string, Vec3>([[tree.id, [0, 0, 0]]]);
+  for (const path of nodePaths) {
+    const node = path.at(-1);
+    if (!node || node.id === tree.id || path[0]?.id !== tree.id || positions.has(node.id)) continue;
+    positions.set(node.id, getNodeWorldPositionFromPath(path, overrides));
+  }
+  return positions;
 }
 
 function derivePhyllotaxisLayout(tree: AtlasNode, overrides: AtlasPositionOverrides): Map<string, Vec3> {

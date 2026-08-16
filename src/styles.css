@@ -4100,6 +4100,34 @@ h1 {
   background-size: 25% 25%;
 }
 
+.chess-board-host .cg-wrap coords {
+  color: #152218;
+  font-weight: 800;
+  text-shadow: 0 0 2px rgba(244, 245, 236, 0.72);
+}
+
+.chess-board-host cg-board square.move-dest::after {
+  position: absolute;
+  top: 35%;
+  left: 35%;
+  width: 30%;
+  height: 30%;
+  border-radius: 50%;
+  background: rgba(20, 58, 34, 0.72);
+  box-shadow: 0 0 0 1px rgba(244, 245, 236, 0.28);
+  content: "";
+}
+
+.chess-board-host cg-board square.move-dest.oc::after {
+  top: 8%;
+  left: 8%;
+  width: 84%;
+  height: 84%;
+  border: 3px solid rgba(20, 58, 34, 0.78);
+  background: transparent;
+  box-shadow: inset 0 0 0 2px rgba(244, 245, 236, 0.48);
+}
+
 .chess-viewer-note,
 .board-game-viewer-status {
   margin: 0;

@@ -110,7 +110,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
         >
           <RotateCcw size={14} />
         </button>
-        <button type="button" className="go-viewer-icon" onClick={() => recordRoot && focusNode(recordRoot.id)} disabled={!recordRoot || currentNode?.id === recordRoot.id} aria-label="初期局面に戻る" title="初期局面に戻る">
+        <button type="button" className="go-viewer-icon" onClick={() => recordRoot && focusNode(recordRoot.id)} disabled={!recordRoot || currentNode?.id === recordRoot.id} aria-label={formatAppMessage("board.navigation.first")} title={formatAppMessage("board.navigation.first")}>
           <SkipBack size={14} />
         </button>
         <button type="button" className="go-viewer-icon" onClick={() => parentNode && focusNode(parentNode.id)} disabled={!parentNode} aria-label="一手戻る">
@@ -119,7 +119,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
         <button type="button" className="go-viewer-icon" onClick={() => variations[0] && focusNode(variations[0].id)} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
         </button>
-        <button type="button" className="go-viewer-icon" onClick={() => branchTail && focusNode(branchTail.id)} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label="現在の分岐の末端へ進む" title="現在の分岐の末端へ進む">
+        <button type="button" className="go-viewer-icon" onClick={() => branchTail && focusNode(branchTail.id)} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
           <SkipForward size={14} />
         </button>
         <button type="button" className="go-viewer-icon" onClick={() => addMove([-1, -1], true)} aria-label="パス">

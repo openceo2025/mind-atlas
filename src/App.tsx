@@ -2303,7 +2303,12 @@ export default function App() {
 
       <header className="top-bar" aria-label={formatAppMessage("ui.app.mindAtlasStatus.36acaea")}>
         <div className="top-title-stack">
-          <AtlasBreadcrumb path={onboarding.showLogoOnly ? [atlasRoot] : selectedPath} mobilePortrait={mobilePortraitBreadcrumb} onFocus={focusNode} />
+          <AtlasBreadcrumb
+            path={onboarding.showLogoOnly ? [atlasRoot] : selectedPath}
+            mobilePortrait={mobilePortraitBreadcrumb}
+            onFocus={focusNode}
+            logoFocusId={isBoardGameMode ? atlasRoot.children[0]?.id ?? atlasRoot.id : atlasRoot.id}
+          />
           {onboarding.showLogoOnly ? (
             <button className="tutorial-skip-button" type="button" onClick={handleSkipTutorial}>
               <ArrowRight size={14} />
@@ -5296,11 +5301,21 @@ function isUniverseTitlePlaceholder(title: string, placeholderTitle: string) {
   return title === DEFAULT_DATASET_TITLE || title === placeholderTitle || UNIVERSE_TITLE_PLACEHOLDER_ALIASES.includes(title);
 }
 
-function AtlasBreadcrumb({ path, mobilePortrait, onFocus }: { path: AtlasNode[]; mobilePortrait: boolean; onFocus: (id: string) => void }) {
+function AtlasBreadcrumb({
+  path,
+  mobilePortrait,
+  onFocus,
+  logoFocusId,
+}: {
+  path: AtlasNode[];
+  mobilePortrait: boolean;
+  onFocus: (id: string) => void;
+  logoFocusId?: string;
+}) {
   const crumbs = compactBreadcrumb(path, mobilePortrait);
   const handleLogoClick = () => {
     emitOnboardingEvent("home-logo-clicked");
-    onFocus(path[0].id);
+    onFocus(logoFocusId ?? path[0].id);
   };
 
   return (

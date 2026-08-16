@@ -30,6 +30,22 @@ import {
   useAtlasStore,
 } from "../store/atlasStore";
 import { deriveAtlasLayout, deriveAtlasLayoutFrame, type AtlasLayoutFrame, type AtlasLayoutMode, type AtlasLayoutViewport, type Vec3 } from "../layout/atlasLayout";
+import {
+  buildAtlasRenderProjection,
+  getAtlasRenderNodePath,
+  updateAtlasRenderIndex,
+  type AtlasRenderIndex,
+  type AtlasRenderIndexEntry,
+} from "../layout/atlasRenderIndex";
+import {
+  BOARD_MOBILE_ACTIVE_NODE_DIAMETER_RATIO,
+  BOARD_MOBILE_NODE_WORLD_SCALE,
+  BOARD_MOBILE_REFERENCE_ACTIVE_NODE_DIAMETER_PX,
+  BOARD_MOBILE_REFERENCE_NODE_VIEW_HEIGHT_PX,
+  getBoardMobileFocusDistance,
+  getBoardMobileTargetNodeDiameterPx,
+  getProjectedDiameterPx,
+} from "../layout/boardCamera";
 import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_BIRTH_UNAVAILABLE_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { buildContextCopy, CONTEXT_COPY_PRESETS, copyContextMarkdown, type ContextCopyPreset } from "../context/contextCopy";
 import { nodeTreeHasAttachments, readNodeClipboard, writeNodeClipboard } from "../nodeClipboard";
@@ -69,7 +85,7 @@ const GENERATED_LAYOUT_MOBILE_PORTRAIT_PANEL_HEIGHT_RATIO = 0.42;
 const GENERATED_LAYOUT_MOBILE_LANDSCAPE_PANEL_MAX_WIDTH_PX = 292;
 const GENERATED_LAYOUT_MOBILE_LANDSCAPE_PANEL_WIDTH_RATIO = 0.33;
 const GENERATED_LAYOUT_MOBILE_EDGE_GAP_PX = 24;
-const BOARD_MOBILE_FOCUS_DISTANCE_MULTIPLIER = 2;
+const BOARD_RENDER_NODE_BUDGET = 240;
 const GENERATED_LAYOUT_TREE_DESKTOP_CHILD_BIAS_RATIO = 0.18;
 const GENERATED_LAYOUT_TREE_MOBILE_LANDSCAPE_CHILD_BIAS_RATIO = 0.2;
 const GENERATED_LAYOUT_TREE_MAX_CHILD_BIAS_PX = 170;
@@ -165,10 +181,7 @@ type VisualNodeHandle = {
   getWorldPosition: () => Vec3Tuple;
 };
 
-type NodeRenderMeta = {
-  node: AtlasNode;
-  pathIds: string[];
-};
+type NodeRenderMeta = AtlasRenderIndexEntry;
 
 type NodeContextMenuState = {
   nodeId: string;
@@ -563,7 +576,9 @@ export function UniverseCanvas({
       ref={shareTargetRef}
       className={`universe-shell ${embedInteractionLocked ? "is-embed-interaction-locked" : ""}`}
       data-embed-interaction={embedInteractionLocked ? "locked" : undefined}
-      data-board-mobile-focus-scale={boardGameMode && isMobileBoardGameViewport() ? BOARD_MOBILE_FOCUS_DISTANCE_MULTIPLIER : undefined}
+      data-board-mobile-focus-target-ratio={boardGameMode && isMobileBoardGameViewport() ? BOARD_MOBILE_ACTIVE_NODE_DIAMETER_RATIO.toFixed(6) : undefined}
+      data-board-mobile-reference-view-height={boardGameMode && isMobileBoardGameViewport() ? BOARD_MOBILE_REFERENCE_NODE_VIEW_HEIGHT_PX : undefined}
+      data-board-mobile-reference-node-diameter={boardGameMode && isMobileBoardGameViewport() ? BOARD_MOBILE_REFERENCE_ACTIVE_NODE_DIAMETER_PX : undefined}
       aria-label={formatAppMessage("ui.universeCanvas.mindAtlasUniverseView.f1af16f")}
     >
       <Canvas
@@ -774,15 +789,25 @@ function NotificationPulseLayer({
     [atlasRoot, pulses],
   );
   const animatedPulses = useMemo(() => selectAnimatedNotificationPulses(renderablePulses, renderQuality), [renderablePulses, renderQuality]);
+  const boardPulsePaths = useMemo(
+    () =>
+      boardGameMode && layoutMode === "phyllotaxis"
+        ? animatedPulses
+            .map((pulse) => findNodePath(atlasRoot, pulse.nodeId))
+            .filter((path): path is AtlasNode[] => Boolean(path))
+        : undefined,
+    [animatedPulses, atlasRoot, boardGameMode, layoutMode],
+  );
   const layoutFrame = useMemo(
     () =>
-      deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, {
+      deriveAtlasLayoutFrame(atlasRoot, layoutMode, collectPathPositionOverrides(boardPulsePaths), {
         focusNodeId: selectedNodeId,
         viewport: layoutViewport,
         viewportWidth: stableLayoutMetrics.width,
         viewportHeight: stableLayoutMetrics.height,
+        nodePaths: boardPulsePaths,
       }),
-    [atlasRoot, layoutMode, layoutViewport, selectedNodeId, stableLayoutMetrics.height, stableLayoutMetrics.width],
+    [atlasRoot, boardPulsePaths, layoutMode, layoutViewport, selectedNodeId, stableLayoutMetrics.height, stableLayoutMetrics.width],
   );
 
   useFrame(() => {
@@ -889,16 +914,20 @@ function getNotificationPulseColor(kind: NotificationPulseKind, theme: AtlasThem
 }
 
 function buildNotificationPathKinds(
-  root: AtlasNode,
+  index: AtlasRenderIndex,
   unreadNotifications: NotificationKindRecord,
 ) {
   const kinds = new Map<string, NotificationPulseKind>();
   for (const unread of Object.values(selectAnimatedNotificationKindSources(unreadNotifications))) {
-    const path = findNodePath(root, unread.nodeId);
-    if (!path) continue;
+    const path = getAtlasRenderNodePath(index, unread.nodeId);
+    if (!path.length) continue;
     markNotificationPath(kinds, path, unread.kind);
   }
-  markStatusNotificationPaths(root, [root], kinds);
+  for (const entry of index.entries.values()) {
+    if (!isNotificationErrorSource(entry.node)) continue;
+    const path = getAtlasRenderNodePath(index, entry.node.id);
+    if (path.length) markNotificationPath(kinds, path, "error");
+  }
   return kinds;
 }
 
@@ -910,19 +939,6 @@ function selectAnimatedNotificationKindSources(unreadNotifications: Notification
       .sort(([, a], [, b]) => notificationPriority(b.kind) - notificationPriority(a.kind) || (b.lastPulseAt ?? 0) - (a.lastPulseAt ?? 0))
       .slice(0, MAX_ANIMATED_NOTIFICATION_PULSES),
   );
-}
-
-function markStatusNotificationPaths(
-  node: AtlasNode,
-  path: AtlasNode[],
-  kinds: Map<string, NotificationPulseKind>,
-) {
-  if (isNotificationErrorSource(node)) {
-    markNotificationPath(kinds, path, "error");
-  }
-  for (const child of node.children) {
-    markStatusNotificationPaths(child, [...path, child], kinds);
-  }
 }
 
 const isNotificationErrorSource = isIntrinsicErrorNode;
@@ -1059,6 +1075,8 @@ function NavigationController({
     duration: number;
     nonce: number;
     nodeId: string;
+    targetWorld: Vec3Tuple;
+    targetWorldDiameter: number;
   } | null>(null);
   const [birthEffect, setBirthEffect] = useState<BirthEffect | null>(null);
   const inputSphereSegments: [number, number] = renderQuality === "low" ? [32, 16] : [64, 32];
@@ -1257,31 +1275,38 @@ function NavigationController({
     const targetAngles = directionToYawPitch(targetDirection);
     const generatedFocusDiameter = generatedLayoutFocus?.diameter ?? focusRequest.diameter;
     const targetDiameter = Math.max(focusRequest.diameter, generatedFocusDiameter);
+    const focusViewportHeight = boardGameMode && mobileCamera ? Math.max(1, size.height) : stableLayoutMetrics.height;
     const baseTargetDistance =
       mobileGeneratedLayout
-        ? getGeneratedLayoutMobileCameraDistance(targetDiameter, stableLayoutMetrics.height, perspective.fov, layoutViewport, layoutMode)
+        ? getGeneratedLayoutMobileCameraDistance(targetDiameter, focusViewportHeight, perspective.fov, layoutViewport, layoutMode)
         : getCameraDistanceForDiameter(
             targetDiameter,
-            stableLayoutMetrics.height,
+            focusViewportHeight,
             perspective.fov,
             generatedLayoutActive ? GENERATED_LAYOUT_MAX_CAMERA_DISTANCE : phyllotaxisOverviewFocus ? 1400 : 620,
           );
-    // Board notebooks dedicate the lower part of the viewport to the board.
-    // On mobile the Atlas needs a wider context than the generic focus pass,
-    // so the focused planet is rendered at half the current screen diameter.
+    // The board panel is outside this Canvas, so size.height is exactly the
+    // drawable Atlas height. Keep the active planet at the measured reference
+    // ratio instead of applying a device-specific zoom multiplier.
     const targetDistance = boardGameMode && mobileCamera
-      ? baseTargetDistance * BOARD_MOBILE_FOCUS_DISTANCE_MULTIPLIER
+      ? getBoardMobileFocusDistance(
+          Math.min(focusRequest.diameter, NOTEBOOK_NODE_RADIUS * 2) * BOARD_MOBILE_NODE_WORLD_SCALE,
+          focusViewportHeight,
+          perspective.fov,
+        )
       : baseTargetDistance;
     const targetRadius = generatedLayoutActive ? Math.abs(targetVector.z) : targetVector.length();
     const targetIsRoot = !generatedLayoutActive && focusRequest.nodeId === atlasRoot.id;
-    const focusDistance = generatedLayoutActive ? targetDistance : targetDistance * (mobileLandscapeCamera ? MOBILE_LANDSCAPE_FOCUS_DISTANCE_MULTIPLIER : 1);
+    const focusDistance = generatedLayoutActive
+      ? targetDistance
+      : targetDistance * (mobileLandscapeCamera && !boardGameMode ? MOBILE_LANDSCAPE_FOCUS_DISTANCE_MULTIPLIER : 1);
     const generatedMaxCameraDistance = mobileGeneratedLayout ? GENERATED_LAYOUT_MOBILE_MAX_CAMERA_DISTANCE : GENERATED_LAYOUT_MAX_CAMERA_DISTANCE;
     const targetOffset =
       generatedLayoutActive
         ? clamp(targetRadius - focusDistance, targetRadius - generatedMaxCameraDistance, MAX_CAMERA_OFFSET)
         : phyllotaxisOverviewFocus
         ? Math.min(MAX_CAMERA_OFFSET, targetRadius - focusDistance)
-        : targetIsRoot && mobileCamera
+        : targetIsRoot && mobileCamera && !boardGameMode
         ? getInitialCameraOffset(mobilePortraitCamera)
         // The measured canvas height already accounts for compact board-mode framing.
         : getFocusTargetOffset(targetRadius, focusDistance);
@@ -1298,7 +1323,12 @@ function NavigationController({
           getVisibleCommandDockReservedBottom(stableLayoutMetrics.height),
           false,
         );
-    const focusWorldPerPixel = getWorldUnitsPerPixel(focusDistance, stableLayoutMetrics.height, perspective.fov);
+    const focusWorldPerPixel = getWorldUnitsPerPixel(focusDistance, focusViewportHeight, perspective.fov);
+    const focusShell = gl.domElement.closest<HTMLElement>(".universe-shell");
+    if (focusShell && boardGameMode && mobileCamera) {
+      focusShell.dataset.boardMobileDrawableHeight = String(Math.round(focusViewportHeight));
+      focusShell.dataset.boardMobileTargetNodeDiameter = getBoardMobileTargetNodeDiameterPx(focusViewportHeight).toFixed(2);
+    }
     const current = yawPitchRef.current;
     const targetYaw = closestAngle(current.yaw, targetAngles.yaw);
     const targetPitch = clamp(targetAngles.pitch, -FOCUS_PITCH_LIMIT, FOCUS_PITCH_LIMIT);
@@ -1343,17 +1373,21 @@ function NavigationController({
       duration: focusPlan.duration,
       nonce: focusPlan.nonce,
       nodeId: focusPlan.nodeId,
+      targetWorld: [targetVector.x, targetVector.y, targetVector.z],
+      targetWorldDiameter: Math.min(focusRequest.diameter, NOTEBOOK_NODE_RADIUS * 2) * (boardGameMode && mobileCamera ? BOARD_MOBILE_NODE_WORLD_SCALE : 1),
     };
   }, [
     atlasRoot,
     boardGameMode,
     focusRequest,
+    gl,
     keyboardPortraitLock,
     layoutMode,
     mobileCamera,
     mobileLandscapeCamera,
     perspective.fov,
     renderQuality,
+    size.height,
     stableLayoutMetrics.height,
     stableLayoutMetrics.width,
   ]);
@@ -1429,7 +1463,7 @@ function NavigationController({
     }
 
     const visibilityViewport = getGeneratedLayoutViewport(layoutMode, stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
-    reportNodeVisibility(atlasRoot, perspective, nodeVisibilityRef.current, visibilityViewport);
+    if (!boardGameMode) reportNodeVisibility(atlasRoot, perspective, nodeVisibilityRef.current, visibilityViewport);
 
     const drag = dragRef.current;
     if (!boardGameMode && layoutMode === "phyllotaxis" && drag?.mode === "hold" && drag.canBirth && !drag.created) {
@@ -1489,6 +1523,18 @@ function NavigationController({
 
     if (progress >= 1) {
       transitionRef.current = null;
+      if (boardGameMode && mobileCamera) {
+        perspective.updateMatrixWorld();
+        const cameraSpaceTarget = new Vector3(...transition.targetWorld).applyMatrix4(perspective.matrixWorldInverse);
+        const actualDiameter = getProjectedDiameterPx(
+          transition.targetWorldDiameter,
+          Math.abs(cameraSpaceTarget.z),
+          Math.max(1, size.height),
+          perspective.fov,
+        );
+        const focusShell = gl.domElement.closest<HTMLElement>(".universe-shell");
+        if (focusShell) focusShell.dataset.boardMobileActualNodeDiameter = actualDiameter.toFixed(2);
+      }
       window.dispatchEvent(
         new CustomEvent<FocusTransitionCompleteDetail>(FOCUS_TRANSITION_COMPLETE_EVENT, {
           detail: { nodeId: transition.nodeId, nonce: transition.nonce },
@@ -2338,12 +2384,27 @@ function NotebookNodes({
   const focusRequest = useAtlasStore((state) => state.focusRequest);
   const focusNonce = focusRequest?.nonce ?? 0;
   const mobileLabelScope = useMobilePerformanceMode();
-  const { camera, size } = useThree();
+  const { camera, gl, size } = useThree();
   const perspective = camera as PerspectiveCamera;
   const [focusWaveStartedAt, setFocusWaveStartedAt] = useState(() => performance.now());
   const [renderSelectedNodeId, setRenderSelectedNodeId] = useState(selectedNodeId);
-  const selectedPath = findNodePath(atlasRoot, renderSelectedNodeId) ?? findNodePath(atlasRoot, selectedNodeId) ?? [atlasRoot];
-  const cameraFocusPath = cameraFocusNodeId ? findNodePath(atlasRoot, cameraFocusNodeId) : null;
+  const nodeRenderIndexRef = useRef<AtlasRenderIndex | null>(null);
+  const nodeRenderIndex = useMemo(() => {
+    const next = updateAtlasRenderIndex(atlasRoot, nodeRenderIndexRef.current);
+    nodeRenderIndexRef.current = next;
+    return next;
+  }, [atlasRoot]);
+  const nodeRenderMetaById = nodeRenderIndex.entries;
+  const selectedPath = useMemo(() => {
+    const renderPath = getAtlasRenderNodePath(nodeRenderIndex, renderSelectedNodeId);
+    if (renderPath.length) return renderPath;
+    const currentPath = getAtlasRenderNodePath(nodeRenderIndex, selectedNodeId);
+    return currentPath.length ? currentPath : [atlasRoot];
+  }, [atlasRoot, nodeRenderIndex, renderSelectedNodeId, selectedNodeId]);
+  const cameraFocusPath = useMemo(
+    () => (cameraFocusNodeId ? getAtlasRenderNodePath(nodeRenderIndex, cameraFocusNodeId) : null),
+    [cameraFocusNodeId, nodeRenderIndex],
+  );
   const renderFocusPath = cameraFocusPath ?? selectedPath;
   const rootIsSelected = renderSelectedNodeId === atlasRoot.id;
   const effectiveSelectedNodeId = rootIsSelected ? atlasRoot.id : renderSelectedNodeId;
@@ -2355,7 +2416,10 @@ function NotebookNodes({
     () => new Map(selectedPath.map((node, index) => [node.id, index])),
     [selectedPath],
   );
-  const notificationKindsByNodeId = useMemo(() => buildNotificationPathKinds(atlasRoot, unreadNotifications), [atlasRoot, unreadNotifications]);
+  const notificationKindsByNodeId = useMemo(
+    () => buildNotificationPathKinds(nodeRenderIndex, unreadNotifications),
+    [nodeRenderIndex, unreadNotifications],
+  );
   const activeNotificationSnoozePrompt =
     notificationSnoozePrompt && notificationSnoozePrompt.expiresAt > Date.now() ? notificationSnoozePrompt : null;
   const multiSelectedNodeIdSet = useMemo(() => new Set(multiSelectedNodeIds), [multiSelectedNodeIds]);
@@ -2366,36 +2430,38 @@ function NotebookNodes({
       new Set(getAiContextNodeIds(atlasRoot, selectedNodeId, { ...aiContextOptions, selectedNodeIds: multiSelectedNodeIds })),
     );
   }, [activeCommandMode, aiContextOptions, atlasRoot, commandInputEditing, multiSelectedNodeIds, selectedNodeId]);
-  const runningLineageNodeIds = useMemo(() => buildRunningLineageNodeIds(atlasRoot), [atlasRoot]);
-  const nodeRenderMetaById = useMemo(() => buildNodeRenderMeta(atlasRoot), [atlasRoot]);
-  const mandatoryRenderNodeIds = useMemo(
+  const runningLineageNodeIds = useMemo(
+    () => (boardGameMode ? new Set<string>() : buildRunningLineageNodeIds(atlasRoot)),
+    [atlasRoot, boardGameMode],
+  );
+  const boardRenderNodeIds = useMemo(
     () =>
-      buildMandatoryRenderNodeIds(
-        atlasRoot.id,
-        nodeRenderMetaById,
-        [
-          selectedNodeId,
-          renderSelectedNodeId,
-          cameraFocusNodeId,
-          ...(rootIsSelected ? atlasRoot.children.map((child) => child.id) : []),
-          ...multiSelectedNodeIds,
-          ...notificationPulses.map((pulse) => pulse.nodeId),
-          ...aiContextPreviewNodeIds,
-          ...runningLineageNodeIds,
-          activeNotificationSnoozePrompt?.nodeId ?? null,
-        ],
-      ),
+      boardGameMode
+        ? buildAtlasRenderProjection({
+            index: nodeRenderIndex,
+            anchorNodeId: cameraFocusNodeId ?? renderSelectedNodeId ?? selectedNodeId,
+            priorityNodeIds: [
+              selectedNodeId,
+              renderSelectedNodeId,
+              cameraFocusNodeId,
+              ...multiSelectedNodeIds,
+              ...notificationPulses.map((pulse) => pulse.nodeId),
+              ...aiContextPreviewNodeIds,
+              ...runningLineageNodeIds,
+              activeNotificationSnoozePrompt?.nodeId ?? null,
+            ],
+            maxNodes: BOARD_RENDER_NODE_BUDGET,
+          })
+        : null,
     [
       activeNotificationSnoozePrompt?.nodeId,
       aiContextPreviewNodeIds,
-      atlasRoot.children,
-      atlasRoot.id,
+      boardGameMode,
       cameraFocusNodeId,
       multiSelectedNodeIds,
-      nodeRenderMetaById,
+      nodeRenderIndex,
       notificationPulses,
       renderSelectedNodeId,
-      rootIsSelected,
       runningLineageNodeIds,
       selectedNodeId,
     ],
@@ -2410,11 +2476,72 @@ function NotebookNodes({
         viewport: layoutViewport,
         viewportWidth: stableLayoutMetrics.width,
         viewportHeight: stableLayoutMetrics.height,
+        renderProjection:
+          layoutMode === "phyllotaxis" && boardRenderNodeIds
+            ? { index: nodeRenderIndex, nodeIds: boardRenderNodeIds }
+            : undefined,
       }),
-    [atlasRoot, layoutMode, layoutViewport, selectedNodeId, stableLayoutMetrics.height, stableLayoutMetrics.width],
+    [
+      atlasRoot,
+      boardRenderNodeIds,
+      layoutMode,
+      layoutViewport,
+      nodeRenderIndex,
+      selectedNodeId,
+      stableLayoutMetrics.height,
+      stableLayoutMetrics.width,
+    ],
   );
   const currentLayoutPositions = layoutFrame.positions;
   const currentVisibleNodeIds = layoutFrame.visibleIds;
+  useEffect(() => {
+    const shell = gl.domElement.closest<HTMLElement>(".universe-shell");
+    if (!shell) return;
+    if (!boardGameMode) {
+      delete shell.dataset.boardRenderBudget;
+      delete shell.dataset.boardRenderedNodeCount;
+      return;
+    }
+    shell.dataset.boardRenderBudget = String(BOARD_RENDER_NODE_BUDGET);
+    shell.dataset.boardRenderedNodeCount = String(
+      [...currentVisibleNodeIds].filter((nodeId) => nodeId !== atlasRoot.id).length,
+    );
+  }, [atlasRoot.id, boardGameMode, currentVisibleNodeIds, gl]);
+  const mandatoryRenderNodeIds = useMemo(() => {
+    const mandatory = buildMandatoryRenderNodeIds(
+      atlasRoot.id,
+      nodeRenderIndex,
+      [
+        selectedNodeId,
+        renderSelectedNodeId,
+        cameraFocusNodeId,
+        ...(rootIsSelected ? atlasRoot.children.map((child) => child.id) : []),
+        ...multiSelectedNodeIds,
+        ...notificationPulses.map((pulse) => pulse.nodeId),
+        ...aiContextPreviewNodeIds,
+        ...runningLineageNodeIds,
+        activeNotificationSnoozePrompt?.nodeId ?? null,
+      ],
+      boardRenderNodeIds ? currentVisibleNodeIds : undefined,
+    );
+    if (!boardRenderNodeIds) return mandatory;
+    return new Set([...mandatory].filter((nodeId) => currentVisibleNodeIds.has(nodeId)));
+  }, [
+    activeNotificationSnoozePrompt?.nodeId,
+    aiContextPreviewNodeIds,
+    atlasRoot.children,
+    atlasRoot.id,
+    boardRenderNodeIds,
+    cameraFocusNodeId,
+    currentVisibleNodeIds,
+    multiSelectedNodeIds,
+    nodeRenderIndex,
+    notificationPulses,
+    renderSelectedNodeId,
+    rootIsSelected,
+    runningLineageNodeIds,
+    selectedNodeId,
+  ]);
   const currentNodeScales = layoutFrame.nodeScales;
   const currentLabelScales = layoutFrame.labelScales;
   const previousVisibleNodeIdsRef = useRef<Set<string> | null>(null);
@@ -2517,7 +2644,7 @@ function NotebookNodes({
       candidateNodeIds: layoutRenderNodeIds,
       mandatoryNodeIds: mandatoryRenderNodeIds,
       marginNdc: mobileLabelScope ? CAMERA_CULL_MOBILE_MARGIN_NDC : CAMERA_CULL_MARGIN_NDC,
-      nodeRenderMetaById,
+      nodeRenderIndex,
       now,
       positions: layoutPositions,
       previousNodeIds: cameraVisibleNodeIdsRef.current,
@@ -2536,7 +2663,7 @@ function NotebookNodes({
   );
   const labelAnchorNodeId = cameraFocusNodeId ?? selectedNodeId;
   const structuralPriorityLabelNodeIds = useMemo(() => {
-    const anchorDepth = (nodeRenderMetaById.get(labelAnchorNodeId)?.pathIds.length ?? Number.POSITIVE_INFINITY) - 1;
+    const anchorDepth = nodeRenderMetaById.get(labelAnchorNodeId)?.depth ?? Number.POSITIVE_INFINITY;
     return anchorDepth <= 1 ? new Set(atlasRoot.children.map((child) => child.id)) : new Set<string>();
   }, [atlasRoot.children, labelAnchorNodeId, nodeRenderMetaById]);
   const labelBudget = renderQuality === "low" ? LOW_QUALITY_LABEL_BUDGET : mobileLabelScope ? MOBILE_LABEL_BUDGET : DESKTOP_LABEL_BUDGET;
@@ -2548,16 +2675,16 @@ function NotebookNodes({
         mandatoryNodeIds: new Set([selectedNodeId, labelAnchorNodeId]),
         structuralPriorityNodeIds: structuralPriorityLabelNodeIds,
         maxLabels: labelBudget,
-        nodeRenderMetaById,
+        nodeRenderIndex,
         positions: layoutPositions,
       }),
-    [labelAnchorNodeId, labelBudget, layoutPositions, nodeRenderMetaById, renderVisibleNodeIds, selectedNodeId, structuralPriorityLabelNodeIds],
+    [labelAnchorNodeId, labelBudget, layoutPositions, nodeRenderIndex, renderVisibleNodeIds, selectedNodeId, structuralPriorityLabelNodeIds],
   );
 
   useEffect(() => {
-    if (findNode(atlasRoot, renderSelectedNodeId)) return;
+    if (nodeRenderIndex.entries.has(renderSelectedNodeId)) return;
     setRenderSelectedNodeId(selectedNodeId);
-  }, [atlasRoot, renderSelectedNodeId, selectedNodeId]);
+  }, [nodeRenderIndex, renderSelectedNodeId, selectedNodeId]);
 
   useEffect(() => {
     if (layoutMode !== "phyllotaxis") {
@@ -2569,8 +2696,8 @@ function NotebookNodes({
       return;
     }
 
-    const currentPath = findNodePath(atlasRoot, renderSelectedNodeId);
-    const nextPath = findNodePath(atlasRoot, selectedNodeId);
+    const currentPath = getAtlasRenderNodePath(nodeRenderIndex, renderSelectedNodeId);
+    const nextPath = getAtlasRenderNodePath(nodeRenderIndex, selectedNodeId);
     if (isStrictAncestorPath(nextPath, currentPath)) {
       setRenderSelectedNodeId(selectedNodeId);
       return;
@@ -2594,7 +2721,7 @@ function NotebookNodes({
       window.clearTimeout(timeout);
       window.removeEventListener(FOCUS_TRANSITION_COMPLETE_EVENT, handleFocusTransitionComplete);
     };
-  }, [atlasRoot, focusRequest, layoutMode, renderSelectedNodeId, selectedNodeId]);
+  }, [focusRequest, layoutMode, nodeRenderIndex, renderSelectedNodeId, selectedNodeId]);
 
   useEffect(() => {
     setFocusWaveStartedAt(performance.now());
@@ -2612,8 +2739,8 @@ function NotebookNodes({
 
   if (layoutMode === "calendar") {
     const calendarPaths = [...currentVisibleNodeIds]
-      .map((nodeId) => findNodePath(atlasRoot, nodeId))
-      .filter((path): path is AtlasNode[] => Boolean(path));
+      .map((nodeId) => getAtlasRenderNodePath(nodeRenderIndex, nodeId))
+      .filter((path) => path.length > 0);
     return (
       <group>
         {calendarPaths.map((path) => {
@@ -2671,7 +2798,7 @@ function NotebookNodes({
   }
 
   if (renderQuality === "low") {
-    const lowRenderPaths = buildLowQualityRenderPaths(atlasRoot, selectedNodeId, notificationPulses, aiContextPreviewNodeIds);
+    const lowRenderPaths = buildLowQualityRenderPaths(nodeRenderIndex, selectedNodeId, notificationPulses, aiContextPreviewNodeIds);
     return (
       <group>
         {lowRenderPaths.map(({ path, visibleDepthRemaining, suppressParentEdge }) => {
@@ -2818,10 +2945,13 @@ function NotebookNodes({
   );
 }
 
-function buildLowQualityRenderPaths(root: AtlasNode, selectedNodeId: string, notificationPulses: NotificationPulse[], aiContextPreviewNodeIds: Set<string>) {
+function buildLowQualityRenderPaths(index: AtlasRenderIndex, selectedNodeId: string, notificationPulses: NotificationPulse[], aiContextPreviewNodeIds: Set<string>) {
+  const root = index.entries.get(index.rootId)?.node;
+  if (!root) return [];
   const entries: Array<{ path: AtlasNode[]; visibleDepthRemaining: number; suppressParentEdge: boolean }> = [];
   const added = new Set<string>();
-  const selectedPath = findNodePath(root, selectedNodeId) ?? [root];
+  const selectedPath = getAtlasRenderNodePath(index, selectedNodeId);
+  if (!selectedPath.length) selectedPath.push(root);
   const selectedNode = selectedPath[selectedPath.length - 1];
 
   const addPath = (path: AtlasNode[], visibleDepthRemaining: number, suppressParentEdge: boolean) => {
@@ -2839,14 +2969,14 @@ function buildLowQualityRenderPaths(root: AtlasNode, selectedNodeId: string, not
   }
 
   for (const pulse of notificationPulses) {
-    const path = findNodePath(root, pulse.nodeId);
-    if (!path) continue;
+    const path = getAtlasRenderNodePath(index, pulse.nodeId);
+    if (!path.length) continue;
     addPath(path, 0, path.length > 2);
   }
 
   for (const nodeId of aiContextPreviewNodeIds) {
-    const path = findNodePath(root, nodeId);
-    if (!path) continue;
+    const path = getAtlasRenderNodePath(index, nodeId);
+    if (!path.length) continue;
     addPath(path, 0, path.length > 2);
   }
 
@@ -2882,25 +3012,16 @@ function expandNodeIdsWithRootLineage(root: AtlasNode, nodeIds: Set<string>) {
   return expanded;
 }
 
-function buildNodeRenderMeta(root: AtlasNode) {
-  const metaById = new Map<string, NodeRenderMeta>();
-  const visit = (node: AtlasNode, pathIds: string[]) => {
-    const nextPathIds = [...pathIds, node.id];
-    metaById.set(node.id, {
-      node,
-      pathIds: nextPathIds,
-    });
-    node.children.forEach((child) => visit(child, nextPathIds));
-  };
-  visit(root, []);
-  return metaById;
-}
-
-function buildMandatoryRenderNodeIds(rootId: string, metaById: Map<string, NodeRenderMeta>, nodeIds: Array<string | null | undefined> | Set<string>) {
+function buildMandatoryRenderNodeIds(
+  rootId: string,
+  index: AtlasRenderIndex,
+  nodeIds: Array<string | null | undefined> | Set<string>,
+  allowedNodeIds?: ReadonlySet<string>,
+) {
   const ids = new Set<string>();
   for (const nodeId of nodeIds) {
     if (!nodeId) continue;
-    addNodePathRenderIds(ids, metaById, nodeId);
+    addNodePathRenderIds(ids, index, nodeId, allowedNodeIds);
   }
   ids.delete(rootId);
   return ids;
@@ -2911,7 +3032,7 @@ function buildCameraCulledNodeIds({
   candidateNodeIds,
   mandatoryNodeIds,
   marginNdc,
-  nodeRenderMetaById,
+  nodeRenderIndex,
   now,
   positions,
   previousNodeIds,
@@ -2922,7 +3043,7 @@ function buildCameraCulledNodeIds({
   candidateNodeIds: Set<string>;
   mandatoryNodeIds: Set<string>;
   marginNdc: number;
-  nodeRenderMetaById: Map<string, NodeRenderMeta>;
+  nodeRenderIndex: AtlasRenderIndex;
   now: number;
   positions: Map<string, Vec3>;
   previousNodeIds: Set<string> | null;
@@ -2944,17 +3065,17 @@ function buildCameraCulledNodeIds({
     if (toNode.dot(forward) <= -NOTEBOOK_NODE_RADIUS) continue;
     projected.set(position[0], position[1], position[2]).project(camera);
     if (!isProjectedPositionInsideCullMargin(projected, marginNdc)) continue;
-    addNodePathRenderIds(nextNodeIds, nodeRenderMetaById, nodeId);
+    addNodePathRenderIds(nextNodeIds, nodeRenderIndex, nodeId, candidateNodeIds);
   }
 
   for (const nodeId of mandatoryNodeIds) {
     if (!candidateNodeIds.has(nodeId)) continue;
-    addNodePathRenderIds(nextNodeIds, nodeRenderMetaById, nodeId);
+    addNodePathRenderIds(nextNodeIds, nodeRenderIndex, nodeId, candidateNodeIds);
   }
 
   if (previousNodeIds) {
     for (const nodeId of previousNodeIds) {
-      if (nodeId === rootId || nextNodeIds.has(nodeId) || !candidateNodeIds.has(nodeId) || !nodeRenderMetaById.has(nodeId)) {
+      if (nodeId === rootId || nextNodeIds.has(nodeId) || !candidateNodeIds.has(nodeId) || !nodeRenderIndex.entries.has(nodeId)) {
         retainedUntil.delete(nodeId);
         continue;
       }
@@ -3003,7 +3124,7 @@ function buildPriorityLabelNodeIds({
   mandatoryNodeIds,
   structuralPriorityNodeIds,
   maxLabels,
-  nodeRenderMetaById,
+  nodeRenderIndex,
   positions,
 }: {
   anchorNodeId: string;
@@ -3011,7 +3132,7 @@ function buildPriorityLabelNodeIds({
   mandatoryNodeIds: Set<string>;
   structuralPriorityNodeIds: Set<string>;
   maxLabels: number;
-  nodeRenderMetaById: Map<string, NodeRenderMeta>;
+  nodeRenderIndex: AtlasRenderIndex;
   positions: Map<string, Vec3>;
 }) {
   const selected = new Set<string>();
@@ -3019,7 +3140,8 @@ function buildPriorityLabelNodeIds({
     if (candidateNodeIds.has(nodeId)) selected.add(nodeId);
   }
 
-  const anchorPath = nodeRenderMetaById.get(anchorNodeId)?.pathIds ?? [];
+  const nodeRenderMetaById = nodeRenderIndex.entries;
+  const anchorAncestorDistances = buildAncestorDistanceMap(nodeRenderIndex, anchorNodeId);
   const anchorPosition = positions.get(anchorNodeId);
   const rankNodeIds = (nodeIds: Iterable<string>) =>
     [...nodeIds]
@@ -3028,9 +3150,9 @@ function buildPriorityLabelNodeIds({
         const meta = nodeRenderMetaById.get(nodeId)!;
         return {
           nodeId,
-          graphDistance: getTreeGraphDistance(anchorPath, meta.pathIds),
+          graphDistance: getTreeGraphDistanceFromAnchor(nodeRenderIndex, nodeId, anchorAncestorDistances),
           worldDistance: getSquaredPositionDistance(anchorPosition, positions.get(nodeId)),
-          depth: meta.pathIds.length,
+          depth: meta.depth,
         };
       })
       .sort(
@@ -3052,11 +3174,30 @@ function buildPriorityLabelNodeIds({
   return selected;
 }
 
-function getTreeGraphDistance(leftPath: string[], rightPath: string[]) {
-  let commonLength = 0;
-  const limit = Math.min(leftPath.length, rightPath.length);
-  while (commonLength < limit && leftPath[commonLength] === rightPath[commonLength]) commonLength += 1;
-  return leftPath.length + rightPath.length - commonLength * 2;
+function buildAncestorDistanceMap(index: AtlasRenderIndex, nodeId: string) {
+  const distances = new Map<string, number>();
+  let currentId: string | null = nodeId;
+  let distance = 0;
+  while (currentId && !distances.has(currentId)) {
+    distances.set(currentId, distance);
+    currentId = index.entries.get(currentId)?.parentId ?? null;
+    distance += 1;
+  }
+  return distances;
+}
+
+function getTreeGraphDistanceFromAnchor(index: AtlasRenderIndex, nodeId: string, anchorAncestorDistances: Map<string, number>) {
+  let currentId: string | null = nodeId;
+  let distance = 0;
+  const seen = new Set<string>();
+  while (currentId && !seen.has(currentId)) {
+    const anchorDistance = anchorAncestorDistances.get(currentId);
+    if (anchorDistance !== undefined) return distance + anchorDistance;
+    seen.add(currentId);
+    currentId = index.entries.get(currentId)?.parentId ?? null;
+    distance += 1;
+  }
+  return Number.POSITIVE_INFINITY;
 }
 
 function getSquaredPositionDistance(left?: Vec3, right?: Vec3) {
@@ -3067,11 +3208,17 @@ function getSquaredPositionDistance(left?: Vec3, right?: Vec3) {
   return x * x + y * y + z * z;
 }
 
-function addNodePathRenderIds(target: Set<string>, metaById: Map<string, NodeRenderMeta>, nodeId: string) {
-  const meta = metaById.get(nodeId);
-  if (!meta) return;
-  meta.pathIds.forEach((pathId) => target.add(pathId));
+function addNodePathRenderIds(target: Set<string>, index: AtlasRenderIndex, nodeId: string, allowedNodeIds?: ReadonlySet<string>) {
+  let currentId: string | null = nodeId;
+  const seen = new Set<string>();
+  while (currentId && !seen.has(currentId)) {
+    if (allowedNodeIds && currentId !== index.rootId && !allowedNodeIds.has(currentId)) break;
+    seen.add(currentId);
+    target.add(currentId);
+    currentId = index.entries.get(currentId)?.parentId ?? null;
+  }
 }
+
 
 function isProjectedPositionInsideCullMargin(projected: Vector3, marginNdc: number) {
   return (
@@ -3092,6 +3239,17 @@ function areSetsEqual(left: Set<string> | null, right: Set<string>) {
 
 function getLayoutPosition(layoutPositions: Map<string, Vec3>, nodeId: string): Vec3 {
   return layoutPositions.get(nodeId) ?? [0, 0, 0];
+}
+
+function collectPathPositionOverrides(paths?: AtlasNode[][]) {
+  if (!paths) return undefined;
+  const overrides = new Map<string, Vec3>();
+  for (const path of paths) {
+    for (const node of path) {
+      if (node.position) overrides.set(node.id, node.position);
+    }
+  }
+  return overrides;
 }
 
 function hasAiContextPreviewNode(node: AtlasNode, aiContextPreviewNodeIds: Set<string>): boolean {
@@ -3242,7 +3400,7 @@ function HierarchyNode({
   const lineageRunningColor = theme === "light" ? "#0b63ce" : "#86b7ff";
   const statusColor = hasRunningDescendant && node.status !== "error" ? lineageRunningColor : getStatusColor(effectiveStatus);
   const ringColor = theme === "light" ? themeColors.ring : statusColor;
-  const boardGameNodeScale = boardGameMobile ? 0.72 : 1;
+  const boardGameNodeScale = boardGameMobile ? BOARD_MOBILE_NODE_WORLD_SCALE : 1;
   const radius = getNodeVisualRadius(node, depth) * boardGameNodeScale;
   const hitRadius = getNodeHitRadius(node, depth) * boardGameNodeScale;
   const visualDepthIndex =

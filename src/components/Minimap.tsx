@@ -13,7 +13,16 @@ export function Minimap() {
   const focusNode = useAtlasStore((state) => state.focusNode);
   const positions = useMemo(
     () => {
-      const frame = deriveAtlasLayoutFrame(atlasRoot, layoutMode, undefined, { focusNodeId: selectedNodeId });
+      const boardNodePaths = atlasRoot.notebookMode && atlasRoot.notebookMode !== "standard"
+        ? atlasRoot.children.map((child) => [atlasRoot, child])
+        : undefined;
+      const boardOverrides = boardNodePaths
+        ? new Map(boardNodePaths.flat().flatMap((node) => (node.position ? [[node.id, node.position] as const] : [])))
+        : undefined;
+      const frame = deriveAtlasLayoutFrame(atlasRoot, layoutMode, boardOverrides, {
+        focusNodeId: selectedNodeId,
+        nodePaths: layoutMode === "phyllotaxis" ? boardNodePaths : undefined,
+      });
       return atlasRoot.children
         .filter((node) => frame.visibleIds.has(node.id))
         .map((node) => ({ node, position: frame.positions.get(node.id) ?? [0, 0, 0] as [number, number, number] }));

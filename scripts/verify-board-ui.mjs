@@ -310,6 +310,15 @@ async function verifyChess() {
   const { context, page } = await createPage({ width: 1440, height: 900 });
   try {
     await importFixture(page, "chess");
+    const initialRecordNodeId = await page.evaluate(() => {
+      const root = JSON.parse(window.localStorage.getItem("mind-atlas-notebook-v2") || "null");
+      return root?.children?.[0]?.id || "";
+    });
+    await page.locator(".atlas-logo-crumb").click();
+    if (initialRecordNodeId) {
+      await page.locator(`.universe-shell [data-selected="true"][data-node-id="${initialRecordNodeId}"]`).waitFor({ state: "visible" });
+    }
+    await page.waitForTimeout(700);
     await verifyBoardExport(page, "chess");
     await assertBoardModeLayout(page, "chess", false);
     await assertDesktopBoardFocusCenter(page, "chess");
@@ -430,6 +439,14 @@ async function clickChessMove(page, fromSquare, toSquare) {
   const destinations = await page.locator(".chess-board-host square.move-dest").count();
   if (selected !== 1 || destinations < 1) {
     throw new Error(`Chess tap selection failed for ${fromSquare}: selected=${selected}, destinations=${destinations}`);
+  }
+  const destinationStyle = await page.locator(".chess-board-host square.move-dest").first().evaluate((element) => {
+    const style = getComputedStyle(element, "::after");
+    return { content: style.content, width: style.width, backgroundColor: style.backgroundColor, borderTopWidth: style.borderTopWidth };
+  });
+  if (destinationStyle.content === "none" || destinationStyle.width === "0px"
+    || (destinationStyle.backgroundColor === "rgba(0, 0, 0, 0)" && destinationStyle.borderTopWidth === "0px")) {
+    throw new Error(`Chess legal destination marker is not visible: ${JSON.stringify(destinationStyle)}`);
   }
   await page.mouse.click(to.x, to.y);
 }
@@ -604,8 +621,31 @@ async function focusMobileBoardMidRecord(page, mode) {
 }
 
 async function assertMobileBoardFocusScale(page, mode) {
-  const scale = await page.locator(".universe-shell").getAttribute("data-board-mobile-focus-scale");
-  if (scale !== "2") throw new Error(`${mode} mobile board focus distance is not doubled: ${scale}`);
+  const metrics = await page.locator(".universe-shell").evaluate((element) => ({
+    ratio: Number(element.getAttribute("data-board-mobile-focus-target-ratio")),
+    referenceHeight: Number(element.getAttribute("data-board-mobile-reference-view-height")),
+    referenceDiameter: Number(element.getAttribute("data-board-mobile-reference-node-diameter")),
+    drawableHeight: Number(element.getAttribute("data-board-mobile-drawable-height")),
+    targetDiameter: Number(element.getAttribute("data-board-mobile-target-node-diameter")),
+    actualDiameter: Number(element.getAttribute("data-board-mobile-actual-node-diameter")),
+    renderBudget: Number(element.getAttribute("data-board-render-budget")),
+    renderedNodeCount: Number(element.getAttribute("data-board-rendered-node-count")),
+    actualHeight: element.getBoundingClientRect().height,
+  }));
+  const expectedRatio = 57 / 359;
+  const expectedDiameter = metrics.drawableHeight * expectedRatio;
+  if (
+    Math.abs(metrics.ratio - expectedRatio) > 0.000001
+    || metrics.referenceHeight !== 359
+    || metrics.referenceDiameter !== 57
+    || Math.abs(metrics.drawableHeight - metrics.actualHeight) > 2
+    || Math.abs(metrics.targetDiameter - expectedDiameter) > 0.05
+    || Math.abs(metrics.actualDiameter - expectedDiameter) > 1
+    || metrics.renderBudget !== 240
+    || metrics.renderedNodeCount > metrics.renderBudget
+  ) {
+    throw new Error(`${mode} mobile board focus does not reproduce the measured 57/359 ratio: ${JSON.stringify(metrics)}`);
+  }
 }
 
 async function assertMobileAtlasComposition(page, mode, universe, { strictCenter = false } = {}) {
