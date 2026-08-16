@@ -114,6 +114,25 @@ function activeFocusPanel(page) {
   return page.locator(".focus-panel.is-board-game-panel:not(.is-hidden)");
 }
 
+async function assertDesktopBoardFocusCenter(page, mode, expectedTitle = null) {
+  const universe = await page.locator(".universe-shell").boundingBox();
+  const titleBox = await page.locator(".universe-shell [data-node-id]").evaluateAll((elements, titleValue) => {
+    const target = titleValue
+      ? elements.find((element) => ("value" in element ? element.value : element.textContent)?.trim() === titleValue)
+      : elements.find((element) => element.dataset.selected === "true")
+        ?? elements.find((element) => ("value" in element ? element.value : element.textContent)?.trim());
+    if (!target) return null;
+    const rect = target.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  }, expectedTitle);
+  if (!universe || !titleBox) throw new Error(`${mode} desktop board focus title is missing.`);
+  const titleCenterX = titleBox.x + titleBox.width / 2;
+  const universeCenterX = universe.x + universe.width / 2;
+  if (Math.abs(titleCenterX - universeCenterX) > Math.max(18, universe.width * 0.08)) {
+    throw new Error(`${mode} desktop board focus is horizontally offset: ${JSON.stringify({ titleCenterX, universeCenterX, universe })}`);
+  }
+}
+
 async function assertBoardModeLayout(page, mode, mobile) {
   const app = page.locator(`main[data-notebook-mode="${mode}"].is-board-game-mode`);
   await app.waitFor();
@@ -142,6 +161,7 @@ async function verifyShogi() {
     await importFixture(page, "shogi");
     await verifyBoardExport(page, "shogi");
     await assertBoardModeLayout(page, "shogi", false);
+    await assertDesktopBoardFocusCenter(page, "shogi");
     await assertDesktopInputLayer(page);
     await captureScreenshot(page, "shogi-desktop");
     await expectTexts(page.locator(".shogi-file-coordinates span"), ["9", "8", "7", "6", "5", "4", "3", "2", "1"], "shogi files");
@@ -279,6 +299,7 @@ async function verifyChess() {
     await importFixture(page, "chess");
     await verifyBoardExport(page, "chess");
     await assertBoardModeLayout(page, "chess", false);
+    await assertDesktopBoardFocusCenter(page, "chess");
     await assertDesktopInputLayer(page);
     await captureScreenshot(page, "chess-desktop");
     if (await page.locator(".chess-candidate-arrows line").count() < 1) throw new Error("Chess root candidate arrow is missing.");
@@ -427,6 +448,7 @@ async function verifyGo() {
     await importFixture(page, "go");
     await verifyBoardExport(page, "go");
     await assertBoardModeLayout(page, "go", false);
+    await assertDesktopBoardFocusCenter(page, "go");
     await assertDesktopInputLayer(page);
     await captureScreenshot(page, "go-desktop");
     await page.getByRole("button", { name: "一手進む" }).click();
@@ -475,7 +497,8 @@ async function verifyMobileLayout(mode) {
     await importFixture(page, mode);
     const { board, universe } = await assertBoardModeLayout(page, mode, true);
     await page.waitForTimeout(1_450);
-    await assertMobileAtlasComposition(page, `${mode} initial load`, universe);
+    await assertMobileBoardFocusScale(page, mode);
+    await assertMobileAtlasComposition(page, `${mode} initial load`, universe, { strictCenter: true });
     await focusMobileBoardMidRecord(page, mode);
     await page.waitForTimeout(1_450);
     const panel = activeFocusPanel(page);
@@ -537,7 +560,12 @@ async function focusMobileBoardMidRecord(page, mode) {
   }
 }
 
-async function assertMobileAtlasComposition(page, mode, universe) {
+async function assertMobileBoardFocusScale(page, mode) {
+  const scale = await page.locator(".universe-shell").getAttribute("data-board-mobile-focus-scale");
+  if (scale !== "2") throw new Error(`${mode} mobile board focus distance is not doubled: ${scale}`);
+}
+
+async function assertMobileAtlasComposition(page, mode, universe, { strictCenter = false } = {}) {
   const composition = await page.evaluate(() => {
     const universeElement = document.querySelector(".universe-shell");
     const universeRect = universeElement?.getBoundingClientRect();
@@ -593,12 +621,12 @@ async function assertMobileAtlasComposition(page, mode, universe) {
     throw new Error(`${mode} mobile Atlas has no selected node text anchors to evaluate.`);
   }
   const activeTextGap = Math.abs(composition.selectedBody.y - composition.selected.y);
-  const minActiveTextGap = Math.min(universe.width, universe.height) * 0.15;
+  const minActiveTextGap = Math.min(universe.width, universe.height) * 0.12;
   const maxActiveTextGap = Math.min(universe.width, universe.height) * 0.44;
   const activeAnchorX = (composition.selected.x + composition.selectedBody.x) / 2;
   const activeAnchorY = (composition.selected.y + composition.selectedBody.y) / 2;
-  const maxCenterOffsetX = universe.width * 0.24;
-  const maxCenterOffsetY = universe.height * 0.3;
+  const maxCenterOffsetX = universe.width * (strictCenter ? 0.08 : 0.24);
+  const maxCenterOffsetY = universe.height * (strictCenter ? 0.12 : 0.3);
   if (
     composition.count < 2
     || activeTextGap < minActiveTextGap

@@ -69,6 +69,7 @@ const GENERATED_LAYOUT_MOBILE_PORTRAIT_PANEL_HEIGHT_RATIO = 0.42;
 const GENERATED_LAYOUT_MOBILE_LANDSCAPE_PANEL_MAX_WIDTH_PX = 292;
 const GENERATED_LAYOUT_MOBILE_LANDSCAPE_PANEL_WIDTH_RATIO = 0.33;
 const GENERATED_LAYOUT_MOBILE_EDGE_GAP_PX = 24;
+const BOARD_MOBILE_FOCUS_DISTANCE_MULTIPLIER = 2;
 const GENERATED_LAYOUT_TREE_DESKTOP_CHILD_BIAS_RATIO = 0.18;
 const GENERATED_LAYOUT_TREE_MOBILE_LANDSCAPE_CHILD_BIAS_RATIO = 0.2;
 const GENERATED_LAYOUT_TREE_MAX_CHILD_BIAS_PX = 170;
@@ -547,6 +548,7 @@ export function UniverseCanvas({
       ref={shareTargetRef}
       className={`universe-shell ${embedInteractionLocked ? "is-embed-interaction-locked" : ""}`}
       data-embed-interaction={embedInteractionLocked ? "locked" : undefined}
+      data-board-mobile-focus-scale={boardGameMode && isMobileBoardGameViewport() ? BOARD_MOBILE_FOCUS_DISTANCE_MULTIPLIER : undefined}
       aria-label={formatAppMessage("ui.universeCanvas.mindAtlasUniverseView.f1af16f")}
     >
       <Canvas
@@ -1240,7 +1242,7 @@ function NavigationController({
     const targetAngles = directionToYawPitch(targetDirection);
     const generatedFocusDiameter = generatedLayoutFocus?.diameter ?? focusRequest.diameter;
     const targetDiameter = Math.max(focusRequest.diameter, generatedFocusDiameter);
-    const targetDistance =
+    const baseTargetDistance =
       mobileGeneratedLayout
         ? getGeneratedLayoutMobileCameraDistance(targetDiameter, stableLayoutMetrics.height, perspective.fov, layoutViewport, layoutMode)
         : getCameraDistanceForDiameter(
@@ -1249,6 +1251,12 @@ function NavigationController({
             perspective.fov,
             generatedLayoutActive ? GENERATED_LAYOUT_MAX_CAMERA_DISTANCE : phyllotaxisOverviewFocus ? 1400 : 620,
           );
+    // Board notebooks dedicate the lower part of the viewport to the board.
+    // On mobile the Atlas needs a wider context than the generic focus pass,
+    // so the focused planet is rendered at half the current screen diameter.
+    const targetDistance = boardGameMode && mobileCamera
+      ? baseTargetDistance * BOARD_MOBILE_FOCUS_DISTANCE_MULTIPLIER
+      : baseTargetDistance;
     const targetRadius = generatedLayoutActive ? Math.abs(targetVector.z) : targetVector.length();
     const targetIsRoot = !generatedLayoutActive && focusRequest.nodeId === atlasRoot.id;
     const focusDistance = generatedLayoutActive ? targetDistance : targetDistance * (mobileLandscapeCamera ? MOBILE_LANDSCAPE_FOCUS_DISTANCE_MULTIPLIER : 1);
@@ -1262,15 +1270,19 @@ function NavigationController({
         ? getInitialCameraOffset(mobilePortraitCamera)
         // The measured canvas height already accounts for compact board-mode framing.
         : getFocusTargetOffset(targetRadius, focusDistance);
-    const baseFocusScreenOffset = getGeneratedLayoutFocusScreenOffset(
-      layoutMode,
-      layoutViewport,
-      stableLayoutMetrics.width,
-      stableLayoutMetrics.height,
-      boardGameMode ? 0 : getVisibleCommandDockReservedBottom(stableLayoutMetrics.height),
-      boardGameMode,
-    );
-    const focusScreenOffset = baseFocusScreenOffset;
+    // The standard notebook keeps its right-panel avoidance offset. Board
+    // notebooks have a dedicated Atlas viewport, so every board focus stays
+    // on its true center, including root and initial-position nodes.
+    const focusScreenOffset = boardGameMode
+      ? { x: 0, y: 0 }
+      : getGeneratedLayoutFocusScreenOffset(
+          layoutMode,
+          layoutViewport,
+          stableLayoutMetrics.width,
+          stableLayoutMetrics.height,
+          getVisibleCommandDockReservedBottom(stableLayoutMetrics.height),
+          false,
+        );
     const focusWorldPerPixel = getWorldUnitsPerPixel(focusDistance, stableLayoutMetrics.height, perspective.fov);
     const current = yawPitchRef.current;
     const targetYaw = closestAngle(current.yaw, targetAngles.yaw);
