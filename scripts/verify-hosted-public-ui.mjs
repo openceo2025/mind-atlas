@@ -418,6 +418,11 @@ try {
     if (await startSpaceDialog.getByRole("button").filter({ has: page.locator(".start-space-mode-icon") }).count() !== 4) {
       throw new Error("New space should expose four notebook mode choices before templates.");
     }
+    for (const mode of ["standard", "shogi", "go", "chess"]) {
+      if (await startSpaceDialog.locator(`.start-space-mode-icon.is-${mode}`).count() !== 1) {
+        throw new Error(`New space is missing its dedicated ${mode} icon.`);
+      }
+    }
     await startSpaceDialog.getByRole("button", { name: /空白のスペース/ }).click();
     await startSpaceDialog.getByRole("heading", { name: "テンプレート", exact: true }).waitFor();
     await startSpaceDialog.getByRole("button", { name: /日常メモのスペース/ }).click();
@@ -735,7 +740,7 @@ async function verifyDirectShogiLaunch(browser) {
       nodeBody: document.querySelector(".node-body-input")?.value ?? "",
       modeParam: new URLSearchParams(location.search).get("mode"),
     }));
-    if (state.datasetTitle !== "新規の棋譜" || state.nodeTitle !== "初期局面" || state.nodeBody !== "") {
+    if (state.datasetTitle !== "新規の棋譜" || state.nodeTitle !== "将棋" || state.nodeBody !== "") {
       throw new Error(`Direct shogi launch did not create the requested empty record: ${JSON.stringify(state)}`);
     }
     if (state.modeParam !== null) throw new Error(`Direct shogi launch URL was not consumed safely: ${JSON.stringify(state)}`);

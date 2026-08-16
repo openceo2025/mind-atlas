@@ -244,6 +244,21 @@ let mobileRaycastMode: MobileRaycastMode = { kind: "idle" };
 let mobilePerformanceModeSnapshot = false;
 type UniversePointerSession = { owner: symbol; reset: () => void };
 let activeUniversePointerSession: UniversePointerSession | null = null;
+const POST_BIRTH_RELEASE_SUPPRESSION_MS = 480;
+let postBirthReleaseSuppression: { pointerId: number; until: number } | null = null;
+
+function suppressBackgroundClickAfterBirth(pointerId: number) {
+  postBirthReleaseSuppression = { pointerId, until: performance.now() + POST_BIRTH_RELEASE_SUPPRESSION_MS };
+}
+
+function isBackgroundClickSuppressed(pointerId: number) {
+  const suppression = postBirthReleaseSuppression;
+  if (!suppression || performance.now() >= suppression.until) {
+    postBirthReleaseSuppression = null;
+    return false;
+  }
+  return suppression.pointerId === pointerId;
+}
 
 function setHiddenDragEdgeNodeId(id: string | null) {
   if (hiddenDragEdgeNodeId === id) return;
@@ -1421,6 +1436,8 @@ function NavigationController({
       const heldFor = performance.now() - drag.startedAt;
       if (heldFor >= HOLD_TO_BIRTH_MS) {
         drag.created = true;
+        suppressBackgroundClickAfterBirth(drag.pointerId);
+        backgroundClickRef.current = null;
         addRootNodeAt(
           drag.direction,
           "",
@@ -1499,7 +1516,9 @@ function NavigationController({
     const activeDrag = dragRef.current;
     if (activeDrag && activeDrag.pointerId !== pointerId) return false;
     window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_INTERACTION_EVENT));
-    backgroundClickRef.current = pointerType !== "mouse" || button === 0 ? { pointerId, x: clientX, y: clientY } : null;
+    backgroundClickRef.current = (pointerType !== "mouse" || button === 0) && !isBackgroundClickSuppressed(pointerId)
+      ? { pointerId, x: clientX, y: clientY }
+      : null;
     const canBirth =
       !boardGameMode &&
       layoutMode === "phyllotaxis" &&
@@ -1571,6 +1590,8 @@ function NavigationController({
     if (!drag || drag.pointerId !== pointerId) return false;
     const backgroundClick = backgroundClickRef.current;
     if (
+      !drag.created &&
+      !isBackgroundClickSuppressed(pointerId) &&
       backgroundClick?.pointerId === pointerId &&
       Math.hypot(clientX - backgroundClick.x, clientY - backgroundClick.y) <= 6
     ) {
@@ -3484,6 +3505,7 @@ function HierarchyNode({
     });
 
     if (childId) {
+      suppressBackgroundClickAfterBirth(drag.pointerId);
       emitOnboardingEvent("child-node-created", { childDepth: depth + 1 });
       drag.handoffChildId = childId;
       drag.handoffLayerRadius = getShellRadius(depth + 1);
@@ -3494,6 +3516,7 @@ function HierarchyNode({
         siblingCount: childCount,
       });
       syncVisualNodePosition(childId, childWorld, drag.currentWorld);
+      selectNodeInPlace(childId);
       setHiddenDragEdgeNodeId(childId);
     }
     setDragVisual(null);
@@ -3771,6 +3794,7 @@ function HierarchyNode({
     }
     if (drag.handoffChildId && drag.handoffChildWorld) {
       moveNode(drag.handoffChildId, drag.handoffChildWorld);
+      focusNode(drag.handoffChildId);
     }
     setHiddenDragEdgeNodeId(null);
     setDragVisual(null);

@@ -820,6 +820,57 @@ async function verifyBackgroundReturnsOneParent(browser) {
   await context.close();
 }
 
+async function verifyBirthReleaseKeepsNewNodeFocused(browser) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  await seedCompletedOnboarding(page);
+  await seedSingleChildNotebook(page);
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForSelector("canvas");
+  await page.locator('textarea.space-title-editor[data-node-id="verify-child"]').waitFor();
+  await page.waitForTimeout(1100);
+  await page.evaluate(() => {
+    window.__mindAtlasVerifyBackgroundInteractions = 0;
+    window.addEventListener("mindatlas:universe-background-interaction", () => {
+      window.__mindAtlasVerifyBackgroundInteractions += 1;
+    });
+  });
+  const backgroundPoint = await findCanvasBackgroundPoint(page, "post-birth release");
+  const beforeIds = await page.evaluate(() => {
+    const raw = window.localStorage.getItem("mind-atlas-notebook-v2");
+    return raw ? (JSON.parse(raw).children ?? []).map((node) => node.id) : [];
+  });
+  await page.mouse.move(backgroundPoint.x, backgroundPoint.y);
+  await page.mouse.down();
+  await page.waitForTimeout(1720);
+  const beforeRelease = await readBirthReleaseState(page, beforeIds);
+  await page.mouse.up();
+  const afterRelease = await readBirthReleaseState(page, beforeIds);
+  await page.waitForTimeout(900);
+  const state = await readBirthReleaseState(page, beforeIds);
+  if (!state.createdNodeId || state.selectedNodeId !== state.createdNodeId) {
+    throw new Error(`The release that completed node birth moved focus away from the new node: ${JSON.stringify({ beforeRelease, afterRelease, settled: state })}`);
+  }
+  await context.close();
+  return state;
+}
+
+function readBirthReleaseState(page, beforeIds) {
+  return page.evaluate((ids) => {
+    const raw = window.localStorage.getItem("mind-atlas-notebook-v2");
+    const children = raw ? (JSON.parse(raw).children ?? []) : [];
+    const createdNode = children.find((node) => !ids.includes(node.id));
+    const selectedEditor = document.querySelector('textarea.space-title-editor[data-selected="true"]');
+    const uiStateRaw = window.localStorage.getItem("mind-atlas-ui-state-v1");
+    const uiSelectedNodeId = uiStateRaw ? JSON.parse(uiStateRaw).selectedNodeId ?? "" : "";
+    return {
+      childIds: children.map((node) => node.id),
+      createdNodeId: createdNode?.id ?? "",
+      selectedNodeId: selectedEditor?.getAttribute("data-node-id") ?? uiSelectedNodeId,
+    };
+  }, beforeIds);
+}
+
 async function verifyKonamiDoesNotUnlock(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 820 },
@@ -3838,6 +3889,10 @@ try {
   } else if (process.argv[2] === "background-parent") {
     await runStep("backgroundReturnsOneParent", () => verifyBackgroundReturnsOneParent(browser));
     console.log("Background parent verification passed");
+  } else if (process.argv[2] === "birth-release") {
+    const birthRelease = await runStep("birthReleaseKeepsNewNodeFocused", () => verifyBirthReleaseKeepsNewNodeFocused(browser));
+    console.log("Post-birth release verification passed");
+    console.log({ birthRelease });
   } else if (process.argv[2] === "calendar") {
     const calendarLayout = await runStep("calendarLayout", () => verifyCalendarLayout(browser));
     console.log("Calendar layout verification passed");
@@ -3890,6 +3945,7 @@ try {
     const notificationSnoozeActions = await runStep("notificationSnoozeActions", () => verifyNotificationSnoozeActions(browser));
     await runStep("generatedLayoutBlocksBackgroundBirth", () => verifyGeneratedLayoutBlocksBackgroundBirth(browser));
     await runStep("backgroundReturnsOneParent", () => verifyBackgroundReturnsOneParent(browser));
+    const birthRelease = await runStep("birthReleaseKeepsNewNodeFocused", () => verifyBirthReleaseKeepsNewNodeFocused(browser));
     await runStep("stablePhyllotaxisPositions", () => verifyStablePhyllotaxisPositions(browser));
     const konamiBlocked = await runStep("konamiBlocked", () => verifyKonamiDoesNotUnlock(browser));
     const tutorialSkip = await runStep("tutorialSkip", () => verifyTutorialSkipButton(browser));
@@ -3922,7 +3978,7 @@ try {
     const mobile = await runStep("mobileViewport", () => verifyViewport(browser, "mobile", { width: 390, height: 844 }));
     const mobileLandscape = await runStep("mobileLandscapeViewport", () => verifyViewport(browser, "mobile-landscape", { width: 844, height: 390 }));
     console.log("UI verification passed");
-    console.log({ desktop, nodeSearch, calendarLayout, localDeveloperMode, agentRunNodeSync, notificationSnoozeActions, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, agentRecovery, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileCanvasInterruptionRecovery, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, iosTouchSuppression, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
+    console.log({ desktop, nodeSearch, calendarLayout, localDeveloperMode, agentRunNodeSync, notificationSnoozeActions, birthRelease, konamiBlocked, tutorialSkip, lockedMenu, tutorialMode, voiceLog, agentRecovery, shareFlows, outline, outlineSafety, outlineTheme, imports, mobileOutline, mobileGlobalMenuScroll, mobileCanvasPinchZoom, mobileCanvasInterruptionRecovery, mobileTutorialRootBirth, mobileGeneratedLayout, phyllotaxisFocusOffset, treeWheelZoom, operationControls, editorKeyboardCreateFocus, commandDock, providerUsage, iosTouchSuppression, mobileEditorKeyboard, cameraScopedRendering, mobile, mobileLandscape });
   }
 } finally {
   await browser.close();

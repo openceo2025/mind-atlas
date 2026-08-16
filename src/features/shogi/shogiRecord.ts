@@ -65,7 +65,7 @@ export function createNewShogiRecord(datasetName = "新規の棋譜"): ShogiImpo
   const position = Position.newBySFEN(DEFAULT_SFEN);
   if (!position) throw new Error("The standard shogi position could not be created.");
   return recordToAtlas(new TsshogiRecord(position), "new", datasetName, {
-    recordRootTitle: "初期局面",
+    recordRootTitle: datasetName === "新規の棋譜" ? "将棋" : datasetName,
     recordRootBody: "",
   });
 }

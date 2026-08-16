@@ -316,6 +316,13 @@ async function verifyChess() {
     await verifyBoardChildBodyPreview(page, "chess");
     await assertDesktopInputLayer(page);
     await captureScreenshot(page, "chess-desktop");
+    const chessPalette = await page.locator(".chess-board-host cg-board").evaluate((board) => {
+      const style = getComputedStyle(board);
+      return { backgroundImage: style.backgroundImage, backgroundSize: style.backgroundSize };
+    });
+    if (!chessPalette.backgroundImage.includes("conic-gradient") || chessPalette.backgroundSize !== "25% 25%") {
+      throw new Error(`Chess board should use a stable green-and-white checker pattern: ${JSON.stringify(chessPalette)}`);
+    }
     if (await page.locator(".chess-candidate-arrows line").count() < 1) throw new Error("Chess root candidate arrow is missing.");
     const whiteFiles = await chessCoordinatePositions(page);
     await page.getByRole("button", { name: "盤面を反転" }).click();
@@ -466,6 +473,27 @@ async function verifyGo() {
     await verifyBoardChildBodyPreview(page, "go");
     await assertDesktopInputLayer(page);
     await captureScreenshot(page, "go-desktop");
+    const goEdgeGeometry = await page.locator(".go-point.is-left-edge.is-top-edge").first().evaluate((point) => {
+      const rect = point.getBoundingClientRect();
+      const horizontal = getComputedStyle(point, "::before");
+      const vertical = getComputedStyle(point, "::after");
+      return {
+        pointWidth: rect.width,
+        pointHeight: rect.height,
+        horizontalLeft: Number.parseFloat(horizontal.left),
+        horizontalWidth: Number.parseFloat(horizontal.width),
+        verticalTop: Number.parseFloat(vertical.top),
+        verticalHeight: Number.parseFloat(vertical.height),
+      };
+    });
+    if (
+      goEdgeGeometry.horizontalLeft < goEdgeGeometry.pointWidth * 0.4
+      || goEdgeGeometry.horizontalWidth > goEdgeGeometry.pointWidth * 0.6
+      || goEdgeGeometry.verticalTop < goEdgeGeometry.pointHeight * 0.4
+      || goEdgeGeometry.verticalHeight > goEdgeGeometry.pointHeight * 0.6
+    ) {
+      throw new Error(`Go grid lines should terminate at the outer intersections: ${JSON.stringify(goEdgeGeometry)}`);
+    }
     await page.getByRole("button", { name: "一手進む" }).click();
     await page.locator(".go-viewer-position").filter({ hasText: "1 手目" }).waitFor();
     if (await page.locator(".go-point.is-last").count() !== 1) throw new Error("Go last move marker is missing.");

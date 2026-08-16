@@ -1,5 +1,5 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CalendarDays, CircleDashed, CircleDot, CloudDownload, CloudUpload, CreditCard, Crown, Download, FileText, GitBranch, Github, GraduationCap, Grid3X3, History, Info, Languages, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Search, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CalendarDays, CloudDownload, CloudUpload, CreditCard, Crown, Download, FileText, GitBranch, Github, GraduationCap, History, Info, Languages, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Search, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
 import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, importBridgeShogiSource, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { createAboutDemoNotebook, getAboutDemoAttachmentPreviewUrls, getAboutDemoLayoutMode, getAboutDemoNotification, getAboutDemoOverviewFocusRequest, getAboutDemoSelectedNodeId, readAboutDemoConfig } from "./aboutDemo";
@@ -3813,10 +3813,25 @@ function StartSpaceDialog({
   ];
 
   const modeIcon = (mode: (typeof modeChoices)[number]["mode"]) => {
-    if (mode === "standard") return <CircleDashed size={28} strokeWidth={1.7} />;
-    if (mode === "shogi") return <Crown size={28} strokeWidth={1.7} />;
-    if (mode === "go") return <CircleDot size={28} strokeWidth={1.7} />;
-    return <Grid3X3 size={28} strokeWidth={1.7} />;
+    if (mode === "standard") {
+      return (
+        <span className="start-space-mode-glyph is-standard">
+          <span />
+          <span />
+          <span />
+        </span>
+      );
+    }
+    if (mode === "shogi") return <span className="start-space-mode-glyph is-shogi" />;
+    if (mode === "go") {
+      return (
+        <span className="start-space-mode-glyph is-go">
+          <span />
+          <span />
+        </span>
+      );
+    }
+    return <Crown className="start-space-mode-glyph is-chess" size={29} strokeWidth={1.7} />;
   };
 
   return (
@@ -3854,7 +3869,7 @@ function StartSpaceDialog({
                     onClick={() => choice.mode === "standard" ? setShowStandardChoices(true) : onStartBoard(choice.mode)}
                     disabled={loading}
                   >
-                    <span className="start-space-mode-icon" aria-hidden="true">{modeIcon(choice.mode)}</span>
+                    <span className={`start-space-mode-icon is-${choice.mode}`} aria-hidden="true">{modeIcon(choice.mode)}</span>
                     <strong>{t(choice.title)}</strong>
                     <small>{t(choice.detail)}</small>
                   </button>

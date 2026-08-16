@@ -12,6 +12,9 @@ const imported = await importChessRecordFile(new File([source], "fixture.pgn"));
 const annotatedRoot = imported.root.children[0];
 const annotatedMove = annotatedRoot?.children[0];
 if (!annotatedRoot || !annotatedMove) throw new Error("Chess annotation fixture is incomplete.");
+if (annotatedMove.title !== "e4" || annotatedMove.children[0]?.title !== "e5") {
+  throw new Error(`Chess node titles should use concise SAN without PGN move-number punctuation: ${annotatedMove.title} / ${annotatedMove.children[0]?.title}`);
+}
 annotatedRoot.title = "Main line / study";
 annotatedRoot.body = "Root note\nSecond note";
 annotatedMove.title = "King pawn plan";

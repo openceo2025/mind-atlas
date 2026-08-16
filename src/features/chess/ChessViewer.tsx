@@ -135,7 +135,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     const san = makeSan(position, move);
     const nextPosition = position.clone();
     nextPosition.play(move);
-    const displayText = formatMoveLabel(position, san);
+    const displayText = formatMoveLabel(san);
     const childId = addChildNode(parent.id, "", { title: displayText, focus: false, requestEdit: false });
     if (!childId) return;
     const nextContent: ChessRecordContent = {
@@ -352,8 +352,8 @@ function normalizeCastling(uci: string) {
   return uci;
 }
 
-function formatMoveLabel(position: ReturnType<typeof positionFromFen>, san: string) {
-  return `${position.fullmoves}${position.turn === "white" ? "." : "..."} ${san}`;
+function formatMoveLabel(san: string) {
+  return san;
 }
 
 function findPath(root: AtlasNode, targetId: string, path: AtlasNode[] = []): AtlasNode[] | null {

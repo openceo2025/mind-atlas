@@ -130,11 +130,17 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
           const candidateNodes = candidateNodesByVertex.get(vertexLabel) ?? [];
           const isCandidate = candidateNodes.length > 0;
           const isLast = Boolean(lastVertex && lastVertex[0] === x && lastVertex[1] === y);
+          const edgeClasses = [
+            x === 0 ? "is-left-edge" : "",
+            x === currentContent.boardSize - 1 ? "is-right-edge" : "",
+            y === 0 ? "is-top-edge" : "",
+            y === currentContent.boardSize - 1 ? "is-bottom-edge" : "",
+          ].filter(Boolean).join(" ");
           return (
             <button
               key={`${x}-${y}`}
               type="button"
-              className={`go-point ${sign === 1 ? "is-black" : sign === -1 ? "is-white" : ""} ${isStarPoint(x, y, currentContent.boardSize) ? "is-star" : ""} ${isLast ? "is-last" : ""} ${isCandidate ? "is-candidate" : ""}`}
+              className={`go-point ${edgeClasses} ${sign === 1 ? "is-black" : sign === -1 ? "is-white" : ""} ${isStarPoint(x, y, currentContent.boardSize) ? "is-star" : ""} ${isLast ? "is-last" : ""} ${isCandidate ? "is-candidate" : ""}`}
               onClick={() => isCandidate ? focusNode(candidateNodes[0].id) : sign === 0 ? addMove(vertex) : onStatus?.("その交点にはすでに石があります。")}
               aria-label={`${vertexLabel}${sign === 1 ? " 黒" : sign === -1 ? " 白" : ""}${isCandidate ? ` ${formatAppMessage("board.candidateMoves")}` : ""}`}
             >

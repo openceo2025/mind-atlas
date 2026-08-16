@@ -145,7 +145,7 @@ function buildMoveChildren(
       fen: makeFen(before.toSetup()),
       uci: makeUci(move),
       san,
-      displayText: formatMoveLabel(parentPosition, san),
+      displayText: formatMoveLabel(san),
       branchIndex,
       ...(child.data.nags?.length ? { nags: child.data.nags } : {}),
     };
@@ -193,8 +193,8 @@ function positionFromFen(fen: string): Position {
   return Chess.fromSetup(setup).unwrap();
 }
 
-function formatMoveLabel(position: Position, san: string) {
-  return `${position.fullmoves}${position.turn === "white" ? "." : "..."} ${san}`;
+function formatMoveLabel(san: string) {
+  return san;
 }
 
 function makeNode(

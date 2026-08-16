@@ -46,7 +46,7 @@ const fresh = createNewShogiRecord();
 if (fresh.datasetName !== "新規の棋譜" || fresh.root.title !== "新規の棋譜" || fresh.root.children.length !== 1) {
   throw new Error("New shogi launch did not create exactly one initial-position node.");
 }
-if (fresh.root.children[0]?.title !== "初期局面" || fresh.root.children[0]?.body !== "" || fresh.root.children[0]?.children.length !== 0) {
+if (fresh.root.children[0]?.title !== "将棋" || fresh.root.children[0]?.body !== "" || fresh.root.children[0]?.children.length !== 0) {
   throw new Error("New shogi launch initial node is not empty and correctly titled.");
 }
 console.log("verify:shogi:new-record:passed");
