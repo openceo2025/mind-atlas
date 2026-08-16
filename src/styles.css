@@ -2553,6 +2553,126 @@ h1 {
   gap: 14px;
 }
 
+.start-space-mode-section {
+  display: grid;
+  gap: 16px;
+  padding: 4px 0 8px;
+}
+
+.start-space-mode-heading {
+  display: grid;
+  gap: 5px;
+}
+
+.start-space-mode-heading h3 {
+  margin: 0;
+  color: #fff4c5;
+  font-size: 15px;
+}
+
+.start-space-mode-heading p {
+  margin: 0;
+  color: #9fb5a9;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.start-space-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.start-space-mode-card {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 8px;
+  min-width: 0;
+  min-height: 156px;
+  border: 1px solid rgba(219, 234, 211, 0.16);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(3, 7, 6, 0.62);
+  color: #e8f2e6;
+  cursor: pointer;
+  text-align: left;
+}
+
+.start-space-mode-card:hover:not(:disabled),
+.start-space-mode-card:focus-visible {
+  border-color: rgba(216, 245, 109, 0.68);
+  background: rgba(12, 36, 32, 0.78);
+  outline: none;
+}
+
+.start-space-mode-card:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.start-space-mode-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid rgba(216, 245, 109, 0.3);
+  border-radius: 999px;
+  color: #d8f56d;
+  background: rgba(216, 245, 109, 0.08);
+}
+
+.start-space-mode-card strong {
+  color: #fff4c5;
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.start-space-mode-card small {
+  color: #9fb5a9;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.start-space-back-button {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #b9e5d2;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.start-space-back-button:hover:not(:disabled) {
+  color: #fff4c5;
+}
+
+.start-space-back-button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+@media (max-width: 640px) {
+  .start-space-mode-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .start-space-mode-card {
+    min-height: 132px;
+    padding: 12px;
+  }
+
+  .start-space-mode-card strong {
+    font-size: 13px;
+  }
+}
+
 .start-space-section {
   display: grid;
   gap: 8px;

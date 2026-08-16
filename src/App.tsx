@@ -1,5 +1,5 @@
 import { FocusPanel } from "./components/FocusPanel";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CalendarDays, CloudDownload, CloudUpload, CreditCard, Download, FileText, GitBranch, Github, GraduationCap, History, Info, Languages, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Search, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CalendarDays, CircleDashed, CircleDot, CloudDownload, CloudUpload, CreditCard, Crown, Download, FileText, GitBranch, Github, GraduationCap, Grid3X3, History, Info, Languages, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Search, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
 import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, importBridgeShogiSource, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { createAboutDemoNotebook, getAboutDemoAttachmentPreviewUrls, getAboutDemoLayoutMode, getAboutDemoNotification, getAboutDemoOverviewFocusRequest, getAboutDemoSelectedNodeId, readAboutDemoConfig } from "./aboutDemo";
@@ -25,6 +25,7 @@ import { findNode, findNodePath, useAtlasStore } from "./store/atlasStore";
 import { getAtlasLayoutModeLabel, isAtlasLayoutMode, type AtlasLayoutMode } from "./layout/atlasLayout";
 import { I18nText, useMessage, useMindAtlasLocale } from "./i18n/I18nProvider";
 import { AVAILABLE_LOCALES, LOCALE_LABELS, currentAppLocale, type LocalePreference } from "./i18n/locales";
+import type { MessageId } from "./i18n/messages";
 import {
   deleteHostedCloudNotebook,
   fetchHostedServiceSession,
@@ -60,6 +61,8 @@ import {
 } from "./features/board/boardRecord";
 import { mergeBoardRecords } from "./features/board/boardRecordMerge";
 import { createNewShogiRecord } from "./features/shogi/shogiRecord";
+import { createNewChessRecord } from "./features/chess/chessRecord";
+import { createNewGoRecord } from "./features/go/goRecord";
 import { extractSupportedShogiSourceUrl } from "./features/shogi/shogiSource";
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
@@ -1856,6 +1859,33 @@ export default function App() {
     });
   };
 
+  const handleStartWithBoard = (mode: Exclude<NotebookMode, "standard">) => {
+    const messageId = mode === "shogi"
+      ? "startSpace.modeShogi"
+      : mode === "chess"
+        ? "startSpace.modeChess"
+        : "startSpace.modeGo";
+    requestWorkspaceSwitch(t(messageId), () => {
+      const imported = mode === "shogi"
+        ? createNewShogiRecord(t(messageId))
+        : mode === "chess"
+          ? createNewChessRecord(t(messageId))
+          : createNewGoRecord(t(messageId));
+      analyticsIgnoreNextNotebookRef.current = true;
+      resetNotebook();
+      importNotebook(imported.root, imported.datasetName, {}, {
+        selectedNodeId: imported.recordRootId,
+        requestTitleEdit: false,
+        notebookMode: mode,
+      });
+      forgetCurrentCloudNotebook();
+      setStartSpaceOpen(false);
+      setOutlineEditorOpen(false);
+      setOutlineEditorRootId(null);
+      setMobileWorkspacePanelRevealed(false);
+    });
+  };
+
   const handleStartWithCloudNotebook = async (entry: CloudNotebookEntry) => {
     requestCloudLoad(entry, { closeCloudDialog: false, closeStartSpace: true });
   };
@@ -2859,6 +2889,7 @@ export default function App() {
           onClose={() => setStartSpaceOpen(false)}
           onRefresh={refreshCloudNotebooks}
           onStartTemplate={handleStartWithTemplate}
+          onStartBoard={handleStartWithBoard}
           onStartFromCloud={handleStartWithCloudNotebook}
           onContinueWithoutTemplate={() => setStartSpaceOpen(false)}
           onLogin={() => {
@@ -3744,6 +3775,7 @@ function StartSpaceDialog({
   onClose,
   onRefresh,
   onStartTemplate,
+  onStartBoard,
   onStartFromCloud,
   onContinueWithoutTemplate,
   onLogin,
@@ -3757,18 +3789,43 @@ function StartSpaceDialog({
   onClose: () => void;
   onRefresh: () => void;
   onStartTemplate: (templateId: NotebookTemplateId) => void;
+  onStartBoard: (mode: Exclude<NotebookMode, "standard">) => void;
   onStartFromCloud: (entry: CloudNotebookEntry) => void;
   onContinueWithoutTemplate: () => void;
   onLogin: () => void;
 }) {
   const t = useMessage();
+  const [showStandardChoices, setShowStandardChoices] = useState(source !== "initialize");
+
+  useEffect(() => {
+    setShowStandardChoices(source !== "initialize");
+  }, [source]);
+
+  const modeChoices: Array<{
+    mode: "standard" | Exclude<NotebookMode, "standard">;
+    title: MessageId;
+    detail: MessageId;
+  }> = [
+    { mode: "standard", title: "startSpace.modeStandard", detail: "startSpace.modeStandard.detail" },
+    { mode: "shogi", title: "startSpace.modeShogi", detail: "startSpace.modeShogi.detail" },
+    { mode: "go", title: "startSpace.modeGo", detail: "startSpace.modeGo.detail" },
+    { mode: "chess", title: "startSpace.modeChess", detail: "startSpace.modeChess.detail" },
+  ];
+
+  const modeIcon = (mode: (typeof modeChoices)[number]["mode"]) => {
+    if (mode === "standard") return <CircleDashed size={28} strokeWidth={1.7} />;
+    if (mode === "shogi") return <Crown size={28} strokeWidth={1.7} />;
+    if (mode === "go") return <CircleDot size={28} strokeWidth={1.7} />;
+    return <Grid3X3 size={28} strokeWidth={1.7} />;
+  };
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="cloud-load-dialog start-space-dialog" role="dialog" aria-modal="true" aria-label={t("startSpace.title")} onMouseDown={(event) => event.stopPropagation()}>
         <header className="voice-log-header">
           <div>
             <h2>{source === "tutorial" ? t("startSpace.nextTitle") : t("startSpace.newTitle")}</h2>
-            <p>{source === "tutorial" ? t("startSpace.tutorialDetail") : t("startSpace.newDetail")}</p>
+            <p>{source === "tutorial" ? t("startSpace.tutorialDetail") : showStandardChoices ? t("startSpace.newDetail") : t("startSpace.modeDetail")}</p>
           </div>
           <div className="voice-log-actions">
             {cloudAvailable ? (
@@ -3782,69 +3839,100 @@ function StartSpaceDialog({
           </div>
         </header>
         <div className="cloud-package-list start-space-list">
-          {error ? <p className="cloud-dialog-status is-error">{hosted ? error : t("startSpace.cloudBridgeRequired")}</p> : null}
-          {source === "tutorial" ? (
-            <button className="cloud-package-button start-space-continue-button" type="button" onClick={onContinueWithoutTemplate} disabled={loading}>
-              <span>
-                <strong>{t("startSpace.keepTutorial")}</strong>
-                <small>{t("startSpace.keepTutorial.detail")}</small>
-              </span>
-              <ArrowRight size={16} />
-            </button>
-          ) : null}
-          <section className="start-space-section" aria-label={formatAppMessage("ui.app.notebookTemplates.b6a2c8e")}>
-            <h3>{t("startSpace.templates")}</h3>
-            {NOTEBOOK_TEMPLATES.map((template) => (
-              <button
-                key={template.id}
-                className="cloud-package-button start-space-choice"
-                type="button"
-                onClick={() => onStartTemplate(template.id)}
-                disabled={loading}
-              >
-                <span>
-                  <strong>{t(template.titleMessageId)}</strong>
-                  <small>{t(template.descriptionMessageId)}</small>
-                </span>
-                <FileText size={16} />
-              </button>
-            ))}
-          </section>
-          {cloudAvailable ? (
-            <section className="start-space-section" aria-label={formatAppMessage("ui.app.cloudNotebookCopies.1f91ff1")}>
-              <h3>{t("startSpace.cloudCopies")}</h3>
-              {loading ? <p className="cloud-dialog-status">{<I18nText id="ui.app.loading.f82b023" />}</p> : null}
-              {!loading && !notebooks.length ? <p className="cloud-dialog-status">{t("startSpace.cloudEmpty")}</p> : null}
-              {notebooks.map((entry) => {
-                return (
+          {source === "initialize" && !showStandardChoices ? (
+            <section className="start-space-mode-section" aria-label={t("startSpace.modeTitle")}>
+              <div className="start-space-mode-heading">
+                <h3>{t("startSpace.modeTitle")}</h3>
+                <p>{t("startSpace.modeDetail")}</p>
+              </div>
+              <div className="start-space-mode-grid">
+                {modeChoices.map((choice) => (
                   <button
-                    key={cloudNotebookKey(entry)}
+                    key={choice.mode}
+                    className="start-space-mode-card"
+                    type="button"
+                    onClick={() => choice.mode === "standard" ? setShowStandardChoices(true) : onStartBoard(choice.mode)}
+                    disabled={loading}
+                  >
+                    <span className="start-space-mode-icon" aria-hidden="true">{modeIcon(choice.mode)}</span>
+                    <strong>{t(choice.title)}</strong>
+                    <small>{t(choice.detail)}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : (
+            <>
+              {source === "initialize" ? (
+                <button className="start-space-back-button" type="button" onClick={() => setShowStandardChoices(false)} disabled={loading}>
+                  <ArrowLeft size={15} /> {t("startSpace.backToModes")}
+                </button>
+              ) : null}
+              {error ? <p className="cloud-dialog-status is-error">{hosted ? error : t("startSpace.cloudBridgeRequired")}</p> : null}
+              {source === "tutorial" ? (
+                <button className="cloud-package-button start-space-continue-button" type="button" onClick={onContinueWithoutTemplate} disabled={loading}>
+                  <span>
+                    <strong>{t("startSpace.keepTutorial")}</strong>
+                    <small>{t("startSpace.keepTutorial.detail")}</small>
+                  </span>
+                  <ArrowRight size={16} />
+                </button>
+              ) : null}
+              <section className="start-space-section" aria-label={formatAppMessage("ui.app.notebookTemplates.b6a2c8e")}>
+                <h3>{t("startSpace.templates")}</h3>
+                {NOTEBOOK_TEMPLATES.map((template) => (
+                  <button
+                    key={template.id}
                     className="cloud-package-button start-space-choice"
                     type="button"
-                    onClick={() => onStartFromCloud(entry)}
+                    onClick={() => onStartTemplate(template.id)}
                     disabled={loading}
                   >
                     <span>
-                      <strong>{entry.title || entry.name}</strong>
-                      <small>
-                        {formatBytes(entry.size)} / {formatVoiceLogTime(entry.updatedAt)}
-                        {entry.visibility === "public" ? formatAppMessage("ui.app.shared.f6ca971") : ""}
-                      </small>
+                      <strong>{t(template.titleMessageId)}</strong>
+                      <small>{t(template.descriptionMessageId)}</small>
                     </span>
-                    <CloudDownload size={16} />
+                    <FileText size={16} />
                   </button>
-                );
-              })}
-            </section>
-          ) : hosted ? (
-            <section className="start-space-section start-space-cloud-login" aria-label={formatAppMessage("ui.app.cloudNotebookCopies.1f91ff1")}>
-              <h3>{t("startSpace.cloudCopies")}</h3>
-              <p className="cloud-dialog-status">{t("startSpace.cloudLoginDetail")}</p>
-              <button className="secondary-button" type="button" onClick={onLogin}>
-                <LogIn size={15} /> {t("startSpace.googleLogin")}
-              </button>
-            </section>
-          ) : null}
+                ))}
+              </section>
+              {cloudAvailable ? (
+                <section className="start-space-section" aria-label={formatAppMessage("ui.app.cloudNotebookCopies.1f91ff1")}>
+                  <h3>{t("startSpace.cloudCopies")}</h3>
+                  {loading ? <p className="cloud-dialog-status">{<I18nText id="ui.app.loading.f82b023" />}</p> : null}
+                  {!loading && !notebooks.length ? <p className="cloud-dialog-status">{t("startSpace.cloudEmpty")}</p> : null}
+                  {notebooks.map((entry) => {
+                    return (
+                      <button
+                        key={cloudNotebookKey(entry)}
+                        className="cloud-package-button start-space-choice"
+                        type="button"
+                        onClick={() => onStartFromCloud(entry)}
+                        disabled={loading}
+                      >
+                        <span>
+                          <strong>{entry.title || entry.name}</strong>
+                          <small>
+                            {formatBytes(entry.size)} / {formatVoiceLogTime(entry.updatedAt)}
+                            {entry.visibility === "public" ? formatAppMessage("ui.app.shared.f6ca971") : ""}
+                          </small>
+                        </span>
+                        <CloudDownload size={16} />
+                      </button>
+                    );
+                  })}
+                </section>
+              ) : hosted ? (
+                <section className="start-space-section start-space-cloud-login" aria-label={formatAppMessage("ui.app.cloudNotebookCopies.1f91ff1")}>
+                  <h3>{t("startSpace.cloudCopies")}</h3>
+                  <p className="cloud-dialog-status">{t("startSpace.cloudLoginDetail")}</p>
+                  <button className="secondary-button" type="button" onClick={onLogin}>
+                    <LogIn size={15} /> {t("startSpace.googleLogin")}
+                  </button>
+                </section>
+              ) : null}
+            </>
+          )}
         </div>
       </section>
     </div>

@@ -414,6 +414,11 @@ try {
     await publicMenu.getByRole("button", { name: "新しく始める" }).click();
     const startSpaceDialog = page.getByRole("dialog", { name: "始め方を選ぶ" });
     await startSpaceDialog.waitFor();
+    await startSpaceDialog.getByRole("heading", { name: "何を始めますか？", exact: true }).waitFor();
+    if (await startSpaceDialog.getByRole("button").filter({ has: page.locator(".start-space-mode-icon") }).count() !== 4) {
+      throw new Error("New space should expose four notebook mode choices before templates.");
+    }
+    await startSpaceDialog.getByRole("button", { name: /空白のスペース/ }).click();
     await startSpaceDialog.getByRole("heading", { name: "テンプレート", exact: true }).waitFor();
     await startSpaceDialog.getByRole("button", { name: /日常メモのスペース/ }).click();
     await startSpaceDialog.waitFor({ state: "detached" });
@@ -421,6 +426,8 @@ try {
     await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
     await publicMenu.getByRole("button", { name: "新しく始める" }).click();
     await startSpaceDialog.waitFor();
+    await startSpaceDialog.getByRole("heading", { name: "何を始めますか？", exact: true }).waitFor();
+    await startSpaceDialog.getByRole("button", { name: /空白のスペース/ }).click();
     await startSpaceDialog.getByRole("button", { name: /Verify cloud notebook/ }).click();
     await startSpaceDialog.waitFor({ state: "detached" });
     await page.getByText("Verify cloud notebook note", { exact: true }).first().waitFor();

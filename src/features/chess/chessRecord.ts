@@ -39,6 +39,15 @@ export function importChessRecordText(text: string, datasetName = "Imported ches
   return gameToAtlas(game, datasetName);
 }
 
+export function createNewChessRecord(datasetName = "New chess game"): ChessImportResult {
+  const game: Game<PgnNodeData> = {
+    headers: new Map([["Event", datasetName]]),
+    comments: [],
+    moves: new Node<PgnNodeData>(),
+  };
+  return gameToAtlas(game, datasetName);
+}
+
 export function exportChessRecord(root: AtlasNode): string {
   const recordRoot = findRecordRoot(root);
   const rootContent = findChessNodeContent(recordRoot);

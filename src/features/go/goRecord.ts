@@ -29,6 +29,15 @@ export function importGoRecordText(text: string, datasetName = "Imported Go reco
   return treeToAtlas(tree, datasetName);
 }
 
+export function createNewGoRecord(datasetName = "New Go game"): GoImportResult {
+  return treeToAtlas({
+    id: 0,
+    parentId: null,
+    data: { GM: ["1"], FF: ["4"], SZ: ["19"] },
+    children: [],
+  }, datasetName);
+}
+
 export function exportGoRecord(root: AtlasNode): string {
   const recordRoot = findRecordRoot(root);
   const rootContent = findGoNodeContent(recordRoot);
