@@ -200,6 +200,38 @@ try {
     }
     await signedOutPage.close();
 
+    const sharedSignedOutPage = await browser.newPage({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
+    await seedCompletedOnboarding(sharedSignedOutPage);
+    await sharedSignedOutPage.goto(`${appUrl}/#s=verifycloudsharetoken`, { waitUntil: "networkidle" });
+    await sharedSignedOutPage.waitForSelector("canvas");
+    await sharedSignedOutPage.locator(".dataset-title-input").waitFor();
+    try {
+      await sharedSignedOutPage.waitForFunction(
+        () => document.querySelector(".dataset-title-input")?.value.includes("Verify cloud notebook"),
+        undefined,
+        { timeout: 15_000 },
+      );
+    } catch (error) {
+      console.error("Shared-link debug", {
+        title: await sharedSignedOutPage.locator(".dataset-title-input").inputValue(),
+        dialogCount: await sharedSignedOutPage.locator(".shared-notebook-dialog").count(),
+        body: (await sharedSignedOutPage.locator("body").innerText()).slice(0, 500),
+        requests: requestedPaths.slice(-10),
+        storedRootTitle: await sharedSignedOutPage.evaluate(() => {
+          try { return JSON.parse(localStorage.getItem("mind-atlas-notebook-v2") || "null")?.title ?? null; } catch { return null; }
+        }),
+      });
+      throw error;
+    }
+    const sharedTitle = await sharedSignedOutPage.locator(".dataset-title-input").inputValue();
+    if (!sharedTitle.includes("Verify cloud notebook")) {
+      throw new Error(`Signed-out shared link did not import directly: ${sharedTitle}`);
+    }
+    if (await sharedSignedOutPage.locator(".shared-notebook-dialog").count() !== 0) {
+      throw new Error("Signed-out shared link should not show the import confirmation dialog.");
+    }
+    await sharedSignedOutPage.close();
+
     const signedOutMobilePage = await browser.newPage({
       viewport: { width: 390, height: 844 },
       ignoreHTTPSErrors: true,

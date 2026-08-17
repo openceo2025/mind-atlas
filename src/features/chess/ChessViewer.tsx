@@ -52,7 +52,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     () => variationChildren.filter((node) => findChessNodeContent(node)?.role === "move"),
     [variationChildren],
   );
-  const { rememberChild, selectVariation, advance } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
+  const { rememberChild, selectVariation, advance, advanceToTail } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
   const boardRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<Api | null>(null);
   const configRef = useRef<Config | null>(null);
@@ -191,7 +191,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
         <button type="button" className="chess-viewer-icon" onClick={advance} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
         </button>
-        <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(branchTail)} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
+        <button type="button" className="chess-viewer-icon" onClick={advanceToTail} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
           <SkipForward size={14} />
         </button>
       </div>

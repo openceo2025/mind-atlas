@@ -52,7 +52,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   const path = recordRoot && currentNode ? findPath(recordRoot, currentNode.id) ?? [recordRoot] : recordRoot ? [recordRoot] : [];
   const parentNode = path.length > 1 ? path[path.length - 2] : null;
   const variations = (currentNode ?? recordRoot)?.children.filter((node) => findShogiNodeContent(node)?.role === "move") ?? [];
-  const { rememberChild, selectVariation, advance } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
+  const { rememberChild, selectVariation, advance, advanceToTail } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
   const [libraryReady, setLibraryReady] = useState(false);
   const [libraryError, setLibraryError] = useState("");
   const [orientation, setOrientation] = useState<"sente" | "gote">("sente");
@@ -178,7 +178,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
         <button type="button" className="shogi-viewer-icon" onClick={advance} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
         </button>
-        <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(branchTail)} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
+        <button type="button" className="shogi-viewer-icon" onClick={advanceToTail} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
           <SkipForward size={14} />
         </button>
       </div>

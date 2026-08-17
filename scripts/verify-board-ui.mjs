@@ -315,6 +315,16 @@ async function verifyShogiCandidateBranches() {
     if (replayedNodeId !== chosenNodeId) {
       throw new Error(`Shogi next navigation forgot the selected variation: chosen=${chosenNodeId} replayed=${replayedNodeId}`);
     }
+
+    // The last-position control must follow that same remembered branch when
+    // it is invoked from the shared position.
+    await page.locator(".shogi-viewer-icon").nth(2).click();
+    await page.locator(".shogi-candidate-arrow-hit").first().waitFor({ state: "visible" });
+    await page.locator(".shogi-viewer-icon").last().click();
+    const tailedNodeId = await page.locator('.universe-shell [data-selected="true"]').getAttribute("data-node-id");
+    if (tailedNodeId !== chosenNodeId) {
+      throw new Error(`Shogi last navigation forgot the selected variation: chosen=${chosenNodeId} tailed=${tailedNodeId}`);
+    }
   } finally {
     await context.close();
   }

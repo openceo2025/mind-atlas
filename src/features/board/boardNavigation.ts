@@ -43,7 +43,24 @@ export function useBoardBranchNavigation(
     focusNode(next.id);
   };
 
-  return { rememberChild, selectVariation, advance };
+  const advanceToTail = () => {
+    const initialNode = currentNode ?? recordRoot;
+    if (!initialNode) return;
+    let node: AtlasNode = initialNode;
+    const visited = new Set<string>();
+    while (!visited.has(node.id)) {
+      visited.add(node.id);
+      const variations = moveChildren(node);
+      if (!variations.length) break;
+      const preferredId = recordPreferences?.get(node.id);
+      const next = variations.find((child) => child.id === preferredId) ?? variations[0];
+      rememberChild(node.id, next.id);
+      node = next;
+    }
+    if (node.id !== (currentNode ?? recordRoot)?.id) focusNode(node.id);
+  };
+
+  return { rememberChild, selectVariation, advance, advanceToTail };
 }
 
 function getRecordPreferences(records: Map<string, Map<string, string>>, recordId: string) {

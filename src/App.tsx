@@ -277,6 +277,7 @@ export default function App() {
   const [boardRecordMergeStrategy, setBoardRecordMergeStrategy] = useState<BoardRecordMergeStrategy>("record-root");
   const [sharedNotebookRoot, setSharedNotebookRoot] = useState<AtlasNode | null>(null);
   const [sharedNotebookImporting, setSharedNotebookImporting] = useState(false);
+  const sharedHostedAutoImportTokenRef = useRef<string | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [dragImportActive, setDragImportActive] = useState(false);
   const mobilePortraitBreadcrumb = useMobilePortraitBreadcrumbLayout();
@@ -668,6 +669,11 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    if (notebookPersistenceStatus !== "ready") {
+      return () => {
+        cancelled = true;
+      };
+    }
     if (publicServiceMode) {
       const hostedShareToken = readHostedShareTokenFromUrl();
       if (hostedShareToken) {
@@ -705,7 +711,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [publicServiceMode]);
+  }, [notebookPersistenceStatus, publicServiceMode, t]);
 
   useEffect(() => {
     if (uiRestoreAppliedRef.current) return;
@@ -1252,6 +1258,21 @@ export default function App() {
     removeSharedNotebookHash();
     setSharedNotebookRoot(null);
   };
+
+  useEffect(() => {
+    const hostedShareToken = publicServiceMode ? readHostedShareTokenFromUrl() : null;
+    if (
+      !hostedShareToken ||
+      !sharedNotebookRoot ||
+      sharedNotebookImporting ||
+      hostedSessionLoading ||
+      !hostedSession ||
+      hostedSession.authenticated ||
+      sharedHostedAutoImportTokenRef.current === hostedShareToken
+    ) return;
+    sharedHostedAutoImportTokenRef.current = hostedShareToken;
+    void importSharedNotebook();
+  }, [hostedSession, hostedSessionLoading, importSharedNotebook, publicServiceMode, sharedNotebookImporting, sharedNotebookRoot]);
 
   const loadCloudNotebook = async (entry: CloudNotebookEntry) => {
     try {

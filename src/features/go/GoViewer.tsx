@@ -32,7 +32,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
   const branchTail = currentNode ? findRecordTail(currentNode) : recordRoot ? findRecordTail(recordRoot) : null;
   const board = useMemo(() => (currentContent ? boardFromGoContent(currentContent) : null), [currentContent?.board, currentContent?.boardSize]);
   const [flipped, setFlipped] = useState(false);
-  const { rememberChild, selectVariation, advance } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
+  const { rememberChild, selectVariation, advance, advanceToTail } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
 
   if (!enabled || !recordRoot || !rootContent || !currentContent || !selectedNode || !board) return null;
 
@@ -123,7 +123,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
         <button type="button" className="go-viewer-icon" onClick={advance} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
         </button>
-        <button type="button" className="go-viewer-icon" onClick={() => branchTail && focusNode(branchTail.id)} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
+        <button type="button" className="go-viewer-icon" onClick={advanceToTail} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
           <SkipForward size={14} />
         </button>
         <button type="button" className="go-viewer-icon" onClick={() => addMove([-1, -1], true)} aria-label="パス">
