@@ -2205,6 +2205,67 @@ h1 {
   overscroll-behavior: contain;
 }
 
+.board-record-merge-strategy {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.board-record-merge-strategy legend {
+  margin: 0 0 7px;
+  padding: 0;
+  color: #fff4c5;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.board-record-merge-strategy label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  border: 1px solid rgba(219, 234, 211, 0.14);
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: rgba(3, 7, 6, 0.62);
+  color: #edf7e8;
+  cursor: pointer;
+}
+
+.board-record-merge-strategy label.is-selected {
+  border-color: rgba(141, 245, 207, 0.52);
+  background: rgba(141, 245, 207, 0.1);
+}
+
+.board-record-merge-strategy input {
+  margin: 3px 0 0;
+  accent-color: #8df5cf;
+}
+
+.board-record-merge-strategy span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.board-record-merge-strategy strong {
+  font-size: 12px;
+}
+
+.board-record-merge-strategy small {
+  color: #9fb5a9;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.board-record-merge-strategy:disabled label {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .board-record-source-section {
   display: grid;
   gap: 8px;

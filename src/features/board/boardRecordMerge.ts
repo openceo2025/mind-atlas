@@ -7,13 +7,45 @@ export interface BoardRecordMergeResult {
   addedBranches: number;
   mergedTextNodes: number;
   lastAddedNodeId: string | null;
+  anchor: BoardRecordMergeAnchor;
 }
 
-export function mergeBoardRecords(destination: AtlasNode, source: AtlasNode): BoardRecordMergeResult {
+export type BoardRecordMergeStrategy = "record-root" | "deepest-common-position";
+
+export interface BoardRecordMergeOptions {
+  strategy?: BoardRecordMergeStrategy;
+}
+
+export interface BoardRecordMergeAnchor {
+  strategy: BoardRecordMergeStrategy;
+  destinationNodeId: string;
+  sourceNodeId: string;
+  destinationPly: number;
+  sourcePly: number;
+}
+
+type MergeState = Pick<BoardRecordMergeResult, "matchedNodes" | "addedBranches" | "mergedTextNodes" | "lastAddedNodeId">;
+
+type PositionedRecordNode = {
+  node: AtlasNode;
+  ply: number;
+  depth: number;
+  order: number;
+};
+
+export function mergeBoardRecords(
+  destination: AtlasNode,
+  source: AtlasNode,
+  options: BoardRecordMergeOptions = {},
+): BoardRecordMergeResult {
   const destinationMode = boardMode(destination.notebookMode);
   const sourceMode = boardMode(source.notebookMode);
   if (!destinationMode || !sourceMode || destinationMode !== sourceMode) {
     throw new Error("Only records from the same game type can be merged.");
+  }
+  const strategy = options.strategy ?? "record-root";
+  if (strategy === "deepest-common-position" && destinationMode === "go") {
+    throw new Error("Go records can only be merged from the initial position because position history can affect ko legality.");
   }
 
   const target = structuredClone(destination);
@@ -22,17 +54,34 @@ export function mergeBoardRecords(destination: AtlasNode, source: AtlasNode): Bo
   if (!targetRecordRoot || !sourceRecordRoot) throw new Error("A record root could not be found.");
   assertSameGame(targetRecordRoot, sourceRecordRoot, destinationMode);
 
-  const state = { matchedNodes: 1, addedBranches: 0, mergedTextNodes: 0, lastAddedNodeId: null as string | null };
+  const state: MergeState = { matchedNodes: 1, addedBranches: 0, mergedTextNodes: 0, lastAddedNodeId: null };
   // Keep the notebook user's record title stable; imported source names are
   // metadata, not a new title to append on every merge.
   mergeNodeText(targetRecordRoot, sourceRecordRoot, destinationMode, state, { preserveDestinationTitle: true });
   mergeMetadata(targetRecordRoot, sourceRecordRoot);
   const recordId = targetRecordRoot.structuredContent?.recordId;
   if (!recordId) throw new Error("The destination record id is missing.");
-  mergeChildren(targetRecordRoot, sourceRecordRoot, destinationMode, recordId, state);
+  const anchor = strategy === "deepest-common-position"
+    ? findDeepestCommonPosition(targetRecordRoot, sourceRecordRoot, destinationMode)
+    : createMergeAnchor(targetRecordRoot, sourceRecordRoot);
+  if (anchor.target.node !== targetRecordRoot) {
+    state.matchedNodes += 1;
+    mergeNodeText(anchor.target.node, anchor.source.node, destinationMode, state);
+  }
+  mergeChildren(anchor.target.node, anchor.source.node, destinationMode, recordId, state);
   target.updatedAt = new Date().toISOString();
 
-  return { root: target, ...state };
+  return {
+    root: target,
+    ...state,
+    anchor: {
+      strategy,
+      destinationNodeId: anchor.target.node.id,
+      sourceNodeId: anchor.source.node.id,
+      destinationPly: anchor.target.ply,
+      sourcePly: anchor.source.ply,
+    },
+  };
 }
 
 function mergeChildren(
@@ -40,7 +89,7 @@ function mergeChildren(
   sourceParent: AtlasNode,
   mode: BoardNotebookMode,
   recordId: string,
-  state: Omit<BoardRecordMergeResult, "root">,
+  state: MergeState,
 ) {
   const targetMoveChildren = targetParent.children.filter((node) => isMoveNode(node, mode));
   for (const sourceChild of sourceParent.children.filter((node) => isMoveNode(node, mode))) {
@@ -61,6 +110,92 @@ function mergeChildren(
   targetParent.children.forEach((child, branchIndex) => {
     if (isMoveNode(child, mode) && child.structuredContent) child.structuredContent.branchIndex = branchIndex;
   });
+}
+
+function findDeepestCommonPosition(
+  destinationRoot: AtlasNode,
+  sourceRoot: AtlasNode,
+  mode: BoardNotebookMode,
+) {
+  if (mode === "go") throw new Error("Go records cannot use deepest-position merging.");
+  const destinationPositions = collectRecordPositions(destinationRoot, mode);
+  const sourcePositions = collectRecordPositions(sourceRoot, mode);
+  const destinationByKey = new Map<string, PositionedRecordNode>();
+  for (const candidate of destinationPositions) {
+    const key = positionKey(candidate.node, mode);
+    if (!key) continue;
+    const current = destinationByKey.get(key);
+    if (!current || comparePositionCandidates(candidate, current) > 0) {
+      destinationByKey.set(key, candidate);
+    }
+  }
+
+  let best = createMergeAnchor(destinationRoot, sourceRoot);
+  for (const source of sourcePositions) {
+    const key = positionKey(source.node, mode);
+    if (!key) continue;
+    const target = destinationByKey.get(key);
+    if (!target) continue;
+    const candidate = { target, source };
+    if (compareMergeAnchors(candidate, best) > 0) best = candidate;
+  }
+  return best;
+}
+
+function collectRecordPositions(root: AtlasNode, mode: BoardNotebookMode) {
+  const result: PositionedRecordNode[] = [];
+  const stack: Array<{ node: AtlasNode; depth: number }> = [{ node: root, depth: 0 }];
+  while (stack.length) {
+    const current = stack.pop();
+    if (!current) break;
+    if (isRecordRoot(current.node, mode) || isMoveNode(current.node, mode)) {
+      const ply = recordPly(current.node);
+      result.push({
+        node: current.node,
+        ply: ply >= 0 ? ply : current.depth,
+        depth: current.depth,
+        order: result.length,
+      });
+    }
+    for (let index = current.node.children.length - 1; index >= 0; index -= 1) {
+      const child = current.node.children[index];
+      if (isMoveNode(child, mode)) stack.push({ node: child, depth: current.depth + 1 });
+    }
+  }
+  return result;
+}
+
+function createMergeAnchor(target: AtlasNode, source: AtlasNode) {
+  return {
+    target: positionedNode(target, 0, 0),
+    source: positionedNode(source, 0, 0),
+  };
+}
+
+function comparePositionCandidates(left: PositionedRecordNode, right: PositionedRecordNode) {
+  if (left.ply !== right.ply) return left.ply - right.ply;
+  if (left.depth !== right.depth) return left.depth - right.depth;
+  return right.order - left.order;
+}
+
+function positionedNode(node: AtlasNode, depth: number, order: number): PositionedRecordNode {
+  const ply = recordPly(node);
+  return { node, ply: ply >= 0 ? ply : depth, depth, order };
+}
+
+function compareMergeAnchors(
+  left: { target: PositionedRecordNode; source: PositionedRecordNode },
+  right: { target: PositionedRecordNode; source: PositionedRecordNode },
+) {
+  const leftCommonDepth = Math.min(left.target.ply, left.source.ply);
+  const rightCommonDepth = Math.min(right.target.ply, right.source.ply);
+  if (leftCommonDepth !== rightCommonDepth) return leftCommonDepth - rightCommonDepth;
+  if (left.source.ply !== right.source.ply) return left.source.ply - right.source.ply;
+  if (left.target.ply !== right.target.ply) return left.target.ply - right.target.ply;
+  if (left.source.depth !== right.source.depth) return left.source.depth - right.source.depth;
+  if (left.target.depth !== right.target.depth) return left.target.depth - right.target.depth;
+  if (left.source.order !== right.source.order) return right.source.order - left.source.order;
+  return right.target.order - left.target.order;
 }
 
 function cloneRecordSubtree(source: AtlasNode, parentId: string, recordId: string, branchIndex: number): AtlasNode {

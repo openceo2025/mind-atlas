@@ -59,7 +59,7 @@ import {
   nativeBoardRecordFileName,
   nativeBoardRecordSizeBytes,
 } from "./features/board/boardRecord";
-import { mergeBoardRecords } from "./features/board/boardRecordMerge";
+import { mergeBoardRecords, type BoardRecordMergeStrategy } from "./features/board/boardRecordMerge";
 import { createNewShogiRecord } from "./features/shogi/shogiRecord";
 import { createNewChessRecord } from "./features/chess/chessRecord";
 import { createNewGoRecord } from "./features/go/goRecord";
@@ -274,6 +274,7 @@ export default function App() {
   const [boardRecordDialogMode, setBoardRecordDialogMode] = useState<BoardRecordDialogMode>(null);
   const [boardRecordDialogBusy, setBoardRecordDialogBusy] = useState(false);
   const [boardRecordDialogError, setBoardRecordDialogError] = useState("");
+  const [boardRecordMergeStrategy, setBoardRecordMergeStrategy] = useState<BoardRecordMergeStrategy>("record-root");
   const [sharedNotebookRoot, setSharedNotebookRoot] = useState<AtlasNode | null>(null);
   const [sharedNotebookImporting, setSharedNotebookImporting] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
@@ -1585,6 +1586,7 @@ export default function App() {
 
   const openBoardRecordDialog = (mode: Exclude<BoardRecordDialogMode, null>) => {
     setBoardRecordDialogError("");
+    if (mode === "merge") setBoardRecordMergeStrategy("record-root");
     setBoardRecordDialogMode(mode);
     setMenuOpen(false);
     if (mode === "merge") {
@@ -1630,7 +1632,7 @@ export default function App() {
   };
 
   const applyBoardRecordMerge = async (sourceRoot: AtlasNode) => {
-    const result = mergeBoardRecords(atlasRoot, sourceRoot);
+    const result = mergeBoardRecords(atlasRoot, sourceRoot, { strategy: boardRecordMergeStrategy });
     const nextSelectedId = result.lastAddedNodeId
       ?? findNode(result.root, selectedNodeId)?.id
       ?? result.root.children[0]?.id
@@ -2814,6 +2816,8 @@ export default function App() {
           hosted={publicServiceMode}
           busy={boardRecordDialogBusy}
           error={boardRecordDialogError}
+          mergeStrategy={boardRecordMergeStrategy}
+          onMergeStrategyChange={setBoardRecordMergeStrategy}
           onClose={() => setBoardRecordDialogMode(null)}
           onRefresh={() => {
             void refreshNotebookSnapshots();
@@ -3265,6 +3269,8 @@ function BoardRecordDialog({
   hosted,
   busy,
   error,
+  mergeStrategy,
+  onMergeStrategyChange,
   onClose,
   onRefresh,
   onFile,
@@ -3280,6 +3286,8 @@ function BoardRecordDialog({
   hosted: boolean;
   busy: boolean;
   error: string;
+  mergeStrategy: BoardRecordMergeStrategy;
+  onMergeStrategyChange: (strategy: BoardRecordMergeStrategy) => void;
   onClose: () => void;
   onRefresh: () => void;
   onFile: (file: File) => void;
@@ -3325,6 +3333,37 @@ function BoardRecordDialog({
         </header>
         {error ? <p className="notebook-history-error">{error}</p> : null}
         <div className="board-record-dialog-body">
+          {isMerge && mode !== "go" ? (
+            <fieldset className="board-record-merge-strategy" disabled={busy}>
+              <legend>{t("board.merge.strategy.label")}</legend>
+              <label className={mergeStrategy === "record-root" ? "is-selected" : ""}>
+                <input
+                  type="radio"
+                  name="board-record-merge-strategy"
+                  value="record-root"
+                  checked={mergeStrategy === "record-root"}
+                  onChange={() => onMergeStrategyChange("record-root")}
+                />
+                <span>
+                  <strong>{t("board.merge.strategy.root")}</strong>
+                  <small>{t("board.merge.strategy.rootDetail")}</small>
+                </span>
+              </label>
+              <label className={mergeStrategy === "deepest-common-position" ? "is-selected" : ""}>
+                <input
+                  type="radio"
+                  name="board-record-merge-strategy"
+                  value="deepest-common-position"
+                  checked={mergeStrategy === "deepest-common-position"}
+                  onChange={() => onMergeStrategyChange("deepest-common-position")}
+                />
+                <span>
+                  <strong>{t("board.merge.strategy.deepest")}</strong>
+                  <small>{t("board.merge.strategy.deepestDetail")}</small>
+                </span>
+              </label>
+            </fieldset>
+          ) : null}
           <section className="board-record-source-section">
             <h3>{t("board.source.file")}</h3>
             <label className="board-record-file-action">

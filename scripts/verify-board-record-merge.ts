@@ -8,6 +8,9 @@ import type { AtlasNode } from "../src/types.ts";
 verifyShogiMerge();
 verifyChessMerge();
 verifyGoMerge();
+verifyShogiTranspositionMerge();
+verifyChessTranspositionMerge();
+verifyGoDeepestStrategyGuard();
 
 function verifyShogiMerge() {
   const destinationNative = TsshogiRecord.newByUSI("startpos moves 7g7f 3c3d");
@@ -37,6 +40,60 @@ function verifyGoMerge() {
   const merged = verifyMerge(destination, source, "go");
   const restored = importGoRecordText(exportGoRecord(merged), "Restored").root;
   assertAnnotations(restored, "go");
+}
+
+function verifyShogiTranspositionMerge() {
+  const destinationNative = TsshogiRecord.newByUSI("startpos moves 7g7f 3c3d 2g2f 8c8d 2f2e");
+  const sourceNative = TsshogiRecord.newByUSI("startpos moves 2g2f 8c8d 7g7f 3c3d 7f7e");
+  if (destinationNative instanceof Error || sourceNative instanceof Error) throw new Error("Could not create shogi transposition fixtures.");
+  const destination = importShogiRecordText(exportKIF(destinationNative), "Destination", "kif").root;
+  const source = importShogiRecordText(exportKIF(sourceNative), "Source", "kif").root;
+  verifyTranspositionStrategies(destination, source, "shogi", 4);
+}
+
+function verifyChessTranspositionMerge() {
+  const destination = importChessRecordText('[Event "Destination"]\n\n1. Nf3 d5 2. g3 Nf6 3. Bg2 e6 *', "Destination").root;
+  const source = importChessRecordText('[Event "Source"]\n\n1. g3 d5 2. Nf3 Nf6 3. Bg2 c5 *', "Source").root;
+  verifyTranspositionStrategies(destination, source, "chess", 5);
+}
+
+function verifyTranspositionStrategies(destination: AtlasNode, source: AtlasNode, label: string, expectedAnchorPly: number) {
+  const fromRoot = mergeBoardRecords(destination, source, { strategy: "record-root" });
+  const rootRecord = fromRoot.root.children[0];
+  if (rootRecord?.children.length !== 2 || fromRoot.anchor.destinationPly !== 0 || fromRoot.anchor.sourcePly !== 0) {
+    throw new Error(label + " initial-position strategy did not preserve alternate move orders.");
+  }
+
+  const fromDeepest = mergeBoardRecords(destination, source, { strategy: "deepest-common-position" });
+  const deepestRecord = fromDeepest.root.children[0];
+  const anchor = findNode(fromDeepest.root, fromDeepest.anchor.destinationNodeId);
+  if (!deepestRecord || !anchor) throw new Error(label + " deepest-position merge lost its anchor.");
+  if (deepestRecord.children.length !== 1) throw new Error(label + " deepest-position merge retained the imported move-order prefix.");
+  if (fromDeepest.anchor.destinationPly !== expectedAnchorPly || fromDeepest.anchor.sourcePly !== expectedAnchorPly) {
+    throw new Error(label + " deepest-position merge selected the wrong common position.");
+  }
+  if (anchor.children.length !== 2 || fromDeepest.addedBranches !== 1 || !fromDeepest.lastAddedNodeId) {
+    throw new Error(label + " deepest-position merge did not append the new continuation at the common position.");
+  }
+
+  const repeated = mergeBoardRecords(fromDeepest.root, source, { strategy: "deepest-common-position" });
+  if (repeated.addedBranches !== 0 || repeated.lastAddedNodeId !== null) {
+    throw new Error(label + " deepest-position merge was not idempotent.");
+  }
+  console.log("verify:board-record-merge:" + label + ":transposition:passed");
+}
+
+function verifyGoDeepestStrategyGuard() {
+  const destination = importGoRecordText("(;GM[1]FF[4]SZ[9];B[dd])", "Destination").root;
+  const source = importGoRecordText("(;GM[1]FF[4]SZ[9];B[dd])", "Source").root;
+  let rejected = false;
+  try {
+    mergeBoardRecords(destination, source, { strategy: "deepest-common-position" });
+  } catch (error) {
+    rejected = error instanceof Error && /ko legality/i.test(error.message);
+  }
+  if (!rejected) throw new Error("Go deepest-position merge must be rejected.");
+  console.log("verify:board-record-merge:go:deepest-guard:passed");
 }
 
 function annotateRoots(destination: AtlasNode, source: AtlasNode) {

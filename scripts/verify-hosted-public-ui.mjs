@@ -704,6 +704,19 @@ async function verifyHostedShogiMergeFeedback(page, recordText) {
   await page.getByRole("button", { name: "KIF棋譜をマージ" }).click();
   const dialog = page.locator(".board-record-dialog");
   await dialog.waitFor();
+  const mergeStrategies = dialog.locator('input[name="board-record-merge-strategy"]');
+  if (await mergeStrategies.count() !== 2) {
+    throw new Error("Hosted shogi merge did not expose both merge starting-point choices.");
+  }
+  const initialStrategy = dialog.locator('input[value="record-root"]');
+  const deepestStrategy = dialog.locator('input[value="deepest-common-position"]');
+  if (!await initialStrategy.isChecked()) {
+    throw new Error("Hosted shogi merge did not default to the non-destructive initial-position strategy.");
+  }
+  await deepestStrategy.check();
+  if (!await deepestStrategy.isChecked()) {
+    throw new Error("Hosted shogi merge could not select deepest matching position.");
+  }
   await dialog.locator("textarea").fill(recordText);
   const action = dialog.getByRole("button", { name: "この棋譜にマージ" });
   const colors = await action.evaluate((element) => {
