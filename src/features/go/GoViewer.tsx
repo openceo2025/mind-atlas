@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, GitBranch, RotateCcw, SkipBack, SkipForward 
 import { useMemo, useState } from "react";
 import GoBoard, { type Sign, type Vertex } from "@sabaki/go-board";
 import { findGoNodeContent, findGoRecordRoot, goRecordPath, goVertexToSgf, nearestGoRecordNode, nextGoSign, boardFromGoContent } from "./goRecord";
+import { useBoardBranchNavigation } from "../board/boardNavigation";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, GoRecordContent } from "../../types";
 import { formatAppMessage } from "../../i18n/format";
@@ -31,6 +32,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
   const branchTail = currentNode ? findRecordTail(currentNode) : recordRoot ? findRecordTail(recordRoot) : null;
   const board = useMemo(() => (currentContent ? boardFromGoContent(currentContent) : null), [currentContent?.board, currentContent?.boardSize]);
   const [flipped, setFlipped] = useState(false);
+  const { rememberChild, selectVariation, advance } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
 
   if (!enabled || !recordRoot || !rootContent || !currentContent || !selectedNode || !board) return null;
 
@@ -57,6 +59,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
       return content?.role === "move" && content.color === color && (content.vertex === "pass" ? pass : content.vertex === board.stringifyVertex(vertex));
     });
     if (existing) {
+      rememberChild(parent.id, existing.id);
       focusNode(existing.id);
       return;
     }
@@ -92,6 +95,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
       branchIndex: parent.children.filter((child) => findGoNodeContent(child)?.role === "move").length,
     };
     updateNode(childId, { structuredContent: nextContent });
+    rememberChild(parent.id, childId);
     focusNode(childId);
   };
 
@@ -116,7 +120,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
         <button type="button" className="go-viewer-icon" onClick={() => parentNode && focusNode(parentNode.id)} disabled={!parentNode} aria-label="一手戻る">
           <ChevronLeft size={14} />
         </button>
-        <button type="button" className="go-viewer-icon" onClick={() => variations[0] && focusNode(variations[0].id)} disabled={!variations.length} aria-label="一手進む">
+        <button type="button" className="go-viewer-icon" onClick={advance} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
         </button>
         <button type="button" className="go-viewer-icon" onClick={() => branchTail && focusNode(branchTail.id)} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
@@ -148,7 +152,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
               key={`${x}-${y}`}
               type="button"
               className={`go-point ${edgeClasses} ${sign === 1 ? "is-black" : sign === -1 ? "is-white" : ""} ${isStarPoint(x, y, currentContent.boardSize) ? "is-star" : ""} ${isLast ? "is-last" : ""} ${isCandidate ? "is-candidate" : ""}`}
-              onClick={() => isCandidate ? focusNode(candidateNodes[0].id) : sign === 0 ? addMove(vertex) : onStatus?.("その交点にはすでに石があります。")}
+              onClick={() => isCandidate ? selectVariation(candidateNodes[0]) : sign === 0 ? addMove(vertex) : onStatus?.("その交点にはすでに石があります。")}
               aria-label={`${vertexLabel}${sign === 1 ? " 黒" : sign === -1 ? " 白" : ""}${isCandidate ? ` ${formatAppMessage("board.candidateMoves")}` : ""}`}
             >
               <span aria-hidden="true" />
@@ -160,7 +164,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
         <span className="board-variation-label">{formatAppMessage("board.candidateMoves")}</span>
         {variations.length ? <GitBranch size={13} /> : null}
         {variations.map((node) => (
-          <button key={node.id} type="button" className={node.id === currentNode?.id ? "is-active" : ""} onClick={() => focusNode(node.id)}>
+          <button key={node.id} type="button" className={node.id === currentNode?.id ? "is-active" : ""} onClick={() => selectVariation(node)}>
             {findGoNodeContent(node)?.displayText || node.title}
           </button>
         ))}

@@ -301,6 +301,20 @@ async function verifyShogiCandidateBranches() {
     if (state.targets.some((target) => Math.abs(target.x - destination.x) >= cellWidth / 2)) {
       throw new Error(`Shogi promotion target escaped its destination cell: ${JSON.stringify({ destination, targets: state.targets })}`);
     }
+
+    // A deliberately selected variation must remain the next-step choice
+    // after going back to the shared position and advancing again.
+    const candidateTargets = page.locator(".shogi-candidate-arrow-hit");
+    await candidateTargets.nth(1).click();
+    const chosenNodeId = await page.locator('.universe-shell [data-selected="true"]').getAttribute("data-node-id");
+    if (!chosenNodeId) throw new Error("Shogi selected variation did not focus a node.");
+    await page.getByRole("button", { name: "一手戻る" }).click();
+    await page.locator(".shogi-candidate-arrow-hit").first().waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "一手進む" }).click();
+    const replayedNodeId = await page.locator('.universe-shell [data-selected="true"]').getAttribute("data-node-id");
+    if (replayedNodeId !== chosenNodeId) {
+      throw new Error(`Shogi next navigation forgot the selected variation: chosen=${chosenNodeId} replayed=${replayedNodeId}`);
+    }
   } finally {
     await context.close();
   }

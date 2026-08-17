@@ -13,6 +13,7 @@ import { Chessground } from "chessground";
 import "chessground/assets/chessground.base.css";
 import "chessground/assets/chessground.cburnett.css";
 import { findChessNodeContent, findChessRecordRoot, nearestChessRecordNode } from "./chessRecord";
+import { useBoardBranchNavigation } from "../board/boardNavigation";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, ChessRecordContent } from "../../types";
 import { formatAppMessage } from "../../i18n/format";
@@ -51,6 +52,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     () => variationChildren.filter((node) => findChessNodeContent(node)?.role === "move"),
     [variationChildren],
   );
+  const { rememberChild, selectVariation, advance } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
   const boardRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<Api | null>(null);
   const configRef = useRef<Config | null>(null);
@@ -130,6 +132,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     const existing = parent.children.find((child) => findChessNodeContent(child)?.uci === uci);
     if (existing) {
       setPendingPromotion(null);
+      rememberChild(parent.id, existing.id);
       focusNode(existing.id);
       return;
     }
@@ -154,6 +157,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     };
     setPendingPromotion(null);
     updateNode(childId, { structuredContent: nextContent });
+    rememberChild(parent.id, childId);
     focusNode(childId);
   }
 
@@ -184,7 +188,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
         <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(parentNode)} disabled={!parentNode} aria-label="一手戻る">
           <ChevronLeft size={14} />
         </button>
-        <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(variations[0] ?? null)} disabled={!variations.length} aria-label="一手進む">
+        <button type="button" className="chess-viewer-icon" onClick={advance} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
         </button>
         <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(branchTail)} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
@@ -208,7 +212,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
                 x2={candidate.to[0]}
                 y2={candidate.to[1]}
                 markerEnd={`url(#${candidateArrowheadId})`}
-                onClick={() => focusNode(candidate.node.id)}
+                onClick={() => selectVariation(candidate.node)}
               />
             ))}
           </svg>
@@ -218,7 +222,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
               type="button"
               className="chess-candidate-arrow-hit"
               style={{ left: `${candidate.to[0] / 8}%`, top: `${candidate.to[1] / 8}%` }}
-              onClick={() => focusNode(candidate.node.id)}
+              onClick={() => selectVariation(candidate.node)}
               aria-label={candidate.label}
               title={candidate.label}
             />
@@ -248,7 +252,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
         <span className="board-variation-label">{formatAppMessage("board.candidateMoves")}</span>
         {variations.length ? <GitBranch size={13} /> : null}
         {variations.map((node) => (
-          <button key={node.id} type="button" onClick={() => focusNode(node.id)}>
+          <button key={node.id} type="button" onClick={() => selectVariation(node)}>
             {findChessNodeContent(node)?.displayText || node.title}
           </button>
         ))}

@@ -6,6 +6,7 @@ import type { Config } from "shogiground/config";
 import type { DropDests, Key, MoveDests, PieceName, RoleString } from "shogiground/types";
 import { findShogiNodeContent, findShogiRecordRoot } from "./shogiRecord";
 import { buildShogiCandidateArrows, buildShogiCandidateTargets } from "./shogiCandidates";
+import { useBoardBranchNavigation } from "../board/boardNavigation";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, ShogiRecordContent } from "../../types";
 import { formatAppMessage } from "../../i18n/format";
@@ -51,6 +52,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   const path = recordRoot && currentNode ? findPath(recordRoot, currentNode.id) ?? [recordRoot] : recordRoot ? [recordRoot] : [];
   const parentNode = path.length > 1 ? path[path.length - 2] : null;
   const variations = (currentNode ?? recordRoot)?.children.filter((node) => findShogiNodeContent(node)?.role === "move") ?? [];
+  const { rememberChild, selectVariation, advance } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
   const [libraryReady, setLibraryReady] = useState(false);
   const [libraryError, setLibraryError] = useState("");
   const [orientation, setOrientation] = useState<"sente" | "gote">("sente");
@@ -119,6 +121,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
     }
     const existing = parent.children.find((child) => findShogiNodeContent(child)?.usi === usi);
     if (existing) {
+      rememberChild(parent.id, existing.id);
       focusNode(existing.id);
       return;
     }
@@ -143,6 +146,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       branchIndex: parent.children.filter((child) => findShogiNodeContent(child)?.role === "move").length,
     };
     updateNode(childId, { structuredContent: nextContent });
+    rememberChild(parent.id, childId);
     focusNode(childId);
   }
 
@@ -171,7 +175,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
         <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(parentNode)} disabled={!parentNode} aria-label="一手戻る">
           <ChevronLeft size={14} />
         </button>
-        <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(variations[0] ?? null)} disabled={!variations.length} aria-label="一手進む">
+        <button type="button" className="shogi-viewer-icon" onClick={advance} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
         </button>
         <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(branchTail)} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
@@ -203,7 +207,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
                   x2={candidate.to[0]}
                   y2={candidate.to[1]}
                   markerEnd={`url(#${candidateArrowheadId})`}
-                  onClick={() => focusNode(candidate.node.id)}
+                  onClick={() => selectVariation(candidate.node)}
                 />
               ))}
             </svg>
@@ -215,7 +219,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
                 data-candidate-kind={candidate.isDrop ? "drop" : "move"}
                 data-candidate-square={candidate.toSquare}
                 style={{ left: `${(candidate.to[0] / 9)}%`, top: `${(candidate.to[1] / 9)}%` }}
-                onClick={() => focusNode(candidate.node.id)}
+                onClick={() => selectVariation(candidate.node)}
                 aria-label={candidate.label}
                 title={candidate.label}
               />
@@ -228,7 +232,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
         <span className="board-variation-label">{formatAppMessage("board.candidateMoves")}</span>
         {variations.length ? <GitBranch size={13} /> : null}
         {variations.map((node) => (
-          <button key={node.id} type="button" onClick={() => focusNode(node.id)}>
+          <button key={node.id} type="button" onClick={() => selectVariation(node)}>
             {findShogiNodeContent(node)?.displayText || node.title}
           </button>
         ))}
