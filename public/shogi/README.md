@@ -1,9 +1,12 @@
-# Shogi landing page
+# Shogi landing page (generated output)
 
-The canonical editable source lives in
-`C:\Users\satof\sato\mind_atlas_shogi_site`. After building that project, run
-its `npm run export:conoha -- <this-directory>` command to refresh the static
-page served at `https://mind-atlas.org/shogi/`.
+This directory is **generated**. Do not edit `index.html` or `styles.css`
+here — the editable source is [`sites/shogi-landing`](../../sites/shogi-landing),
+and that README documents the build, export, and publish commands.
+
+Note: `public/` is copied verbatim into `dist/` and served by the VPS, so this
+file is reachable at `https://mind-atlas.org/shogi/README.md`. Keep internal
+notes in `sites/shogi-landing/README.md` instead.
 
 The WebP files are privacy-safe derivatives of screenshots supplied by the
 project owner for the shogi import guide.

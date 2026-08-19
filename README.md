@@ -233,6 +233,21 @@ Preview the production build:
 npm run preview
 ```
 
+### Shogi Landing Page
+
+The static landing page at `https://mind-atlas.org/shogi/` is built from
+`sites/shogi-landing/` and exported into `public/shogi/`, which the root build
+copies into `dist/`. Preview what the source currently produces without
+touching the deployed page:
+
+```powershell
+npm run site:shogi:export
+```
+
+See [sites/shogi-landing/README.md](sites/shogi-landing/README.md) for the
+publish command and for the current drift between that source and the page
+being served.
+
 ## Hosted VPS Service
 
 Mind Atlas can also be built as a small paid hosted service for
