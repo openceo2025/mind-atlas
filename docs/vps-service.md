@@ -389,6 +389,9 @@ What it does, if you ever need to do it by hand:
    `root:www-data` mode `640` — the service reads it through its group.
 6. `systemctl restart mind-atlas`, then check `systemctl is-active` and
    `/health`.
+7. Once the new tree is confirmed serving, delete the uploaded archive and
+   every older backup directory, so `/opt/mind-atlas-backups` holds exactly one
+   generation. See Rollback for why one and not more.
 
 `/opt/mind-atlas` has no `.git`, so `git fetch`, `git checkout` and `git pull`
 there all fail with `fatal: not a git repository`. Extraction also lays the new
@@ -614,7 +617,7 @@ Before public promotion:
 
 ## Rollback
 
-Roll back by putting the previous tree back. Each deploy leaves a full copy of
+Roll back by putting the previous tree back. Each deploy leaves one full copy of
 what it replaced, including that build's `dist/` and `node_modules/`, so no
 rebuild is needed and the site returns in seconds:
 
@@ -628,9 +631,16 @@ curl -fsS http://127.0.0.1:8788/health
 ```
 
 Do not run `git` commands in `/opt/mind-atlas` — see the warning under
-Deploying An Update. To rebuild an arbitrary commit instead of restoring a
-backup, deploy that commit with the normal flow rather than checking it out on
-the server.
+Deploying An Update. To go back further than one generation, deploy the older
+commit with the normal flow rather than checking it out on the server; git
+holds every deployed commit, so nothing is lost by keeping only one copy here.
+
+Only one generation is retained on purpose. A second copy would protect nothing
+that git does not already protect, and a full copy contains `.env.service`, so
+every extra generation is another plain-text copy of the database password and
+the provider keys sitting on the server. Nothing creates these backups
+automatically — no cron entry and no systemd timer — so they appear only when a
+deploy runs.
 
 The safety branch for the original implementation is:
 
