@@ -144,7 +144,7 @@ create database mindatlas owner mindatlas;
 \q
 ```
 
-Clone and install:
+Clone and install, for a **new** host only:
 
 ```bash
 sudo mkdir -p /opt/mind-atlas
@@ -153,6 +153,11 @@ git clone https://github.com/openceo2025/mind-atlas.git /opt/mind-atlas
 cd /opt/mind-atlas
 npm ci
 ```
+
+The live host at `mind-atlas.org` no longer carries a `.git` directory
+(verified 2026-08-19): its tree is delivered as an archive of a pushed commit.
+Updating and rolling back that host therefore never involve git on the server —
+see Deploying An Update and Rollback.
 
 ## Environment File
 
@@ -356,6 +361,46 @@ curl http://127.0.0.1:8788/health
 ```
 
 Stop it with `Ctrl+C` after the smoke test.
+
+## Deploying An Update
+
+The running host is updated by shipping an archive of a pushed commit, not by
+pulling on the server. Use the `mind-atlas-deploy` skill, which performs the
+whole sequence and prints a ready-to-paste rollback line:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\skills\mind-atlas-deploy\scripts\deploy.ps1"
+```
+
+What it does, if you ever need to do it by hand:
+
+1. Refuse to continue unless the working tree is clean and `HEAD` is pushed, so
+   the deployed tree is reproducible from a commit anyone can fetch.
+2. `git archive --format=tar.gz -o <sha>.tar.gz HEAD` and `scp` it to
+   `/opt/mind-atlas-backups/`.
+3. On the server: `cp -a /opt/mind-atlas
+   /opt/mind-atlas-backups/<timestamp>-<old-sha>`, extract the archive over
+   `/opt/mind-atlas`, and write the full SHA to `/opt/mind-atlas/.deploy-commit`.
+   The archive holds only committed files, so `.env.service`, `node_modules/`
+   and the serving `dist/` are untouched until the build replaces `dist/`.
+4. `npm ci`, then the hosted build, `verify:hosted-dist` and `service:migrate`
+   above.
+5. `chown -R www-data:www-data /opt/mind-atlas`, then restore `.env.service` to
+   `root:www-data` mode `640` — the service reads it through its group.
+6. `systemctl restart mind-atlas`, then check `systemctl is-active` and
+   `/health`.
+
+`/opt/mind-atlas` has no `.git`, so `git fetch`, `git checkout` and `git pull`
+there all fail with `fatal: not a git repository`. Extraction also lays the new
+tree over the old one, so a file deleted in a commit stays on the server until
+it is removed explicitly.
+
+Which commit is live:
+
+```bash
+cat /opt/mind-atlas/.deploy-commit
+curl -s https://mind-atlas.org/.mind-atlas-build.json
+```
 
 ## systemd
 
@@ -569,23 +614,28 @@ Before public promotion:
 
 ## Rollback
 
-The safety branch for this implementation is:
+Roll back by putting the previous tree back. Each deploy leaves a full copy of
+what it replaced, including that build's `dist/` and `node_modules/`, so no
+rebuild is needed and the site returns in seconds:
+
+```bash
+ls -1 /opt/mind-atlas-backups
+systemctl stop mind-atlas
+rm -rf /opt/mind-atlas
+mv /opt/mind-atlas-backups/<timestamp>-<old-sha> /opt/mind-atlas
+systemctl start mind-atlas
+curl -fsS http://127.0.0.1:8788/health
+```
+
+Do not run `git` commands in `/opt/mind-atlas` — see the warning under
+Deploying An Update. To rebuild an arbitrary commit instead of restoring a
+backup, deploy that commit with the normal flow rather than checking it out on
+the server.
+
+The safety branch for the original implementation is:
 
 ```text
 codex/mind-atlas-vps-service
-```
-
-To roll back the VPS app to the previous deployed commit:
-
-```bash
-cd /opt/mind-atlas
-git fetch origin
-git checkout <previous-good-commit>
-npm ci
-VITE_MIND_ATLAS_PUBLIC_SERVICE=true \
-VITE_MIND_ATLAS_SERVICE_URL=https://mind-atlas.org \
-npm run build
-sudo systemctl restart mind-atlas
 ```
 
 Do not commit `.env.service` or provider API keys.
