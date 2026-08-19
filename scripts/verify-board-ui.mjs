@@ -259,10 +259,65 @@ async function verifyMergeDialogLayout() {
     if (!buttonBox || !strategyBox || buttonBox.y >= strategyBox.y) {
       throw new Error("Merge dialog puts the starting-point choice above the merge button.");
     }
+
+    await verifyMergedBranchIsRetraced(page, dialog);
     console.log("verify:board-ui:merge-dialog:passed");
   } finally {
     await context.close();
   }
+}
+
+/**
+ * Merge a record that branches away at the third move, then walk back to the
+ * fork and forward again. The merged branch is the second variation, so a
+ * forward step that fell back to record order would land on the original line.
+ */
+async function verifyMergedBranchIsRetraced(page, dialog) {
+  const source = "#KIF version=2.0\n\n手合割：平手\n\n手数----指手---------\n   1 ７六歩(77)\n   2 ３四歩(33)\n   3 ２六歩(27)\n   4 ８四歩(83)\n";
+  await dialog.locator("textarea").fill(source);
+  await dialog.getByRole("button", { name: /この棋譜にマージ|Merge into this record/ }).click();
+  await dialog.waitFor({ state: "detached", timeout: 15_000 });
+  await page.locator(".shogi-viewer-position").filter({ hasText: "4手目" }).waitFor({ timeout: 10_000 });
+
+  await page.getByRole("button", { name: "一手戻る" }).click();
+  await page.locator(".shogi-viewer-position").filter({ hasText: "3手目" }).waitFor();
+  const mergedMove = await selectedNodeTitle(page);
+  if (!mergedMove) throw new Error("The merged branch did not become the focused move.");
+
+  await page.getByRole("button", { name: "一手戻る" }).click();
+  await page.locator(".shogi-viewer-position").filter({ hasText: "2手目" }).waitFor();
+  const forkMove = await settledSelectedNodeTitle(page, mergedMove);
+  const variations = await page.locator(".shogi-variations button").allTextContents();
+  if (variations.length !== 2) throw new Error(`The merge did not produce a fork: ${JSON.stringify(variations)}`);
+  if (variations[0].trim() === mergedMove) {
+    throw new Error("The merged branch is already first, so this does not exercise the record-order fallback.");
+  }
+
+  await page.getByRole("button", { name: "一手進む" }).click();
+  await page.locator(".shogi-viewer-position").filter({ hasText: "3手目" }).waitFor();
+  const afterForward = await settledSelectedNodeTitle(page, forkMove);
+  if (afterForward !== mergedMove) {
+    throw new Error(`Stepping forward after a merge left the branch: expected ${mergedMove}, got ${afterForward}.`);
+  }
+}
+
+async function selectedNodeTitle(page) {
+  return page.locator(".universe-shell [data-node-id]").evaluateAll((elements) => {
+    const selected = elements.find((element) => element.dataset.selected === "true");
+    if (!selected) return "";
+    return (("value" in selected ? selected.value : selected.textContent) ?? "").trim();
+  });
+}
+
+/** The universe overlay repaints a frame behind the viewer, so wait it out. */
+async function settledSelectedNodeTitle(page, previousTitle) {
+  await page.waitForFunction((previous) => {
+    const elements = Array.from(document.querySelectorAll(".universe-shell [data-node-id]"));
+    const selected = elements.find((element) => element.dataset.selected === "true");
+    const title = selected ? (("value" in selected ? selected.value : selected.textContent) ?? "").trim() : "";
+    return Boolean(title) && title !== previous;
+  }, previousTitle, { timeout: 10_000 });
+  return selectedNodeTitle(page);
 }
 
 async function verifyBoardChildBodyPreview(page, mode) {
