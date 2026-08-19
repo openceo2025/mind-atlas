@@ -62,7 +62,7 @@ export function mergeBoardRecords(
   const recordId = targetRecordRoot.structuredContent?.recordId;
   if (!recordId) throw new Error("The destination record id is missing.");
   const anchor = strategy === "deepest-common-position"
-    ? findDeepestCommonPosition(targetRecordRoot, sourceRecordRoot, destinationMode)
+    ? findCommonPositionNearestSourceTail(targetRecordRoot, sourceRecordRoot, destinationMode)
     : createMergeAnchor(targetRecordRoot, sourceRecordRoot);
   if (anchor.target.node !== targetRecordRoot) {
     state.matchedNodes += 1;
@@ -112,34 +112,45 @@ function mergeChildren(
   });
 }
 
-function findDeepestCommonPosition(
+function findCommonPositionNearestSourceTail(
   destinationRoot: AtlasNode,
   sourceRoot: AtlasNode,
   mode: BoardNotebookMode,
 ) {
   if (mode === "go") throw new Error("Go records cannot use deepest-position merging.");
-  const destinationPositions = collectRecordPositions(destinationRoot, mode);
-  const sourcePositions = collectRecordPositions(sourceRoot, mode);
   const destinationByKey = new Map<string, PositionedRecordNode>();
-  for (const candidate of destinationPositions) {
+  for (const candidate of collectRecordPositions(destinationRoot, mode)) {
     const key = positionKey(candidate.node, mode);
     if (!key) continue;
     const current = destinationByKey.get(key);
-    if (!current || comparePositionCandidates(candidate, current) > 0) {
+    // The same position can occur more than once in the destination tree, for
+    // example after a repetition. Graft onto the earliest occurrence so the
+    // imported continuation stays close to the main line instead of being
+    // buried behind the repeat.
+    if (!current || comparePositionCandidates(candidate, current) < 0) {
       destinationByKey.set(key, candidate);
     }
   }
 
-  let best = createMergeAnchor(destinationRoot, sourceRoot);
+  // Walk the source backwards from its terminal position. The first position
+  // that already exists anywhere in the destination is the anchor, so only the
+  // moves that follow it get added. Move order before the anchor is irrelevant:
+  // matching is on position identity alone.
+  const sourcePositions = collectRecordPositions(sourceRoot, mode).sort(compareSourceSearchOrder);
   for (const source of sourcePositions) {
     const key = positionKey(source.node, mode);
     if (!key) continue;
     const target = destinationByKey.get(key);
-    if (!target) continue;
-    const candidate = { target, source };
-    if (compareMergeAnchors(candidate, best) > 0) best = candidate;
+    if (target) return { target, source };
   }
-  return best;
+  return createMergeAnchor(destinationRoot, sourceRoot);
+}
+
+/** Orders source positions terminal-first: deepest ply, then main line. */
+function compareSourceSearchOrder(left: PositionedRecordNode, right: PositionedRecordNode) {
+  if (left.ply !== right.ply) return right.ply - left.ply;
+  if (left.depth !== right.depth) return right.depth - left.depth;
+  return left.order - right.order;
 }
 
 function collectRecordPositions(root: AtlasNode, mode: BoardNotebookMode) {
@@ -172,30 +183,16 @@ function createMergeAnchor(target: AtlasNode, source: AtlasNode) {
   };
 }
 
+/** Orders destination positions main-line-first: shallowest ply, then earliest branch. */
 function comparePositionCandidates(left: PositionedRecordNode, right: PositionedRecordNode) {
   if (left.ply !== right.ply) return left.ply - right.ply;
   if (left.depth !== right.depth) return left.depth - right.depth;
-  return right.order - left.order;
+  return left.order - right.order;
 }
 
 function positionedNode(node: AtlasNode, depth: number, order: number): PositionedRecordNode {
   const ply = recordPly(node);
   return { node, ply: ply >= 0 ? ply : depth, depth, order };
-}
-
-function compareMergeAnchors(
-  left: { target: PositionedRecordNode; source: PositionedRecordNode },
-  right: { target: PositionedRecordNode; source: PositionedRecordNode },
-) {
-  const leftCommonDepth = Math.min(left.target.ply, left.source.ply);
-  const rightCommonDepth = Math.min(right.target.ply, right.source.ply);
-  if (leftCommonDepth !== rightCommonDepth) return leftCommonDepth - rightCommonDepth;
-  if (left.source.ply !== right.source.ply) return left.source.ply - right.source.ply;
-  if (left.target.ply !== right.target.ply) return left.target.ply - right.target.ply;
-  if (left.source.depth !== right.source.depth) return left.source.depth - right.source.depth;
-  if (left.target.depth !== right.target.depth) return left.target.depth - right.target.depth;
-  if (left.source.order !== right.source.order) return right.source.order - left.source.order;
-  return right.target.order - left.target.order;
 }
 
 function cloneRecordSubtree(source: AtlasNode, parentId: string, recordId: string, branchIndex: number): AtlasNode {
@@ -304,15 +301,30 @@ function mergeBody(destination: string, source: string) {
   return lines.join("\n");
 }
 
+/**
+ * Identity of a position as the game defines it, never the move that produced
+ * it. Two nodes reached by different move orders share a key when the pieces,
+ * the side to move, and the rights that survive into the future are the same.
+ */
 function positionKey(node: AtlasNode, mode: BoardNotebookMode) {
   const content = node.structuredContent;
   if (mode === "shogi" && content?.kind === "shogi-record") {
+    // SFEN board / side to move / hands. The trailing move number is dropped.
     return content.sfen.trim().split(/\s+/).slice(0, 3).join(" ");
   }
   if (mode === "chess" && content?.kind === "chess-record") {
+    // Placement / side to move / castling rights / en passant. chessops writes
+    // the en-passant square only when the capture is actually available, so two
+    // records that reach one position by different move orders agree here.
+    // Halfmove and fullmove counters are dropped: they are history, not
+    // position.
     return content.fen.trim().split(/\s+/).slice(0, 4).join(" ");
   }
   if (mode === "go" && content?.kind === "go-record") {
+    // Stones plus the colour that owns the node. This identifies a position
+    // well enough to line up children under a shared parent, but it carries no
+    // ko point and no capture counts, which is why go rejects the
+    // deepest-common-position strategy instead of grafting across move orders.
     return `${content.boardSize}:${content.board}:${content.role === "move" ? content.color ?? "" : content.metadata?.PL ?? "B"}`;
   }
   return "";

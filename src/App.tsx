@@ -274,7 +274,7 @@ export default function App() {
   const [boardRecordDialogMode, setBoardRecordDialogMode] = useState<BoardRecordDialogMode>(null);
   const [boardRecordDialogBusy, setBoardRecordDialogBusy] = useState(false);
   const [boardRecordDialogError, setBoardRecordDialogError] = useState("");
-  const [boardRecordMergeStrategy, setBoardRecordMergeStrategy] = useState<BoardRecordMergeStrategy>("record-root");
+  const [boardRecordMergeStrategy, setBoardRecordMergeStrategy] = useState<BoardRecordMergeStrategy>("deepest-common-position");
   const [sharedNotebookRoot, setSharedNotebookRoot] = useState<AtlasNode | null>(null);
   const [sharedNotebookImporting, setSharedNotebookImporting] = useState(false);
   const sharedHostedAutoImportTokenRef = useRef<string | null>(null);
@@ -1607,7 +1607,10 @@ export default function App() {
 
   const openBoardRecordDialog = (mode: Exclude<BoardRecordDialogMode, null>) => {
     setBoardRecordDialogError("");
-    if (mode === "merge") setBoardRecordMergeStrategy("record-root");
+    // Anchoring on the shared position is what people want almost every time.
+    // Go is the exception: it rejects that strategy because ko legality depends
+    // on how the position was reached.
+    if (mode === "merge") setBoardRecordMergeStrategy(notebookMode === "go" ? "record-root" : "deepest-common-position");
     setBoardRecordDialogMode(mode);
     setMenuOpen(false);
     if (mode === "merge") {
@@ -1653,7 +1656,8 @@ export default function App() {
   };
 
   const applyBoardRecordMerge = async (sourceRoot: AtlasNode) => {
-    const result = mergeBoardRecords(atlasRoot, sourceRoot, { strategy: boardRecordMergeStrategy });
+    const strategy = notebookMode === "go" ? "record-root" : boardRecordMergeStrategy;
+    const result = mergeBoardRecords(atlasRoot, sourceRoot, { strategy });
     const nextSelectedId = result.lastAddedNodeId
       ?? findNode(result.root, selectedNodeId)?.id
       ?? result.root.children[0]?.id
@@ -3354,37 +3358,6 @@ function BoardRecordDialog({
         </header>
         {error ? <p className="notebook-history-error">{error}</p> : null}
         <div className="board-record-dialog-body">
-          {isMerge && mode !== "go" ? (
-            <fieldset className="board-record-merge-strategy" disabled={busy}>
-              <legend>{t("board.merge.strategy.label")}</legend>
-              <label className={mergeStrategy === "record-root" ? "is-selected" : ""}>
-                <input
-                  type="radio"
-                  name="board-record-merge-strategy"
-                  value="record-root"
-                  checked={mergeStrategy === "record-root"}
-                  onChange={() => onMergeStrategyChange("record-root")}
-                />
-                <span>
-                  <strong>{t("board.merge.strategy.root")}</strong>
-                  <small>{t("board.merge.strategy.rootDetail")}</small>
-                </span>
-              </label>
-              <label className={mergeStrategy === "deepest-common-position" ? "is-selected" : ""}>
-                <input
-                  type="radio"
-                  name="board-record-merge-strategy"
-                  value="deepest-common-position"
-                  checked={mergeStrategy === "deepest-common-position"}
-                  onChange={() => onMergeStrategyChange("deepest-common-position")}
-                />
-                <span>
-                  <strong>{t("board.merge.strategy.deepest")}</strong>
-                  <small>{t("board.merge.strategy.deepestDetail")}</small>
-                </span>
-              </label>
-            </fieldset>
-          ) : null}
           <section className="board-record-source-section">
             <h3>{t("board.source.file")}</h3>
             <label className="board-record-file-action">
@@ -3440,6 +3413,38 @@ function BoardRecordDialog({
                 )) : <p>{t("board.source.historyEmpty")}</p>}
               </div>
             </section>
+          ) : null}
+          {/* Rarely changed, so it sits below the input and the merge button. */}
+          {isMerge && mode !== "go" ? (
+            <fieldset className="board-record-merge-strategy" disabled={busy}>
+              <legend>{t("board.merge.strategy.label")}</legend>
+              <label className={mergeStrategy === "deepest-common-position" ? "is-selected" : ""}>
+                <input
+                  type="radio"
+                  name="board-record-merge-strategy"
+                  value="deepest-common-position"
+                  checked={mergeStrategy === "deepest-common-position"}
+                  onChange={() => onMergeStrategyChange("deepest-common-position")}
+                />
+                <span>
+                  <strong>{t("board.merge.strategy.deepest")}</strong>
+                  <small>{t("board.merge.strategy.deepestDetail")}</small>
+                </span>
+              </label>
+              <label className={mergeStrategy === "record-root" ? "is-selected" : ""}>
+                <input
+                  type="radio"
+                  name="board-record-merge-strategy"
+                  value="record-root"
+                  checked={mergeStrategy === "record-root"}
+                  onChange={() => onMergeStrategyChange("record-root")}
+                />
+                <span>
+                  <strong>{t("board.merge.strategy.root")}</strong>
+                  <small>{t("board.merge.strategy.rootDetail")}</small>
+                </span>
+              </label>
+            </fieldset>
           ) : null}
         </div>
       </section>
@@ -3683,41 +3688,47 @@ function CloudLoadDialog({
             </button>
           </div>
         </header>
+        {/* Fixed above the list: the file actions must stay reachable no
+            matter how far the user scrolls through their saved notebooks. */}
+        {error || status || hosted ? (
+          <div className="cloud-dialog-toolbar">
+            {error ? <p className="cloud-dialog-status is-error">{error}</p> : null}
+            {status ? <p className="cloud-dialog-status is-ok">{status}</p> : null}
+            {hosted ? (
+              <div className="cloud-manager-actions" aria-label={formatAppMessage("ui.app.cloudFileActions.72433a6")}>
+                <button type="button" onClick={onSaveAs} disabled={loading || !onSaveAs}>
+                  <CloudUpload size={15} />
+                  <span>{<I18nText id="ui.app.saveCurrentAs.18cbd57" />}</span>
+                </button>
+                <button type="button" onClick={() => selectedEntry && onLoad(selectedEntry)} disabled={selectedDisabled}>
+                  <CloudDownload size={15} />
+                  <span>{<I18nText id="ui.app.load.872c7f9" />}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => selectedEntry && onOverwrite?.(selectedEntry)}
+                  disabled={selectedDisabled || !onOverwrite}
+                >
+                  <FileText size={15} />
+                  <span>{<I18nText id="ui.app.overwrite.d7bec6b" />}</span>
+                </button>
+                <button type="button" onClick={() => selectedEntry && onRename?.(selectedEntry)} disabled={selectedDisabled || !onRename}>
+                  <PenLine size={15} />
+                  <span>{<I18nText id="ui.app.rename.974d17f" />}</span>
+                </button>
+                <button type="button" onClick={() => selectedEntry && onShare?.(selectedEntry)} disabled={selectedDisabled || !onShare}>
+                  <Share2 size={15} />
+                  <span>{<I18nText id="ui.app.copyShareLink.d2e2a6f" />}</span>
+                </button>
+                <button className="danger-button" type="button" onClick={() => selectedEntry && onDelete?.(selectedEntry)} disabled={selectedDisabled || !onDelete}>
+                  <Trash2 size={15} />
+                  <span>{<I18nText id="ui.app.delete.c859ed3" />}</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div className="cloud-package-list">
-          {error ? <p className="cloud-dialog-status is-error">{error}</p> : null}
-          {status ? <p className="cloud-dialog-status is-ok">{status}</p> : null}
-          {hosted ? (
-            <div className="cloud-manager-actions" aria-label={formatAppMessage("ui.app.cloudFileActions.72433a6")}>
-              <button type="button" onClick={onSaveAs} disabled={loading || !onSaveAs}>
-                <CloudUpload size={15} />
-                <span>{<I18nText id="ui.app.saveCurrentAs.18cbd57" />}</span>
-              </button>
-              <button type="button" onClick={() => selectedEntry && onLoad(selectedEntry)} disabled={selectedDisabled}>
-                <CloudDownload size={15} />
-                <span>{<I18nText id="ui.app.load.872c7f9" />}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => selectedEntry && onOverwrite?.(selectedEntry)}
-                disabled={selectedDisabled || !onOverwrite}
-              >
-                <FileText size={15} />
-                <span>{<I18nText id="ui.app.overwrite.d7bec6b" />}</span>
-              </button>
-              <button type="button" onClick={() => selectedEntry && onRename?.(selectedEntry)} disabled={selectedDisabled || !onRename}>
-                <PenLine size={15} />
-                <span>{<I18nText id="ui.app.rename.974d17f" />}</span>
-              </button>
-              <button type="button" onClick={() => selectedEntry && onShare?.(selectedEntry)} disabled={selectedDisabled || !onShare}>
-                <Share2 size={15} />
-                <span>{<I18nText id="ui.app.copyShareLink.d2e2a6f" />}</span>
-              </button>
-              <button className="danger-button" type="button" onClick={() => selectedEntry && onDelete?.(selectedEntry)} disabled={selectedDisabled || !onDelete}>
-                <Trash2 size={15} />
-                <span>{<I18nText id="ui.app.delete.c859ed3" />}</span>
-              </button>
-            </div>
-          ) : null}
           {loading ? <p className="cloud-dialog-status">{<I18nText id="ui.app.loading.f82b023" />}</p> : null}
           {!loading && !notebooks.length ? <p className="cloud-dialog-status">{hosted ? formatAppMessage("ui.app.noCloudFilesYet.17dff2f") : formatAppMessage("ui.app.noCloudPackagesFound.85d460d")}</p> : null}
           {notebooks.map((entry) => {

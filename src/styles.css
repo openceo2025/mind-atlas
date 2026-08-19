@@ -1892,8 +1892,10 @@ h1 {
 }
 
 .cloud-load-dialog {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  /* Column flow rather than fixed grid rows: the dialog carries a header, an
+     optional fixed toolbar, and the scrolling list, and only the list grows. */
+  display: flex;
+  flex-direction: column;
   width: min(720px, calc(100vw - 32px));
   max-height: min(680px, calc(100vh - 32px));
   border: 1px solid rgba(219, 234, 211, 0.18);
@@ -2604,10 +2606,24 @@ h1 {
 .cloud-package-list {
   display: grid;
   align-content: start;
+  flex: 1 1 auto;
   gap: 8px;
   min-height: 0;
   overflow: auto;
   padding: 12px 16px 16px;
+}
+
+.cloud-dialog-toolbar {
+  display: grid;
+  align-content: start;
+  flex: 0 0 auto;
+  gap: 8px;
+  border-bottom: 1px solid rgba(219, 234, 211, 0.12);
+  padding: 12px 16px;
+}
+
+.cloud-dialog-toolbar .cloud-manager-actions {
+  margin: 0;
 }
 
 .start-space-list {

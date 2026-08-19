@@ -36,6 +36,7 @@ try {
   if (testScope === "all" || testScope === "chess-special") await verifyChessSpecialMoves();
   if (testScope === "all" || testScope === "go") await verifyGo();
   if (testScope === "all" || testScope === "go-ko") await verifyGoKo();
+  if (testScope === "all" || testScope === "merge-dialog") await verifyMergeDialogLayout();
   if (testScope === "all" || testScope === "mobile") {
     for (const mode of ["shogi", "chess", "go"]) await verifyMobileLayout(mode);
   } else if (testScope.startsWith("mobile-")) {
@@ -215,6 +216,50 @@ async function verifyShogi() {
     await page.locator(".shogi-viewer-position").filter({ hasText: "3手目" }).waitFor();
     await verifyGeneratedLayoutFocus(page, "ツリー");
     await verifyGeneratedLayoutFocus(page, "マインドマップ");
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * The merge dialog leads with what people actually operate: the record to merge
+ * in, then the merge button. The starting-point choice is set once and is
+ * parked at the bottom, defaulting to the shared-position anchor.
+ */
+async function verifyMergeDialogLayout() {
+  const { context, page } = await createPage({ width: 1440, height: 900 });
+  try {
+    await importFixture(page, "shogi");
+    await page.getByLabel(/Open atlas menu|Mind Atlasメニューを開く/).click();
+    await page.getByRole("button", { name: /棋譜をマージ|Merge .* record/ }).first().click();
+    const dialog = page.locator(".board-record-dialog");
+    await dialog.waitFor({ state: "visible", timeout: 10_000 });
+
+    const strategy = dialog.locator(".board-record-merge-strategy");
+    await strategy.waitFor({ state: "visible" });
+    const checked = await strategy.locator("input[type=radio]:checked").getAttribute("value");
+    if (checked !== "deepest-common-position") {
+      throw new Error(`Merge dialog defaulted to ${checked} instead of the shared-position anchor.`);
+    }
+
+    const order = await dialog.locator(".board-record-dialog-body > *").evaluateAll((blocks) =>
+      blocks.map((block) => block.className.split(" ")[0]),
+    );
+    if (order[0] !== "board-record-source-section") {
+      throw new Error(`Merge dialog does not lead with the record input: ${JSON.stringify(order)}`);
+    }
+    if (order.at(-1) !== "board-record-merge-strategy") {
+      throw new Error(`Merge starting point is not the last block: ${JSON.stringify(order)}`);
+    }
+
+    // The merge button has to sit above the options, not below them.
+    const mergeButton = dialog.getByRole("button", { name: /この棋譜にマージ|Merge into this record/ });
+    const buttonBox = await mergeButton.boundingBox();
+    const strategyBox = await strategy.boundingBox();
+    if (!buttonBox || !strategyBox || buttonBox.y >= strategyBox.y) {
+      throw new Error("Merge dialog puts the starting-point choice above the merge button.");
+    }
+    console.log("verify:board-ui:merge-dialog:passed");
   } finally {
     await context.close();
   }
