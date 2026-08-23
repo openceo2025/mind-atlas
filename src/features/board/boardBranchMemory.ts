@@ -61,3 +61,46 @@ export function branchTailAlongMemory(memory: BoardBranchMemory, node: AtlasNode
   }
   return current;
 }
+
+/** A position the record forks at: more than one move continues from it. */
+export function isBoardBranchPoint(node: AtlasNode) {
+  return boardMoveChildren(node).length > 1;
+}
+
+/**
+ * The moves to replay to reach the next fork ahead of `node`, following the
+ * remembered branch. The list is empty when no fork lies ahead; the last entry
+ * is the fork itself. Nothing here focuses a node - the caller decides how fast
+ * to walk the list, because the point of the control is that the moves are seen
+ * being played rather than jumped over.
+ */
+export function pathToNextBranchPoint(memory: BoardBranchMemory, node: AtlasNode) {
+  const steps: AtlasNode[] = [];
+  const visited = new Set<string>([node.id]);
+  let current = node;
+  for (;;) {
+    const next = preferredBranchChild(memory, current);
+    if (!next || visited.has(next.id)) return [];
+    visited.add(next.id);
+    steps.push(next);
+    if (isBoardBranchPoint(next)) return steps;
+    current = next;
+  }
+}
+
+/**
+ * The moves to replay back to the previous fork above `node`, nearest first.
+ * The record root counts as a fork when the record opens with more than one
+ * first move; otherwise walking back past every fork returns nothing.
+ */
+export function pathToPreviousBranchPoint(root: AtlasNode, node: AtlasNode) {
+  const path = findBoardRecordPath(root, node.id);
+  if (!path || path.length < 2) return [];
+  const steps: AtlasNode[] = [];
+  for (let index = path.length - 2; index >= 0; index -= 1) {
+    const ancestor = path[index];
+    steps.push(ancestor);
+    if (isBoardBranchPoint(ancestor)) return steps;
+  }
+  return [];
+}

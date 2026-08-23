@@ -3668,6 +3668,30 @@ h1 {
   opacity: 0.35;
 }
 
+/*
+ * The branch-replay controls read as one mark, so the circle and the chevron sit
+ * on a single baseline with no gap. The circle is the fork and is set smaller
+ * than the chevron so the pair stays as compact as the icon buttons beside it.
+ */
+.board-branch-jump {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  font-family: inherit;
+  line-height: 1;
+  letter-spacing: -0.06em;
+}
+
+.board-branch-jump .board-branch-jump-mark {
+  font-size: 0.62em;
+  opacity: 0.9;
+}
+
+.board-branch-jump .board-branch-jump-arrow {
+  font-size: 0.9em;
+}
+
 .shogi-board-shell {
   display: grid;
   gap: 4px;
@@ -4026,6 +4050,68 @@ h1 {
 .shogi-variations button.is-active {
   border-color: rgba(247, 215, 101, 0.45);
   color: #fff4c5;
+}
+
+/*
+ * A variation that arrived with a merged record names the game it came from, so
+ * two lines from the same position can be told apart without opening either.
+ */
+.shogi-variations button.has-record-source {
+  display: grid;
+  gap: 1px;
+  justify-items: start;
+  border-color: rgba(247, 215, 101, 0.32);
+}
+
+.board-variation-move {
+  display: block;
+}
+
+.board-variation-source {
+  display: block;
+  max-width: 15ch;
+  overflow: hidden;
+  color: #9cac9f;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-record-source {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  border: 1px solid rgba(219, 234, 211, 0.14);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: rgba(219, 234, 211, 0.05);
+  color: #c2d5c7;
+  font-size: 10px;
+}
+
+.board-record-source-headline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #9cac9f;
+}
+
+.board-record-source-row {
+  display: grid;
+  grid-template-columns: minmax(0, 8ch) minmax(0, 1fr);
+  gap: 6px;
+}
+
+.board-record-source-row dt {
+  overflow: hidden;
+  color: #9cac9f;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-record-source-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .chess-viewer,

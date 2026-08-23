@@ -58,6 +58,9 @@ export function mergeBoardRecords(
   // Keep the notebook user's record title stable; imported source names are
   // metadata, not a new title to append on every merge.
   mergeNodeText(targetRecordRoot, sourceRecordRoot, destinationMode, state, { preserveDestinationTitle: true });
+  // Read before mergeMetadata folds the two headers together, so a branch keeps
+  // the header of the record it actually came from.
+  const sourceRecordHeader = { ...(sourceRecordRoot.structuredContent?.metadata ?? {}) };
   mergeMetadata(targetRecordRoot, sourceRecordRoot);
   const recordId = targetRecordRoot.structuredContent?.recordId;
   if (!recordId) throw new Error("The destination record id is missing.");
@@ -68,7 +71,7 @@ export function mergeBoardRecords(
     state.matchedNodes += 1;
     mergeNodeText(anchor.target.node, anchor.source.node, destinationMode, state);
   }
-  mergeChildren(anchor.target.node, anchor.source.node, destinationMode, recordId, state);
+  mergeChildren(anchor.target.node, anchor.source.node, destinationMode, recordId, state, sourceRecordHeader);
   target.updatedAt = new Date().toISOString();
 
   return {
@@ -90,6 +93,7 @@ function mergeChildren(
   mode: BoardNotebookMode,
   recordId: string,
   state: MergeState,
+  sourceRecordMetadata: Record<string, string>,
 ) {
   const targetMoveChildren = targetParent.children.filter((node) => isMoveNode(node, mode));
   for (const sourceChild of sourceParent.children.filter((node) => isMoveNode(node, mode))) {
@@ -98,10 +102,10 @@ function mergeChildren(
     if (match) {
       state.matchedNodes += 1;
       mergeNodeText(match, sourceChild, mode, state);
-      mergeChildren(match, sourceChild, mode, recordId, state);
+      mergeChildren(match, sourceChild, mode, recordId, state, sourceRecordMetadata);
       continue;
     }
-    const clone = cloneRecordSubtree(sourceChild, targetParent.id, recordId, targetMoveChildren.length);
+    const clone = cloneRecordSubtree(sourceChild, targetParent.id, recordId, targetMoveChildren.length, sourceRecordMetadata);
     targetParent.children.push(clone);
     targetMoveChildren.push(clone);
     state.addedBranches += 1;
@@ -195,10 +199,24 @@ function positionedNode(node: AtlasNode, depth: number, order: number): Position
   return { node, ply: ply >= 0 ? ply : depth, depth, order };
 }
 
-function cloneRecordSubtree(source: AtlasNode, parentId: string, recordId: string, branchIndex: number): AtlasNode {
+function cloneRecordSubtree(
+  source: AtlasNode,
+  parentId: string,
+  recordId: string,
+  branchIndex: number,
+  // Only the node at the top of an added branch carries it: that is the move
+  // where the line leaves the existing record, so it is where the user needs to
+  // see which game the continuation came from.
+  sourceRecordMetadata?: Record<string, string>,
+): AtlasNode {
   const id = `node-board-merge-${crypto.randomUUID()}`;
   const structuredContent = source.structuredContent
-    ? { ...source.structuredContent, recordId, branchIndex } as AtlasStructuredContent
+    ? {
+      ...source.structuredContent,
+      recordId,
+      branchIndex,
+      ...(sourceRecordMetadata && Object.keys(sourceRecordMetadata).length ? { sourceRecordMetadata } : {}),
+    } as AtlasStructuredContent
     : undefined;
   const clone: AtlasNode = {
     ...structuredClone(source),

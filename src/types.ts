@@ -1019,6 +1019,13 @@ export interface ShogiRecordContent {
   displayText?: string;
   branchIndex?: number;
   metadata?: Record<string, string>;
+  /**
+   * The header of the record this move came from, kept when a second record is
+   * merged in. Set on the first move of each branch the merge adds, so a fork
+   * can be traced back to the game it was played in. The keys are whatever the
+   * importer produced, never a fixed set from one file format.
+   */
+  sourceRecordMetadata?: Record<string, string>;
 }
 
 export type ChessRecordFormat = "pgn" | "new";
@@ -1037,6 +1044,13 @@ export interface ChessRecordContent {
   branchIndex?: number;
   nags?: number[];
   metadata?: Record<string, string>;
+  /**
+   * The header of the record this move came from, kept when a second record is
+   * merged in. Set on the first move of each branch the merge adds, so a fork
+   * can be traced back to the game it was played in. The keys are whatever the
+   * importer produced, never a fixed set from one file format.
+   */
+  sourceRecordMetadata?: Record<string, string>;
 }
 
 export type GoRecordFormat = "sgf" | "new";
@@ -1057,6 +1071,13 @@ export interface GoRecordContent {
   setupBlack?: string[];
   setupWhite?: string[];
   metadata?: Record<string, string>;
+  /**
+   * The header of the record this move came from, kept when a second record is
+   * merged in. Set on the first move of each branch the merge adds, so a fork
+   * can be traced back to the game it was played in. The keys are whatever the
+   * importer produced, never a fixed set from one file format.
+   */
+  sourceRecordMetadata?: Record<string, string>;
 }
 
 export type AtlasStructuredContent = ShogiRecordContent | ChessRecordContent | GoRecordContent;

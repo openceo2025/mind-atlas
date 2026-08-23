@@ -1,10 +1,13 @@
-import { ChevronLeft, ChevronRight, GitBranch, RotateCcw, SkipBack, SkipForward } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, GitBranch, RotateCcw, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { formatKIFMove, handPieceTypes, Position, Square } from "tsshogi";
 import type { Api } from "shogiground/api";
 import type { Config } from "shogiground/config";
 import type { DropDests, Key, MoveDests, PieceName, RoleString } from "shogiground/types";
 import { findShogiNodeContent, findShogiRecordRoot } from "./shogiRecord";
+import { toShogiBoardNotation } from "./shogiNotation";
+import { BoardBranchJumpButton } from "../board/BoardBranchJumpButtons";
+import { findRecordProvenance } from "../board/recordProvenance";
 import { buildShogiCandidateArrows, buildShogiCandidateTargets } from "./shogiCandidates";
 import { useBoardBranchNavigation } from "../board/boardNavigation";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
@@ -52,7 +55,16 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   const path = recordRoot && currentNode ? findPath(recordRoot, currentNode.id) ?? [recordRoot] : recordRoot ? [recordRoot] : [];
   const parentNode = path.length > 1 ? path[path.length - 2] : null;
   const variations = (currentNode ?? recordRoot)?.children.filter((node) => findShogiNodeContent(node)?.role === "move") ?? [];
-  const { rememberChild, selectVariation, advance, advanceToTail } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
+  const {
+    rememberChild,
+    selectVariation,
+    advance,
+    advanceToTail,
+    hasNextBranchPoint,
+    hasPreviousBranchPoint,
+    replayToNextBranchPoint,
+    replayToPreviousBranchPoint,
+  } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
   const [libraryReady, setLibraryReady] = useState(false);
   const [libraryError, setLibraryError] = useState("");
   const [orientation, setOrientation] = useState<"sente" | "gote">("sente");
@@ -131,7 +143,8 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       if (boardConfigRef.current) apiRef.current?.set(boardConfigRef.current, true);
       return;
     }
-    const childId = addChildNode(parent.id, "", { title: formatKIFMove(move), focus: false, requestEdit: false });
+    const moveText = toShogiBoardNotation(formatKIFMove(move));
+    const childId = addChildNode(parent.id, "", { title: moveText, focus: false, requestEdit: false });
     if (!childId) return;
     const nextContent: ShogiRecordContent = {
       kind: "shogi-record",
@@ -142,13 +155,17 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       ply: content.ply + 1,
       sfen: nextPosition.sfen,
       usi,
-      displayText: formatKIFMove(move),
+      displayText: moveText,
       branchIndex: parent.children.filter((child) => findShogiNodeContent(child)?.role === "move").length,
     };
     updateNode(childId, { structuredContent: nextContent });
     rememberChild(parent.id, childId);
     focusNode(childId);
   }
+
+  // Shown for the move the user is standing on, so a branch that was merged in
+  // says which game it came from without needing a hover.
+  const currentProvenance = findRecordProvenance(currentNode);
 
   const jumpTo = (node: AtlasNode | null) => {
     if (node) focusNode(node.id);
@@ -172,12 +189,24 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
         <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(recordRoot)} disabled={!recordRoot || currentNode?.id === recordRoot.id} aria-label={formatAppMessage("board.navigation.first")} title={formatAppMessage("board.navigation.first")}>
           <SkipBack size={14} />
         </button>
+        <BoardBranchJumpButton
+          className="shogi-viewer-icon"
+          direction="previous"
+          disabled={!hasPreviousBranchPoint}
+          onClick={replayToPreviousBranchPoint}
+        />
         <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(parentNode)} disabled={!parentNode} aria-label="一手戻る">
           <ChevronLeft size={14} />
         </button>
         <button type="button" className="shogi-viewer-icon" onClick={advance} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
         </button>
+        <BoardBranchJumpButton
+          className="shogi-viewer-icon"
+          direction="next"
+          disabled={!hasNextBranchPoint}
+          onClick={replayToNextBranchPoint}
+        />
         <button type="button" className="shogi-viewer-icon" onClick={advanceToTail} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
           <SkipForward size={14} />
         </button>
@@ -231,12 +260,36 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       <div className="shogi-variations" aria-label={formatAppMessage("board.candidateMoves")}>
         <span className="board-variation-label">{formatAppMessage("board.candidateMoves")}</span>
         {variations.length ? <GitBranch size={13} /> : null}
-        {variations.map((node) => (
-          <button key={node.id} type="button" onClick={() => selectVariation(node)}>
-            {findShogiNodeContent(node)?.displayText || node.title}
-          </button>
-        ))}
+        {variations.map((node) => {
+          const provenance = findRecordProvenance(node);
+          return (
+            <button
+              key={node.id}
+              type="button"
+              onClick={() => selectVariation(node)}
+              className={provenance ? "has-record-source" : ""}
+              title={provenance ? provenance.headline : undefined}
+            >
+              <span className="board-variation-move">{findShogiNodeContent(node)?.displayText || node.title}</span>
+              {provenance ? <span className="board-variation-source">{provenance.headline}</span> : null}
+            </button>
+          );
+        })}
       </div>
+      {currentProvenance ? (
+        <dl className="board-record-source" aria-label={formatAppMessage("board.recordSource.label")}>
+          <div className="board-record-source-headline">
+            <BookOpen size={12} aria-hidden="true" />
+            <span>{formatAppMessage("board.recordSource.label")}</span>
+          </div>
+          {currentProvenance.entries.map(([key, value]) => (
+            <div key={key} className="board-record-source-row">
+              <dt>{key}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
       {!libraryReady && !libraryError ? <p className="shogi-viewer-note">将棋盤を準備しています...</p> : null}
       {libraryError ? <p className="shogi-viewer-note is-error">{libraryError}</p> : null}
     </section>

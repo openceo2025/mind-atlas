@@ -14,6 +14,7 @@ import "chessground/assets/chessground.base.css";
 import "chessground/assets/chessground.cburnett.css";
 import { findChessNodeContent, findChessRecordRoot, nearestChessRecordNode } from "./chessRecord";
 import { useBoardBranchNavigation } from "../board/boardNavigation";
+import { BoardBranchJumpButton } from "../board/BoardBranchJumpButtons";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, ChessRecordContent } from "../../types";
 import { formatAppMessage } from "../../i18n/format";
@@ -52,7 +53,16 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     () => variationChildren.filter((node) => findChessNodeContent(node)?.role === "move"),
     [variationChildren],
   );
-  const { rememberChild, selectVariation, advance, advanceToTail } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
+  const {
+    rememberChild,
+    selectVariation,
+    advance,
+    advanceToTail,
+    hasNextBranchPoint,
+    hasPreviousBranchPoint,
+    replayToNextBranchPoint,
+    replayToPreviousBranchPoint,
+  } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
   const boardRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<Api | null>(null);
   const configRef = useRef<Config | null>(null);
@@ -185,12 +195,24 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
         <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(recordRoot)} disabled={!recordRoot || currentNode?.id === recordRoot.id} aria-label={formatAppMessage("board.navigation.first")} title={formatAppMessage("board.navigation.first")}>
           <SkipBack size={14} />
         </button>
+        <BoardBranchJumpButton
+          className="chess-viewer-icon"
+          direction="previous"
+          disabled={!hasPreviousBranchPoint}
+          onClick={replayToPreviousBranchPoint}
+        />
         <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(parentNode)} disabled={!parentNode} aria-label="一手戻る">
           <ChevronLeft size={14} />
         </button>
         <button type="button" className="chess-viewer-icon" onClick={advance} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
         </button>
+        <BoardBranchJumpButton
+          className="chess-viewer-icon"
+          direction="next"
+          disabled={!hasNextBranchPoint}
+          onClick={replayToNextBranchPoint}
+        />
         <button type="button" className="chess-viewer-icon" onClick={advanceToTail} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
           <SkipForward size={14} />
         </button>

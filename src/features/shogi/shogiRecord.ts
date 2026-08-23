@@ -15,6 +15,7 @@ import {
 } from "tsshogi";
 import type { AtlasNode, ShogiRecordContent, ShogiRecordFormat } from "../../types";
 import { decodeRecordComment, encodeRecordComment } from "../board/recordComment.ts";
+import { toShogiBoardNotation } from "./shogiNotation.ts";
 
 export interface ShogiImportResult {
   root: AtlasNode;
@@ -172,10 +173,10 @@ function buildMoveChildren(
       sfen: move.sfen,
       ...(move.move && "usi" in move.move ? { usi: move.move.usi } : {}),
       ...(specialMove ? { specialMove } : {}),
-      displayText: move.displayText,
+      displayText: toShogiBoardNotation(move.displayText),
       branchIndex: move.branchIndex,
     };
-    const moveText = decodeRecordComment(move.comment, move.displayText || `Move ${move.ply}`);
+    const moveText = decodeRecordComment(move.comment, toShogiBoardNotation(move.displayText) || `Move ${move.ply}`);
     const node = makeNode(moveId, "thread", moveText.title, moveText.body, now, content, []);
     node.sourceParentId = parentId;
     node.children = buildMoveChildren(move, node.id, recordId, format, now);

@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import GoBoard, { type Sign, type Vertex } from "@sabaki/go-board";
 import { findGoNodeContent, findGoRecordRoot, goRecordPath, goVertexToSgf, nearestGoRecordNode, nextGoSign, boardFromGoContent } from "./goRecord";
 import { useBoardBranchNavigation } from "../board/boardNavigation";
+import { BoardBranchJumpButton } from "../board/BoardBranchJumpButtons";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, GoRecordContent } from "../../types";
 import { formatAppMessage } from "../../i18n/format";
@@ -32,7 +33,16 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
   const branchTail = currentNode ? findRecordTail(currentNode) : recordRoot ? findRecordTail(recordRoot) : null;
   const board = useMemo(() => (currentContent ? boardFromGoContent(currentContent) : null), [currentContent?.board, currentContent?.boardSize]);
   const [flipped, setFlipped] = useState(false);
-  const { rememberChild, selectVariation, advance, advanceToTail } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
+  const {
+    rememberChild,
+    selectVariation,
+    advance,
+    advanceToTail,
+    hasNextBranchPoint,
+    hasPreviousBranchPoint,
+    replayToNextBranchPoint,
+    replayToPreviousBranchPoint,
+  } = useBoardBranchNavigation(recordRoot, currentNode, focusNode);
 
   if (!enabled || !recordRoot || !rootContent || !currentContent || !selectedNode || !board) return null;
 
@@ -117,12 +127,24 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
         <button type="button" className="go-viewer-icon" onClick={() => recordRoot && focusNode(recordRoot.id)} disabled={!recordRoot || currentNode?.id === recordRoot.id} aria-label={formatAppMessage("board.navigation.first")} title={formatAppMessage("board.navigation.first")}>
           <SkipBack size={14} />
         </button>
+        <BoardBranchJumpButton
+          className="go-viewer-icon"
+          direction="previous"
+          disabled={!hasPreviousBranchPoint}
+          onClick={replayToPreviousBranchPoint}
+        />
         <button type="button" className="go-viewer-icon" onClick={() => parentNode && focusNode(parentNode.id)} disabled={!parentNode} aria-label="一手戻る">
           <ChevronLeft size={14} />
         </button>
         <button type="button" className="go-viewer-icon" onClick={advance} disabled={!variations.length} aria-label="一手進む">
           <ChevronRight size={14} />
         </button>
+        <BoardBranchJumpButton
+          className="go-viewer-icon"
+          direction="next"
+          disabled={!hasNextBranchPoint}
+          onClick={replayToNextBranchPoint}
+        />
         <button type="button" className="go-viewer-icon" onClick={advanceToTail} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
           <SkipForward size={14} />
         </button>

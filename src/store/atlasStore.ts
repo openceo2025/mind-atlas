@@ -42,6 +42,7 @@ import {
   type AgentSessionResolution,
   type ContextPlan,
 } from "../context/contextEngine";
+import { normalizeShogiNotebookNotation } from "../features/shogi/shogiNotation";
 import { hydrateMissingNodeTitlesFromBodies } from "../titleMaintenance";
 import { acknowledgeNodeError, isIntrinsicErrorNode } from "../nodeErrorState";
 import {
@@ -3426,7 +3427,11 @@ async function initializeNotebookPersistence() {
     const durableNotebookStorage = await requestDurableNotebookStorage();
     const migratedRoot = await migrateLegacyNotebookIfNeeded(initialAtlasRoot);
     const persistedRoot = migratedRoot ? ensureNotebookNode(migratedRoot) : await loadPersistedNotebook();
-    const currentRoot = persistedRoot ? repairDuplicateNodeIds(ensureNotebookNode(persistedRoot)).root : null;
+    const repairedRoot = persistedRoot ? repairDuplicateNodeIds(ensureNotebookNode(persistedRoot)).root : null;
+    // Records imported before the board forms were adopted still spell promoted
+    // silver, knight and lance the KIF way. Rewrite them once on load so the
+    // board, the record list and the node titles all read the same.
+    const currentRoot = repairedRoot ? normalizeShogiNotebookNotation(repairedRoot) ?? repairedRoot : null;
     if (currentRoot) writeLegacyNotebookRecovery(currentRoot);
     useAtlasStore.setState((state) => {
       if (!currentRoot) {

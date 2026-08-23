@@ -32,6 +32,7 @@ const fixtures = {
 try {
   if (testScope === "all" || testScope === "shogi") await verifyShogi();
   if (testScope === "all" || testScope === "shogi-candidates") await verifyShogiCandidateBranches();
+  if (testScope === "all" || testScope === "branch-replay") await verifyBranchReplayControls();
   if (testScope === "all" || testScope === "chess") await verifyChess();
   if (testScope === "all" || testScope === "chess-special") await verifyChessSpecialMoves();
   if (testScope === "all" || testScope === "go") await verifyGo();
@@ -675,6 +676,127 @@ async function verifyGoKo() {
   }
 }
 
+
+/**
+ * The branch controls replay the moves in between rather than warping, so the
+ * intermediate positions have to be seen. The circle is the fork mark and must
+ * stay smaller than the chevron, which is what keeps the pair compact.
+ */
+async function verifyBranchReplayControls() {
+  const branchedKif = [
+    "#KIF version=2.0",
+    "手合割：平手",
+    "手数----指手---------",
+    "   1 ７六歩(77)",
+    "   2 ３四歩(33)",
+    "   3 ２六歩(27)",
+    "   4 ８四歩(83)",
+    "   5 ２五歩(26)",
+    "",
+    "変化：4手",
+    "   4 ４四歩(43)",
+    "",
+  ].join("\n");
+
+  for (const [mode, fixture, viewer, iconClass] of [
+    ["shogi", { name: "branch-replay.kif", content: branchedKif }, ".shogi-viewer", "shogi-viewer-icon"],
+    ["chess", fixtures.chess, ".chess-viewer", "chess-viewer-icon"],
+    ["go", fixtures.go, ".go-viewer", "go-viewer-icon"],
+  ]) {
+    const { context, page } = await createPage({ width: 980, height: 900 });
+    try {
+      await importRecord(page, fixture.name, fixture.content, viewer);
+      await page.waitForTimeout(400);
+      const marks = await page.evaluate((iconClassName) => {
+        const buttons = [...document.querySelectorAll(`.${iconClassName}.board-branch-jump`)];
+        return buttons.map((button) => {
+          const mark = button.querySelector(".board-branch-jump-mark");
+          const arrow = button.querySelector(".board-branch-jump-arrow");
+          const rect = button.getBoundingClientRect();
+          return {
+            label: button.getAttribute("aria-label") ?? "",
+            text: button.textContent ?? "",
+            markSize: mark ? Number.parseFloat(getComputedStyle(mark).fontSize) : 0,
+            arrowSize: arrow ? Number.parseFloat(getComputedStyle(arrow).fontSize) : 0,
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+          };
+        });
+      }, iconClass);
+      if (marks.length !== 2) throw new Error(`${mode} does not expose both branch replay controls: ${JSON.stringify(marks)}`);
+      const [previous, next] = marks;
+      if (previous.text !== "○＜" || next.text !== "＞○") {
+        throw new Error(`${mode} branch controls do not read ○＜ / ＞○: ${JSON.stringify(marks)}`);
+      }
+      for (const mark of marks) {
+        if (!(mark.markSize > 0 && mark.markSize < mark.arrowSize)) {
+          throw new Error(`${mode} branch mark is not smaller than the arrow: ${JSON.stringify(mark)}`);
+        }
+        if (mark.width > 44 || mark.height > 44) {
+          throw new Error(`${mode} branch control is not compact: ${JSON.stringify(mark)}`);
+        }
+      }
+      console.log(`verify:board-ui:branch-replay:${mode}:controls:passed`);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // The shogi fixture forks at move 4, so the forward control has somewhere to
+  // go and the moves before the fork must be shown on the way.
+  const { context, page } = await createPage({ width: 980, height: 900 });
+  try {
+    await importRecord(page, "branch-replay.kif", branchedKif, ".shogi-viewer");
+    await page.waitForTimeout(400);
+    const toFirst = page.getByRole("button", { name: "初期局面に戻る" });
+    if (!await toFirst.isDisabled()) {
+      await toFirst.click();
+      await page.waitForTimeout(250);
+    }
+    const nextBranch = page.getByRole("button", { name: "次の分岐局面まで早送り" });
+    if (await nextBranch.isDisabled()) throw new Error("The forward branch control is disabled although the record forks.");
+
+    const seen = await page.evaluate(async () => {
+      const readPly = () => document.querySelector(".shogi-viewer-position")?.textContent ?? "";
+      const observed = [readPly()];
+      const timer = setInterval(() => {
+        const ply = readPly();
+        if (ply !== observed[observed.length - 1]) observed.push(ply);
+      }, 20);
+      const button = [...document.querySelectorAll(".shogi-viewer-icon.board-branch-jump")]
+        .find((element) => (element.getAttribute("aria-label") ?? "").includes("早送り"));
+      button?.click();
+      await new Promise((resolve) => setTimeout(resolve, 1400));
+      clearInterval(timer);
+      return observed;
+    });
+    if (seen.length < 3) {
+      throw new Error(`The branch replay warped instead of playing the moves in between: ${JSON.stringify(seen)}`);
+    }
+    const variationCount = await page.locator(".shogi-variations button").count();
+    if (variationCount < 2) {
+      throw new Error(`The branch replay did not stop on a forking position: ${variationCount} variations`);
+    }
+    // Standing on the fork itself there is nothing earlier to go back to; the
+    // control only becomes available once the user is inside one of the lines.
+    const previousBranch = page.getByRole("button", { name: "手前の分岐局面まで早戻し" });
+    if (!await previousBranch.isDisabled()) {
+      throw new Error("The backward branch control should be disabled while standing on the first fork.");
+    }
+    await page.locator(".shogi-variations button").first().click();
+    await page.waitForTimeout(300);
+    if (await previousBranch.isDisabled()) throw new Error("The backward branch control is disabled inside a variation.");
+    await previousBranch.click();
+    await page.waitForTimeout(900);
+    const backVariationCount = await page.locator(".shogi-variations button").count();
+    if (backVariationCount < 2) {
+      throw new Error(`The backward replay did not return to the fork: ${backVariationCount} variations`);
+    }
+    console.log(`verify:board-ui:branch-replay:shogi:replay:passed steps=${seen.length}`);
+  } finally {
+    await context.close();
+  }
+}
 
 async function verifyMobileLayout(mode) {
   const { context, page } = await createPage({ ...mobileViewport, mobile: true });

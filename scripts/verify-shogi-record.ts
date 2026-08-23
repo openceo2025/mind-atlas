@@ -2,6 +2,12 @@ import { anySpecialMove, exportCSA, exportKI2, exportKIF, Record as TsshogiRecor
 import { sanitizeStructuredContentForExport } from "../src/notebookExport.ts";
 import { createNewShogiRecord, exportShogiRecord, importShogiRecordFile } from "../src/features/shogi/shogiRecord.ts";
 import { buildShogiCandidateArrows, buildShogiCandidateTargets } from "../src/features/shogi/shogiCandidates.ts";
+import { hasKifPromotedPieceText, normalizeShogiNotebookNotation, toShogiBoardNotation } from "../src/features/shogi/shogiNotation.ts";
+import { findRecordProvenance } from "../src/features/board/recordProvenance.ts";
+import { mergeBoardRecords } from "../src/features/board/boardRecordMerge.ts";
+import { isBoardBranchPoint, pathToNextBranchPoint, pathToPreviousBranchPoint } from "../src/features/board/boardBranchMemory.ts";
+import { branchReplayStepMs } from "../src/features/board/boardNavigation.ts";
+import type { AtlasNode } from "../src/types.ts";
 
 const source = TsshogiRecord.newByUSI("startpos moves 7g7f 3c3d 2g2f");
 if (source instanceof Error) throw source;
@@ -143,6 +149,155 @@ if (buildShogiCandidateArrows([invalidCandidate], "sente").length !== 0) {
   throw new Error("Malformed candidate USI should not create an off-board arrow.");
 }
 console.log("verify:shogi:candidate-arrows:passed drop-and-invalid");
+
+// ---------------------------------------------------------------------------
+// Promoted pieces are named the way a board names them, not the way KIF spells
+// them. Nothing Mind Atlas draws may still read 成銀 / 成桂 / 成香.
+// ---------------------------------------------------------------------------
+
+if (toShogiBoardNotation("同　成銀(23)") !== "同　全(23)") throw new Error("Promoted silver is not shown as 全.");
+if (toShogiBoardNotation("２四成桂(36)") !== "２四圭(36)") throw new Error("Promoted knight is not shown as 圭.");
+if (toShogiBoardNotation("１三成香(15)") !== "１三杏(15)") throw new Error("Promoted lance is not shown as 杏.");
+// The promotion suffix and 不成 are different words and must survive untouched.
+if (toShogiBoardNotation("２二角成(88)") !== "２二角成(88)") throw new Error("The promotion suffix was rewritten.");
+if (toShogiBoardNotation("７七桂不成(89)") !== "７七桂不成(89)") throw new Error("不成 was rewritten.");
+console.log("verify:shogi:promoted-piece-text:passed");
+
+const promotedSource = TsshogiRecord.newByUSI(
+  "startpos moves 7g7f 3c3d 8h2b+ 3a2b B*4e 2b3c 4e3d 3c3d P*3c 2a3c 3i4h 3c4e 4h3i 4e3g+ 3i3h 3g4g",
+);
+if (promotedSource instanceof Error) throw promotedSource;
+const promotedImport = await importShogiRecordFile(new File([exportKIF(promotedSource)], "promoted.kif"));
+const promotedTexts: string[] = [];
+collectMoveText(promotedImport.root, promotedTexts);
+const kifSpelled = promotedTexts.filter((text) => hasKifPromotedPieceText(text));
+if (kifSpelled.length) throw new Error(`Imported moves still use KIF promoted-piece text: ${JSON.stringify(kifSpelled)}`);
+if (!promotedTexts.some((text) => text.includes("圭"))) {
+  throw new Error(`The promoted-knight fixture never produced a 圭 move: ${JSON.stringify(promotedTexts)}`);
+}
+console.log("verify:shogi:promoted-piece-import:passed");
+
+// A notebook stored before the board forms were adopted is rewritten on load,
+// but a title the user typed is left alone.
+const legacyRoot = {
+  id: "atlas-root", title: "棋譜", body: "", children: [{
+    id: "record", title: "record", body: "",
+    structuredContent: { kind: "shogi-record", schemaVersion: 1, role: "record-root", recordId: "r", sourceFormat: "kif", ply: 0, sfen: "x" },
+    children: [
+      { id: "m1", title: "同　成銀(23)", body: "", structuredContent: { kind: "shogi-record", schemaVersion: 1, role: "move", recordId: "r", sourceFormat: "kif", ply: 1, sfen: "x", displayText: "同　成銀(23)" }, children: [] },
+      { id: "m2", title: "私の勝負手 成銀", body: "", structuredContent: { kind: "shogi-record", schemaVersion: 1, role: "move", recordId: "r", sourceFormat: "kif", ply: 1, sfen: "x", displayText: "２四成桂(36)" }, children: [] },
+    ],
+  }],
+} as unknown as AtlasNode;
+const migrated = normalizeShogiNotebookNotation(legacyRoot);
+if (!migrated) throw new Error("A legacy notebook was not migrated.");
+const migratedMoves = migrated.children[0].children;
+if (migratedMoves[0].title !== "同　全(23)" || migratedMoves[0].structuredContent?.displayText !== "同　全(23)") {
+  throw new Error(`The generated title was not migrated: ${JSON.stringify(migratedMoves[0])}`);
+}
+if (migratedMoves[1].title !== "私の勝負手 成銀") throw new Error("A hand-written title was rewritten by the migration.");
+if (migratedMoves[1].structuredContent?.displayText !== "２四圭(36)") throw new Error("The move text under a hand-written title was not migrated.");
+if (normalizeShogiNotebookNotation(migrated) !== null) throw new Error("The migration is not idempotent.");
+console.log("verify:shogi:promoted-piece-migration:passed");
+
+// ---------------------------------------------------------------------------
+// Replaying to the next and previous branching position.
+// ---------------------------------------------------------------------------
+
+const branchSource = TsshogiRecord.newByUSI("startpos moves 7g7f 3c3d 2g2f 8c8d 2f2e");
+if (branchSource instanceof Error) throw branchSource;
+branchSource.goto(3);
+const sideLine = branchSource.position.createMoveByUSI("4c4d");
+if (!sideLine || !branchSource.append(sideLine)) throw new Error("Could not create the branch-navigation fixture.");
+const branchImport = await importShogiRecordFile(new File([exportKIF(branchSource)], "branches.kif"));
+const branchRecordRoot = branchImport.root.children[0];
+const memory = new Map<string, string>();
+const forwardSteps = pathToNextBranchPoint(memory, branchRecordRoot);
+if (!forwardSteps.length) throw new Error("No branching position was found ahead of the record root.");
+if (!isBoardBranchPoint(forwardSteps[forwardSteps.length - 1])) throw new Error("The forward replay did not stop on a fork.");
+if (forwardSteps.some((node, index) => index < forwardSteps.length - 1 && isBoardBranchPoint(node))) {
+  throw new Error("The forward replay walked past a nearer fork.");
+}
+// Every intermediate move is replayed, so the user sees the line being played.
+if (forwardSteps.length < 2) throw new Error(`The forward replay skipped the moves in between: ${forwardSteps.length}`);
+const forkNode = forwardSteps[forwardSteps.length - 1];
+const deepNode = findRecordTailNode(forkNode.children[0]);
+const backSteps = pathToPreviousBranchPoint(branchRecordRoot, deepNode);
+if (!backSteps.length) throw new Error("No branching position was found behind the tail.");
+if (backSteps[backSteps.length - 1].id !== forkNode.id) throw new Error("The backward replay did not stop on the nearest fork.");
+if (pathToNextBranchPoint(memory, deepNode).length) throw new Error("A fork was reported ahead of the record tail.");
+if (pathToPreviousBranchPoint(branchRecordRoot, branchRecordRoot).length) throw new Error("A fork was reported behind the record root.");
+// The whole replay is about half a second, and each step stays visible.
+for (const [steps, minimum, maximum] of [[2, 26, 260], [8, 26, 110], [40, 26, 110]] as const) {
+  const stepMs = branchReplayStepMs(steps);
+  if (stepMs < minimum || stepMs > maximum) throw new Error(`Replay pacing is out of range for ${steps} steps: ${stepMs}ms`);
+}
+if (branchReplayStepMs(8) * 8 > 700) throw new Error("An eight-move replay takes noticeably longer than half a second.");
+if (branchReplayStepMs(1) !== 0) throw new Error("A single-step replay should not be paced.");
+console.log("verify:shogi:branch-replay:passed");
+
+// ---------------------------------------------------------------------------
+// A merged branch names the record it came from.
+// ---------------------------------------------------------------------------
+
+const baseRecord = TsshogiRecord.newByUSI("startpos moves 7g7f 3c3d 2g2f");
+if (baseRecord instanceof Error) throw baseRecord;
+const otherRecord = TsshogiRecord.newByUSI("startpos moves 7g7f 3c3d 6i7h");
+if (otherRecord instanceof Error) throw otherRecord;
+otherRecord.metadata.setStandardMetadata("date" as never, "2026/03/14");
+otherRecord.metadata.setStandardMetadata("blackName" as never, "佐藤");
+otherRecord.metadata.setStandardMetadata("whiteName" as never, "鈴木");
+otherRecord.metadata.setStandardMetadata("tournament" as never, "研究会");
+const destination = await importShogiRecordFile(new File([exportKIF(baseRecord)], "base.kif"));
+const incoming = await importShogiRecordFile(new File([exportKIF(otherRecord)], "other.kif"));
+const merged = mergeBoardRecords(destination.root, incoming.root, { strategy: "record-root" });
+if (!merged.addedBranches) throw new Error("The provenance fixture did not add a branch.");
+const branchFirstMoves: AtlasNode[] = [];
+collectProvenanceNodes(merged.root, branchFirstMoves);
+if (branchFirstMoves.length !== 1) {
+  throw new Error(`Exactly the first move of the added branch should carry the source record: ${branchFirstMoves.length}`);
+}
+const provenance = findRecordProvenance(branchFirstMoves[0]);
+if (!provenance) throw new Error("The merged branch has no readable source record.");
+for (const expected of ["2026/03/14", "佐藤", "鈴木", "研究会"]) {
+  if (!provenance.headline.includes(expected) && !provenance.entries.some(([, value]) => value.includes(expected))) {
+    throw new Error(`The source record summary lost ${expected}: ${JSON.stringify(provenance)}`);
+  }
+}
+if (!provenance.headline.includes("vs")) throw new Error(`The two players are not paired: ${provenance.headline}`);
+// Unknown header keys must still reach the reader rather than being dropped.
+const customProvenance = findRecordProvenance({
+  structuredContent: { sourceRecordMetadata: { "独自項目": "手元の記録" } },
+} as unknown as AtlasNode);
+if (!customProvenance || !customProvenance.headline.includes("手元の記録")) {
+  throw new Error(`An unrecognized header key was dropped: ${JSON.stringify(customProvenance)}`);
+}
+// The field survives the export sanitizer, so cloud save and share keep it.
+const sanitizedProvenance = sanitizeStructuredContentForExport(branchFirstMoves[0].structuredContent);
+if (!sanitizedProvenance || !("sourceRecordMetadata" in sanitizedProvenance)) {
+  throw new Error("The source record header did not survive the export sanitizer.");
+}
+console.log("verify:shogi:merged-branch-provenance:passed");
+
+function collectMoveText(node: AtlasNode, into: string[]) {
+  const content = node.structuredContent;
+  if (content?.kind === "shogi-record" && content.role === "move") {
+    into.push(node.title);
+    if (content.displayText) into.push(content.displayText);
+  }
+  for (const child of node.children) collectMoveText(child, into);
+}
+
+function collectProvenanceNodes(node: AtlasNode, into: AtlasNode[]) {
+  if (node.structuredContent?.sourceRecordMetadata) into.push(node);
+  for (const child of node.children) collectProvenanceNodes(child, into);
+}
+
+function findRecordTailNode(node: AtlasNode): AtlasNode {
+  const moves = node.children.filter((child) => child.structuredContent?.role === "move");
+  return moves.length ? findRecordTailNode(moves[0]) : node;
+}
+
 
 function countNodes(node: { children: Array<{ children: unknown[] }> }): number {
   return 1 + node.children.reduce((sum, child) => sum + countNodes(child), 0);

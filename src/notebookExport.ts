@@ -225,14 +225,21 @@ function addCommonStructuredFields(content: Record<string, unknown>, source: Rec
   if (Number.isInteger(source.branchIndex) && (source.branchIndex as number) >= 0 && (source.branchIndex as number) < 1000) {
     content.branchIndex = source.branchIndex;
   }
-  if (source.metadata && typeof source.metadata === "object") {
-    const entries = Object.entries(source.metadata)
-      .filter(([key, item]) => typeof key === "string" && typeof item === "string")
-      .slice(0, 80)
-      .map(([key, item]) => [safeBoundedText(key, "", 120), safeBoundedText(item, "", 1000)] as const)
-      .filter(([key, item]) => key && item);
-    if (entries.length) content.metadata = Object.fromEntries(entries);
+  for (const field of ["metadata", "sourceRecordMetadata"] as const) {
+    const record = sanitizeStructuredMetadata(source[field]);
+    if (record) content[field] = record;
   }
+}
+
+/** Record headers are free-form key/value text, so both size and shape are bounded. */
+function sanitizeStructuredMetadata(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([key, item]) => typeof key === "string" && typeof item === "string")
+    .slice(0, 80)
+    .map(([key, item]) => [safeBoundedText(key, "", 120), safeBoundedText(item as string, "", 1000)] as const)
+    .filter(([key, item]) => key && item);
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
 function boundedPly(value: unknown) {
