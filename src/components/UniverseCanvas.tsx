@@ -4195,7 +4195,7 @@ function HierarchyNode({
             <Html center position={[0, -radius - 14, 16]} transform={false} zIndexRange={[4, 1]}>
               <BoardMobileNodeBody
                 node={node}
-                onChange={(body) => updateNode(node.id, { body, summary: body.split("\\n").find(Boolean) ?? "" })}
+                onChange={(body) => updateNode(node.id, { body, summary: body.split("\n").find(Boolean) ?? "" })}
               />
             </Html>
           ) : null}
@@ -4289,37 +4289,95 @@ function BoardMobileNodeTitle({
     );
   }
 
+  return <BoardMobileNodeTitleInput node={node} onChange={onChange} />;
+}
+
+/**
+ * Board-mode mobile fields render inside a drei `<Html>` portal, so the DOM
+ * value and the React `value` prop are always one commit apart. Binding them
+ * straight to the store made React restore the *previous* value into the
+ * focused element on every composition update, which cancels IME composition
+ * and commits each kana on its own - Japanese could only be typed as unconverted
+ * hiragana. The space label editor already solves this with a local draft, so
+ * the board fields reuse the same shape.
+ */
+function useBoardMobileTextDraft(value: string, nodeId: string, onChange: (next: string) => void) {
+  const composingRef = useRef(false);
+  const [draft, setDraft] = useState(value);
+  // Resizing the focused element mid-composition also cancels the IME, so the
+  // width is measured from the last committed text until composition ends.
+  const [sizingValue, setSizingValue] = useState(value);
+
+  useEffect(() => {
+    if (composingRef.current) return;
+    setDraft(value);
+    setSizingValue(value);
+  }, [value, nodeId]);
+
+  const commit = (next: string) => {
+    setSizingValue(next);
+    onChange(next);
+  };
+
+  return {
+    value: draft,
+    sizingValue,
+    onChange: (event: { target: { value: string }; nativeEvent: Event }) => {
+      const next = event.target.value;
+      setDraft(next);
+      if (!composingRef.current && !isInputComposing(event.nativeEvent)) commit(next);
+    },
+    onCompositionStart: () => {
+      composingRef.current = true;
+    },
+    onCompositionEnd: (event: { currentTarget: { value: string } }) => {
+      composingRef.current = false;
+      const next = event.currentTarget.value;
+      setDraft(next);
+      commit(next);
+    },
+  };
+}
+
+function BoardMobileNodeTitleInput({ node, onChange }: { node: AtlasNode; onChange: (title: string) => void }) {
+  const draft = useBoardMobileTextDraft(node.title, node.id, onChange);
+  const placeholder = formatAppMessage("node.untitled");
   return (
     <input
       className="board-mobile-node-title board-mobile-node-input"
-      style={{ width: boardMobileTextWidth(node.title, formatAppMessage("node.untitled"), 52, 132) }}
+      style={{ width: boardMobileTextWidth(draft.sizingValue, placeholder, 52, 132) }}
       data-node-id={node.id}
-      value={node.title}
-      placeholder={formatAppMessage("node.untitled")}
-      aria-label={formatAppMessage("dynamic.nodeTitle", { title: node.title || formatAppMessage("node.untitled") })}
+      value={draft.value}
+      placeholder={placeholder}
+      aria-label={formatAppMessage("dynamic.nodeTitle", { title: node.title || placeholder })}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
-      onChange={(event) => onChange(event.target.value)}
+      onChange={draft.onChange}
+      onCompositionStart={draft.onCompositionStart}
+      onCompositionEnd={draft.onCompositionEnd}
     />
   );
 }
 
 function BoardMobileNodeBody({ node, onChange }: { node: AtlasNode; onChange: (body: string) => void }) {
+  const draft = useBoardMobileTextDraft(node.body, node.id, onChange);
   const memoPlaceholder = formatAppMessage("ui.focusPanel.memoDetailsOrContext.0f619ba")
     .split(/[、，,;；:\s]+/u)[0]
     .trim() || "Memo";
   return (
     <textarea
       className="board-mobile-node-body board-mobile-node-input"
-      style={{ width: boardMobileTextWidth(node.body, memoPlaceholder, 48, 132) }}
+      style={{ width: boardMobileTextWidth(draft.sizingValue, memoPlaceholder, 48, 132) }}
       data-node-id={node.id}
-      value={node.body}
+      value={draft.value}
       placeholder={memoPlaceholder}
       aria-label={memoPlaceholder}
       rows={2}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
-      onChange={(event) => onChange(event.target.value)}
+      onChange={draft.onChange}
+      onCompositionStart={draft.onCompositionStart}
+      onCompositionEnd={draft.onCompositionEnd}
     />
   );
 }

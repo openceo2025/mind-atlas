@@ -742,8 +742,15 @@ async function verifyHostedShogiMergeFeedback(page, recordText) {
   }
   const initialStrategy = dialog.locator('input[value="record-root"]');
   const deepestStrategy = dialog.locator('input[value="deepest-common-position"]');
+  // The merge anchors at the position nearest the imported tail by default, so
+  // a continuation of the same game lands where it was played rather than being
+  // replayed from the initial position.
+  if (!await deepestStrategy.isChecked()) {
+    throw new Error("Hosted shogi merge did not default to the nearest matching position.");
+  }
+  await initialStrategy.check();
   if (!await initialStrategy.isChecked()) {
-    throw new Error("Hosted shogi merge did not default to the non-destructive initial-position strategy.");
+    throw new Error("Hosted shogi merge could not select the initial position.");
   }
   await deepestStrategy.check();
   if (!await deepestStrategy.isChecked()) {

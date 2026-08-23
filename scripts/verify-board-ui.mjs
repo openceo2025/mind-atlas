@@ -675,6 +675,7 @@ async function verifyGoKo() {
   }
 }
 
+
 async function verifyMobileLayout(mode) {
   const { context, page } = await createPage({ ...mobileViewport, mobile: true });
   try {
@@ -716,6 +717,7 @@ async function verifyMobileLayout(mode) {
     if (!compactFields.length || compactFields.some((field) => field.width > 134 || field.border !== "0px")) {
       throw new Error(`${mode} mobile node text fields are not compact and borderless: ${JSON.stringify(compactFields)}`);
     }
+    await assertMobileImeComposition(page, mode);
     if (mode === "shogi") {
       const coordinateState = await page.evaluate(() => {
         const board = document.querySelector(".shogi-board-host")?.getBoundingClientRect();
@@ -734,6 +736,96 @@ async function verifyMobileLayout(mode) {
     }
   } finally {
     await context.close();
+  }
+}
+
+/**
+ * Board-mode mobile fields live inside a drei `<Html>` portal. When they were
+ * bound straight to the store, React restored the previous value into the
+ * focused element on every composition update: IME composition was cancelled
+ * and Japanese could only be typed as unconverted hiragana. The element must
+ * not be written to, and must not be resized, while a composition is open.
+ */
+async function assertMobileImeComposition(page, mode) {
+  for (const [selector, kind] of [["textarea.board-mobile-node-body", "body"], ["input.board-mobile-node-title", "title"]]) {
+    const probe = await page.evaluate(async ({ selector }) => {
+      const element = document.querySelector(selector);
+      if (!element) return { missing: true };
+      const prototype = element.tagName === "INPUT" ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype;
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+      const writes = [];
+      const widths = [];
+      let composing = false;
+      Object.defineProperty(element, "value", {
+        configurable: true,
+        get() { return descriptor.get.call(this); },
+        set(next) { if (composing) writes.push(next); descriptor.set.call(this, next); },
+      });
+      element.focus();
+      element.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      composing = true;
+      for (const text of ["に", "にほ", "にほん", "にほんごにゅうりょく"]) {
+        descriptor.set.call(element, text);
+        element.dispatchEvent(new CompositionEvent("compositionupdate", { bubbles: true, data: text }));
+        element.dispatchEvent(new InputEvent("input", { bubbles: true, data: text.slice(-1), inputType: "insertCompositionText", isComposing: true }));
+        await new Promise((resolve) => setTimeout(resolve, 90));
+        widths.push(Math.round(element.getBoundingClientRect().width));
+      }
+      composing = false;
+      // The IME converts, then commits.
+      descriptor.set.call(element, "日本語入力");
+      element.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "日本語入力" }));
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertCompositionText", isComposing: false }));
+      await new Promise((resolve) => setTimeout(resolve, 260));
+      const committed = descriptor.get.call(element);
+      delete element.value;
+      return { writes, widths, committed, focused: document.activeElement === element };
+    }, { selector });
+
+    if (probe.missing) throw new Error(`${mode} mobile ${kind} field is missing; the IME check cannot run.`);
+    if (probe.writes.length) {
+      throw new Error(`${mode} mobile ${kind} field was rewritten during IME composition, which cancels conversion: ${JSON.stringify(probe.writes)}`);
+    }
+    if (new Set(probe.widths).size !== 1) {
+      throw new Error(`${mode} mobile ${kind} field was resized during IME composition, which cancels conversion: ${JSON.stringify(probe.widths)}`);
+    }
+    if (probe.committed !== "日本語入力") {
+      throw new Error(`${mode} mobile ${kind} field did not keep the converted text: ${JSON.stringify(probe.committed)}`);
+    }
+  }
+
+  // The node summary is the first line of the body, so it must be split on a
+  // real newline rather than a literal backslash-n.
+  const summary = await page.evaluate(async () => {
+    const element = document.querySelector("textarea.board-mobile-node-body");
+    if (!element) return { missing: true };
+    const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+    const nodeId = element.dataset.nodeId;
+    const twoLines = ["一行目", "二行目"].join(String.fromCharCode(10));
+    descriptor.set.call(element, twoLines);
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", isComposing: false }));
+    const findNode = (node) => {
+      if (!node) return null;
+      if (node.id === nodeId) return node;
+      for (const child of node.children ?? []) {
+        const found = findNode(child);
+        if (found) return found;
+      }
+      return null;
+    };
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const stored = window.localStorage.getItem("mind-atlas-notebook-v2");
+      if (!stored) continue;
+      const node = findNode(JSON.parse(stored));
+      if (node?.body === twoLines) return { summary: node.summary, body: node.body };
+    }
+    return { timedOut: true };
+  });
+  if (summary.missing) throw new Error(`${mode} mobile body field is missing; the summary check cannot run.`);
+  if (summary.timedOut) throw new Error(`${mode} mobile body edit never reached the stored notebook.`);
+  if (summary.summary !== "一行目") {
+    throw new Error(`${mode} mobile body summary is not the first line of the body: ${JSON.stringify(summary)}`);
   }
 }
 
