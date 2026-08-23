@@ -48,10 +48,14 @@ for (const staticFile of ["index.html", "styles.css", "kio-copy-guide-v3.webp", 
   assert.equal(fs.existsSync(path.join(shogiDir, staticFile)), true, `hosted shogi file is missing: ${staticFile}`);
 }
 const shogiHtml = fs.readFileSync(path.join(shogiDir, "index.html"), "utf8");
-assert.ok(shogiHtml.includes("気になった局面を、あとですぐに見返せる。"), "hosted shogi page is missing its current value proposition");
+assert.ok(shogiHtml.includes("将棋アプリでの全ての棋譜をひとつのツリーに整理する"), "hosted shogi page is missing its current value proposition");
+assert.ok(shogiHtml.includes("「ここ、どうだった？」を、その場で聞けます。"), "hosted shogi page should describe engine analysis");
 assert.ok(shogiHtml.includes('/shogi/kio-copy-guide-v3.webp'), "hosted shogi page should use the current Kio copy guide image");
 assert.ok(shogiHtml.includes('https://mind-atlas.org/?mode=shogi'), "hosted shogi calls to action should open a fresh shogi workspace");
 assert.equal(/<script\b/i.test(shogiHtml), false, "hosted shogi page should not depend on the Sites runtime");
+// The page is served over mobile data. PNG originals here mean the export
+// shipped 6 MB of images instead of 355 KB.
+assert.equal(/<img[^>]+\.png/i.test(shogiHtml), false, "hosted shogi page must load WebP images, not the PNG originals");
 
 for (const locale of ["en", "ja"]) {
   for (const page of ["about", "privacy", "terms"]) {

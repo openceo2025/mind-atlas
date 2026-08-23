@@ -457,6 +457,21 @@ sudo 7z x -o/opt/shogi/eval /opt/shogi/dist/Suisho5.7z   # nn.bin, 64,217,066 by
 sudo chmod -R a+rX /opt/shogi
 ```
 
+The opening book is the new petashock book, 2.25 million positions, MIT
+licensed and published by the same project:
+
+```bash
+curl -fsSL -o /opt/shogi/dist/new_petabook.7z \
+  https://github.com/yaneurao/YaneuraOu/releases/download/new_petabook233/new_petabook_20250505c.7z
+sudo 7z x -o/opt/shogi/bin/book /opt/shogi/dist/new_petabook.7z   # user_book1.db, 493 MB
+```
+
+It must sit in `book/` **beside the engine binary**, because `BookDir` is
+relative to the engine's working directory. `BookOnTheFly` keeps the 493 MB on
+disk rather than in the engine's memory, and a probe still answers in about
+50 ms — against five seconds for a search, from entries analyzed far deeper
+than five seconds buys. Set `MIND_ATLAS_SHOGI_BOOK_FILE=no_book` to turn it off.
+
 Then install the unit:
 
 ```bash

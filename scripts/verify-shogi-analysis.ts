@@ -27,6 +27,7 @@ function analysisResult(patch: Partial<ShogiAnalysisResult> = {}): ShogiAnalysis
     nps: 2_400_000,
     elapsedMs: 5010,
     terminal: false,
+    book: false,
     score: { kind: "cp", sente: 62 },
     bestMove: "7g7f",
     pv: ["7g7f", "3c3d", "2g2f", "8c8d", "2f2e", "8d8e"],
@@ -135,6 +136,17 @@ if (appendShogiAnalysisEntry("", entry) !== entry) throw new Error("An empty bod
 const stamp = formatShogiAnalysisStamp(analysisResult());
 if (!stamp.includes("読み筋から作成")) throw new Error("Generated move nodes must say where they came from.");
 if (stamp.includes("評価値")) throw new Error("Generated move nodes must not repeat the evaluation.");
+
+// A book answer is a different kind of claim from a search and has to read as
+// one: it did not think for five seconds, so it must not say that it did.
+const bookResult = analysisResult({ book: true, depth: 0, seldepth: 0, nodes: 0, nps: 0, elapsedMs: 47, score: { kind: "cp", sente: 44 }, bestMove: "7g7f", pv: ["7g7f", "8c8d"] });
+const bookSteps = buildShogiAnalysisLine(START_SFEN, 0, bookResult.pv, 24);
+const bookEntry = formatShogiAnalysisEntry(bookResult, bookSteps);
+if (!bookEntry.includes("エンジン: やねうら王 + 水匠5（定跡）")) throw new Error(`A book answer must say so:\n${bookEntry}`);
+if (bookEntry.includes("秒")) throw new Error("A book answer must not claim a search budget it never spent.");
+if (!bookEntry.includes("最善手: ▲７六歩")) throw new Error("A book answer must still name the move.");
+if (!formatShogiAnalysisStamp(bookResult).includes("定跡から作成")) throw new Error("Nodes from a book line must say they came from the book.");
+console.log("verify:shogi-analysis:book-answer:passed");
 
 const failure = formatShogiAnalysisFailure("やねうら王 + 水匠5", "The shogi engine did not answer in time.", "2026-08-23T12:40:00.000Z");
 if (!failure.includes("error: The shogi engine did not answer in time.")) throw new Error("Failures must record the reason.");

@@ -1001,6 +1001,7 @@ async function handleShogiAnalysis(request, response) {
     nps: Number(engineResult?.nps) || 0,
     elapsedMs: Number(engineResult?.elapsedMs) || 0,
     terminal: Boolean(engineResult?.terminal),
+    book: Boolean(engineResult?.book),
     score: normalizeShogiScoreToSente(engineResult?.score, sideToMove),
     bestMove: stringValue(engineResult?.bestMove),
     pv: Array.isArray(engineResult?.pv) ? engineResult.pv.slice(0, shogiAnalysisPvMaxLength).map(stringValue) : [],

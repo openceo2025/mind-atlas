@@ -917,6 +917,8 @@ export interface ShogiAnalysisResult {
   nps: number;
   elapsedMs: number;
   terminal: boolean;
+  /** The answer came from the opening book rather than from a search. */
+  book: boolean;
   score: { kind: "cp" | "mate"; sente: number } | null;
   bestMove: string;
   pv: string[];

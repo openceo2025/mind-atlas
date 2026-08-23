@@ -103,8 +103,14 @@ export function formatShogiAnalysisTimestamp(value: string): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/**
+ * A book answer and a search answer are different kinds of claim, so the line
+ * says which one this is. The book did not think for five seconds; it recalls
+ * a position someone already analyzed far more deeply than that.
+ */
 function engineLine(result: ShogiAnalysisResult): string {
   const label = result.engine.label || "やねうら王 + 水匠5";
+  if (result.book) return `エンジン: ${label}（定跡）`;
   const seconds = Math.round(result.movetimeMs / 100) / 10;
   const depth = result.depth > 0 ? ` / 深さ${result.depth}` : "";
   return `エンジン: ${label}（${seconds}秒${depth}）`;
@@ -133,7 +139,8 @@ export function formatShogiAnalysisEntry(result: ShogiAnalysisResult, steps: Sho
  */
 export function formatShogiAnalysisStamp(result: ShogiAnalysisResult): string {
   const label = result.engine.label || "やねうら王 + 水匠5";
-  return `${ANALYSIS_BLOCK_PREFIX}${formatShogiAnalysisTimestamp(result.analyzedAt)} ---\nエンジン: ${label} の読み筋から作成`;
+  const source = result.book ? "定跡" : "読み筋";
+  return `${ANALYSIS_BLOCK_PREFIX}${formatShogiAnalysisTimestamp(result.analyzedAt)} ---\nエンジン: ${label} の${source}から作成`;
 }
 
 /** Failure leaves a trace on the analyzed node and creates nothing else. */

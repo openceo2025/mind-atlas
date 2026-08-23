@@ -996,6 +996,7 @@ function createMockShogiAnalysis(sfen) {
     nps: 2400000,
     elapsedMs: 5010,
     terminal: false,
+    book: false,
     score: { kind: "cp", sente: 62 },
     bestMove: "7g7f",
     pv: ["7g7f", "3c3d", "2g2f", "8c8d", "2f2e"],

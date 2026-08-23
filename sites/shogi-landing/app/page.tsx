@@ -4,21 +4,21 @@ const mainSiteUrl = "https://mind-atlas.org";
 const importSources = [
   {
     name: "将棋ウォーズ",
-    image: "/wars-copy.png",
+    image: "/wars-copy.webp",
     alt: "将棋ウォーズの棋譜画面にあるコピーと共有の操作",
     heading: "棋譜をコピー",
     action: "棋譜画面で棋譜をコピーするか、共有リンクを取得します。",
   },
   {
     name: "将棋クエスト",
-    image: "/quest-share.png",
+    image: "/quest-share.webp",
     alt: "将棋クエストの共有メニューにある棋譜を送る操作",
     heading: "棋譜をコピー",
     action: "「棋譜を送る」から棋譜共有リンクをクリップボードへコピーします。",
   },
   {
     name: "棋桜",
-    image: "/kio-copy-guide-v3.png",
+    image: "/kio-copy-guide-v3.webp",
     alt: "棋桜の棋譜画面で棋譜コピーを押す場所",
     heading: "棋譜コピーを押す",
     action: "対局画面の下にある「棋譜コピー」を押して、棋譜をコピーします。",
@@ -81,7 +81,7 @@ export default function Home() {
           </div>
           <figure className="guide-shot import-guide-shot">
             <img
-              src="/kif-import-guide.png"
+              src="/kif-import-guide.webp"
               alt="Mind Atlasのサブメニューでインポートを選ぶ場所を黄色い線で示した画面"
             />
             <figcaption>サブメニューの「インポート」からKIFを読み込みます。</figcaption>
@@ -128,14 +128,14 @@ export default function Home() {
           <div className="merge-guide-grid">
             <figure className="guide-shot">
               <img
-                src="/kif-merge-menu-guide.png"
+                src="/kif-merge-menu-guide.webp"
                 alt="Mind AtlasのサブメニューでKIF棋譜をマージを選ぶ場所を黄色い線で示した画面"
               />
               <figcaption>サブメニューから「KIF棋譜をマージ」を選びます。</figcaption>
             </figure>
             <figure className="guide-shot">
               <img
-                src="/kif-merge-dialog-guide.png"
+                src="/kif-merge-dialog-guide.webp"
                 alt="棋譜テキストまたは共有URLの入力欄とマージボタンを黄色い線で示した画面"
               />
               <figcaption>コピーした棋譜を貼り付け、「この棋譜にマージ」を押します。</figcaption>
@@ -183,7 +183,7 @@ export default function Home() {
           </div>
           <figure className="product-shot">
             <img
-              src="/mind-atlas-shogi-board.png"
+              src="/mind-atlas-shogi-board.webp"
               alt="Mind Atlasで将棋盤と棋譜の分岐を同時に表示したモバイル画面"
             />
             <figcaption>実際の将棋棋譜モード</figcaption>
@@ -220,7 +220,7 @@ export default function Home() {
               <h2>「ここ、どうだった？」を、その場で聞けます。</h2>
             </div>
             <p>
-              気になった局面で右上の「AI」を押すと、将棋AI「やねうら王」と評価関数「水匠5」が5秒考えて、評価値・最善手・その先の読み筋を返します。待っている必要はありません。別の局面を見たりメモを書いたりしている間に解析は進み、終わるとその局面が光って知らせます。
+              気になった局面で右上の「AI」を押すと、将棋AI「やねうら王」と評価関数「水匠5」が評価値・最善手・その先の読み筋を返します。定跡にある局面なら定跡の手をすぐに、定跡を外れた局面なら5秒考えた結果を返します。待っている必要はありません。別の局面を見たりメモを書いたりしている間に解析は進み、終わるとその局面が光って知らせます。
             </p>
           </div>
           <div className="analysis-list">

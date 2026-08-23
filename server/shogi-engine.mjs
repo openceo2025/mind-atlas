@@ -26,6 +26,9 @@ const searchGraceMs = readIntEnv("MIND_ATLAS_SHOGI_ENGINE_SEARCH_GRACE_MS", 1000
 const queueMaxLength = readIntEnv("MIND_ATLAS_SHOGI_ENGINE_QUEUE_MAX", 12);
 const requestMaxBytes = readIntEnv("MIND_ATLAS_SHOGI_ENGINE_MAX_BYTES", 8 * 1024);
 const engineLabel = getEnv("MIND_ATLAS_SHOGI_ENGINE_LABEL", "やねうら王 + 水匠5");
+const bookFile = getEnv("MIND_ATLAS_SHOGI_BOOK_FILE", "user_book1.db");
+const bookDir = getEnv("MIND_ATLAS_SHOGI_BOOK_DIR", "");
+const bookPvMoves = readIntEnv("MIND_ATLAS_SHOGI_BOOK_PV_MOVES", 24);
 
 /**
  * SFEN reaches the engine as a raw USI command line. Anything outside this
@@ -110,9 +113,7 @@ function startEngine() {
         write(state, "setoption name NetworkDelay2 value 0");
         write(state, "setoption name MinimumThinkingTime value 0");
         write(state, "setoption name USI_Ponder value false");
-        // An opening book answers instantly with no evaluation and no reading,
-        // which is the opposite of what an analysis request asked for.
-        write(state, "setoption name BookFile value no_book");
+        writeBookOptions(state);
         write(state, "isready");
         return;
       }
@@ -130,6 +131,44 @@ function startEngine() {
     write(state, "usi");
   });
   return engineStartPromise;
+}
+
+/**
+ * Opening book settings, tuned for analysis rather than for play.
+ *
+ * The book is worth more than the search where it reaches: its entries come
+ * from far deeper analysis than five seconds buys, and it answers in about
+ * 50 ms instead of five seconds. The defaults, however, are written for an
+ * engine that is playing a game, and three of them have to be overridden:
+ *
+ * - `IgnoreBookPly` - book entries record the ply they were reached at, and
+ *   without this a position analyzed at a different move number simply misses.
+ *   For analysis the position is the question; how it was reached is not.
+ * - `BookEvalBlackLimit` / `BookEvalWhiteLimit` - these exist so an engine
+ *   refuses to walk into an opening the book considers bad for it. Asked about
+ *   such a position, the honest answer is still the book's move.
+ * - `BookEvalDiff 0` - the default of 30 lets the engine pick any move within
+ *   30 centipawns for variety, which is how a game stays interesting and how
+ *   an analysis becomes wrong. Zero keeps only the joint-best moves.
+ *
+ * `BookOnTheFly` keeps the 493 MB book on disk instead of in the engine's
+ * memory, which is what makes it fit beside the web service at all.
+ */
+function writeBookOptions(state) {
+  if (!bookFile || bookFile === "no_book") {
+    write(state, "setoption name BookFile value no_book");
+    return;
+  }
+  if (bookDir) write(state, `setoption name BookDir value ${bookDir}`);
+  write(state, "setoption name USI_OwnBook value true");
+  write(state, `setoption name BookFile value ${bookFile}`);
+  write(state, "setoption name BookOnTheFly value true");
+  write(state, "setoption name IgnoreBookPly value true");
+  write(state, "setoption name BookMoves value 10000");
+  write(state, "setoption name BookEvalDiff value 0");
+  write(state, "setoption name BookEvalBlackLimit value -99999");
+  write(state, "setoption name BookEvalWhiteLimit value -99999");
+  write(state, `setoption name BookPvMoves value ${bookPvMoves}`);
 }
 
 function parseScore(tokens, index) {
@@ -194,13 +233,20 @@ function analyzePosition({ sfen, movetimeMs }) {
           if (seldepthIndex >= 0) seldepth = Number(tokens[seldepthIndex + 1]) || seldepth;
           if (nodesIndex >= 0) nodes = Number(tokens[nodesIndex + 1]) || nodes;
           if (npsIndex >= 0) nps = Number(tokens[npsIndex + 1]) || nps;
+          // A book answer lists every candidate it knows as its own multipv
+          // line before naming the one it chose, so only the primary line is
+          // the answer to the question that was asked.
+          const multipvIndex = tokens.indexOf("multipv");
+          if (multipvIndex >= 0 && tokens[multipvIndex + 1] !== "1") return;
           if (scoreIndex >= 0 && pvIndex >= 0) {
             const score = parseScore(tokens, scoreIndex);
             const pv = tokens.slice(pvIndex + 1).filter((move) => USI_MOVE_PATTERN.test(move));
             const bounded = tokens.includes("lowerbound") || tokens.includes("upperbound");
+            // Only the book reports depth 0: it did not search, it remembered.
+            const fromBook = depthIndex >= 0 && Number(tokens[depthIndex + 1]) === 0;
             if (score && pv.length) {
-              if (bounded) bestBounded = { score, pv, depth, seldepth };
-              else best = { score, pv, depth, seldepth };
+              if (bounded) bestBounded = { score, pv, depth, seldepth, book: fromBook };
+              else best = { score, pv, depth, seldepth, book: fromBook };
             }
           }
           return;
@@ -211,10 +257,11 @@ function analyzePosition({ sfen, movetimeMs }) {
           finish(null, {
             bestMove,
             terminal: bestMove === "resign" || bestMove === "win" || !bestMove,
+            book: Boolean(final?.book),
             score: final?.score ?? null,
             pv: final?.pv ?? [],
-            depth: final?.depth ?? depth,
-            seldepth: final?.seldepth ?? seldepth,
+            depth: final?.book ? 0 : final?.depth ?? depth,
+            seldepth: final?.book ? 0 : final?.seldepth ?? seldepth,
             nodes,
             nps,
             elapsedMs: Date.now() - startedAt,

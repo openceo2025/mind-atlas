@@ -51,38 +51,34 @@ sites/shogi-landing --export--> public/shogi/ --npm run build--> dist/shogi/ --d
 `dist/`, so whatever is committed under `public/shogi/` is what the site
 serves.
 
-## Current drift — read before publishing
+## Image weight — the gate that keeps it honest
 
-As of 2026-08-19 the deployed page is **not** the output of this source at
-HEAD. The live URL was fetched and compared: it is byte-identical to the
-committed `public/shogi/index.html`, and both differ from a fresh export.
+Everything the page loads is WebP, and `scripts/export-conoha.mjs` refuses to
+finish if those assets exceed 600 KB. The PNG files under `public/` are the
+editable originals and are never published; `staleFiles` removes them from the
+output so a stale copy cannot keep being served.
 
-| | deployed (`public/shogi/`) | fresh export from this source |
-| --- | --- | --- |
-| guide/board images | hand-made `*.webp` derivatives | `*.png` originals |
-| walkthrough images | none | three `kif-*-guide.png` |
-| hero and header copy | 2026-08-16 wording | revised 2026-08-17 wording |
-| referenced image bytes | 1.67 MB (315 KB inline + `og.png`) | 6.9 MB (6.2 MB inline + `og.png`) |
+This exists because the two formats drifted apart once and nothing noticed.
+The published page had been hand-converted to WebP after export while the
+source still referenced the PNG originals, so `site:shogi:publish` would
+silently swap 0.3 MB of images for 6.2 MB — and delete the WebP files on the
+way out. The weight budget is the part that makes it stay fixed: at 6.2 MB the
+export now fails with a per-asset breakdown instead of shipping.
 
-Roughly 100 lines of markup differ. `npm run site:shogi:publish` replaces the
-reviewed live page with that newer draft and deletes the `*.webp` files (see
-`staleFiles` in `scripts/export-conoha.mjs`). Review an export before
-committing one:
+Current: 355 KB across seven images. `og.png` stays PNG and is exempt — social
+scrapers fetch it, the page does not, and some of them still handle WebP badly.
 
-```powershell
-npm run site:shogi:export
-```
+To add an image: put the PNG in `public/`, convert it (`sharp` is already a
+dependency), reference the `.webp` from `page.tsx`, and add the `.webp` to
+`assets` in the export script.
 
-Then compare `sites/shogi-landing/export-conoha/index.html` against
-`public/shogi/index.html`.
+## Drift, resolved 2026-08-24
 
-The drift is still open as of 2026-08-23. The shogi AI analysis section added
-that day was applied the narrow way this section describes: the source was
-edited, `site:shogi:export` produced the reference markup, and only the
-`ai-note-band` section and its new `.analysis-list` / `.ai-note-terms` rules
-were spliced into the deployed `public/shogi/` files. Every existing `*.webp`
-reference was left untouched, so shipping the analysis copy did not also ship
-the unreviewed 2026-08-17 draft.
+The deployed page had been stuck at the 2026-08-16 wording while the source
+moved on to a 2026-08-17 revision. Publishing the shogi AI analysis section
+closed the gap: `public/shogi/` is now a plain export of this source, so the
+old comparison table no longer applies. Keep it that way — commit the source
+change and the regenerated output together, as the rule below says.
 
 ## Rule for future changes
 

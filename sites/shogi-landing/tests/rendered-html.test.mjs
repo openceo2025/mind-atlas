@@ -38,12 +38,15 @@ test("server-renders the Mind Atlas shogi landing page", async () => {
   assert.match(html, /やねうら王/);
   assert.match(html, /水匠5/);
   assert.doesNotMatch(html, /AI解析は、ただいま準備中です。/);
-  assert.match(html, /kif-import-guide\.png/);
-  assert.match(html, /kif-merge-menu-guide\.png/);
-  assert.match(html, /kif-merge-dialog-guide\.png/);
+  assert.match(html, /kif-import-guide\.webp/);
+  assert.match(html, /kif-merge-menu-guide\.webp/);
+  assert.match(html, /kif-merge-dialog-guide\.webp/);
   assert.match(html, /初期局面/);
   assert.doesNotMatch(html, /<span>01<\/span>|<span>02<\/span>|<span>03<\/span>/);
-  assert.match(html, /kio-copy-guide-v3\.png/);
+  assert.match(html, /kio-copy-guide-v3\.webp/);
   assert.match(html, /https:\/\/mind-atlas\.org\/\?mode=shogi/);
+  // Every image the page loads is WebP. A PNG here means the export would ship
+  // the multi-megabyte originals again.
+  assert.doesNotMatch(html, /<img[^>]+\.png/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/);
 });

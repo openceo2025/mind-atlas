@@ -749,6 +749,7 @@ export interface ShogiAnalysisResult {
   nps: number;
   elapsedMs: number;
   terminal: boolean;
+  book: boolean;
   score: { kind: "cp" | "mate"; sente: number } | null;
   bestMove: string;
   pv: string[];
@@ -834,6 +835,19 @@ hosted dependency that local mode cannot start without.
 The engine does not run inside `server/mind-atlas-service.mjs` or its event
 loop. It runs as `mind-atlas-shogi-engine.service`, a separate systemd unit on
 the same host, and the web service reaches it over localhost.
+
+A position in the opening book is answered from the book, not by searching.
+The book (2.25M positions, MIT, published by the YaneuraOu project) holds
+evaluations from far deeper analysis than a five second search reaches, and it
+answers in about 50 ms, so it is both the better answer and the cheaper one.
+Three of its defaults are written for an engine playing a game rather than
+answering a question and are overridden: `IgnoreBookPly` (a position is the
+question; the move number it was reached at is not), the eval limits that make
+an engine refuse to enter an opening it dislikes, and `BookEvalDiff`, whose
+default of 30 centipawns exists to give a playing engine variety and would give
+an analysis a randomly worse move. A book answer is labelled `定跡` everywhere
+it is shown, because its reading is short by nature and it never spent the five
+seconds a search would have.
 
 `server/shogi-engine.mjs` owns one long-lived USI process:
 
