@@ -30,6 +30,17 @@ import {
   type Vec3,
   type AtlasLayoutMode,
 } from "../layout/atlasLayout";
+import { requestHostedShogiAnalysis } from "../hosted/serviceClient";
+import {
+  SHOGI_ANALYSIS_MAX_LINE_NODES,
+  appendShogiAnalysisEntry,
+  appendShogiAnalysisLine,
+  buildShogiAnalysisLine,
+  formatShogiAnalysisEntry,
+  formatShogiAnalysisFailure,
+  formatShogiAnalysisStamp,
+  readShogiRecordContent,
+} from "../features/shogi/shogiAnalysis";
 import { sanitizeNotebookForExport } from "../notebookExport";
 import {
   CONTEXT_BUDGET_PRESETS,
@@ -91,6 +102,7 @@ import type {
   NotebookMode,
   OpenClawSettings,
   Selection,
+  ShogiAnalysisResult,
   ViewportState,
   VoiceLogEntry,
   VoicePartnerSettings,
@@ -272,6 +284,9 @@ interface AtlasStore {
   notificationPulses: NotificationPulse[];
   unreadNotifications: Record<string, UnreadNotification>;
   notificationSnoozePrompt: NotificationSnoozePrompt | null;
+  /** Node id of the single in-flight shogi engine analysis, or null when idle. */
+  shogiAnalysisNodeId: string | null;
+  requestShogiAnalysis: (nodeId: string) => Promise<void>;
   notebookPersistenceStatus: NotebookPersistenceStatus;
   notebookPersistenceError: string;
   notebookSnapshots: NotebookSnapshot[];
@@ -415,6 +430,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   notificationPulses: [],
   unreadNotifications: restoreUnreadNotifications(initialAtlasRoot),
   notificationSnoozePrompt: null,
+  shogiAnalysisNodeId: null,
   notebookPersistenceStatus: "loading",
   notebookPersistenceError: "",
   notebookSnapshots: [],
@@ -1257,6 +1273,93 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       };
     });
     if (options.focus !== false) get().focusNode(child.id);
+  },
+
+  /**
+   * Analyzes one position with the hosted shogi engine.
+   *
+   * Only one analysis may be in flight for the whole app: the engine is a
+   * single shared CPU on the host, and a user who fires the button on every
+   * position would queue work nobody is waiting for. The node pulses while the
+   * request runs so the user can keep working anywhere else in the atlas.
+   */
+  requestShogiAnalysis: async (nodeId) => {
+    const state = get();
+    if (state.shogiAnalysisNodeId) return;
+    const node = findNode(state.atlasRoot, nodeId);
+    const content = readShogiRecordContent(node);
+    if (!node || !content || content.specialMove) return;
+    const sfen = content.sfen;
+    set((current) => ({
+      shogiAnalysisNodeId: nodeId,
+      atlasRoot: updateNodeById(current.atlasRoot, nodeId, (target) => ({ ...target, status: "running" as WorkStatus })),
+    }));
+
+    let result: ShogiAnalysisResult | null = null;
+    let failure = "";
+    try {
+      result = await requestHostedShogiAnalysis(sfen);
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error ?? "");
+      if (!failure || /aborted|timeout|signal/i.test(failure)) failure = formatAppMessage("shogi.analysis.timeout");
+    }
+
+    set((current) => {
+      const target = findNode(current.atlasRoot, nodeId);
+      const targetContent = readShogiRecordContent(target);
+      if (!target || !targetContent) return { shogiAnalysisNodeId: null };
+
+      if (!result) {
+        const body = appendShogiAnalysisEntry(target.body, formatShogiAnalysisFailure(SHOGI_ENGINE_LABEL, failure));
+        const atlasRoot = updateNodeById(current.atlasRoot, nodeId, (item) => ({
+          ...item,
+          body,
+          status: "error" as WorkStatus,
+          updatedAt: new Date().toISOString(),
+        }));
+        persistNotebook(atlasRoot);
+        const title = formatAppMessage("shogi.analysis.failed");
+        return {
+          ...pushHistory(current),
+          atlasRoot,
+          shogiAnalysisNodeId: null,
+          notificationPulses: [...current.notificationPulses, createNotificationPulse(nodeId, "error", title)],
+          unreadNotifications: markUnreadNotification(current.unreadNotifications, nodeId, "error", title),
+        };
+      }
+
+      const steps = buildShogiAnalysisLine(targetContent.sfen, targetContent.ply, result.pv, result.pv.length);
+      const body = appendShogiAnalysisEntry(target.body, formatShogiAnalysisEntry(result, steps));
+      const analyzed = updateNodeById(current.atlasRoot, nodeId, (item) => ({
+        ...item,
+        body,
+        // Board notebooks never surface a work status, so the analyzed node is
+        // returned to rest instead of being left pulsing after the answer.
+        status: "done" as WorkStatus,
+        updatedAt: new Date().toISOString(),
+      }));
+      const usedNodeIds = collectNodeIdSet(analyzed);
+      const line = appendShogiAnalysisLine(
+        analyzed,
+        nodeId,
+        steps.slice(0, SHOGI_ANALYSIS_MAX_LINE_NODES),
+        formatShogiAnalysisStamp(result),
+        (parentId, index, title, body) => createNotebookNode(parentId, index, title, body, { usedNodeIds }),
+      );
+      const atlasRoot = stabilizePhyllotaxisPositions(line.root);
+      persistNotebook(atlasRoot);
+      const title = formatAppMessage("shogi.analysis.ready");
+      const birthMarks = { ...current.birthMarks };
+      for (const createdId of line.createdIds) birthMarks[createdId] = performance.now();
+      return {
+        ...pushHistory(current),
+        atlasRoot,
+        birthMarks,
+        shogiAnalysisNodeId: null,
+        notificationPulses: [...current.notificationPulses, createNotificationPulse(nodeId, "shogiAI", title)],
+        unreadNotifications: markUnreadNotification(current.unreadNotifications, nodeId, "shogiAI", title),
+      };
+    });
   },
 
   addChildNode: (parentId, initialBody = "", options = {}) => {
@@ -3956,7 +4059,7 @@ function isStoredUnreadNotification(value: unknown): value is UnreadNotification
 }
 
 function isNotificationPulseKind(value: unknown): value is NotificationPulseKind {
-  return value === "done" || value === "needs_review" || value === "error" || value === "codex" || value === "openclaw" || value === "claude" || value === "cost";
+  return value === "done" || value === "needs_review" || value === "error" || value === "codex" || value === "openclaw" || value === "claude" || value === "cost" || value === "shogiAI";
 }
 
 function focusRootCameraOnly(setState: typeof useAtlasStore.setState, nodeId: string) {
@@ -5107,6 +5210,8 @@ function aiResultNotificationKind(mode: AiExecutionMode): NotificationPulseKind 
   return "needs_review";
 }
 
+const SHOGI_ENGINE_LABEL = "やねうら王 + 水匠5";
+
 function createNotificationPulse(nodeId: string, kind: NotificationPulseKind, title: string): NotificationPulse {
   return {
     id: `pulse-${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`,
@@ -5851,15 +5956,24 @@ function withoutUndefined<T extends Record<string, unknown>>(value: T) {
 }
 
 function ensureNotebookNode(node: AtlasNode): AtlasNode {
-  return stabilizePhyllotaxisPositions(ensureNotebookTree(node, [], 1));
+  return stabilizePhyllotaxisPositions(ensureNotebookTree(node, [], 1, isBoardGameNotebookMode(node.notebookMode)));
 }
 
-function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCount: number): AtlasNode {
+/**
+ * `settleStatus` resets every node to `done` while a board record is loaded.
+ * Board notebooks never expose a work status - the user cannot set one - so a
+ * status is only ever a transient engine state. Without this, a reload during
+ * an analysis, or a crash before the answer arrived, would leave a node
+ * pulsing blue or red forever with no way to clear it. Standard notebooks keep
+ * their statuses untouched.
+ */
+function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCount: number, settleStatus: boolean): AtlasNode {
   const now = new Date().toISOString();
   const depth = parentPath.length;
   const base: AtlasNode = {
     ...node,
     ...(depth === 0 ? { notebookMode: normalizeNotebookMode(node.notebookMode) } : {}),
+    ...(settleStatus ? { status: "done" as WorkStatus } : {}),
     nodeType: node.nodeType ?? "note",
     body: node.body ?? node.summary ?? "",
     author: node.author ?? "human",
@@ -5877,7 +5991,7 @@ function ensureNotebookTree(node: AtlasNode, parentPath: AtlasNode[], siblingCou
   };
   return {
     ...base,
-    children: (node.children ?? []).map((child) => ensureNotebookTree(child, [...parentPath, base], node.children.length)),
+    children: (node.children ?? []).map((child) => ensureNotebookTree(child, [...parentPath, base], node.children.length, settleStatus)),
   };
 }
 

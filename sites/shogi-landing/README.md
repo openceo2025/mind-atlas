@@ -76,6 +76,14 @@ npm run site:shogi:export
 Then compare `sites/shogi-landing/export-conoha/index.html` against
 `public/shogi/index.html`.
 
+The drift is still open as of 2026-08-23. The shogi AI analysis section added
+that day was applied the narrow way this section describes: the source was
+edited, `site:shogi:export` produced the reference markup, and only the
+`ai-note-band` section and its new `.analysis-list` / `.ai-note-terms` rules
+were spliced into the deployed `public/shogi/` files. Every existing `*.webp`
+reference was left untouched, so shipping the analysis copy did not also ship
+the unreviewed 2026-08-17 draft.
+
 ## Rule for future changes
 
 Commit the source change and the regenerated `public/shogi/` output in the

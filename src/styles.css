@@ -4554,6 +4554,48 @@ button:disabled,
   box-shadow: 0 0 18px rgba(255, 107, 107, 0.22);
 }
 
+/* The shogi analysis trigger shares the icon-button shell so the top-right
+   cluster stays one row of identical controls, and borrows the agent blue
+   while a search runs - the same colour the analyzed node pulses in the
+   universe, so the button and the star read as one event. */
+.shogi-analysis-button {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #f3f5dd;
+}
+
+.shogi-analysis-button.is-analyzing {
+  border-color: rgba(134, 183, 255, 0.72);
+  background: rgba(134, 183, 255, 0.18);
+  color: #cfe2ff;
+  box-shadow: 0 0 18px rgba(134, 183, 255, 0.28);
+  animation: shogi-analysis-pulse 1.4s ease-in-out infinite;
+}
+
+/* Disabled buttons are dimmed globally; the running state must stay legible. */
+.shogi-analysis-button.is-analyzing:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+
+@keyframes shogi-analysis-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 12px rgba(134, 183, 255, 0.22);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(134, 183, 255, 0.5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shogi-analysis-button.is-analyzing {
+    animation: none;
+  }
+}
+
 .status-row {
   display: flex;
   align-items: center;

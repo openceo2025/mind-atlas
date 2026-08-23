@@ -753,7 +753,7 @@ export interface AiBridgeProvider {
   detail?: string;
 }
 
-export type NotificationPulseKind = "done" | "needs_review" | "error" | "codex" | "openclaw" | "claude" | "cost";
+export type NotificationPulseKind = "done" | "needs_review" | "error" | "codex" | "openclaw" | "claude" | "cost" | "shogiAI";
 
 export interface NotificationPulse {
   id: string;
@@ -899,6 +899,27 @@ export interface ShogiSourceImportResult {
   fileName: string;
   format: "csa";
   text: string;
+}
+
+/**
+ * One engine answer for one position. `score.sente` is already normalized to
+ * sente-positive by the service, so no consumer has to know whose turn it was.
+ */
+export interface ShogiAnalysisResult {
+  engine: { id: string; name: string; label: string };
+  analyzedAt: string;
+  sfen: string;
+  sideToMove: "sente" | "gote";
+  movetimeMs: number;
+  depth: number;
+  seldepth: number;
+  nodes: number;
+  nps: number;
+  elapsedMs: number;
+  terminal: boolean;
+  score: { kind: "cp" | "mate"; sente: number } | null;
+  bestMove: string;
+  pv: string[];
 }
 
 export interface RealtimeSessionConfig {

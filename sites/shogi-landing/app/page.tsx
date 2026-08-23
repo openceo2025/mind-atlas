@@ -213,13 +213,32 @@ export default function Home() {
       </section>
 
       <section className="ai-note-band">
-        <div className="section-inner ai-note">
-          <div>
-            <p className="section-kicker">今後の予定</p>
-            <h2>AI解析は、ただいま準備中です。</h2>
+        <div className="section-inner">
+          <div className="ai-note">
+            <div>
+              <p className="section-kicker">AI解析</p>
+              <h2>「ここ、どうだった？」を、その場で聞けます。</h2>
+            </div>
+            <p>
+              気になった局面で右上の「AI」を押すと、将棋AI「やねうら王」と評価関数「水匠5」が5秒考えて、評価値・最善手・その先の読み筋を返します。待っている必要はありません。別の局面を見たりメモを書いたりしている間に解析は進み、終わるとその局面が光って知らせます。
+            </p>
           </div>
-          <p>
-            現在のマインドアトラスのAI機能はChatGPT等への連携機能であり、将棋のAI解析機能はありません。局面の評価値や候補手を返す将棋AI解析は、ユーザー数が増えれば追加する予定です。
+          <div className="analysis-list">
+            <article>
+              <h3>結果は局面のメモに</h3>
+              <p>いつ・どのAIで解析したか、評価値、最善手、読み筋が、その局面のメモに追記されます。</p>
+            </article>
+            <article>
+              <h3>読み筋がそのまま枝に</h3>
+              <p>最善手からの5手が分岐として盤とツリーに並びます。すでに指されている手はそのまま使われ、同じ枝は増えません。</p>
+            </article>
+            <article>
+              <h3>KIFにも残る</h3>
+              <p>解析でできた分岐もメモも、いつものKIF書き出しに含まれます。</p>
+            </article>
+          </div>
+          <p className="ai-note-terms">
+            AI解析を使うにはGoogleログインが必要です。追加料金はありません。棋譜の読み込み・再生・編集はこれまでどおり登録なしで使えます。
           </p>
         </div>
       </section>

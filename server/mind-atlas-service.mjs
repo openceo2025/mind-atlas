@@ -109,6 +109,13 @@ const authRateLimitMax = readIntEnv("MIND_ATLAS_RATE_LIMIT_AUTH_MAX", 20);
 const userAiRateLimitMax = readIntEnv("MIND_ATLAS_RATE_LIMIT_USER_AI_MAX", 30);
 const userAiConcurrentRequests = readIntEnv("MIND_ATLAS_AI_CONCURRENT_REQUESTS", 2);
 const realtimeConcurrentSessions = readIntEnv("MIND_ATLAS_REALTIME_CONCURRENT_SESSIONS", 1);
+const shogiEngineUrl = getEnv("MIND_ATLAS_SHOGI_ENGINE_URL", "http://127.0.0.1:8787").replace(/\/+$/, "");
+const shogiAnalysisMovetimeMs = readIntEnv("MIND_ATLAS_SHOGI_ANALYSIS_MOVETIME_MS", 5000);
+const shogiAnalysisTimeoutMs = readIntEnv("MIND_ATLAS_SHOGI_ANALYSIS_TIMEOUT_MS", 30000);
+const shogiAnalysisRateLimitMax = readIntEnv("MIND_ATLAS_RATE_LIMIT_SHOGI_ANALYSIS_MAX", 10);
+const shogiAnalysisConcurrentRequests = readIntEnv("MIND_ATLAS_SHOGI_ANALYSIS_CONCURRENT_REQUESTS", 1);
+const shogiAnalysisPvMaxLength = readIntEnv("MIND_ATLAS_SHOGI_ANALYSIS_PV_MAX", 24);
+const shogiAnalysisEnabled = readBoolEnv("MIND_ATLAS_SHOGI_ANALYSIS_ENABLED", true);
 const sessionIdleDays = readIntEnv("MIND_ATLAS_SESSION_IDLE_DAYS", 7);
 const staleReservationMinutes = readIntEnv("MIND_ATLAS_STALE_RESERVATION_MINUTES", 30);
 const maintenanceIntervalMs = readIntEnv("MIND_ATLAS_MAINTENANCE_INTERVAL_MS", 5 * 60 * 1000);
@@ -290,6 +297,11 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/board-records/shogi/source") {
       await handleShogiSourceImport(request, response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/board-records/shogi/analyze") {
+      await handleShogiAnalysis(request, response);
       return;
     }
 
@@ -903,6 +915,108 @@ async function handleShogiSourceImport(request, response) {
   } catch (error) {
     throw new ServiceError(400, "shogi_source_unavailable", stringValue(error?.message || error));
   }
+}
+
+/**
+ * SFEN travels on to the engine as part of a USI command line, so the charset
+ * is validated here as well as in the bridge: no caller may smuggle a newline
+ * and append their own engine commands.
+ */
+const SHOGI_SFEN_PATTERN = /^[1-9a-zA-Z+*/ -]{1,160}$/;
+
+async function handleShogiAnalysis(request, response) {
+  if (!shogiAnalysisEnabled) throw new ServiceError(503, "service_not_configured", "Shogi analysis is not configured");
+  const user = await requireUser(request);
+  enforceUserRateLimit(user.id, "shogi-analysis", shogiAnalysisRateLimitMax);
+  const release = enterUserConcurrency(`shogi-analysis:${user.id}`, shogiAnalysisConcurrentRequests);
+  attachReleaseOnResponse(response, release);
+  const payload = await readJson(request, 8 * 1024);
+  const sfen = stringValue(payload?.sfen).trim();
+  if (!SHOGI_SFEN_PATTERN.test(sfen)) throw new ServiceError(400, "A valid SFEN position is required");
+  const sideToMove = sfen.split(" ")[1] === "w" ? "gote" : "sente";
+  const startedAt = Date.now();
+  await recordServerAnalyticsEventSafe("ai_request_started", {
+    userId: user.id,
+    pageGroup: "app",
+    properties: { feature: "shogi_analysis", provider: "yaneuraou", model: "suisho5" },
+  });
+
+  let engineResult;
+  try {
+    const engineResponse = await fetch(`${shogiEngineUrl}/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sfen, movetimeMs: shogiAnalysisMovetimeMs }),
+      signal: AbortSignal.timeout(shogiAnalysisTimeoutMs),
+    });
+    const text = await engineResponse.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!engineResponse.ok) {
+      throw new ServiceError(
+        engineResponse.status === 503 ? 503 : 502,
+        "engine_unavailable",
+        stringValue(data?.error) || "The shogi engine is unavailable",
+      );
+    }
+    engineResult = data;
+  } catch (error) {
+    await recordServerAnalyticsEventSafe("ai_request_failed", {
+      userId: user.id,
+      pageGroup: "app",
+      properties: {
+        feature: "shogi_analysis",
+        provider: "yaneuraou",
+        model: "suisho5",
+        duration_ms: Date.now() - startedAt,
+        error_code: error instanceof ServiceError ? stringValue(error.code) || "engine_error" : "engine_unreachable",
+      },
+    });
+    if (error instanceof ServiceError) throw error;
+    throw new ServiceError(504, "engine_unavailable", "The shogi engine did not answer in time");
+  }
+
+  await recordServerAnalyticsEventSafe("ai_request_succeeded", {
+    userId: user.id,
+    pageGroup: "app",
+    properties: {
+      feature: "shogi_analysis",
+      provider: "yaneuraou",
+      model: "suisho5",
+      duration_ms: Date.now() - startedAt,
+    },
+  });
+  sendJson(response, 200, {
+    engine: {
+      id: "yaneuraou-suisho5",
+      name: stringValue(engineResult?.engineName),
+      label: stringValue(engineResult?.label) || "やねうら王 + 水匠5",
+    },
+    analyzedAt: new Date().toISOString(),
+    sfen,
+    sideToMove,
+    movetimeMs: Number(engineResult?.movetimeMs) || shogiAnalysisMovetimeMs,
+    depth: Number(engineResult?.depth) || 0,
+    seldepth: Number(engineResult?.seldepth) || 0,
+    nodes: Number(engineResult?.nodes) || 0,
+    nps: Number(engineResult?.nps) || 0,
+    elapsedMs: Number(engineResult?.elapsedMs) || 0,
+    terminal: Boolean(engineResult?.terminal),
+    score: normalizeShogiScoreToSente(engineResult?.score, sideToMove),
+    bestMove: stringValue(engineResult?.bestMove),
+    pv: Array.isArray(engineResult?.pv) ? engineResult.pv.slice(0, shogiAnalysisPvMaxLength).map(stringValue) : [],
+  });
+}
+
+/**
+ * USI reports every score from the mover's point of view. The product always
+ * shows sente-positive numbers, so the flip happens once, here, rather than in
+ * every consumer.
+ */
+function normalizeShogiScoreToSente(score, sideToMove) {
+  const kind = stringValue(score?.kind);
+  const value = Number(score?.value);
+  if (!Number.isFinite(value) || (kind !== "cp" && kind !== "mate")) return null;
+  return { kind, sente: sideToMove === "gote" ? -value : value };
 }
 
 async function handleTextPartnerTurn(request, response) {

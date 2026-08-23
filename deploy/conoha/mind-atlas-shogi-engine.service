@@ -1,0 +1,37 @@
+[Unit]
+Description=Mind Atlas shogi engine bridge (YaneuraOu + Suisho5)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mind-atlas
+EnvironmentFile=/opt/mind-atlas/.env.service
+ExecStart=/usr/bin/node server/shogi-engine.mjs
+Restart=always
+RestartSec=5
+User=www-data
+Group=www-data
+
+# The engine is a deliberate CPU hog: one search saturates its threads for the
+# whole movetime. These limits keep it strictly subordinate to the web service
+# on the shared 4 vCPU host, so a queued analysis can never slow down browsing.
+Nice=10
+CPUWeight=20
+CPUQuota=200%
+MemoryHigh=500M
+MemoryMax=700M
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=full
+ReadOnlyPaths=/opt/shogi
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

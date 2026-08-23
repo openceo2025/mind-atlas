@@ -335,6 +335,27 @@ export default function App() {
   const notebookMode: NotebookMode = atlasRoot.notebookMode ?? "standard";
   const isBoardGameMode = notebookMode !== "standard";
   const boardRecordFormat = isBoardNotebookMode(notebookMode) ? BOARD_RECORD_FORMATS[notebookMode] : null;
+  const shogiAnalysisNodeId = useAtlasStore((state) => state.shogiAnalysisNodeId);
+  const requestShogiAnalysis = useAtlasStore((state) => state.requestShogiAnalysis);
+  const shogiAnalysisBusy = Boolean(shogiAnalysisNodeId);
+  const selectedShogiContent =
+    selectedNode.structuredContent?.kind === "shogi-record" ? selectedNode.structuredContent : null;
+  /**
+   * Analysis is a hosted feature. The engine runs on the public service host,
+   * so local developer mode has nothing to call and never shows the control.
+   */
+  const shogiAnalysisAvailable = publicServiceMode && notebookMode === "shogi";
+  const shogiAnalysisNodeReady = Boolean(selectedShogiContent && !selectedShogiContent.specialMove);
+  const handleShogiAnalysis = () => {
+    if (!shogiAnalysisAvailable || shogiAnalysisBusy) return;
+    if (!hostedAuthenticated) {
+      trackProductEvent("google_login_started", { trigger: "account" }, { immediate: true });
+      startHostedGoogleLogin("account");
+      return;
+    }
+    if (!shogiAnalysisNodeReady) return;
+    void requestShogiAnalysis(selectedNodeId);
+  };
   const appliedBoardModeRef = useRef<NotebookMode | null>(null);
   const appliedBoardLayoutRef = useRef("");
   useEffect(() => {
@@ -359,7 +380,14 @@ export default function App() {
   }, [focusNode, isBoardGameMode, layoutMode, notebookMode, selectedNodeId, setLayoutMode]);
   const attachmentsEnabled = !publicServiceMode;
   const voiceLogReadable = publicServiceMode ? onboarding.showMainChrome : aiFeaturesUnlocked;
-  const showCommandDock = aiFeaturesUnlocked && (aboutDemoConfig ? aboutDemoConfig.kind === "app" : publicServiceMode || shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport));
+  // A board record is an authoritative move tree. Free-form text AI would
+  // happily append nodes to it, so the public board modes hide that surface
+  // entirely and offer engine analysis as the only AI that touches a record.
+  const textAiSurfaceHidden = publicServiceMode && isBoardGameMode;
+  const showCommandDock =
+    aiFeaturesUnlocked &&
+    !textAiSurfaceHidden &&
+    (aboutDemoConfig ? aboutDemoConfig.kind === "app" : publicServiceMode || shouldShowCommandDock(atlasRoot.id, selectedNodeId, viewport));
   const showTutorialNodeControls = onboarding.showNodeCreationControls;
   const tutorialWorkspaceAvailable = onboarding.showMainChrome || onboarding.showEditorDuringTutorial;
   const mobileOperationPanelTabAvailable = !mobilePortraitOperationSurface;
@@ -2363,7 +2391,7 @@ export default function App() {
 
       {onboarding.showMainChrome ? (
       <div ref={globalMenuRef} className="global-menu" aria-label={formatAppMessage("ui.app.atlasActions.8babf3a")}>
-        {publicServiceMode ? (
+        {publicServiceMode && !isBoardGameMode ? (
           <button
             className={`ai-feature-button top-account-feature-button ${aiFeaturesUnlocked ? "is-active" : ""}`}
             type="button"
@@ -2374,6 +2402,27 @@ export default function App() {
             <Sparkles size={16} />
             <span>{hostedAccountFeatureLabel}</span>
             <small>{aiFeatureButtonBadge(hostedSession, hostedSessionLoading, hostedSessionError)}</small>
+          </button>
+        ) : null}
+        {shogiAnalysisAvailable ? (
+          <button
+            className={`icon-button shogi-analysis-button ${shogiAnalysisBusy ? "is-analyzing" : ""}`}
+            type="button"
+            onClick={handleShogiAnalysis}
+            disabled={shogiAnalysisBusy || (hostedAuthenticated && !shogiAnalysisNodeReady)}
+            aria-busy={shogiAnalysisBusy}
+            aria-label={shogiAnalysisBusy ? t("shogi.analysis.running") : t("shogi.analysis.actionLabel")}
+            title={
+              shogiAnalysisBusy
+                ? t("shogi.analysis.running")
+                : !hostedAuthenticated
+                  ? t("shogi.analysis.signInRequired")
+                  : shogiAnalysisNodeReady
+                    ? t("shogi.analysis.actionLabel")
+                    : t("shogi.analysis.unavailable")
+            }
+          >
+            <span aria-hidden="true">{t("shogi.analysis.action")}</span>
           </button>
         ) : null}
         <button
@@ -2391,7 +2440,7 @@ export default function App() {
         </button>
         {menuOpen ? (
           <div className="context-menu global-context-menu">
-            {publicServiceMode ? (
+            {publicServiceMode && !isBoardGameMode ? (
               <button
                 className={`mobile-menu-account-feature ${aiFeaturesUnlocked ? "is-active" : ""}`}
                 type="button"
@@ -4598,6 +4647,8 @@ function notificationKindLabel(kind: NotificationPulse["kind"]) {
       return formatAppMessage("label.notification.claudeCode");
     case "cost":
       return formatAppMessage("label.notification.cost");
+    case "shogiAI":
+      return formatAppMessage("label.notification.shogiAI");
     case "done":
       return formatAppMessage("label.notification.completed");
     case "needs_review":

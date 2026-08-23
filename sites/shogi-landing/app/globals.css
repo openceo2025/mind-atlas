@@ -730,7 +730,8 @@ h3 {
   text-align: right;
 }
 
-.save-list {
+.save-list,
+.analysis-list {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 48px;
@@ -738,13 +739,15 @@ h3 {
   border-bottom: 1px solid var(--line);
 }
 
-.save-list article {
+.save-list article,
+.analysis-list article {
   min-width: 0;
   border-right: 1px solid var(--line);
   padding: 30px clamp(16px, 3vw, 36px) 32px;
 }
 
-.save-list article:first-child {
+.save-list article:first-child,
+.analysis-list article:first-child {
   border-left: 1px solid var(--line);
 }
 
@@ -754,11 +757,13 @@ h3 {
   font-size: 10px;
 }
 
-.save-list h3 {
+.save-list h3,
+.analysis-list h3 {
   margin: 24px 0 10px;
 }
 
-.save-list p {
+.save-list p,
+.analysis-list p {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
@@ -1047,29 +1052,35 @@ footer nav {
     width: 100%;
   }
 
-  .save-list {
+  .save-list,
+  .analysis-list {
     grid-template-columns: 1fr;
     margin-top: 34px;
   }
 
   .save-list article,
-  .save-list article:first-child {
+  .save-list article:first-child,
+  .analysis-list article,
+  .analysis-list article:first-child {
     display: block;
     border: 0;
     border-bottom: 1px solid var(--line);
     padding: 22px 0;
   }
 
-  .save-list article:last-child {
+  .save-list article:last-child,
+  .analysis-list article:last-child {
     border-bottom: 0;
   }
 
-  .save-list h3 {
+  .save-list h3,
+  .analysis-list h3 {
     margin: 0 0 6px;
     font-size: 15px;
   }
 
-  .save-list p {
+  .save-list p,
+  .analysis-list p {
     font-size: 12px;
   }
 
@@ -1117,4 +1128,12 @@ footer nav {
   html {
     scroll-behavior: auto;
   }
+}
+
+.ai-note-terms {
+  max-width: 720px;
+  margin: 36px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.9;
 }

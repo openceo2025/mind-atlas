@@ -34,7 +34,10 @@ test("server-renders the Mind Atlas shogi landing page", async () => {
   assert.match(html, /将棋ウォーズ/);
   assert.match(html, /将棋クエスト/);
   assert.match(html, /棋桜/);
-  assert.match(html, /AI解析は、ただいま準備中です。/);
+  assert.match(html, /「ここ、どうだった？」を、その場で聞けます。/);
+  assert.match(html, /やねうら王/);
+  assert.match(html, /水匠5/);
+  assert.doesNotMatch(html, /AI解析は、ただいま準備中です。/);
   assert.match(html, /kif-import-guide\.png/);
   assert.match(html, /kif-merge-menu-guide\.png/);
   assert.match(html, /kif-merge-dialog-guide\.png/);

@@ -1,6 +1,6 @@
 # Board Game Records and Analysis Plan
 
-Status: canonical implementation brief - Phase 1 import/view/edit, native-format persistence, record merge, and mode-aware board layout are implemented in Local Developer Mode and Hosted Public Mode; analysis remains pending
+Status: canonical implementation brief - Phase 1 import/view/edit, native-format persistence, record merge, and mode-aware board layout are implemented in Local Developer Mode and Hosted Public Mode; shogi engine analysis is implemented in Hosted Public Mode; chess and Go analysis remain pending
 
 Phase 1 delivery now covers Shogi KIF/KI2/CSA, Chess PGN, and Go SGF in both
 local and hosted modes: records are converted into Atlas nodes, viewed in the
@@ -11,8 +11,15 @@ and agent surfaces, but board structured content is allowed through a bounded
 sanitizer so cloud save/load and public sharing preserve the board mode. Imported notebooks persist a root-level
 `standard`/`shogi`/`chess`/`go` mode. Board mode resets the current workspace
 before import, restores automatically on cloud/package reload, and uses a
-fixed board/editor layout on desktop and mobile. Engine analysis and multi-game
-selection remain future work.
+fixed board/editor layout on desktop and mobile. Multi-game selection remains
+future work.
+
+Shogi engine analysis is live in Hosted Public Mode: one `AI` button analyzes
+the active position with YaneuraOu and Suisho5 on the service host, writes the
+evaluation, best move and reading into the node body, and turns the first five
+moves of that reading into ordinary record nodes. Chess and Go analysis are not
+implemented. Local Developer Mode does not offer analysis, because the engine
+is part of the hosted deployment rather than the client.
 
 The persistence and merge follow-up is also complete. Board notebooks use KIF,
 PGN, or SGF at every user-visible save boundary, including hosted cloud storage,
@@ -25,7 +32,7 @@ Shogi Wars and Shogi Quest through a bounded server-side fetcher. Merge matching
 is path-aware and position-based, appends only missing variations, deduplicates
 title/body text, and preserves edited titles and bodies in native comments.
 
-Last reviewed: 2026-08-15
+Last reviewed: 2026-08-23
 
 Target games: shogi, chess, and Go
 
@@ -48,8 +55,10 @@ The product model is:
    the existing child when the same move already exists.
 7. Export the current Atlas record tree back to the standard record format.
 8. Analyze the active position through a separate engine-analysis service.
-   Analysis never edits the record until the user explicitly adds a candidate
-   line as a variation.
+   Analysis writes its answer into the record: the evaluation into the analyzed
+   node's body, and the engine reading into ordinary move nodes. Undo reverses
+   the whole thing in one step. See 11.1 for why this replaced the earlier
+   apply-a-candidate-line flow.
 
 Game files are import/export formats. They are not multimedia attachments.
 The board is a structured-content viewer. It is not a second notebook and it
@@ -77,8 +86,7 @@ understood as spatial branches without replacing the general-purpose notebook.
   Atlas focusing.
 - A mode-aware board-first content view while keeping the Atlas as the primary
   spatial notebook.
-- Local engine analysis first, followed by a separately deployed hosted
-  analysis worker.
+- Hosted shogi engine analysis, running as its own service on the service host.
 
 ### 2.2 Explicitly out of scope for the first release
 
@@ -86,7 +94,8 @@ understood as spatial branches without replacing the general-purpose notebook.
 - Replacing ShogiHome, Lichess, OGS, or other full game clients.
 - Browser-side engine execution in the first release.
 - Automatically asking an LLM to explain every engine result.
-- Automatically adding every engine principal variation to the Atlas.
+- Adding an unbounded engine principal variation to the Atlas. The reading is
+  capped at five move nodes; the rest stays in the body text.
 - Lossless support for every vendor-specific extension in every record file.
 - Importing KI2 or CSA and exporting it again as KI2 or CSA.
 - Making game controls visible when the active Atlas has no game record.
@@ -626,32 +635,52 @@ into this contract before changing Atlas state.
 
 ### 11.1 User flow
 
-The user activates a move node and selects `Analyze position`. The dialog has
-three primary controls:
+Shipped for shogi in Hosted Public Mode. Chess and Go remain unimplemented and
+keep the engine selection in 11.2 as their target.
 
-- `Candidates`: number of ranked candidate moves.
-- `Line length`: maximum moves shown in each principal variation.
-- `Strength`: Quick, Standard, or Deep.
+There is no analysis dialog. The board layout reserves its space for the board
+itself, and a modal asking for candidate counts and search budgets before every
+question would cost more attention than the answer is worth. Analysis is one
+button with fixed settings.
 
-An Advanced section exposes the engine-appropriate compute budget:
+The `AI` button sits at the head of the atlas action cluster, to the left of
+share and the menu, using the same control shell so the cluster stays one row.
+The same button serves desktop and mobile, because board mode already keeps
+that cluster on screen in both layouts.
 
-- Shogi/chess: time, nodes, or search depth.
-- Go: time or visits.
+1. The button appears only in shogi mode, and only in Hosted Public Mode.
+2. Pressing it while signed out starts Google sign-in instead of analyzing.
+3. Pressing it analyzes the position on the active node. Move nodes and the
+   initial position both qualify; a special-move node (resignation, repetition)
+   does not.
+4. The analyzed node pulses in the universe while the search runs, exactly as
+   an agent request does, and the button shows its own running state.
+5. Only one analysis may be in flight for the whole app. The button stays
+   disabled everywhere until the answer lands, including on other nodes.
+6. The user is free to navigate, edit, and work anywhere else meanwhile.
+7. On success the answer is appended to the analyzed node's body and the
+   engine reading becomes real move nodes, in one undoable step.
+8. A completion pulse fires on the analyzed node, so the notification can be
+   followed back to the position it belongs to.
+9. On failure or timeout no nodes are created; a short failure line is appended
+   to the analyzed node's body and the node pulses in the error colour.
 
-Do not present one universal `Depth` field. Go's Monte Carlo tree search does
-not use alpha-beta depth in the same way. The common user-facing concepts are
-candidate count, line length, and analysis strength.
+Fixed settings: 5 seconds of search, one candidate move (`MultiPV 1`), a 30
+second client deadline. The reading is written into the body in full and the
+first five moves of it become nodes.
 
-After analysis:
+Unlike the earlier draft of this plan, analysis writes into the record without
+asking. The record is the product: a reading the user cannot see in the tree is
+a reading they have to hold in their head. The nodes it creates are ordinary
+move nodes - random colour, human author, same shape as a played move or a
+merged variation - so export, merge, navigation and sharing need no concept of
+an "engine node". This is a deliberate reversal of the "never edit the record
+until the user applies a line" rule; undo is the escape hatch.
 
-1. Show the normalized root evaluation.
-2. Show candidates ranked by engine evaluation.
-3. Allow temporary PV playback in the board without changing Atlas nodes.
-4. Offer `Add this line as a variation` and `Add selected lines`.
-5. Deduplicate every move against existing direct move children.
-6. Apply all selected lines as one undoable transaction.
-7. Refuse application if the active node's current `positionKey` differs from
-   the analyzed key.
+Deduplication carries the weight this decision would otherwise cost. Each move
+of the reading reuses the existing child when the move is already there, so a
+reading that agrees with the game merges into it instead of growing a parallel
+copy, and re-analyzing the same position creates nothing the second time.
 
 ### 11.2 Engine selection
 
@@ -689,184 +718,185 @@ terms, and never become the only way to read saved analysis.
 
 ## 12. Analysis API and Data Model
 
-### 12.1 Common request
+### 12.1 Request
+
+The browser sends one position and nothing else. There is no job identity, no
+settings, and no engine selection to negotiate, because the settings are fixed
+by the product and the engine is chosen by the deployment.
 
 ```ts
-export interface GameAnalysisRequest {
-  requestId: string;
-  game: BoardGame;
-  recordId: string;
-  nodeId: string;
-  positionKey: string;
-  candidateCount: number;
-  pvLength: number;
-  strength: "quick" | "standard" | "deep";
-  budget?:
-    | { kind: "timeMs"; value: number }
-    | { kind: "nodes"; value: number }
-    | { kind: "depth"; value: number }
-    | { kind: "visits"; value: number };
-  engineId: string;
+// POST /api/board-records/shogi/analyze
+{ sfen: string }
+```
+
+SFEN is validated against `/^[1-9a-zA-Z+*\/ -]{1,160}$/` by the service and
+again by the engine bridge. The charset is a security border, not a formatting
+preference: the position is concatenated into a USI command line, so a newline
+would let a caller append their own engine commands.
+
+### 12.2 Result
+
+```ts
+export interface ShogiAnalysisResult {
+  engine: { id: string; name: string; label: string };
+  analyzedAt: string;
+  sfen: string;
+  sideToMove: "sente" | "gote";
+  movetimeMs: number;
+  depth: number;
+  seldepth: number;
+  nodes: number;
+  nps: number;
+  elapsedMs: number;
+  terminal: boolean;
+  score: { kind: "cp" | "mate"; sente: number } | null;
+  bestMove: string;
+  pv: string[];
 }
 ```
 
-The browser sends identity and settings, not an authoritative arbitrary
-position. Hosted service code loads the user's notebook/record context or a
-bounded canonical position payload and independently validates it before the
-worker starts. Local mode may pass the normalized path through the trusted
-localhost bridge, but the same adapter validation still runs.
+USI reports every score from the mover's point of view. The service normalizes
+it to sente-positive once, on the way out, so no consumer has to know whose
+turn it was. `terminal` covers `bestmove resign` and `bestmove win`, where
+there is an evaluation but no move to play.
 
-### 12.2 Common result
+The principal variation is capped server-side and replayed client-side against
+the real position. Only the legal prefix survives, so a stale or truncated
+reading degrades into a shorter line instead of writing impossible moves into
+a record.
 
-```ts
-export interface GameAnalysisResult {
-  jobId: string;
-  requestId: string;
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
-  game: BoardGame;
-  recordId: string;
-  nodeId: string;
-  positionKey: string;
-  engine: {
-    id: string;
-    name: string;
-    version: string;
-    model?: string;
-  };
-  requested: {
-    candidateCount: number;
-    pvLength: number;
-    strength: string;
-    budget: GameAnalysisRequest["budget"];
-  };
-  rootEvaluation?: GameEvaluation;
-  candidates: GameAnalysisCandidate[];
-  createdAt: string;
-  startedAt?: string;
-  completedAt?: string;
-  durationMs?: number;
-}
-
-export type GameEvaluation =
-  | {
-      kind: "centipawn";
-      value: number;
-      matePly?: number;
-      perspective: "sente" | "white";
-    }
-  | {
-      kind: "go";
-      blackWinRate: number;
-      blackScoreLead: number;
-      visits: number;
-    };
-```
-
-Normalize positive shogi values to sente advantage and positive chess values
-to White advantage. Preserve raw engine score and perspective internally for
-debugging, but never show a sign without a named perspective. Go reports both
-win rate and point lead; do not force it into centipawns.
-
-### 12.3 Routes
-
-Hosted routes:
+### 12.3 Route
 
 ```text
-POST   /api/game-analysis/jobs
-GET    /api/game-analysis/jobs/:jobId
-GET    /api/game-analysis/jobs/:jobId/events
-DELETE /api/game-analysis/jobs/:jobId
+POST /api/board-records/shogi/analyze
 ```
 
-Local bridge exposes the same response contract under its local origin. The
-client selects transport from the existing local/hosted mode boundary; it must
-never expose local engine paths or executable controls in hosted mode.
+One synchronous request, answered or failed within the client's 30 second
+deadline. There is no job queue, no polling, and no SSE, because a 5 second
+search does not need recovery machinery: if the browser is reloaded mid-flight
+the answer is simply lost, and the position can be asked again.
 
-`POST` returns `202 Accepted` and a job ID. Results stream over SSE when
-available and fall back to bounded polling. Browser refresh must recover a
-still-running job.
+Local developer mode has no route of its own. The engine lives on the hosted
+host, and a second local implementation would be a separate feature carrying
+its own engine installation, so local mode does not offer analysis at all and
+hides the control.
 
 ### 12.4 Storage
 
-Store immutable completed results separately from the notebook. Save only a
-compact summary on the move node:
+Analysis is stored in the record, as text and as nodes. There is no separate
+analysis table, no cache keyed by position, and no summary object on the node.
 
-- analysis ID;
-- engine/version/model;
-- completed time;
-- normalized root evaluation;
-- top candidate moves and bounded PVs.
+This is a deliberate trade. A cache would save real CPU on repeated opening
+positions, and a separate store would keep bodies clean. Both were rejected for
+the same reason: an analysis the user cannot read in the body, export to KIF,
+or carry into a share link is an analysis that lives outside the product's only
+durable artifact. The body is what survives export, merge, cloud save and
+sharing, so that is where the answer goes.
 
-Full raw engine output is never stored in the notebook or sent to the browser.
-Cache completed results by game, `positionKey`, engine version/model, and exact
-settings. A cache hit must still pass entitlement and ownership checks.
+What is written:
+
+- On the analyzed node: a Japanese block appended to the end of the body,
+  containing the timestamp, engine label, search budget and depth, the
+  sente-normalized evaluation, the best move, and the whole legal reading.
+  Repeated analysis appends another block; nothing is overwritten.
+- On each move node the reading created: a two-line stamp naming when and with
+  what the line was produced. The evaluation is not repeated there, because it
+  belongs to the position that was actually analyzed.
+- On failure: a single `error:` line with a trimmed, bounded reason.
+
+Bodies are Japanese regardless of interface language. A body is persisted data
+that round-trips through KIF comments; localizing at write time would freeze
+whichever language the author happened to be using, and re-reading it later in
+another language would be worse than reading it in one fixed language. Blocks
+are delimited with ASCII rules rather than box-drawing characters so a KIF
+comment survives a Shift_JIS export path.
+
+Raw engine output is never stored or forwarded. The service parses `info` and
+`bestmove` lines and emits only the typed result above.
 
 ## 13. Local and Hosted Execution
 
 ### 13.1 Local developer mode
 
-Add engine adapters to the existing local bridge, not the browser:
+Local Developer Mode does not run engine analysis and does not show the `AI`
+button. The engine, its evaluation file and its resource limits are part of the
+hosted deployment; adding a local path would mean a second implementation, a
+second installation for the developer, and a second surface to keep aligned.
+The Mode Safety Contract cuts both ways here: hosted analysis must not become a
+requirement for working locally.
 
-- `MIND_ATLAS_SHOGI_ENGINE_BIN`
-- `MIND_ATLAS_SHOGI_EVAL_PATH`
-- `MIND_ATLAS_CHESS_ENGINE_BIN`
-- `MIND_ATLAS_KATAGO_BIN`
-- `MIND_ATLAS_KATAGO_MODEL`
-- `MIND_ATLAS_KATAGO_CONFIG`
-
-Paths stay local and never enter notebook data. Discovery reports availability,
-version, supported options, and a clear setup error. Keep a warm process only
-after the first request, one process per configured engine, with explicit stop
-and crash recovery.
-
-Code-agent no-timeout policy does not apply here. Engine analysis is a metered
-compute job and must stop at its requested time/nodes/depth/visits budget or a
-hard safety ceiling.
+If local analysis is ever added, it belongs behind the existing local bridge
+with its own engine discovery, never as a browser-side engine and never as a
+hosted dependency that local mode cannot start without.
 
 ### 13.2 Hosted service
 
-Do not run engines inside `server/mind-atlas-service.mjs` or its event loop.
+The engine does not run inside `server/mind-atlas-service.mjs` or its event
+loop. It runs as `mind-atlas-shogi-engine.service`, a separate systemd unit on
+the same host, and the web service reaches it over localhost.
 
-Use PostgreSQL as the initial durable queue:
+`server/shogi-engine.mjs` owns one long-lived USI process:
 
-- API service validates the request and reserves credit.
-- A separate non-root worker claims one job with `FOR UPDATE SKIP LOCKED`.
-- The worker launches or talks to the pinned engine process.
-- Progress is written as bounded structured state.
-- Completion settles actual configured cost; failure/cancel refunds according
-  to the existing reservation model.
-- A stale-job reaper terminates and refunds abandoned jobs.
+- The engine starts once, loads `nn.bin` once, and stays warm. Loading a 64 MB
+  evaluation file per request would cost more than the search.
+- `FV_SCALE` is set to 24 for Suisho5. The engine default of 16 produces a
+  plausible but silently wrong evaluation with this file, so it is configured
+  explicitly rather than inherited.
+- `NetworkDelay`, `NetworkDelay2` and `MinimumThinkingTime` are set to zero.
+  The last one defaults to 2000 ms and exists for real games, not analysis.
+- Every request is serialized through one queue. The engine is a single shared
+  CPU resource, and this queue is the second line of defence behind the
+  per-account single-flight limit.
+- A search that overruns its budget is stopped, and an engine that ignores the
+  stop is killed and restarted rather than left wedged.
 
-Initial worker topology:
+There is no PostgreSQL job queue, no worker pool and no reaper. A 5 second
+synchronous search does not need them, and the durable-queue design in earlier
+drafts of this plan was sized for a product where analysis was a metered,
+long-running, billable job. It is not: it is free, bounded, and fast.
 
-- one CPU worker for Stockfish and YaneuraOu after VPS benchmarking;
-- one concurrent job per user and a low global concurrency cap;
-- KataGo hosted analysis disabled until a GPU-backed worker or measured CPU
-  preset meets latency and cost targets;
-- web service remains healthy even when all analysis workers are offline.
+The systemd unit is where the shared host is protected:
 
-The existing ConoHa web VPS must not be assumed capable. Benchmark CPU, memory,
-latency, thermal behavior, and concurrent load before enabling either CPU
-engine. A separate worker VPS/container is the default scaling path.
+```ini
+Nice=10
+CPUWeight=20
+CPUQuota=200%
+MemoryHigh=500M
+MemoryMax=700M
+```
+
+`CPUWeight=20` is the important line. One search saturates its threads for the
+whole movetime, and on a 4 vCPU host that would be felt by every visitor. A
+weight below the default keeps the engine strictly subordinate: the web service
+wins the CPU whenever it wants it, and analysis fills the gaps. `MemoryMax`
+means a runaway engine is killed instead of the web service.
+
+Measured budget on the current ConoHa host (4 vCPU Icelake Xeon with AVX-512
+VNNI, 3.9 GB RAM): 64 MB of resident evaluation weights, a 128 MB transposition
+table, two search threads, roughly 300-400 MB in total. Memory was never the
+constraint here; CPU scheduling was.
 
 ### 13.3 Hosted abuse and cost controls
 
-- Google login and an explicit entitlement are required for hosted analysis.
-- Reserve credit before enqueueing.
-- Enforce game-specific min/max candidate count, PV length, and compute budget.
-- One active job per user initially.
-- Global queue length and per-IP/per-user rate limits.
-- Idempotency by `requestId`.
-- Cancel on subscription loss only when policy explicitly requires it; always
-  settle already consumed compute.
-- Validate all engine output and cap line lengths before persistence.
-- Run workers as non-root with CPU, memory, process, and filesystem limits.
-- No shell composition from request values.
-- No arbitrary engine option names from browsers.
-- Never return engine paths, commands, stderr, environment variables, or raw
-  upstream responses to users.
-- Add provider/engine/model/version and estimated compute cost to admin usage
-  reporting without storing private node comments.
+Analysis is free and requires Google sign-in. There is no credit reservation,
+no entitlement check beyond authentication, and no billing path, so the rate
+limit is the only thing between a shared CPU and a busy visitor.
+
+- Google login required; a signed-out press starts sign-in instead.
+- Ten analyses per account per minute. No daily cap.
+- One concurrent analysis per account, enforced server-side, and one in-flight
+  request per browser, enforced by the button.
+- One engine-wide queue with a bounded length; a full queue is refused, not
+  buffered.
+- 30 second client deadline, 30 second service deadline to the engine bridge.
+- SFEN validated against a strict charset by both the service and the bridge,
+  because it is concatenated into a USI command line.
+- The engine bridge listens on localhost only and is never exposed by nginx.
+- Engine paths, stderr, and raw USI output never reach the browser. The service
+  emits only the typed result.
+- Analysis requests are recorded as `ai_request_started` / `succeeded` /
+  `failed` product events with `feature: "shogi_analysis"`, so usage is visible
+  in admin reporting without storing any position or private node text.
 
 ## 14. Licensing and Commercial Release Checklist
 

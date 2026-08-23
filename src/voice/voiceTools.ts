@@ -786,7 +786,7 @@ function optionalEnumArg<T extends string>(args: Record<string, unknown>, key: s
 
 function notificationScore(kind: string) {
   if (kind === "error") return 5;
-  if (kind === "codex" || kind === "openclaw" || kind === "claude") return 4;
+  if (kind === "codex" || kind === "openclaw" || kind === "claude" || kind === "shogiAI") return 4;
   if (kind === "needs_review") return 3;
   if (kind === "cost") return 2;
   return 1;
@@ -795,7 +795,7 @@ function notificationScore(kind: string) {
 function notificationSuggestedAction(kind: string) {
   if (kind === "error") return "Focus the node and explain the error before proposing a fix.";
   if (kind === "needs_review") return "Focus the node and summarize what needs human review.";
-  if (kind === "codex" || kind === "openclaw" || kind === "claude") return "Focus the agent result node and summarize completed work.";
+  if (kind === "codex" || kind === "openclaw" || kind === "claude" || kind === "shogiAI") return "Focus the agent result node and summarize completed work.";
   if (kind === "cost") return "Summarize cost or usage impact.";
   return "Focus the node if the user wants more detail.";
 }

@@ -905,7 +905,9 @@ function GlobalNotificationPulse({
 
 function getNotificationPulseColor(kind: NotificationPulseKind, theme: AtlasTheme) {
   if (kind === "error") return "#ff6b6b";
-  if (kind === "codex") return theme === "light" ? "#0b63ce" : "#86b7ff";
+  // The shogi engine shares the agent blue: from the universe it reads as the
+  // same class of event as an agent answering, which is exactly what it is.
+  if (kind === "codex" || kind === "shogiAI") return theme === "light" ? "#0b63ce" : "#86b7ff";
   if (kind === "openclaw") return theme === "light" ? "#087f5b" : "#62e6b8";
   if (kind === "claude") return theme === "light" ? "#8f4a00" : "#ffcc80";
   if (kind === "cost") return "#f59f48";
@@ -954,7 +956,7 @@ function markNotificationPath(kinds: Map<string, NotificationPulseKind>, path: A
 
 function notificationPriority(kind: NotificationPulseKind) {
   if (kind === "error") return 5;
-  if (kind === "codex" || kind === "openclaw" || kind === "claude") return 4;
+  if (kind === "codex" || kind === "openclaw" || kind === "claude" || kind === "shogiAI") return 4;
   if (kind === "needs_review") return 3;
   if (kind === "cost") return 2;
   return 1;

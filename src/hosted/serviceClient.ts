@@ -7,6 +7,7 @@ import type {
   CloudNotebookShareResult,
   HostedServiceSession,
   NativeBoardRecordPayload,
+  ShogiAnalysisResult,
   ShogiSourceImportResult,
 } from "../types";
 import { HOSTED_SERVICE_SESSION_REFRESH_EVENT } from "../events";
@@ -137,6 +138,22 @@ export async function importHostedShogiSource(url: string): Promise<ShogiSourceI
     body: JSON.stringify({ url }),
   });
   return await readHostedJson<ShogiSourceImportResult>(response);
+}
+
+/**
+ * The engine runs on the hosted VPS, so analysis is a hosted-only feature and
+ * the abort is what the product promises the user: an answer or an error
+ * within 30 seconds, never an button that pulses forever.
+ */
+export const HOSTED_SHOGI_ANALYSIS_TIMEOUT_MS = 30_000;
+
+export async function requestHostedShogiAnalysis(sfen: string): Promise<ShogiAnalysisResult> {
+  const response = await hostedFetch("/api/board-records/shogi/analyze", {
+    method: "POST",
+    body: JSON.stringify({ sfen }),
+    signal: AbortSignal.timeout(HOSTED_SHOGI_ANALYSIS_TIMEOUT_MS),
+  });
+  return await readHostedJson<ShogiAnalysisResult>(response);
 }
 
 export function notifyHostedServiceSessionChanged() {

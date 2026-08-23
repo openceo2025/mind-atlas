@@ -9,6 +9,7 @@ const hardTimeoutMs = Number(process.env.MIND_ATLAS_HOSTED_UI_TIMEOUT_MS || 180_
 const host = "127.0.0.1";
 const providerIds = ["openai", "anthropic", "glm", "deepseek", "gemini", "qwen", "composer", "kimi", "mimo", "minimax", "grok"];
 const requestedPaths = [];
+const shogiAnalysisRequests = [];
 let cloudOverwriteCount = 0;
 let mockSessionMode = "active";
 const forbiddenPublicDeveloperTerms = [
@@ -106,6 +107,15 @@ const mockService = http.createServer((request, response) => {
       entry: createMockCloudEntry(cloudId, title),
       root: createMockCloudNotebookRoot(title),
     });
+    return;
+  }
+  if (url.pathname === "/api/board-records/shogi/analyze" && request.method === "POST") {
+    collectRequestJson(request).then((body) => {
+      const sfen = String(body?.sfen ?? "");
+      if (!sfen) return sendJson(response, 400, { error: "sfen missing" });
+      shogiAnalysisRequests.push(sfen);
+      sendJson(response, 200, createMockShogiAnalysis(sfen));
+    }).catch(() => sendJson(response, 400, { error: "invalid analysis JSON" }));
     return;
   }
   if (url.pathname === "/api/share/notebooks" && request.method === "POST") {
@@ -317,10 +327,12 @@ try {
     if (!mobileEditorState.ok) throw new Error(`Hosted mobile editor is not compact: ${JSON.stringify(mobileEditorState)}`);
     await signedOutMobilePage.close();
 
+    // Engine analysis is a signed-in feature, so the board checks run against
+    // an authenticated session rather than the signed-out shell above.
+    mockSessionMode = "active";
     await verifyHostedBoardImport(browser);
     await verifyDirectShogiLaunch(browser);
 
-    mockSessionMode = "active";
     const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
     await seedCompletedOnboarding(page);
     await page.goto(appUrl, { waitUntil: "networkidle" });
@@ -722,13 +734,95 @@ async function verifyHostedBoardImport(browser) {
       if (await page.locator(".panel-attach-preview-button").count()) {
         throw new Error(`Hosted ${fixture.name} exposed the multimedia attachment control.`);
       }
+      await verifyHostedBoardAiSurface(page, fixture.mode);
       if (fixture.mode === "shogi") {
+        await verifyHostedShogiAnalysis(page);
         await verifyHostedShogiMergeFeedback(page, fixture.content);
       }
     } finally {
       await context.close();
     }
   }
+}
+
+/**
+ * A board record is an authoritative move tree, so the free-form text AI is
+ * withdrawn in every board mode and only shogi gains the engine control.
+ */
+async function verifyHostedBoardAiSurface(page, mode) {
+  if (await page.locator(".ai-feature-button").count()) {
+    throw new Error(`Hosted ${mode} mode still exposed the text AI feature button.`);
+  }
+  if (await page.locator(".command-dock").count()) {
+    throw new Error(`Hosted ${mode} mode still exposed the text AI command dock.`);
+  }
+  const analysisButtons = await page.locator(".shogi-analysis-button").count();
+  const expected = mode === "shogi" ? 1 : 0;
+  if (analysisButtons !== expected) {
+    throw new Error(`Hosted ${mode} mode showed ${analysisButtons} analysis buttons, expected ${expected}.`);
+  }
+  if (mode !== "shogi") return;
+  const order = await page.locator(".global-menu > button").evaluateAll((buttons) =>
+    buttons.map((button) => (button.classList.contains("shogi-analysis-button") ? "analysis" : "other")),
+  );
+  if (order[0] !== "analysis") {
+    throw new Error(`The analysis button must lead the atlas action cluster: ${order.join(",")}`);
+  }
+}
+
+/**
+ * Drives one analysis end to end: the request reaches the service, the answer
+ * is written into the analyzed node, and the engine reading becomes real move
+ * nodes without duplicating the move the record already held.
+ */
+async function verifyHostedShogiAnalysis(page) {
+  const before = shogiAnalysisRequests.length;
+  const analysisButton = page.locator(".shogi-analysis-button");
+  // Analyze the initial position: the record already holds the first move of
+  // the canned reading, which is what proves an existing move is reused.
+  const toInitialPosition = page.getByRole("button", { name: "初期局面に戻る" });
+  if (await toInitialPosition.isEnabled()) await toInitialPosition.click();
+  await page.waitForFunction(
+    () => !document.querySelector(".shogi-analysis-button")?.disabled,
+    null,
+    { timeout: 10_000 },
+  ).catch(async () => {
+    throw new Error(`The analysis button stayed disabled: ${await analysisButton.getAttribute("title")}`);
+  });
+  await analysisButton.click();
+  await waitFor(() => shogiAnalysisRequests.length > before, "The analysis request never reached the service.");
+  const sfen = shogiAnalysisRequests[shogiAnalysisRequests.length - 1];
+  if (!/^[1-9a-zA-Z+*/ -]+$/.test(sfen)) throw new Error(`The client sent a malformed SFEN: ${sfen}`);
+
+  const body = page.locator(".node-body-input").first();
+  await body.waitFor({ timeout: 15_000 });
+  await page.waitForFunction(
+    () => document.querySelector(".node-body-input")?.value?.includes("--- AI解析 ") ?? false,
+    null,
+    { timeout: 15_000 },
+  );
+  const text = await body.inputValue();
+  for (const fragment of ["エンジン: やねうら王 + 水匠5", "評価値: +62（先手やや有利）", "最善手: ", "読み筋: "]) {
+    if (!text.includes(fragment)) throw new Error(`The analysis block is missing ${fragment}:\n${text}`);
+  }
+
+  // The button must refuse a second request only while one is in flight; once
+  // the answer lands it has to be usable again.
+  await page.waitForFunction(
+    () => !document.querySelector(".shogi-analysis-button")?.classList.contains("is-analyzing"),
+    null,
+    { timeout: 15_000 },
+  );
+  if (await analysisButton.isDisabled()) throw new Error("The analysis button stayed disabled after the answer arrived.");
+}
+
+async function waitFor(predicate, message, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(message);
 }
 
 async function verifyHostedShogiMergeFeedback(page, recordText) {
@@ -882,6 +976,30 @@ function providerLabel(id) {
     minimax: "MiniMax",
     grok: "Grok",
   }[id] ?? id;
+}
+
+/**
+ * A canned engine answer. The principal variation deliberately opens with the
+ * move the fixture record already contains, so the assertion can prove the
+ * existing node is reused instead of duplicated.
+ */
+function createMockShogiAnalysis(sfen) {
+  return {
+    engine: { id: "yaneuraou-suisho5", name: "YaneuraOu NNUE", label: "やねうら王 + 水匠5" },
+    analyzedAt: new Date().toISOString(),
+    sfen,
+    sideToMove: sfen.split(" ")[1] === "w" ? "gote" : "sente",
+    movetimeMs: 5000,
+    depth: 24,
+    seldepth: 30,
+    nodes: 12000000,
+    nps: 2400000,
+    elapsedMs: 5010,
+    terminal: false,
+    score: { kind: "cp", sente: 62 },
+    bestMove: "7g7f",
+    pv: ["7g7f", "3c3d", "2g2f", "8c8d", "2f2e"],
+  };
 }
 
 function createMockCloudEntry(id, title, visibility = "private") {
