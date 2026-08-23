@@ -423,6 +423,60 @@ sudo systemctl enable --now mind-atlas
 sudo systemctl status mind-atlas
 ```
 
+### Shogi engine bridge
+
+Shogi position analysis runs as a second unit on the same host. It is the only
+service that can talk to the engine, and nginx never exposes it: it listens on
+`127.0.0.1:8787` and the web service reaches it from localhost.
+
+Install the engine and its evaluation file under `/opt/shogi` first:
+
+```bash
+sudo apt-get install -y clang lld make git 7zip
+sudo mkdir -p /opt/shogi && cd /opt/shogi
+sudo git clone --depth 1 https://github.com/yaneurao/YaneuraOu.git
+cd YaneuraOu/source
+sudo nice -n 19 make -j3 normal COMPILER=clang++ TARGET_CPU=AVX512VNNI YANEURAOU_EDITION=YANEURAOU_ENGINE_NNUE
+sudo cp YaneuraOu-by-gcc /opt/shogi/bin/yaneuraou
+```
+
+`lld` is required: the LTO build passes `-fuse-ld=lld` and fails without it.
+Pick `TARGET_CPU` from `lscpu`; the current host reports `avx512_vnni`, and
+`AVX512VNNI` measured about 10% faster there than `AVX2`. Build both and
+compare with a fixed `go movetime` search before choosing — and hold the
+engine's stdin open while measuring, because YaneuraOu treats EOF as a quit and
+will answer from depth 1 with zero nodes otherwise.
+
+The evaluation file is Suisho5, pinned by release:
+
+```bash
+curl -fsSL -o /opt/shogi/dist/Suisho5.7z \
+  https://github.com/yaneurao/YaneuraOu/releases/download/suisho5/Suisho5.7z
+# sha256 6734e3a3d28e67b9206c3442f6d10f16148138327dff811cadedfcf581f79809
+sudo 7z x -o/opt/shogi/eval /opt/shogi/dist/Suisho5.7z   # nn.bin, 64,217,066 bytes
+sudo chmod -R a+rX /opt/shogi
+```
+
+Then install the unit:
+
+```bash
+sudo cp deploy/conoha/mind-atlas-shogi-engine.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mind-atlas-shogi-engine
+curl -s http://127.0.0.1:8787/health
+```
+
+The unit is `PartOf=mind-atlas.service`, so the restart at the end of a deploy
+propagates to it and the bridge always runs the deployed `server/shogi-engine.mjs`.
+Its `MIND_ATLAS_SHOGI_*` settings come from the same `.env.service`.
+
+`CPUWeight=20` is the setting that protects the site. One search saturates its
+threads for the whole movetime, so on this 4 vCPU host the engine is deliberately
+given a lower scheduling weight than the web service: browsing wins the CPU
+whenever it wants it and analysis fills the gaps. Resident cost is about 400 MB
+(64 MB evaluation weights, a 128 MB transposition table, two search threads and
+the Node bridge), capped by `MemoryMax=700M`.
+
 ## nginx And HTTPS
 
 Install the included nginx template:

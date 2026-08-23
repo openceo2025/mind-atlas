@@ -1,6 +1,11 @@
 [Unit]
 Description=Mind Atlas shogi engine bridge (YaneuraOu + Suisho5)
 After=network.target
+# The bridge lives in the same deployed tree as the web service, so a deploy
+# that changes server/shogi-engine.mjs must reach it too. PartOf propagates the
+# restart the deploy already performs; without it the engine would keep running
+# the previous deploy's code until someone noticed.
+PartOf=mind-atlas.service
 
 [Service]
 Type=simple
