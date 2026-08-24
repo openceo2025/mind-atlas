@@ -86,7 +86,6 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   const branchTail = currentNode ? findRecordTail(currentNode) : recordRoot ? findRecordTail(recordRoot) : null;
   const coordinateFiles = orientation === "sente" ? ["9", "8", "7", "6", "5", "4", "3", "2", "1"] : ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
   const coordinateRanks = orientation === "sente" ? JAPANESE_RANKS : [...JAPANESE_RANKS].reverse();
-  const turnLabel = currentContent?.sfen.split(" ")[1] === "w" ? "後手番" : "先手番";
 
   useEffect(() => {
     let cancelled = false;
@@ -176,7 +175,6 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       <div className="shogi-viewer-toolbar">
         <span className="shogi-viewer-label">将棋</span>
         <span className="shogi-viewer-position">{currentContent.ply === 0 ? "開始局面" : `${currentContent.ply}手目`}</span>
-        <span className="board-turn-indicator">{turnLabel}</span>
         <button
           type="button"
           className="shogi-viewer-icon"

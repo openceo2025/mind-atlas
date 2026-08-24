@@ -1180,7 +1180,12 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
   },
 
   showNotificationSnoozePrompt: (id) => {
-    if (!findNode(get().atlasRoot, id)) return;
+    const root = get().atlasRoot;
+    if (!findNode(root, id)) return;
+    // Snoozing is for work that waits on a person. A board record has no such
+    // work: the notification means an engine answered, and the answer is
+    // already in the tree by the time it is read.
+    if (isBoardGameNotebookMode(root.notebookMode)) return;
     const now = Date.now();
     set((state) => ({
       notificationSnoozePrompt: {
@@ -1351,13 +1356,18 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       const title = formatAppMessage("shogi.analysis.ready");
       const birthMarks = { ...current.birthMarks };
       for (const createdId of line.createdIds) birthMarks[createdId] = performance.now();
+      // The question was "what is the move here", so the notification points at
+      // the move, not at the position it was asked from. Following it lands the
+      // user on the engine's answer instead of where they already were. A
+      // position with no legal continuation has no such node, and falls back.
+      const notifyNodeId = line.firstMoveNodeId ?? nodeId;
       return {
         ...pushHistory(current),
         atlasRoot,
         birthMarks,
         shogiAnalysisNodeId: null,
-        notificationPulses: [...current.notificationPulses, createNotificationPulse(nodeId, "shogiAI", title)],
-        unreadNotifications: markUnreadNotification(current.unreadNotifications, nodeId, "shogiAI", title),
+        notificationPulses: [...current.notificationPulses, createNotificationPulse(notifyNodeId, "shogiAI", title)],
+        unreadNotifications: markUnreadNotification(current.unreadNotifications, notifyNodeId, "shogiAI", title),
       };
     });
   },

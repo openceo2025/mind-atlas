@@ -796,14 +796,29 @@ sharing, so that is where the answer goes.
 
 What is written:
 
-- On the analyzed node: a Japanese block appended to the end of the body,
-  containing the timestamp, engine label, search budget and depth, the
-  sente-normalized evaluation, the best move, and the whole legal reading.
+- On the analyzed node: a four-line Japanese block appended to the end of the
+  body — the sente-normalized evaluation, the best move, the whole legal
+  reading, and last the engine, its budget or `定跡`, and the timestamp.
   Repeated analysis appends another block; nothing is overwritten.
-- On each move node the reading created: a two-line stamp naming when and with
+- On each move node the reading created: a one-line stamp naming when and with
   what the line was produced. The evaluation is not repeated there, because it
   belongs to the position that was actually analyzed.
-- On failure: a single `error:` line with a trimmed, bounded reason.
+- On failure: an `error:` line with a trimmed, bounded reason, then the same
+  closing provenance line.
+
+The evaluation leads and the provenance closes. The block is appended to a body
+that may already be long, and on a phone the reader sees its first line or two;
+a header naming the engine and the timestamp would spend exactly that space on
+what nobody reads first, pushing the answer out of view.
+
+The completion notification points at the node holding the engine's move, not
+at the analyzed position. The question was "what is the move here", so
+following the notification should land on the answer rather than back where the
+question was asked. When the move was already in the record the existing node
+is the target; a position with no legal continuation falls back to the analyzed
+node. Board notebooks also suppress the snooze prompt that ordinarily follows a
+notification: snoozing defers work that waits on a person, and by the time this
+notification is read the engine's answer is already in the tree.
 
 Bodies are Japanese regardless of interface language. A body is persisted data
 that round-trips through KIF comments; localizing at write time would freeze

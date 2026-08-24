@@ -120,17 +120,26 @@ console.log("verify:shogi-analysis:pv-limit:passed");
 
 // --- body text --------------------------------------------------------------
 const entry = formatShogiAnalysisEntry(analysisResult(), steps);
-for (const fragment of ["--- AI解析 ", "エンジン: やねうら王 + 水匠5（5秒 / 深さ24）", "評価値: +62（先手やや有利）", "最善手: ▲７六歩", "読み筋: ▲７六歩 △３四歩"]) {
-  if (!entry.includes(fragment)) throw new Error(`The analysis block is missing ${fragment}\n${entry}`);
+const entryLines = entry.split("\n");
+// The evaluation is the answer, so it is the first thing in the block. Anything
+// above it would push it out of view on a phone behind provenance nobody reads
+// first.
+if (entryLines[0] !== "評価値: +62（先手やや有利）") throw new Error(`The evaluation must lead the block:\n${entry}`);
+if (entryLines[1] !== "最善手: ▲７六歩") throw new Error(`The best move must follow the evaluation:\n${entry}`);
+if (!entryLines[2].startsWith("読み筋: ▲７六歩 △３四歩")) throw new Error(`The reading must follow the best move:\n${entry}`);
+if (entryLines[3] !== "やねうら王 + 水匠5（5秒 / 深さ24） 2026-08-23 21:40") {
+  throw new Error(`Provenance must close the block, not open it:\n${entry}`);
 }
+if (entryLines.length !== 4) throw new Error(`The block must be exactly four lines:\n${entry}`);
+if (entry.includes("AI解析") || entry.includes("エンジン:")) throw new Error(`The old header must be gone:\n${entry}`);
 if (entry.includes("─")) throw new Error("The block must use ASCII rules so KIF comments survive Shift_JIS export.");
 
 const terminalEntry = formatShogiAnalysisEntry(analysisResult({ pv: [], bestMove: "resign", terminal: true }), []);
 if (!terminalEntry.includes("最善手: なし")) throw new Error("A terminal position must still record an entry.");
 
 const appended = appendShogiAnalysisEntry(appendShogiAnalysisEntry("元の本文", entry), terminalEntry);
-if (!appended.startsWith("元の本文\n\n--- AI解析 ")) throw new Error("Entries must append after the existing body.");
-if (appended.split("--- AI解析 ").length !== 3) throw new Error("Repeated analysis must keep every block.");
+if (!appended.startsWith("元の本文\n\n評価値: ")) throw new Error("Entries must append after the existing body.");
+if (appended.split("評価値: ").length !== 3) throw new Error("Repeated analysis must keep every block.");
 if (appendShogiAnalysisEntry("", entry) !== entry) throw new Error("An empty body must not gain leading blank lines.");
 
 const stamp = formatShogiAnalysisStamp(analysisResult());
@@ -142,7 +151,7 @@ if (stamp.includes("評価値")) throw new Error("Generated move nodes must not 
 const bookResult = analysisResult({ book: true, depth: 0, seldepth: 0, nodes: 0, nps: 0, elapsedMs: 47, score: { kind: "cp", sente: 44 }, bestMove: "7g7f", pv: ["7g7f", "8c8d"] });
 const bookSteps = buildShogiAnalysisLine(START_SFEN, 0, bookResult.pv, 24);
 const bookEntry = formatShogiAnalysisEntry(bookResult, bookSteps);
-if (!bookEntry.includes("エンジン: やねうら王 + 水匠5（定跡）")) throw new Error(`A book answer must say so:\n${bookEntry}`);
+if (!bookEntry.includes("やねうら王 + 水匠5（定跡）")) throw new Error(`A book answer must say so:\n${bookEntry}`);
 if (bookEntry.includes("秒")) throw new Error("A book answer must not claim a search budget it never spent.");
 if (!bookEntry.includes("最善手: ▲７六歩")) throw new Error("A book answer must still name the move.");
 if (!formatShogiAnalysisStamp(bookResult).includes("定跡から作成")) throw new Error("Nodes from a book line must say they came from the book.");
@@ -160,6 +169,18 @@ const root: AtlasNode = { ...analyzed, children: [played] };
 const grown = appendShogiAnalysisLine(root, "analyzed", steps.slice(0, SHOGI_ANALYSIS_MAX_LINE_NODES), stamp, nodeFactory);
 if (grown.createdIds.length !== 4) {
   throw new Error(`The existing first move must be reused and only the rest created: ${grown.createdIds.length}`);
+}
+// The notification points at the engine's move. Here that move was already in
+// the record, so the reused node has to be reported rather than nothing.
+if (grown.firstMoveNodeId !== "played-7g7f") {
+  throw new Error(`The reused first move must be the notification target: ${grown.firstMoveNodeId}`);
+}
+const fresh = appendShogiAnalysisLine(analyzed, "analyzed", steps.slice(0, 2), stamp, nodeFactory);
+if (!fresh.firstMoveNodeId || fresh.firstMoveNodeId !== fresh.createdIds[0]) {
+  throw new Error(`A newly created first move must be the notification target: ${fresh.firstMoveNodeId}`);
+}
+if (appendShogiAnalysisLine(analyzed, "analyzed", [], stamp, nodeFactory).firstMoveNodeId !== null) {
+  throw new Error("A position with no continuation must report no move node.");
 }
 const reused = grown.root.children.filter((child) => readShogiRecordContent(child)?.usi === "7g7f");
 if (reused.length !== 1) throw new Error("Reusing a move must not duplicate it as a sibling.");

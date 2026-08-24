@@ -18,8 +18,6 @@ import type { AtlasNode, ShogiAnalysisResult, ShogiRecordContent } from "../../t
 /** How many moves of the principal variation become real nodes. */
 export const SHOGI_ANALYSIS_MAX_LINE_NODES = 5;
 
-const ANALYSIS_BLOCK_PREFIX = "--- AI解析 ";
-
 export interface ShogiAnalysisLineStep {
   usi: string;
   /** Move text in the same convention human-played move nodes use. */
@@ -104,31 +102,34 @@ export function formatShogiAnalysisTimestamp(value: string): string {
 }
 
 /**
+ * Who answered, how hard they worked, and when. This closes an entry rather
+ * than opening it: the evaluation is what the reader came for, and a header
+ * would push it down the body - out of sight on a phone - behind information
+ * that only matters once the answer has been read.
+ *
  * A book answer and a search answer are different kinds of claim, so the line
  * says which one this is. The book did not think for five seconds; it recalls
  * a position someone already analyzed far more deeply than that.
  */
 function engineLine(result: ShogiAnalysisResult): string {
   const label = result.engine.label || "やねうら王 + 水匠5";
-  if (result.book) return `エンジン: ${label}（定跡）`;
+  const at = formatShogiAnalysisTimestamp(result.analyzedAt);
+  if (result.book) return `${label}（定跡） ${at}`;
   const seconds = Math.round(result.movetimeMs / 100) / 10;
   const depth = result.depth > 0 ? ` / 深さ${result.depth}` : "";
-  return `エンジン: ${label}（${seconds}秒${depth}）`;
+  return `${label}（${seconds}秒${depth}） ${at}`;
 }
 
 /** The block appended to the node the user asked about. */
 export function formatShogiAnalysisEntry(result: ShogiAnalysisResult, steps: ShogiAnalysisLineStep[]): string {
-  const lines = [
-    `${ANALYSIS_BLOCK_PREFIX}${formatShogiAnalysisTimestamp(result.analyzedAt)} ---`,
-    engineLine(result),
-    `評価値: ${describeShogiScore(result.score)}`,
-  ];
+  const lines = [`評価値: ${describeShogiScore(result.score)}`];
   if (steps.length) {
     lines.push(`最善手: ${steps[0].pvText}`);
     lines.push(`読み筋: ${steps.map((step) => step.pvText).join(" ")}`);
   } else {
     lines.push("最善手: なし（終局または指す手がない局面）");
   }
+  lines.push(engineLine(result));
   return lines.join("\n");
 }
 
@@ -140,13 +141,13 @@ export function formatShogiAnalysisEntry(result: ShogiAnalysisResult, steps: Sho
 export function formatShogiAnalysisStamp(result: ShogiAnalysisResult): string {
   const label = result.engine.label || "やねうら王 + 水匠5";
   const source = result.book ? "定跡" : "読み筋";
-  return `${ANALYSIS_BLOCK_PREFIX}${formatShogiAnalysisTimestamp(result.analyzedAt)} ---\nエンジン: ${label} の${source}から作成`;
+  return `${label} の${source}から作成 ${formatShogiAnalysisTimestamp(result.analyzedAt)}`;
 }
 
 /** Failure leaves a trace on the analyzed node and creates nothing else. */
 export function formatShogiAnalysisFailure(engineLabel: string, message: string, analyzedAt = new Date().toISOString()): string {
   const reason = message.trim().replace(/\s+/g, " ").slice(0, 200) || "原因不明のエラー";
-  return `${ANALYSIS_BLOCK_PREFIX}${formatShogiAnalysisTimestamp(analyzedAt)} ---\nエンジン: ${engineLabel}\nerror: ${reason}`;
+  return `error: ${reason}\n${engineLabel} ${formatShogiAnalysisTimestamp(analyzedAt)}`;
 }
 
 /** Appends one block to a body, keeping a blank line between entries. */
@@ -176,10 +177,16 @@ export function appendShogiAnalysisLine(
   steps: ShogiAnalysisLineStep[],
   stampBody: string,
   createMoveNode: ShogiMoveNodeFactory,
-): { root: AtlasNode; createdIds: string[] } {
+): { root: AtlasNode; createdIds: string[]; firstMoveNodeId: string | null } {
   let nextRoot = root;
   let parentId = analyzedNodeId;
   const createdIds: string[] = [];
+  /**
+   * The node holding the move the engine actually recommends, whether it was
+   * created here or already in the record. This is what the user is waiting
+   * for, so it is what the completion notification points at.
+   */
+  let firstMoveNodeId: string | null = null;
   const now = new Date().toISOString();
 
   for (const step of steps) {
@@ -189,6 +196,7 @@ export function appendShogiAnalysisLine(
     const existing = parent.children.find((child) => readShogiRecordContent(child)?.usi === step.usi);
     if (existing) {
       parentId = existing.id;
+      firstMoveNodeId ??= existing.id;
       continue;
     }
     const created = createMoveNode(parentId, parent.children.length, step.displayText, stampBody);
@@ -213,10 +221,11 @@ export function appendShogiAnalysisLine(
       updatedAt: now,
     }));
     createdIds.push(moveNode.id);
+    firstMoveNodeId ??= moveNode.id;
     parentId = moveNode.id;
   }
 
-  return { root: nextRoot, createdIds };
+  return { root: nextRoot, createdIds, firstMoveNodeId };
 }
 
 function findNodeById(node: AtlasNode, id: string): AtlasNode | null {

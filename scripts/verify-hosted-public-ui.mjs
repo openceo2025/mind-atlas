@@ -797,12 +797,12 @@ async function verifyHostedShogiAnalysis(page) {
   const body = page.locator(".node-body-input").first();
   await body.waitFor({ timeout: 15_000 });
   await page.waitForFunction(
-    () => document.querySelector(".node-body-input")?.value?.includes("--- AI解析 ") ?? false,
+    () => document.querySelector(".node-body-input")?.value?.startsWith("評価値: ") ?? false,
     null,
     { timeout: 15_000 },
   );
   const text = await body.inputValue();
-  for (const fragment of ["エンジン: やねうら王 + 水匠5", "評価値: +62（先手やや有利）", "最善手: ", "読み筋: "]) {
+  for (const fragment of ["評価値: +62（先手やや有利）", "最善手: ", "読み筋: ", "やねうら王 + 水匠5（5秒"]) {
     if (!text.includes(fragment)) throw new Error(`The analysis block is missing ${fragment}:\n${text}`);
   }
 

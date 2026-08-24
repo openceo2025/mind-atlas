@@ -175,14 +175,11 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     if (node) focusNode(node.id);
   };
 
-  const turnLabel = currentContent.fen.split(" ")[1] === "b" ? "Black" : "White";
-
   return (
     <section className="chess-viewer" aria-label="Chess record viewer">
       <div className="chess-viewer-toolbar">
         <span className="chess-viewer-label">チェス</span>
         <span className="chess-viewer-position">{currentContent.ply === 0 ? "開始局面" : `${currentContent.ply} ply`}</span>
-        <span className="board-turn-indicator">{turnLabel}</span>
         <button
           type="button"
           className="chess-viewer-icon"

@@ -55,7 +55,6 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
     nodes.push(variation);
     candidateNodesByVertex.set(content.vertex, nodes);
   }
-  const turnLabel = nextGoSign(rootContent, currentNode ?? recordRoot) === 1 ? "黒番" : "白番";
 
   const addMove = (vertex: Vertex, pass = false) => {
     const parent = currentNode ?? recordRoot;
@@ -114,7 +113,6 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
       <div className="go-viewer-toolbar">
         <span className="go-viewer-label">囲碁</span>
         <span className="go-viewer-position">{currentContent.ply === 0 ? "開始局面" : `${currentContent.ply} 手目`}</span>
-        <span className="board-turn-indicator">{turnLabel}</span>
         <button
           type="button"
           className="go-viewer-icon"

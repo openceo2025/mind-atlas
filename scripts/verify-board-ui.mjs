@@ -710,31 +710,60 @@ async function verifyBranchReplayControls() {
       const marks = await page.evaluate((iconClassName) => {
         const buttons = [...document.querySelectorAll(`.${iconClassName}.board-branch-jump`)];
         return buttons.map((button) => {
-          const mark = button.querySelector(".board-branch-jump-mark");
-          const arrow = button.querySelector(".board-branch-jump-arrow");
+          const svg = button.querySelector("svg");
+          const dot = button.querySelector("circle");
+          const chevron = button.querySelector("path");
           const rect = button.getBoundingClientRect();
+          const sibling = document.querySelector(`.${iconClassName}:not(.board-branch-jump) svg`);
           return {
             label: button.getAttribute("aria-label") ?? "",
-            text: button.textContent ?? "",
-            markSize: mark ? Number.parseFloat(getComputedStyle(mark).fontSize) : 0,
-            arrowSize: arrow ? Number.parseFloat(getComputedStyle(arrow).fontSize) : 0,
+            text: (button.textContent ?? "").trim(),
+            viewBox: svg?.getAttribute("viewBox") ?? "",
+            strokeWidth: svg?.getAttribute("stroke-width") ?? "",
+            iconWidth: svg ? Math.round(svg.getBoundingClientRect().width) : 0,
+            siblingIconWidth: sibling ? Math.round(sibling.getBoundingClientRect().width) : 0,
+            dotWidth: dot ? dot.getBoundingClientRect().width : 0,
+            chevronHeight: chevron ? chevron.getBoundingClientRect().height : 0,
             width: Math.round(rect.width),
             height: Math.round(rect.height),
           };
         });
       }, iconClass);
       if (marks.length !== 2) throw new Error(`${mode} does not expose both branch replay controls: ${JSON.stringify(marks)}`);
-      const [previous, next] = marks;
-      if (previous.text !== "○＜" || next.text !== "＞○") {
-        throw new Error(`${mode} branch controls do not read ○＜ / ＞○: ${JSON.stringify(marks)}`);
-      }
       for (const mark of marks) {
-        if (!(mark.markSize > 0 && mark.markSize < mark.arrowSize)) {
-          throw new Error(`${mode} branch mark is not smaller than the arrow: ${JSON.stringify(mark)}`);
+        // Drawn, not typed: a text glyph takes its weight and size from the
+        // font and never lines up with the lucide icons beside it.
+        if (mark.text !== "") throw new Error(`${mode} branch control still renders text: ${JSON.stringify(mark)}`);
+        if (mark.viewBox !== "0 0 24 24" || mark.strokeWidth !== "2") {
+          throw new Error(`${mode} branch icon does not share the icon grid: ${JSON.stringify(mark)}`);
+        }
+        if (mark.iconWidth !== mark.siblingIconWidth) {
+          throw new Error(`${mode} branch icon is not the size of its neighbours: ${JSON.stringify(mark)}`);
+        }
+        // The fork marker is a dot, not a ring the size of the chevron.
+        if (!(mark.dotWidth > 0 && mark.dotWidth < mark.chevronHeight * 0.6)) {
+          throw new Error(`${mode} branch dot is not small enough: ${JSON.stringify(mark)}`);
         }
         if (mark.width > 44 || mark.height > 44) {
           throw new Error(`${mode} branch control is not compact: ${JSON.stringify(mark)}`);
         }
+      }
+
+      // Adding controls to this row once pushed the last one off screen, so the
+      // row is measured rather than trusted.
+      const overflow = await page.evaluate((viewerSelector) => {
+        const toolbar = document.querySelector(`${viewerSelector} [class$="-viewer-toolbar"]`);
+        if (!toolbar) return { missing: true };
+        const bounds = toolbar.getBoundingClientRect();
+        const escaped = [...toolbar.querySelectorAll("button")]
+          .map((button) => ({ label: button.getAttribute("aria-label") ?? "", rect: button.getBoundingClientRect() }))
+          .filter(({ rect }) => rect.right > bounds.right + 0.5 || rect.left < bounds.left - 0.5)
+          .map(({ label, rect }) => ({ label, left: Math.round(rect.left), right: Math.round(rect.right) }));
+        return { missing: false, toolbarRight: Math.round(bounds.right), escaped };
+      }, viewer);
+      if (overflow.missing) throw new Error(`${mode} viewer has no toolbar to measure`);
+      if (overflow.escaped.length) {
+        throw new Error(`${mode} toolbar controls overflow the panel: ${JSON.stringify(overflow)}`);
       }
       console.log(`verify:board-ui:branch-replay:${mode}:controls:passed`);
     } finally {
