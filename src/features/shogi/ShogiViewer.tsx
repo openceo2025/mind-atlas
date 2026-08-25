@@ -1,4 +1,4 @@
-import { BookOpen, ChevronLeft, ChevronRight, GitBranch, RotateCcw, SkipBack, SkipForward } from "lucide-react";
+import { ChevronLeft, ChevronRight, GitBranch, RotateCcw, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { formatKIFMove, handPieceTypes, Position, Square } from "tsshogi";
 import type { Api } from "shogiground/api";
@@ -162,10 +162,6 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
     focusNode(childId);
   }
 
-  // Shown for the move the user is standing on, so a branch that was merged in
-  // says which game it came from without needing a hover.
-  const currentProvenance = findRecordProvenance(currentNode);
-
   const jumpTo = (node: AtlasNode | null) => {
     if (node) focusNode(node.id);
   };
@@ -274,20 +270,6 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
           );
         })}
       </div>
-      {currentProvenance ? (
-        <dl className="board-record-source" aria-label={formatAppMessage("board.recordSource.label")}>
-          <div className="board-record-source-headline">
-            <BookOpen size={12} aria-hidden="true" />
-            <span>{formatAppMessage("board.recordSource.label")}</span>
-          </div>
-          {currentProvenance.entries.map(([key, value]) => (
-            <div key={key} className="board-record-source-row">
-              <dt>{key}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
       {!libraryReady && !libraryError ? <p className="shogi-viewer-note">将棋盤を準備しています...</p> : null}
       {libraryError ? <p className="shogi-viewer-note is-error">{libraryError}</p> : null}
     </section>

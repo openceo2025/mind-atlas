@@ -57,6 +57,13 @@ export function FocusPanel({
   const attachmentPreviewUrls = useAtlasStore((state) => state.attachmentPreviewUrls);
   const selectedNode = findNode(atlasRoot, selectedNodeId) ?? atlasRoot;
   const isRoot = selectedNode.id === atlasRoot.id;
+  /**
+   * A board record round-trips through KIF, PGN or SGF, and none of those
+   * formats can carry a reminder or a node colour. Offering controls whose
+   * settings the next export would silently drop is worse than not offering
+   * them, so board modes hide both.
+   */
+  const isBoardGameMode = atlasRoot.notebookMode === "shogi" || atlasRoot.notebookMode === "chess" || atlasRoot.notebookMode === "go";
   const panelHidden = isRoot && !boardGameMode;
   const [surfaceMenuOpen, setSurfaceMenuOpen] = useState(false);
   const [reminderMenuOpen, setReminderMenuOpen] = useState(false);
@@ -264,6 +271,7 @@ export function FocusPanel({
               <PanelRightOpen size={17} />
             </button>
           ) : null}
+          {isBoardGameMode ? null : (
           <div className="panel-menu-anchor">
             <button
               className={`icon-button panel-tool-button reminder-tool-button ${selectedNode.reminderAt && !selectedNode.reminderFiredAt ? "is-live" : ""}`}
@@ -280,6 +288,8 @@ export function FocusPanel({
             </button>
             {reminderMobileLayout ? null : reminderMenu}
           </div>
+          )}
+        {isBoardGameMode ? null : (
         <div className="panel-menu-anchor">
           <button
             className="icon-button panel-tool-button"
@@ -323,6 +333,7 @@ export function FocusPanel({
             </div>
           ) : null}
         </div>
+        )}
       </div>
 
       <div className="panel-text-section">

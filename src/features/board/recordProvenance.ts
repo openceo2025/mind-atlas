@@ -81,13 +81,75 @@ export function findRecordProvenance(node: AtlasNode | null | undefined): Record
     }
   }
 
+  return {
+    headline: ordered.join(" / "),
+    entries: orderProvenanceEntries(entries),
+  };
+}
+
+function orderProvenanceEntries(entries: Array<[string, string]>): Array<[string, string]> {
   const preferenceIndex = (key: string) => {
     const index = (HEADLINE_KEYS as readonly string[]).indexOf(key);
     return index === -1 ? HEADLINE_KEYS.length : index;
   };
+  return [...entries].sort((left, right) => preferenceIndex(left[0]) - preferenceIndex(right[0]));
+}
 
-  return {
-    headline: ordered.join(" / "),
-    entries: [...entries].sort((left, right) => preferenceIndex(left[0]) - preferenceIndex(right[0])),
+/**
+ * The heading the header block is written under. Fixed Japanese, like every
+ * other string that ends up in a node body: a body is persisted data that
+ * round-trips through a KIF comment, so localizing it at write time would
+ * freeze whichever language the merge happened to be performed in.
+ */
+export const RECORD_PROVENANCE_HEADING = "元の棋譜";
+
+/**
+ * The source header, as body text.
+ *
+ * This belongs in the node body rather than in a panel beside the board. It is
+ * content about that move - which game the line came from - so it belongs where
+ * every other note about a move lives, where it can be read, edited, exported
+ * into the KIF comment and carried into a share link.
+ */
+export function formatRecordProvenanceBody(metadata: Record<string, string>): string {
+  const entries = orderProvenanceEntries(Object.entries(metadata).filter(([key, value]) => key && value));
+  if (!entries.length) return "";
+  return [RECORD_PROVENANCE_HEADING, ...entries.map(([key, value]) => `${key}: ${value}`)].join("\n");
+}
+
+/**
+ * Adds the header block to a body once. Returns null when there is nothing to
+ * add, so callers can skip a write: a record merged twice, or a record that
+ * already carried the block from a previous merge, must not collect copies.
+ */
+export function appendRecordProvenanceToBody(body: string, metadata: Record<string, string>): string | null {
+  const block = formatRecordProvenanceBody(metadata);
+  if (!block) return null;
+  const current = String(body ?? "").replace(/\s+$/, "");
+  if (current.includes(block)) return null;
+  return current ? `${current}\n\n${block}` : block;
+}
+
+/**
+ * Writes the header into every branch node that carries one but has not had it
+ * written yet. Records merged before the header moved into the body keep their
+ * metadata in structured content, so this is what makes those records show it.
+ *
+ * Returns null when nothing changed, so the caller can skip a notebook write.
+ */
+export function normalizeRecordProvenanceBodies(root: AtlasNode): AtlasNode | null {
+  let changed = false;
+
+  const visit = (node: AtlasNode): AtlasNode => {
+    const children = node.children.map(visit);
+    const childrenChanged = children.some((child, index) => child !== node.children[index]);
+    const metadata = node.structuredContent?.sourceRecordMetadata;
+    const body = metadata ? appendRecordProvenanceToBody(node.body ?? "", metadata) : null;
+    if (body === null) return childrenChanged ? { ...node, children } : node;
+    changed = true;
+    return { ...node, body, children };
   };
+
+  const next = visit(root);
+  return changed ? next : null;
 }

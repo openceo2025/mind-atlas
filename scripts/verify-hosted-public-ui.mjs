@@ -827,7 +827,7 @@ async function waitFor(predicate, message, timeoutMs = 15_000) {
 
 async function verifyHostedShogiMergeFeedback(page, recordText) {
   await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
-  await page.getByRole("button", { name: "KIF棋譜をマージ" }).click();
+  await page.getByRole("button", { name: "将棋アプリの棋譜をマージ" }).click();
   const dialog = page.locator(".board-record-dialog");
   await dialog.waitFor();
   const mergeStrategies = dialog.locator('input[name="board-record-merge-strategy"]');

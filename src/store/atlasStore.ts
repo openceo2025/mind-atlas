@@ -54,6 +54,7 @@ import {
   type ContextPlan,
 } from "../context/contextEngine";
 import { normalizeShogiNotebookNotation } from "../features/shogi/shogiNotation";
+import { normalizeRecordProvenanceBodies } from "../features/board/recordProvenance";
 import { hydrateMissingNodeTitlesFromBodies } from "../titleMaintenance";
 import { acknowledgeNodeError, isIntrinsicErrorNode } from "../nodeErrorState";
 import {
@@ -3544,7 +3545,10 @@ async function initializeNotebookPersistence() {
     // Records imported before the board forms were adopted still spell promoted
     // silver, knight and lance the KIF way. Rewrite them once on load so the
     // board, the record list and the node titles all read the same.
-    const currentRoot = repairedRoot ? normalizeShogiNotebookNotation(repairedRoot) ?? repairedRoot : null;
+    const notationRoot = repairedRoot ? normalizeShogiNotebookNotation(repairedRoot) ?? repairedRoot : null;
+    // Branches merged before the source header moved into the body still carry
+    // it only in structured content, where nothing shows it any more.
+    const currentRoot = notationRoot ? normalizeRecordProvenanceBodies(notationRoot) ?? notationRoot : null;
     if (currentRoot) writeLegacyNotebookRecovery(currentRoot);
     useAtlasStore.setState((state) => {
       if (!currentRoot) {

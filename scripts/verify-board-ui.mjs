@@ -96,9 +96,9 @@ async function verifyBoardExport(page, mode) {
   const extension = fixture.name.slice(fixture.name.lastIndexOf("."));
   const format = extension.slice(1).toUpperCase();
   await page.getByLabel(/Open atlas menu|Mind Atlasメニューを開く/).click();
-  const exportButton = page.getByRole("button", {
-    name: new RegExp(`(?:Export\\s+${format}\\s+record|${format}棋譜をエクスポート)`, "i"),
-  });
+  // The control names the file it writes in its detail line rather than in its
+  // label, so the label is now just "Export".
+  const exportButton = page.getByRole("button", { name: new RegExp(`(?:^Export|エクスポート)\\s*\\${extension}`, "i") });
   const [download] = await Promise.all([
     page.waitForEvent("download"),
     exportButton.click(),
@@ -215,8 +215,7 @@ async function verifyShogi() {
 
     await page.getByRole("button", { name: "Go to parent layer" }).click();
     await page.locator(".shogi-viewer-position").filter({ hasText: "3手目" }).waitFor();
-    await verifyGeneratedLayoutFocus(page, "ツリー");
-    await verifyGeneratedLayoutFocus(page, "マインドマップ");
+    await assertBoardMenuIsSimplified(page);
   } finally {
     await context.close();
   }
@@ -274,7 +273,9 @@ async function verifyMergeDialogLayout() {
  * forward step that fell back to record order would land on the original line.
  */
 async function verifyMergedBranchIsRetraced(page, dialog) {
-  const source = "#KIF version=2.0\n\n手合割：平手\n\n手数----指手---------\n   1 ７六歩(77)\n   2 ３四歩(33)\n   3 ２六歩(27)\n   4 ８四歩(83)\n";
+  // Carries a real header, because the header is what the merge has to write
+  // into the branch node's body.
+  const source = "#KIF version=2.0\n開始日時：2026/03/14 20:00:00\n場所：将棋ウォーズ\n先手：さとう\n後手：すずき\n手合割：平手\n\n手数----指手---------\n   1 ７六歩(77)\n   2 ３四歩(33)\n   3 ２六歩(27)\n   4 ８四歩(83)\n";
   await dialog.locator("textarea").fill(source);
   await dialog.getByRole("button", { name: /この棋譜にマージ|Merge into this record/ }).click();
   await dialog.waitFor({ state: "detached", timeout: 15_000 });
@@ -299,6 +300,16 @@ async function verifyMergedBranchIsRetraced(page, dialog) {
   const afterForward = await settledSelectedNodeTitle(page, forkMove);
   if (afterForward !== mergedMove) {
     throw new Error(`Stepping forward after a merge left the branch: expected ${mergedMove}, got ${afterForward}.`);
+  }
+
+  // The source header is a note about this move, so it belongs in the body the
+  // editor shows, not in a panel wedged under the candidate moves.
+  if (await page.locator(".board-record-source").count()) {
+    throw new Error("The source record is still rendered beside the board instead of in the node body.");
+  }
+  const mergedBody = await page.locator(".node-body-input").first().inputValue();
+  if (!mergedBody.includes("元の棋譜")) {
+    throw new Error(`The merged branch body does not carry its source record: ${JSON.stringify(mergedBody)}`);
   }
 }
 
@@ -479,8 +490,7 @@ async function verifyChess() {
     await page.getByRole("button", { name: "一手戻る" }).click();
     await page.locator(".chess-viewer-position").filter({ hasText: "5 ply" }).waitFor();
     if (await page.locator(".chess-candidate-arrows line").count() < 1) throw new Error("New chess branch arrow is missing.");
-    await verifyGeneratedLayoutFocus(page, "ツリー");
-    await verifyGeneratedLayoutFocus(page, "マインドマップ");
+    await assertBoardMenuIsSimplified(page);
   } finally {
     await context.close();
   }
@@ -652,8 +662,7 @@ async function verifyGo() {
     await page.locator(".go-viewer-position").filter({ hasText: "2 手目" }).waitFor();
     await page.locator(".go-point").first().click();
     await page.locator(".go-viewer-position").filter({ hasText: "3 手目" }).waitFor();
-    await verifyGeneratedLayoutFocus(page, "ツリー");
-    await verifyGeneratedLayoutFocus(page, "マインドマップ");
+    await assertBoardMenuIsSimplified(page);
   } finally {
     await context.close();
   }
@@ -1224,19 +1233,26 @@ async function assertDesktopInputLayer(page) {
   }
 }
 
-async function verifyGeneratedLayoutFocus(page, buttonName) {
+/**
+ * Board records use the Mind Atlas arrangement only, and their menu drops every
+ * surface that cannot describe a game: the layout switcher, node search, the
+ * voice and agent entries, the tutorial and the mobile section. This is the
+ * whole point of the board menu, so it is measured rather than trusted.
+ */
+async function assertBoardMenuIsSimplified(page) {
   await page.getByLabel(/Open atlas menu|Mind Atlasメニューを開く/).click();
-  await page.getByRole("button", { name: buttonName, exact: true }).click();
-  await page.waitForTimeout(650);
-  const state = await page.evaluate(() => {
-    const universe = document.querySelector(".universe-shell")?.getBoundingClientRect();
-    const inputs = [...document.querySelectorAll('.universe-shell input[aria-label$="のタイトル"]')];
-    const active = inputs.find((input) => input.value === document.querySelector(".node-title-input")?.value) ?? inputs.at(-1);
-    const title = active?.getBoundingClientRect();
-    return universe && title ? { universe: rectJson(universe), title: rectJson(title) } : null;
-    function rectJson(rect) { return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; }
-  });
-  if (state && !rectsOverlap(state.universe, state.title)) throw new Error(`${buttonName} active node is outside the board-mode universe.`);
+  const menu = page.locator(".global-context-menu");
+  await menu.waitFor();
+  for (const name of ["ツリー", "マインドマップ", "カレンダー", "テキストエディター"]) {
+    if (await menu.getByRole("button", { name, exact: true }).count()) {
+      throw new Error(`The board menu still offers the ${name} layout.`);
+    }
+  }
+  const text = (await menu.textContent()) ?? "";
+  for (const fragment of ["全ノードを検索", "AI Partner", "Realtime", "音声設定", "チュートリアル", "モバイル設定"]) {
+    if (text.includes(fragment)) throw new Error(`The board menu still offers ${fragment}.`);
+  }
+  await page.keyboard.press("Escape");
 }
 
 async function expectTexts(locator, expected, label) {

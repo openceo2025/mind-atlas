@@ -1,5 +1,6 @@
 import type { AtlasNode, AtlasStructuredContent, NotebookMode } from "../../types";
 import { isBoardNotebookMode, type BoardNotebookMode } from "./boardRecord.ts";
+import { appendRecordProvenanceToBody } from "./recordProvenance.ts";
 
 export interface BoardRecordMergeResult {
   root: AtlasNode;
@@ -218,12 +219,18 @@ function cloneRecordSubtree(
       ...(sourceRecordMetadata && Object.keys(sourceRecordMetadata).length ? { sourceRecordMetadata } : {}),
     } as AtlasStructuredContent
     : undefined;
+  // The header is written into the body, where notes about a move belong and
+  // where export, sharing and editing already reach it.
+  const body = sourceRecordMetadata && Object.keys(sourceRecordMetadata).length
+    ? appendRecordProvenanceToBody(source.body ?? "", sourceRecordMetadata)
+    : null;
   const clone: AtlasNode = {
     ...structuredClone(source),
     id,
     sourceParentId: parentId,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...(body === null ? {} : { body }),
     ...(structuredContent ? { structuredContent } : {}),
     children: [],
   };

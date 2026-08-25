@@ -3,7 +3,7 @@ import { sanitizeStructuredContentForExport } from "../src/notebookExport.ts";
 import { createNewShogiRecord, exportShogiRecord, importShogiRecordFile } from "../src/features/shogi/shogiRecord.ts";
 import { buildShogiCandidateArrows, buildShogiCandidateTargets } from "../src/features/shogi/shogiCandidates.ts";
 import { hasKifPromotedPieceText, normalizeShogiNotebookNotation, toShogiBoardNotation } from "../src/features/shogi/shogiNotation.ts";
-import { findRecordProvenance } from "../src/features/board/recordProvenance.ts";
+import { RECORD_PROVENANCE_HEADING, findRecordProvenance, normalizeRecordProvenanceBodies } from "../src/features/board/recordProvenance.ts";
 import { mergeBoardRecords } from "../src/features/board/boardRecordMerge.ts";
 import { isBoardBranchPoint, pathToNextBranchPoint, pathToPreviousBranchPoint } from "../src/features/board/boardBranchMemory.ts";
 import { branchReplayStepMs } from "../src/features/board/boardNavigation.ts";
@@ -276,6 +276,48 @@ if (!customProvenance || !customProvenance.headline.includes("手元の記録"))
 const sanitizedProvenance = sanitizeStructuredContentForExport(branchFirstMoves[0].structuredContent);
 if (!sanitizedProvenance || !("sourceRecordMetadata" in sanitizedProvenance)) {
   throw new Error("The source record header did not survive the export sanitizer.");
+}
+
+// The header belongs in the node body, where notes about a move already live
+// and where export, sharing and editing reach it - not in a panel beside the
+// board that only the merged branch could ever show.
+const provenanceBody = branchFirstMoves[0].body ?? "";
+if (!provenanceBody.includes(RECORD_PROVENANCE_HEADING)) {
+  throw new Error(`The merged branch did not record its source in the body: ${JSON.stringify(provenanceBody)}`);
+}
+for (const expected of ["2026/03/14", "佐藤", "鈴木", "研究会"]) {
+  if (!provenanceBody.includes(expected)) {
+    throw new Error(`The source header lost ${expected} on its way into the body: ${JSON.stringify(provenanceBody)}`);
+  }
+}
+
+// Merging the same record twice must not stack copies of the same header.
+const twiceMerged = mergeBoardRecords(merged.root, incoming.root, { strategy: "record-root" });
+const twiceBodies: string[] = [];
+const collectBodies = (node: AtlasNode) => {
+  if (node.structuredContent?.sourceRecordMetadata) twiceBodies.push(node.body ?? "");
+  node.children.forEach(collectBodies);
+};
+collectBodies(twiceMerged.root);
+for (const body of twiceBodies) {
+  if (body.split(RECORD_PROVENANCE_HEADING).length > 2) {
+    throw new Error(`A repeated merge duplicated the source header: ${JSON.stringify(body)}`);
+  }
+}
+
+// Records merged before the header moved into the body keep it only in
+// structured content; loading one has to write it through.
+const legacyBranch: AtlasNode = {
+  ...branchFirstMoves[0],
+  body: "",
+  children: [],
+};
+const provenanceMigrated = normalizeRecordProvenanceBodies({ ...merged.root, children: [legacyBranch] } as AtlasNode);
+if (!provenanceMigrated || !provenanceMigrated.children[0].body.includes(RECORD_PROVENANCE_HEADING)) {
+  throw new Error("An older merged record did not gain its source header on load.");
+}
+if (normalizeRecordProvenanceBodies(provenanceMigrated) !== null) {
+  throw new Error("The load-time migration rewrote a record that already carried its header.");
 }
 console.log("verify:shogi:merged-branch-provenance:passed");
 

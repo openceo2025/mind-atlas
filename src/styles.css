@@ -1553,6 +1553,7 @@ h1 {
 }
 
 .context-menu button span,
+.context-menu label > span,
 .context-menu a.context-menu-link span {
   display: grid;
   gap: 2px;
@@ -1560,6 +1561,7 @@ h1 {
 }
 
 .context-menu button small,
+.context-menu label small,
 .context-menu a.context-menu-link small {
   color: #9fb5a9;
   font-size: 11px;
@@ -4056,43 +4058,6 @@ h1 {
   white-space: nowrap;
 }
 
-.board-record-source {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-  border: 1px solid rgba(219, 234, 211, 0.14);
-  border-radius: 6px;
-  padding: 6px 8px;
-  background: rgba(219, 234, 211, 0.05);
-  color: #c2d5c7;
-  font-size: 10px;
-}
-
-.board-record-source-headline {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: #9cac9f;
-}
-
-.board-record-source-row {
-  display: grid;
-  grid-template-columns: minmax(0, 8ch) minmax(0, 1fr);
-  gap: 6px;
-}
-
-.board-record-source-row dt {
-  overflow: hidden;
-  color: #9cac9f;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.board-record-source-row dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 .chess-viewer,
 .go-viewer {
   display: grid;
@@ -6329,7 +6294,8 @@ button:disabled,
 }
 
 .app-shell[data-theme="light"] .context-menu button,
-.app-shell[data-theme="light"] .context-menu label {
+.app-shell[data-theme="light"] .context-menu label,
+.app-shell[data-theme="light"] .context-menu a.context-menu-link {
   color: #17283e;
 }
 
@@ -6339,7 +6305,8 @@ button:disabled,
 }
 
 .app-shell[data-theme="light"] .context-menu button:hover,
-.app-shell[data-theme="light"] .context-menu label:hover {
+.app-shell[data-theme="light"] .context-menu label:hover,
+.app-shell[data-theme="light"] .context-menu a.context-menu-link:hover {
   background: rgba(28, 112, 207, 0.1);
 }
 
@@ -10050,4 +10017,104 @@ button:disabled,
     outline: 0;
     background: transparent;
   }
+}
+
+/*
+ * Board records in the light theme.
+ *
+ * The board surfaces were drawn for the dark background they shipped with:
+ * pale gold labels, translucent white borders and muted greens all rely on
+ * something dark behind them, and on white they disappear. These rules restate
+ * the same design against a light ground rather than dimming it, so the board
+ * reads the same way in either theme.
+ */
+.app-shell[data-theme="light"].is-board-game-mode .focus-panel.is-board-game-panel .panel-toolbar,
+.app-shell[data-theme="light"].is-board-game-mode .focus-panel.is-board-game-panel .panel-text-section,
+.app-shell[data-theme="light"].is-board-game-mode .focus-panel.is-board-game-panel .panel-preview-area {
+  border-color: rgba(53, 104, 164, 0.2);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 18px 64px rgba(55, 90, 130, 0.16);
+}
+
+.app-shell[data-theme="light"] .shogi-viewer-label {
+  color: #8a6300;
+}
+
+.app-shell[data-theme="light"] .chess-viewer-label {
+  color: #1e4fa8;
+}
+
+.app-shell[data-theme="light"] .go-viewer-label {
+  color: #8a5a1f;
+}
+
+.app-shell[data-theme="light"] .shogi-viewer-position,
+.app-shell[data-theme="light"] .chess-viewer-position,
+.app-shell[data-theme="light"] .go-viewer-position,
+.app-shell[data-theme="light"] .board-variation-label,
+.app-shell[data-theme="light"] .board-variation-source,
+.app-shell[data-theme="light"] .shogi-viewer-note,
+.app-shell[data-theme="light"] .board-record-note {
+  color: #4a5b6d;
+}
+
+.app-shell[data-theme="light"] .shogi-variations,
+.app-shell[data-theme="light"] .chess-variations,
+.app-shell[data-theme="light"] .go-variations {
+  color: #29394b;
+}
+
+.app-shell[data-theme="light"] .shogi-viewer-note.is-error,
+.app-shell[data-theme="light"] .shogi-viewer-status {
+  color: #b3261e;
+}
+
+.app-shell[data-theme="light"] .shogi-viewer-icon,
+.app-shell[data-theme="light"] .chess-viewer-icon,
+.app-shell[data-theme="light"] .go-viewer-icon {
+  border-color: rgba(53, 104, 164, 0.3);
+  background: rgba(53, 104, 164, 0.07);
+  color: #17283e;
+}
+
+.app-shell[data-theme="light"] .shogi-variations button,
+.app-shell[data-theme="light"] .chess-variations button,
+.app-shell[data-theme="light"] .go-variations button {
+  border-color: rgba(53, 104, 164, 0.24);
+  background: rgba(53, 104, 164, 0.06);
+  color: #17283e;
+}
+
+.app-shell[data-theme="light"] .shogi-variations button.is-active,
+.app-shell[data-theme="light"] .chess-variations button.is-active,
+.app-shell[data-theme="light"] .go-variations button.is-active {
+  border-color: rgba(154, 106, 0, 0.6);
+  background: rgba(214, 170, 60, 0.16);
+  color: #6d4a00;
+}
+
+.app-shell[data-theme="light"] .shogi-variations button.has-record-source {
+  border-color: rgba(154, 106, 0, 0.42);
+}
+
+/* The hand trays are white boxes on a white panel without their own ground. */
+.app-shell[data-theme="light"] .shogi-hand-host.sg-hand-wrap {
+  border-color: rgba(146, 108, 48, 0.34);
+  background: rgba(214, 170, 100, 0.2);
+}
+
+.app-shell[data-theme="light"] .board-record-source-section h3,
+.app-shell[data-theme="light"] .board-record-dialog .board-record-merge-strategy legend {
+  color: #29394b;
+}
+
+/* The language select keeps its own ground, so the light theme has to restate it. */
+.app-shell[data-theme="light"] .language-select-label {
+  color: #17283e;
+}
+
+.app-shell[data-theme="light"] .language-select-label select {
+  border-color: rgba(53, 104, 164, 0.28);
+  background: #ffffff;
+  color: #17283e;
 }

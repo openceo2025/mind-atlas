@@ -74,6 +74,7 @@ const RENDER_QUALITY_STORAGE_KEY = "mind-atlas-render-quality";
 const ROOT_COMMAND_MAX_ZOOM = 1.08;
 const DEFAULT_DATASET_TITLE = "Mind Atlas";
 const MIND_ATLAS_SOURCE_URL = "https://github.com/openceo2025/mind-atlas";
+const SHOGI_LANDING_URL = "https://mind-atlas.org/shogi/";
 const IMPORT_ACCEPT_TYPES = ".mindatlas,.mindatlaspkg,.md,.markdown,.opml,.mm,.kif,.ki2,.csa,.pgn,.sgf,application/mindatlas+json,application/x-mindatlas-package,text/markdown,text/plain,text/xml,application/xml";
 const HOSTED_IMPORT_ACCEPT_TYPES = ".mindatlas,.md,.markdown,.opml,.mm,.kif,.ki2,.csa,.pgn,.sgf,application/mindatlas+json,text/markdown,text/plain,text/xml,application/xml";
 const CLOUD_NOTEBOOK_MAX_BYTES = 10 * 1024 * 1024;
@@ -335,6 +336,23 @@ export default function App() {
   const notebookMode: NotebookMode = atlasRoot.notebookMode ?? "standard";
   const isBoardGameMode = notebookMode !== "standard";
   const boardRecordFormat = isBoardNotebookMode(notebookMode) ? BOARD_RECORD_FORMATS[notebookMode] : null;
+  const boardGameLabel = t(
+    notebookMode === "chess" ? "board.game.chess" : notebookMode === "go" ? "board.game.go" : "board.game.shogi",
+  );
+  /**
+   * Shogi arrived through its own landing page, so its overview link goes back
+   * there rather than to the general Mind Atlas page. Chess and Go have no such
+   * page and keep the general one.
+   */
+  const aboutLinkHref = notebookMode === "shogi" ? SHOGI_LANDING_URL : localizedAboutUrl(locale);
+  const aboutLinkLabel = notebookMode === "shogi" ? t("menu.about.shogi") : t("menu.about");
+  const aboutLinkDetail = notebookMode === "shogi" ? t("menu.about.shogi.detail") : t("menu.about.detail");
+  /** Every extension the import control accepts, so the menu can name them. */
+  const importAcceptSummary = (publicServiceMode ? HOSTED_IMPORT_ACCEPT_TYPES : IMPORT_ACCEPT_TYPES)
+    .split(",")
+    .map((type) => type.trim())
+    .filter((type) => type.startsWith("."))
+    .join(" ");
   const shogiAnalysisNodeId = useAtlasStore((state) => state.shogiAnalysisNodeId);
   const requestShogiAnalysis = useAtlasStore((state) => state.requestShogiAnalysis);
   const shogiAnalysisBusy = Boolean(shogiAnalysisNodeId);
@@ -1663,26 +1681,6 @@ export default function App() {
     return await importNativeBoardRecordText(mode, source, `${BOARD_RECORD_FORMATS[mode].label} record`);
   };
 
-  const readBoardRecordCloudSource = async (entry: CloudNotebookEntry) => {
-    if (publicServiceMode) {
-      if (!entry.id) throw new Error("Cloud notebook id is missing.");
-      const result = await loadHostedCloudNotebook(entry.id);
-      if (result.record) return (await importNativeBoardRecord(result.record)).root;
-      if (result.root && isBoardNotebookMode(result.root.notebookMode)) return result.root;
-      throw new Error(t("board.merge.notBoardRecord"));
-    }
-
-    const blob = await downloadCloudNotebookPackage(entry.name);
-    if (/\.(kif|pgn|sgf)$/i.test(entry.name)) {
-      return (await importNativeBoardRecordFile(new File([blob], entry.name, { type: "text/plain" }))).root;
-    }
-    if (/\.mindatlaspkg$/i.test(entry.name)) {
-      const imported = await importNotebookPackage(new File([blob], entry.name, { type: "application/x-mindatlas-package" }));
-      if (isBoardNotebookMode(imported.root.notebookMode)) return imported.root;
-    }
-    throw new Error(t("board.merge.notBoardRecord"));
-  };
-
   const applyBoardRecordMerge = async (sourceRoot: AtlasNode) => {
     const strategy = notebookMode === "go" ? "record-root" : boardRecordMergeStrategy;
     const result = mergeBoardRecords(atlasRoot, sourceRoot, { strategy });
@@ -1738,18 +1736,6 @@ export default function App() {
     }
     setBoardRecordDialogMode(null);
     handleImportFile(file);
-  };
-
-  const handleMergeBoardRecordCloud = (entry: CloudNotebookEntry) => {
-    void runBoardRecordDialogAction(async () => {
-      await applyBoardRecordMerge(await readBoardRecordCloudSource(entry));
-    });
-  };
-
-  const handleMergeBoardRecordSnapshot = (snapshot: NotebookSnapshot) => {
-    void runBoardRecordDialogAction(async () => {
-      await applyBoardRecordMerge(await loadNotebookSnapshot(snapshot.id));
-    });
   };
 
   const handleBoardRecordText = (value: string) => {
@@ -2457,6 +2443,58 @@ export default function App() {
                 </span>
               </button>
             ) : null}
+            {/*
+              * A board record is a single file the whole session revolves
+              * around, so its file menu is ordered by how a game actually
+              * arrives: start, open, merge in another record, then save.
+              */}
+            {isBoardGameMode ? (
+              <div className="context-menu-section" aria-label={t("menu.files.label")}>
+                <span className="context-menu-section-title">{t("menu.files")}</span>
+                <button type="button" onClick={handleInitialize}>
+                  <RotateCcw size={15} /> {t("menu.newSpace")}
+                </button>
+                {cloudNotebooksAvailable ? (
+                  <button type="button" onClick={handleOpenCloudLoad}>
+                    <CloudDownload size={15} /> {t("menu.cloudLoad")}
+                  </button>
+                ) : null}
+                <button type="button" onClick={() => openBoardRecordDialog("merge")}>
+                  <GitBranch size={15} /> {t("board.merge.openApps", { game: boardGameLabel })}
+                </button>
+                {cloudNotebooksAvailable ? (
+                  <button type="button" onClick={publicServiceMode ? handleOpenCloudLoad : handleSaveToCloud}>
+                    <CloudUpload size={15} />
+                    <span>
+                      {t("menu.cloudSave")}
+                      <small>{cloudStatus || t("menu.cloudSave.detail")}</small>
+                    </span>
+                  </button>
+                ) : null}
+                <button type="button" onClick={handleOpenRestoreHistory}>
+                  <History size={15} />
+                  <span>
+                    {t("menu.restore")}
+                    <small>{notebookHistoryStatusLabel(notebookPersistenceStatus, notebookSnapshots.length, durableNotebookStorage, notebookPersistenceError)}</small>
+                  </span>
+                </button>
+                <label>
+                  <Upload size={15} />
+                  <span>
+                    {t("menu.import")}
+                    <small>{importAcceptSummary}</small>
+                  </span>
+                  <input type="file" accept={publicServiceMode ? HOSTED_IMPORT_ACCEPT_TYPES : IMPORT_ACCEPT_TYPES} onChange={handleImport} />
+                </label>
+                <button type="button" onClick={handleExportBoardRecord}>
+                  <Download size={15} />
+                  <span>
+                    {t("board.exportRecord")}
+                    <small>.{boardRecordFormat?.extension}</small>
+                  </span>
+                </button>
+              </div>
+            ) : (
             <div className="context-menu-section" aria-label={t("menu.files.label")}>
               <span className="context-menu-section-title">{t("menu.files")}</span>
               <button type="button" onClick={handleInitialize}>
@@ -2469,25 +2507,14 @@ export default function App() {
                   <small>{t("menu.searchNodes.detail")}</small>
                 </span>
               </button>
-              {isBoardGameMode ? (
-                <button type="button" onClick={handleExportBoardRecord}>
-                  <Download size={15} />
-                  <span>
-                    {t("board.exportRecord", { format: boardRecordFormat?.label ?? "" })}
-                    <small>.{boardRecordFormat?.extension}</small>
-                  </span>
-                </button>
-              ) : null}
-              {!isBoardGameMode ? (
-                <button type="button" onClick={handleExportLight}>
-                  <Download size={15} />
-                  <span>
-                    {t("menu.exportText")}
-                    <small>{t("menu.exportText.detail")}</small>
-                  </span>
-                </button>
-              ) : null}
-              {!publicServiceMode && !isBoardGameMode ? (
+              <button type="button" onClick={handleExportLight}>
+                <Download size={15} />
+                <span>
+                  {t("menu.exportText")}
+                  <small>{t("menu.exportText.detail")}</small>
+                </span>
+              </button>
+              {!publicServiceMode ? (
                 <button type="button" onClick={handleExportPackage}>
                   <Download size={15} />
                   <span>
@@ -2496,7 +2523,7 @@ export default function App() {
                   </span>
                 </button>
               ) : null}
-              {!publicServiceMode && !isBoardGameMode ? (
+              {!publicServiceMode ? (
                 <button type="button" onClick={handleCreateSharedNotebookLink} disabled={shareBusy}>
                   <Share2 size={15} />
                   <span>
@@ -2552,33 +2579,15 @@ export default function App() {
                 <Upload size={15} /> {t("menu.import")}
                 <input type="file" accept={publicServiceMode ? HOSTED_IMPORT_ACCEPT_TYPES : IMPORT_ACCEPT_TYPES} onChange={handleImport} />
               </label>
-              {isBoardGameMode ? (
-                <button type="button" onClick={() => openBoardRecordDialog("merge")}>
-                  <GitBranch size={15} />
-                  <span>
-                    {t("board.merge.open", { format: boardRecordFormat?.label ?? "" })}
-                    <small>{t("board.merge.detail")}</small>
-                  </span>
-                </button>
-              ) : (
-                <button type="button" onClick={() => openBoardRecordDialog("import-shogi")}>
-                  <GitBranch size={15} />
-                  <span>
-                    {t("board.shogi.importApps")}
-                    <small>{t("board.shogi.importApps.detail")}</small>
-                  </span>
-                </button>
-              )}
-              {!isBoardGameMode ? (
-                <button type="button" onClick={() => { setTextImportOpen(true); setMenuOpen(false); }}>
-                  <FileText size={15} />
-                  <span>
-                    {t("menu.importOutline")}
-                    <small>{t("menu.importOutline.detail")}</small>
-                  </span>
-                </button>
-              ) : null}
+              <button type="button" onClick={() => { setTextImportOpen(true); setMenuOpen(false); }}>
+                <FileText size={15} />
+                <span>
+                  {t("menu.importOutline")}
+                  <small>{t("menu.importOutline.detail")}</small>
+                </span>
+              </button>
             </div>
+            )}
             <div className="context-menu-section" aria-label={t("menu.background")}>
               <span className="context-menu-section-title">{t("menu.background")}</span>
               <div className="theme-choice-row">
@@ -2600,6 +2609,7 @@ export default function App() {
                 </button>
               </div>
             </div>
+            {!isBoardGameMode ? (
             <div className="context-menu-section" aria-label={t("menu.mode")}>
               <span className="context-menu-section-title">{t("menu.mode")}</span>
               <div className="theme-choice-row mode-choice-row">
@@ -2628,6 +2638,7 @@ export default function App() {
                 </button>
               </div>
             </div>
+            ) : null}
             <div className="undo-redo-row" aria-label={t("menu.history")}>
               <button type="button" onClick={handleUndo} disabled={!canUndo} aria-keyshortcuts="Control+Z" title={`${t("menu.undo")} (Ctrl+Z)`}>
                 <Undo2 size={15} /> {t("menu.undo")}
@@ -2636,7 +2647,7 @@ export default function App() {
                 <Redo2 size={15} /> {t("menu.redo")}
               </button>
             </div>
-            {voiceLogReadable ? (
+            {voiceLogReadable && !isBoardGameMode ? (
               <button type="button" onClick={handleOpenVoiceLog}>
                 <MessageSquareText size={15} />
                 <span>
@@ -2645,7 +2656,7 @@ export default function App() {
                 </span>
               </button>
             ) : null}
-            {aiFeaturesUnlocked ? (
+            {aiFeaturesUnlocked && !isBoardGameMode ? (
               <>
                 <button type="button" onClick={handleRestartRealtime}>
                   <Radio size={15} />
@@ -2663,6 +2674,7 @@ export default function App() {
                 </button>
               </>
             ) : null}
+            {!isBoardGameMode ? (
             <button
               className="tutorial-mode-button"
               type="button"
@@ -2674,6 +2686,7 @@ export default function App() {
                 <small>{t("menu.tutorial.detail")}</small>
               </span>
             </button>
+            ) : null}
             <div className="context-menu-section language-menu-section" aria-label={t("language.section")}>
               <span className="context-menu-section-title"><Languages size={14} /> {t("language.section")}</span>
               <label className="language-select-label">
@@ -2711,6 +2724,7 @@ export default function App() {
                 </button>
               </div>
             </div>
+            {!isBoardGameMode ? (
             <div className="context-menu-section" aria-label={t("menu.mobileSettings")}>
               <span className="context-menu-section-title">{t("menu.mobileSettings")}</span>
               <button type="button" onClick={handleToggleMobileNotifications}>
@@ -2741,11 +2755,12 @@ export default function App() {
                 </span>
               </button>
             </div>
-            <a className="context-menu-link" href={localizedAboutUrl(locale)} aria-label={formatAppMessage("ui.app.mindAtlasOverviewAndAi.b1eb8a4")}>
+            ) : null}
+            <a className="context-menu-link" href={aboutLinkHref} aria-label={formatAppMessage("ui.app.mindAtlasOverviewAndAi.b1eb8a4")}>
               <Info size={15} />
               <span>
-                {t("menu.about")}
-                <small>{t("menu.about.detail")}</small>
+                {aboutLinkLabel}
+                <small>{aboutLinkDetail}</small>
               </span>
             </a>
             <a
@@ -2884,23 +2899,13 @@ export default function App() {
         <BoardRecordDialog
           action={boardRecordDialogMode}
           mode={boardRecordDialogMode === "import-shogi" ? "shogi" : isBoardNotebookMode(notebookMode) ? notebookMode : "shogi"}
-          notebooks={cloudNotebooks}
-          snapshots={notebookSnapshots}
-          cloudAvailable={cloudNotebooksAvailable}
-          hosted={publicServiceMode}
           busy={boardRecordDialogBusy}
           error={boardRecordDialogError}
           mergeStrategy={boardRecordMergeStrategy}
           onMergeStrategyChange={setBoardRecordMergeStrategy}
           onClose={() => setBoardRecordDialogMode(null)}
-          onRefresh={() => {
-            void refreshNotebookSnapshots();
-            if (cloudNotebooksAvailable) void refreshCloudNotebooks();
-          }}
           onFile={handleBoardRecordDialogFile}
           onText={handleBoardRecordText}
-          onCloud={handleMergeBoardRecordCloud}
-          onSnapshot={handleMergeBoardRecordSnapshot}
         />
       ) : null}
       {voiceLogReadable && voiceLogOpen ? (
@@ -3337,47 +3342,28 @@ function NodeSearchDialog({
 function BoardRecordDialog({
   action,
   mode,
-  notebooks,
-  snapshots,
-  cloudAvailable,
-  hosted,
   busy,
   error,
   mergeStrategy,
   onMergeStrategyChange,
   onClose,
-  onRefresh,
   onFile,
   onText,
-  onCloud,
-  onSnapshot,
 }: {
   action: Exclude<BoardRecordDialogMode, null>;
   mode: Exclude<NotebookMode, "standard">;
-  notebooks: CloudNotebookEntry[];
-  snapshots: NotebookSnapshot[];
-  cloudAvailable: boolean;
-  hosted: boolean;
   busy: boolean;
   error: string;
   mergeStrategy: BoardRecordMergeStrategy;
   onMergeStrategyChange: (strategy: BoardRecordMergeStrategy) => void;
   onClose: () => void;
-  onRefresh: () => void;
   onFile: (file: File) => void;
   onText: (value: string) => void;
-  onCloud: (entry: CloudNotebookEntry) => void;
-  onSnapshot: (snapshot: NotebookSnapshot) => void;
 }) {
   const t = useMessage();
   const [sourceText, setSourceText] = useState("");
   const format = BOARD_RECORD_FORMATS[mode];
   const accept = mode === "shogi" ? ".kif,.ki2,.csa,text/plain" : mode === "chess" ? ".pgn,text/plain" : ".sgf,text/plain";
-  const compatibleCloud = notebooks.filter((entry) => {
-    if (entry.fileFormat === format.extension || entry.notebookMode === mode) return true;
-    if (entry.fileFormat === "mindatlas" || /\.mindatlaspkg$/i.test(entry.name)) return true;
-    return entry.name.toLowerCase().endsWith("." + format.extension);
-  });
   const isMerge = action === "merge";
 
   return (
@@ -3395,11 +3381,8 @@ function BoardRecordDialog({
             <p>{isMerge ? t("board.merge.description") : t("board.shogi.importDescription")}</p>
           </div>
           <div className="voice-log-actions">
-            {isMerge ? (
-              <button className="icon-button" type="button" onClick={onRefresh} aria-label={t("common.refresh")} disabled={busy}>
-                <RefreshCw size={16} />
-              </button>
-            ) : null}
+            {/* Refresh reloaded the cloud and history lists this dialog no
+                longer offers, so there is nothing left for it to refresh. */}
             <button className="icon-button" type="button" onClick={onClose} aria-label={t("common.close")} disabled={busy}>
               <X size={17} />
             </button>
@@ -3437,32 +3420,6 @@ function BoardRecordDialog({
               {busy ? t("common.loading") : isMerge ? t("board.merge.action") : t("board.import.action")}
             </button>
           </section>
-          {isMerge && cloudAvailable ? (
-            <section className="board-record-source-section">
-              <h3>{t("board.source.cloud")}</h3>
-              <div className="board-record-source-list">
-                {compatibleCloud.length ? compatibleCloud.map((entry) => (
-                  <button key={cloudNotebookKey(entry)} type="button" disabled={busy} onClick={() => onCloud(entry)}>
-                    <span>{entry.title || entry.name}</span>
-                    <small>{hosted ? entry.name : entry.name + " · " + formatBytes(entry.size)}</small>
-                  </button>
-                )) : <p>{t("board.source.cloudEmpty")}</p>}
-              </div>
-            </section>
-          ) : null}
-          {isMerge ? (
-            <section className="board-record-source-section">
-              <h3>{t("board.source.history")}</h3>
-              <div className="board-record-source-list">
-                {snapshots.length ? snapshots.map((snapshot) => (
-                  <button key={snapshot.id} type="button" disabled={busy} onClick={() => onSnapshot(snapshot)}>
-                    <span>{snapshot.title}</span>
-                    <small>{formatFullDateTime(snapshot.createdAt)} · {snapshot.nodeCount} {t("board.source.nodes")}</small>
-                  </button>
-                )) : <p>{t("board.source.historyEmpty")}</p>}
-              </div>
-            </section>
-          ) : null}
           {/* Rarely changed, so it sits below the input and the merge button. */}
           {isMerge && mode !== "go" ? (
             <fieldset className="board-record-merge-strategy" disabled={busy}>

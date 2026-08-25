@@ -115,6 +115,43 @@ The default first screen, tutorial, templates, editor, local AI workflow, and
 hosted AI workflow must behave exactly as before when no board-game record is
 active.
 
+### 2.4 What board mode withdraws
+
+A board notebook is one record in one arrangement, and every control that
+cannot describe a game is noise in front of the board. Board mode therefore
+hides, rather than disables:
+
+- the layout switcher and the text editor - a record is read in the Mind Atlas
+  arrangement, and the other layouts have nothing to add to a move tree;
+- node search, the AI Partner log, the Realtime and voice controls, tutorial
+  mode, and the whole mobile settings section;
+- the reminder and node-colour controls, because KIF, PGN and SGF cannot carry
+  either, and a setting the next export silently drops is worse than no
+  setting at all;
+- the free-form text AI, for the reason in 11.1: it would append nodes to an
+  authoritative move tree.
+
+The file menu is reordered to the sequence a game actually arrives in: start,
+open from the cloud, merge another record, save, restore, import, export. The
+merge control names the source in the user's terms - "merge a record from a
+shogi app" - rather than naming the file format, and the import control lists
+the extensions it accepts instead of explaining itself in prose.
+
+The merge dialog offers a file and a paste box. Its cloud-file and
+browser-history pickers were removed: a record being merged in has just been
+copied out of a phone app, so it arrives as pasted text or a file, and the two
+list pickers cost a refresh button and two API calls to serve a path nobody
+took.
+
+Shogi's overview link points at its own landing page rather than the general
+Mind Atlas page, because that page is where its users came from. Chess and Go
+keep the general link.
+
+Both themes are first-class here. The board surfaces were drawn against the
+dark background they shipped with, and pale gold labels and translucent white
+borders vanish on white; the light theme restates them against a light ground
+rather than dimming them.
+
 ## 3. Why the Attachment Approach Is Rejected
 
 Hosted Mind Atlas intentionally removes attachments through
