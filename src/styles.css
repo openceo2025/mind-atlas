@@ -10149,3 +10149,113 @@ button:disabled,
   background: #ffffff;
   color: #17283e;
 }
+
+/*
+ * The merge dialog in the light theme.
+ *
+ * It was built entirely in dark-theme colours - cream headings, near-white
+ * button labels over a pale mint fill, a black textarea - so on a white dialog
+ * its title, its file picker and its merge button all read as white on white.
+ * The action button becomes solid rather than translucent: it is the one
+ * control in the dialog that has to be unmistakable.
+ */
+.app-shell[data-theme="light"] .board-record-dialog h2 {
+  color: #17283e;
+}
+
+.app-shell[data-theme="light"] .board-record-dialog > .voice-log-header p {
+  color: #4a5b6d;
+}
+
+.app-shell[data-theme="light"] .board-record-dialog .board-record-file-action {
+  border-color: rgba(53, 104, 164, 0.3);
+  background: rgba(53, 104, 164, 0.07);
+  color: #17283e;
+}
+
+.app-shell[data-theme="light"] .board-record-dialog .board-record-file-action:hover {
+  background: rgba(28, 112, 207, 0.12);
+}
+
+.app-shell[data-theme="light"] .board-record-dialog textarea {
+  border-color: rgba(53, 104, 164, 0.24);
+  background: #ffffff;
+  color: #17283e;
+}
+
+.app-shell[data-theme="light"] .board-record-dialog textarea::placeholder {
+  color: #7d8b99;
+}
+
+.app-shell[data-theme="light"] .board-record-source-section > .primary-button {
+  border-color: transparent;
+  background: #1c70cf;
+  color: #ffffff;
+}
+
+.app-shell[data-theme="light"] .board-record-source-section > .primary-button:hover:not(:disabled) {
+  background: #175ba6;
+}
+
+.app-shell[data-theme="light"] .board-record-dialog .board-record-merge-strategy label {
+  border-color: rgba(53, 104, 164, 0.22);
+  background: rgba(53, 104, 164, 0.05);
+  color: #17283e;
+}
+
+.app-shell[data-theme="light"] .board-record-dialog .board-record-merge-strategy label.is-selected {
+  border-color: rgba(28, 112, 207, 0.55);
+  background: rgba(28, 112, 207, 0.12);
+  color: #12325c;
+}
+
+.app-shell[data-theme="light"] .board-record-dialog .notebook-history-error {
+  color: #b3261e;
+}
+
+.app-shell[data-theme="light"] .board-record-dialog .board-record-merge-strategy small {
+  color: #4a5b6d;
+}
+
+/*
+ * Captured pieces in the light theme.
+ *
+ * The hand glyphs are pale gold, which is a piece of ink drawn for a dark tray.
+ * On the light tray they read as a stain rather than a piece, so they take the
+ * same dark ink the pieces on the board use.
+ */
+.app-shell[data-theme="light"] .shogi-hand-host sg-hand piece {
+  color: #3a2a12;
+}
+
+.app-shell[data-theme="light"] .shogi-hand-host sg-hp-wrap::after {
+  color: #6b4a16;
+}
+
+/*
+ * Node text over a light universe.
+ *
+ * These labels float over the background with no ground of their own, so they
+ * were written as near-white with a dark shadow behind them - which on white
+ * leaves the shadow doing all the work and the text barely there. Light mode
+ * inverts the pair: dark ink with a white halo, the same treatment the standard
+ * node labels already use.
+ */
+.app-shell[data-theme="light"] .board-node-body-preview {
+  color: #33475e;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 8px rgba(255, 255, 255, 0.95);
+}
+
+.app-shell[data-theme="light"] .board-mobile-node-title,
+.app-shell[data-theme="light"] .board-mobile-node-body {
+  border-color: rgba(53, 104, 164, 0.24);
+  background: rgba(255, 255, 255, 0.92);
+  color: #17283e;
+  box-shadow: 0 4px 16px rgba(55, 90, 130, 0.18);
+  text-shadow: none;
+}
+
+.app-shell[data-theme="light"] .board-mobile-node-title::placeholder,
+.app-shell[data-theme="light"] .board-mobile-node-body::placeholder {
+  color: #7d8b99;
+}

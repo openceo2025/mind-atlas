@@ -38,6 +38,7 @@ try {
   if (testScope === "all" || testScope === "go") await verifyGo();
   if (testScope === "all" || testScope === "go-ko") await verifyGoKo();
   if (testScope === "all" || testScope === "promotion") await verifyPromotionChoiceFits();
+  if (testScope === "all" || testScope === "light-contrast") await verifyLightThemeContrast();
   if (testScope === "all" || testScope === "merge-dialog") await verifyMergeDialogLayout();
   if (testScope === "all" || testScope === "mobile") {
     for (const mode of ["shogi", "chess", "go"]) await verifyMobileLayout(mode);
@@ -217,6 +218,88 @@ async function verifyShogi() {
     await page.getByRole("button", { name: "Go to parent layer" }).click();
     await page.locator(".shogi-viewer-position").filter({ hasText: "3手目" }).waitFor();
     await assertBoardMenuIsSimplified(page);
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * Board surfaces have to be readable in the light theme too.
+ *
+ * They were all drawn against the dark background they shipped with, and the
+ * failures that followed were the same failure three times: pale text kept its
+ * colour while its ground turned white. Contrast is measurable, so it is
+ * measured rather than looked at - anything at or below about 2:1 is the
+ * white-on-white case, and 3.5 leaves room for the muted labels that are
+ * meant to sit back.
+ */
+async function verifyLightThemeContrast() {
+  const { context, page } = await createPage({ width: 1280, height: 900 });
+  try {
+    await importRecord(page, "contrast.kif", fixtures.shogi.content, ".shogi-viewer");
+    await page.getByLabel(/Open atlas menu|Mind Atlasメニューを開く/).click();
+    await page.getByRole("button", { name: "白", exact: true }).click();
+    await page.waitForTimeout(400);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(400);
+
+    const selectors = [
+      ".shogi-viewer-label",
+      ".shogi-viewer-position",
+      ".shogi-viewer-icon",
+      ".shogi-hand-host sg-hand piece",
+      ".board-variation-label",
+      ".node-title-input",
+      ".node-body-input",
+    ];
+    const results = await page.evaluate((list) => {
+      const parse = (value) => {
+        const parts = (value.match(/[\d.]+/g) ?? []).map(Number);
+        return parts.length >= 3 ? { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 } : null;
+      };
+      const over = (top, bottom) => ({
+        r: top.r * top.a + bottom.r * (1 - top.a),
+        g: top.g * top.a + bottom.g * (1 - top.a),
+        b: top.b * top.a + bottom.b * (1 - top.a),
+        a: 1,
+      });
+      const luminance = ({ r, g, b }) => {
+        const channel = (value) => {
+          const scaled = value / 255;
+          return scaled <= 0.03928 ? scaled / 12.92 : ((scaled + 0.055) / 1.055) ** 2.4;
+        };
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+      };
+      const groundOf = (element) => {
+        const layers = [];
+        for (let node = element; node && node !== document.documentElement; node = node.parentElement) {
+          const background = parse(getComputedStyle(node).backgroundColor);
+          if (background && background.a > 0) layers.push(background);
+          if (background && background.a >= 0.999) break;
+        }
+        let ground = { r: 255, g: 255, b: 255, a: 1 };
+        for (const layer of layers.reverse()) ground = over(layer, ground);
+        return ground;
+      };
+      return list.map((selector) => {
+        const element = document.querySelector(selector);
+        if (!element) return { selector, missing: true };
+        const style = getComputedStyle(element);
+        const ground = groundOf(element);
+        const text = over(parse(style.color) ?? { r: 0, g: 0, b: 0, a: 1 }, ground);
+        const [light, dark] = [luminance(text), luminance(ground)].sort((a, b) => b - a);
+        return { selector, ratio: Math.round(((light + 0.05) / (dark + 0.05)) * 100) / 100 };
+      });
+    }, selectors);
+
+    const missing = results.filter((item) => item.missing).map((item) => item.selector);
+    if (missing.length) throw new Error(`Light-theme contrast check found no ${missing.join(", ")}`);
+    const failed = results.filter((item) => item.ratio < 3.5);
+    if (failed.length) {
+      throw new Error(`Light theme leaves board text unreadable: ${JSON.stringify(failed)}`);
+    }
+    const worst = results.reduce((low, item) => (item.ratio < low.ratio ? item : low));
+    console.log(`verify:board-ui:light-contrast:passed worst=${worst.ratio}:1 (${worst.selector})`);
   } finally {
     await context.close();
   }
