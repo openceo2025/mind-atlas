@@ -3792,9 +3792,9 @@ h1 {
 .shogi-board-shell piece.rook::before { content: "飛"; }
 .shogi-board-shell piece.king::before { content: "玉"; }
 .shogi-board-shell piece.tokin::before { content: "と"; }
-.shogi-board-shell piece.promotedlance::before { content: "成香"; font-size: 0.78em; }
-.shogi-board-shell piece.promotedknight::before { content: "成桂"; font-size: 0.78em; }
-.shogi-board-shell piece.promotedsilver::before { content: "成銀"; font-size: 0.78em; }
+.shogi-board-shell piece.promotedlance::before { content: "杏"; }
+.shogi-board-shell piece.promotedknight::before { content: "圭"; }
+.shogi-board-shell piece.promotedsilver::before { content: "全"; }
 .shogi-board-shell piece.horse::before { content: "馬"; }
 .shogi-board-shell piece.dragon::before { content: "龍"; }
 

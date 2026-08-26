@@ -33,7 +33,7 @@ import {
 import { requestHostedShogiAnalysis } from "../hosted/serviceClient";
 import {
   SHOGI_ANALYSIS_MAX_LINE_NODES,
-  appendShogiAnalysisEntry,
+  prependShogiAnalysisEntry,
   appendShogiAnalysisLine,
   buildShogiAnalysisLine,
   formatShogiAnalysisEntry,
@@ -1316,7 +1316,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       if (!target || !targetContent) return { shogiAnalysisNodeId: null };
 
       if (!result) {
-        const body = appendShogiAnalysisEntry(target.body, formatShogiAnalysisFailure(SHOGI_ENGINE_LABEL, failure));
+        const body = prependShogiAnalysisEntry(target.body, formatShogiAnalysisFailure(SHOGI_ENGINE_LABEL, failure));
         const atlasRoot = updateNodeById(current.atlasRoot, nodeId, (item) => ({
           ...item,
           body,
@@ -1335,7 +1335,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       }
 
       const steps = buildShogiAnalysisLine(targetContent.sfen, targetContent.ply, result.pv, result.pv.length);
-      const body = appendShogiAnalysisEntry(target.body, formatShogiAnalysisEntry(result, steps));
+      const body = prependShogiAnalysisEntry(target.body, formatShogiAnalysisEntry(result, steps));
       const analyzed = updateNodeById(current.atlasRoot, nodeId, (item) => ({
         ...item,
         body,

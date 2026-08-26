@@ -5,7 +5,6 @@ import type { Api } from "shogiground/api";
 import type { Config } from "shogiground/config";
 import type { DropDests, Key, MoveDests, PieceName, RoleString } from "shogiground/types";
 import { findShogiNodeContent, findShogiRecordRoot } from "./shogiRecord";
-import { toShogiBoardNotation } from "./shogiNotation";
 import { BoardBranchJumpButton } from "../board/BoardBranchJumpButtons";
 import { findRecordProvenance } from "../board/recordProvenance";
 import { buildShogiCandidateArrows, buildShogiCandidateTargets } from "./shogiCandidates";
@@ -142,7 +141,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       if (boardConfigRef.current) apiRef.current?.set(boardConfigRef.current, true);
       return;
     }
-    const moveText = toShogiBoardNotation(formatKIFMove(move));
+    const moveText = formatKIFMove(move);
     const childId = addChildNode(parent.id, "", { title: moveText, focus: false, requestEdit: false });
     if (!childId) return;
     const nextContent: ShogiRecordContent = {

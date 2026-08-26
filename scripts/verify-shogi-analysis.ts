@@ -1,6 +1,6 @@
 import {
   SHOGI_ANALYSIS_MAX_LINE_NODES,
-  appendShogiAnalysisEntry,
+  prependShogiAnalysisEntry,
   appendShogiAnalysisLine,
   buildShogiAnalysisLine,
   describeShogiScore,
@@ -137,10 +137,16 @@ if (entry.includes("─")) throw new Error("The block must use ASCII rules so KI
 const terminalEntry = formatShogiAnalysisEntry(analysisResult({ pv: [], bestMove: "resign", terminal: true }), []);
 if (!terminalEntry.includes("最善手: なし")) throw new Error("A terminal position must still record an entry.");
 
-const appended = appendShogiAnalysisEntry(appendShogiAnalysisEntry("元の本文", entry), terminalEntry);
-if (!appended.startsWith("元の本文\n\n評価値: ")) throw new Error("Entries must append after the existing body.");
-if (appended.split("評価値: ").length !== 3) throw new Error("Repeated analysis must keep every block.");
-if (appendShogiAnalysisEntry("", entry) !== entry) throw new Error("An empty body must not gain leading blank lines.");
+// The newest answer leads: only the first line or two of a body is visible
+// beside the node on a phone, so the block just asked for has to be there.
+const stacked = prependShogiAnalysisEntry(prependShogiAnalysisEntry("元の本文", entry), terminalEntry);
+if (!stacked.startsWith("評価値: ")) throw new Error(`The newest entry must lead the body:\n${stacked}`);
+if (!stacked.endsWith("元の本文")) throw new Error(`The existing body must stay below the entries:\n${stacked}`);
+if (stacked.indexOf("最善手: なし") > stacked.indexOf("最善手: ▲７六歩")) {
+  throw new Error(`Entries must stack newest first:\n${stacked}`);
+}
+if (stacked.split("評価値: ").length !== 3) throw new Error("Repeated analysis must keep every block.");
+if (prependShogiAnalysisEntry("", entry) !== entry) throw new Error("An empty body must not gain trailing blank lines.");
 
 const stamp = formatShogiAnalysisStamp(analysisResult());
 if (!stamp.includes("読み筋から作成")) throw new Error("Generated move nodes must say where they came from.");

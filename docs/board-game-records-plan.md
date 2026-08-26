@@ -115,7 +115,20 @@ The default first screen, tutorial, templates, editor, local AI workflow, and
 hosted AI workflow must behave exactly as before when no board-game record is
 active.
 
-### 2.4 What board mode withdraws
+### 2.4 Promoted pieces are named twice
+
+A promoted silver, knight or lance is written two ways, and the two ways belong
+to two different places. The pieces drawn on the board carry the one-character
+forms — 全, 圭, 杏 — because that is what fits on a piece and what a physical
+board shows. Everything that is written move text rather than a drawn piece —
+node titles, node bodies, the candidate-move list, the breadcrumb — reads the
+way KIF spells it: 成銀, 成桂, 成香.
+
+The record files are unaffected either way. tsshogi re-derives move text from
+the position on export and its parser accepts both spellings, so this is purely
+about what a reader sees.
+
+### 2.5 What board mode withdraws
 
 A board notebook is one record in one arrangement, and every control that
 cannot describe a game is noise in front of the board. Board mode therefore
@@ -833,20 +846,24 @@ sharing, so that is where the answer goes.
 
 What is written:
 
-- On the analyzed node: a four-line Japanese block appended to the end of the
+- On the analyzed node: a four-line Japanese block placed at the top of the
   body — the sente-normalized evaluation, the best move, the whole legal
   reading, and last the engine, its budget or `定跡`, and the timestamp.
-  Repeated analysis appends another block; nothing is overwritten.
+  Repeated analysis adds another block above the previous one; nothing is
+  overwritten.
 - On each move node the reading created: a one-line stamp naming when and with
   what the line was produced. The evaluation is not repeated there, because it
   belongs to the position that was actually analyzed.
 - On failure: an `error:` line with a trimmed, bounded reason, then the same
   closing provenance line.
 
-The evaluation leads and the provenance closes. The block is appended to a body
-that may already be long, and on a phone the reader sees its first line or two;
-a header naming the engine and the timestamp would spend exactly that space on
-what nobody reads first, pushing the answer out of view.
+Both the order within a block and the order of blocks answer the same
+constraint: only the first line or two of a body is visible beside the node on
+a phone. So the evaluation leads its block and the provenance closes it — a
+header naming the engine and the timestamp would spend exactly that space on
+what nobody reads first — and the newest block leads the body, because
+re-analyzing a position is how a reader changes their mind about it and the
+answer they just asked for has to be the one they can see.
 
 The completion notification points at the node holding the engine's move, not
 at the analyzed position. The question was "what is the move here", so

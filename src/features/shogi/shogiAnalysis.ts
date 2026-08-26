@@ -1,5 +1,4 @@
 import { formatKIFMove, Position } from "tsshogi";
-import { toShogiBoardNotation } from "./shogiNotation.ts";
 import type { AtlasNode, ShogiAnalysisResult, ShogiRecordContent } from "../../types";
 
 /**
@@ -47,7 +46,7 @@ export function buildShogiAnalysisLine(startSfen: string, startPly: number, pv: 
     const move = position.createMoveByUSI(usi);
     if (!move || !position.isValidMove(move)) break;
     const color = sideToMoveFromSfen(position.sfen);
-    const displayText = toShogiBoardNotation(formatKIFMove(move));
+    const displayText = formatKIFMove(move);
     if (!position.doMove(move)) break;
     steps.push({
       usi,
@@ -150,10 +149,18 @@ export function formatShogiAnalysisFailure(engineLabel: string, message: string,
   return `error: ${reason}\n${engineLabel} ${formatShogiAnalysisTimestamp(analyzedAt)}`;
 }
 
-/** Appends one block to a body, keeping a blank line between entries. */
-export function appendShogiAnalysisEntry(body: string, entry: string): string {
-  const current = body.replace(/\s+$/, "");
-  return current ? `${current}\n\n${entry}` : entry;
+/**
+ * Puts one block at the top of a body, keeping a blank line between entries.
+ *
+ * The newest answer leads. Only the first line or two of a body is visible
+ * beside the node on a phone, and re-analyzing a position is how a reader
+ * changes their mind about it, so the block they just asked for has to be the
+ * one they can see. Earlier blocks and whatever they had written stay below it,
+ * in the order they were added.
+ */
+export function prependShogiAnalysisEntry(body: string, entry: string): string {
+  const current = String(body ?? "").replace(/^\s+/, "");
+  return current ? `${entry}\n\n${current}` : entry;
 }
 
 export function readShogiRecordContent(node: AtlasNode | undefined | null): ShogiRecordContent | null {

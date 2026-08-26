@@ -2,7 +2,7 @@ import { anySpecialMove, exportCSA, exportKI2, exportKIF, Record as TsshogiRecor
 import { sanitizeStructuredContentForExport } from "../src/notebookExport.ts";
 import { createNewShogiRecord, exportShogiRecord, importShogiRecordFile } from "../src/features/shogi/shogiRecord.ts";
 import { buildShogiCandidateArrows, buildShogiCandidateTargets } from "../src/features/shogi/shogiCandidates.ts";
-import { hasKifPromotedPieceText, normalizeShogiNotebookNotation, toShogiBoardNotation } from "../src/features/shogi/shogiNotation.ts";
+import { hasBoardPromotedPieceText, normalizeShogiNotebookNotation, toKifPromotedPieceText } from "../src/features/shogi/shogiNotation.ts";
 import { RECORD_PROVENANCE_HEADING, findRecordProvenance, normalizeRecordProvenanceBodies } from "../src/features/board/recordProvenance.ts";
 import { mergeBoardRecords } from "../src/features/board/boardRecordMerge.ts";
 import { isBoardBranchPoint, pathToNextBranchPoint, pathToPreviousBranchPoint } from "../src/features/board/boardBranchMemory.ts";
@@ -151,16 +151,17 @@ if (buildShogiCandidateArrows([invalidCandidate], "sente").length !== 0) {
 console.log("verify:shogi:candidate-arrows:passed drop-and-invalid");
 
 // ---------------------------------------------------------------------------
-// Promoted pieces are named the way a board names them, not the way KIF spells
-// them. Nothing Mind Atlas draws may still read 成銀 / 成桂 / 成香.
+// Move text spells promoted pieces the way KIF does. The one-character forms
+// belong to the pieces drawn on the board; titles, bodies and the candidate
+// list are written move text and read 成銀 / 成桂 / 成香.
 // ---------------------------------------------------------------------------
 
-if (toShogiBoardNotation("同　成銀(23)") !== "同　全(23)") throw new Error("Promoted silver is not shown as 全.");
-if (toShogiBoardNotation("２四成桂(36)") !== "２四圭(36)") throw new Error("Promoted knight is not shown as 圭.");
-if (toShogiBoardNotation("１三成香(15)") !== "１三杏(15)") throw new Error("Promoted lance is not shown as 杏.");
+if (toKifPromotedPieceText("同　全(23)") !== "同　成銀(23)") throw new Error("Promoted silver is not written as 成銀.");
+if (toKifPromotedPieceText("２四圭(36)") !== "２四成桂(36)") throw new Error("Promoted knight is not written as 成桂.");
+if (toKifPromotedPieceText("１三杏(15)") !== "１三成香(15)") throw new Error("Promoted lance is not written as 成香.");
 // The promotion suffix and 不成 are different words and must survive untouched.
-if (toShogiBoardNotation("２二角成(88)") !== "２二角成(88)") throw new Error("The promotion suffix was rewritten.");
-if (toShogiBoardNotation("７七桂不成(89)") !== "７七桂不成(89)") throw new Error("不成 was rewritten.");
+if (toKifPromotedPieceText("２二角成(88)") !== "２二角成(88)") throw new Error("The promotion suffix was rewritten.");
+if (toKifPromotedPieceText("７七桂不成(89)") !== "７七桂不成(89)") throw new Error("不成 was rewritten.");
 console.log("verify:shogi:promoted-piece-text:passed");
 
 const promotedSource = TsshogiRecord.newByUSI(
@@ -170,33 +171,33 @@ if (promotedSource instanceof Error) throw promotedSource;
 const promotedImport = await importShogiRecordFile(new File([exportKIF(promotedSource)], "promoted.kif"));
 const promotedTexts: string[] = [];
 collectMoveText(promotedImport.root, promotedTexts);
-const kifSpelled = promotedTexts.filter((text) => hasKifPromotedPieceText(text));
-if (kifSpelled.length) throw new Error(`Imported moves still use KIF promoted-piece text: ${JSON.stringify(kifSpelled)}`);
-if (!promotedTexts.some((text) => text.includes("圭"))) {
-  throw new Error(`The promoted-knight fixture never produced a 圭 move: ${JSON.stringify(promotedTexts)}`);
+const boardSpelled = promotedTexts.filter((text) => hasBoardPromotedPieceText(text));
+if (boardSpelled.length) throw new Error(`Imported moves use the board piece forms: ${JSON.stringify(boardSpelled)}`);
+if (!promotedTexts.some((text) => text.includes("成桂"))) {
+  throw new Error(`The promoted-knight fixture never produced a 成桂 move: ${JSON.stringify(promotedTexts)}`);
 }
 console.log("verify:shogi:promoted-piece-import:passed");
 
-// A notebook stored before the board forms were adopted is rewritten on load,
+// A notebook stored while move text used the board forms is rewritten on load,
 // but a title the user typed is left alone.
 const legacyRoot = {
   id: "atlas-root", title: "棋譜", body: "", children: [{
     id: "record", title: "record", body: "",
     structuredContent: { kind: "shogi-record", schemaVersion: 1, role: "record-root", recordId: "r", sourceFormat: "kif", ply: 0, sfen: "x" },
     children: [
-      { id: "m1", title: "同　成銀(23)", body: "", structuredContent: { kind: "shogi-record", schemaVersion: 1, role: "move", recordId: "r", sourceFormat: "kif", ply: 1, sfen: "x", displayText: "同　成銀(23)" }, children: [] },
-      { id: "m2", title: "私の勝負手 成銀", body: "", structuredContent: { kind: "shogi-record", schemaVersion: 1, role: "move", recordId: "r", sourceFormat: "kif", ply: 1, sfen: "x", displayText: "２四成桂(36)" }, children: [] },
+      { id: "m1", title: "同　全(23)", body: "", structuredContent: { kind: "shogi-record", schemaVersion: 1, role: "move", recordId: "r", sourceFormat: "kif", ply: 1, sfen: "x", displayText: "同　全(23)" }, children: [] },
+      { id: "m2", title: "私の勝負手 全", body: "", structuredContent: { kind: "shogi-record", schemaVersion: 1, role: "move", recordId: "r", sourceFormat: "kif", ply: 1, sfen: "x", displayText: "２四圭(36)" }, children: [] },
     ],
   }],
 } as unknown as AtlasNode;
 const migrated = normalizeShogiNotebookNotation(legacyRoot);
 if (!migrated) throw new Error("A legacy notebook was not migrated.");
 const migratedMoves = migrated.children[0].children;
-if (migratedMoves[0].title !== "同　全(23)" || migratedMoves[0].structuredContent?.displayText !== "同　全(23)") {
+if (migratedMoves[0].title !== "同　成銀(23)" || migratedMoves[0].structuredContent?.displayText !== "同　成銀(23)") {
   throw new Error(`The generated title was not migrated: ${JSON.stringify(migratedMoves[0])}`);
 }
-if (migratedMoves[1].title !== "私の勝負手 成銀") throw new Error("A hand-written title was rewritten by the migration.");
-if (migratedMoves[1].structuredContent?.displayText !== "２四圭(36)") throw new Error("The move text under a hand-written title was not migrated.");
+if (migratedMoves[1].title !== "私の勝負手 全") throw new Error("A hand-written title was rewritten by the migration.");
+if (migratedMoves[1].structuredContent?.displayText !== "２四成桂(36)") throw new Error("The move text under a hand-written title was not migrated.");
 if (normalizeShogiNotebookNotation(migrated) !== null) throw new Error("The migration is not idempotent.");
 console.log("verify:shogi:promoted-piece-migration:passed");
 
