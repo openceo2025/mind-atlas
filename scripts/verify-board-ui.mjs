@@ -37,6 +37,7 @@ try {
   if (testScope === "all" || testScope === "chess-special") await verifyChessSpecialMoves();
   if (testScope === "all" || testScope === "go") await verifyGo();
   if (testScope === "all" || testScope === "go-ko") await verifyGoKo();
+  if (testScope === "all" || testScope === "promotion") await verifyPromotionChoiceFits();
   if (testScope === "all" || testScope === "merge-dialog") await verifyMergeDialogLayout();
   if (testScope === "all" || testScope === "mobile") {
     for (const mode of ["shogi", "chess", "go"]) await verifyMobileLayout(mode);
@@ -216,6 +217,56 @@ async function verifyShogi() {
     await page.getByRole("button", { name: "Go to parent layer" }).click();
     await page.locator(".shogi-viewer-position").filter({ hasText: "3手目" }).waitFor();
     await assertBoardMenuIsSimplified(page);
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * The promotion choice has to be readable wherever the move lands.
+ *
+ * It used to be anchored above the destination square, which put it outside the
+ * board - and behind the board's own clipping - for exactly the squares
+ * promotions happen on. Centring it is what fixed that, so the assertion is
+ * that it sits in the middle of the board and inside it, at a phone width where
+ * there is least room to spare.
+ */
+async function verifyPromotionChoiceFits() {
+  const { context, page } = await createPage({ width: 485, height: 858 });
+  try {
+    const source = "#KIF version=2.0\n手合割：平手\n\n手数----指手---------\n   1 ７六歩(77)\n   2 ３四歩(33)\n";
+    await importRecord(page, "promotion.kif", source, ".shogi-viewer");
+    await page.getByRole("button", { name: "現在の分岐の末端へ進む" }).click().catch(() => {});
+    await page.waitForTimeout(400);
+    const board = await page.locator(".shogi-board-host").boundingBox();
+    const at = (file, rank) => ({
+      x: board.x + ((9 - file + 0.5) / 9) * board.width,
+      y: board.y + ((rank - 0.5) / 9) * board.height,
+    });
+    await page.mouse.click(at(8, 8).x, at(8, 8).y);
+    await page.waitForTimeout(200);
+    await page.mouse.click(at(2, 2).x, at(2, 2).y);
+    const choices = page.locator("sg-promotion-choices");
+    await choices.waitFor({ timeout: 10_000 });
+    const geometry = await page.evaluate(() => {
+      const choice = document.querySelector("sg-promotion-choices")?.getBoundingClientRect();
+      const host = document.querySelector(".shogi-board-host")?.getBoundingClientRect();
+      if (!choice || !host) return null;
+      return {
+        inside: choice.top >= host.top && choice.left >= host.left && choice.right <= host.right && choice.bottom <= host.bottom,
+        offsetX: Math.round(choice.left + choice.width / 2 - (host.left + host.width / 2)),
+        offsetY: Math.round(choice.top + choice.height / 2 - (host.top + host.height / 2)),
+        width: Math.round(choice.width),
+        height: Math.round(choice.height),
+      };
+    });
+    if (!geometry) throw new Error("The promotion choice never appeared.");
+    if (!geometry.inside) throw new Error(`The promotion choice is clipped by the board: ${JSON.stringify(geometry)}`);
+    if (Math.abs(geometry.offsetX) > 1 || Math.abs(geometry.offsetY) > 1) {
+      throw new Error(`The promotion choice is anchored to a square again: ${JSON.stringify(geometry)}`);
+    }
+    if (geometry.height < 44) throw new Error(`The promotion choice is too small to tap: ${JSON.stringify(geometry)}`);
+    console.log(`verify:board-ui:promotion-choice:passed ${geometry.width}x${geometry.height}`);
   } finally {
     await context.close();
   }

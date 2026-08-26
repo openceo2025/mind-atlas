@@ -3958,25 +3958,43 @@ h1 {
   pointer-events: auto;
 }
 
+/*
+ * The promotion choice sits in the middle of the board, not over the square.
+ *
+ * Shogiground anchors it to the destination square and opens it upward or
+ * downward by whose piece it is, not by whether there is room, so the board's
+ * own clipping cut it off exactly where promotions happen: a sente promotion on
+ * rank 1 lost 24px off the top, and one on file 1 or 9 lost 21px off the side.
+ * Centring it removes the whole class of problem - no square, board size or
+ * orientation can push it out - at the cost of covering the middle of the board
+ * for the moment it takes to answer.
+ *
+ * The square element is emptied of its position for this: shogiground writes
+ * the square offset as an inline transform, so `!important` is what overrides
+ * it, and the choices then centre against the board instead.
+ */
 .shogi-board-host sg-promotion-square {
   position: absolute;
-  width: 11.1111%;
-  height: 11.1111%;
+  inset: 0;
+  width: auto;
+  height: auto;
+  transform: none !important;
 }
 
 .shogi-board-host sg-promotion-choices {
   position: absolute;
+  top: 50%;
   left: 50%;
-  bottom: 50%;
+  bottom: auto;
   display: grid;
-  grid-template-columns: repeat(2, 42px);
-  min-width: 88px;
+  grid-template-columns: repeat(2, 44px);
+  min-width: 92px;
   border: 1px solid rgba(61, 39, 19, 0.64);
-  border-radius: 6px;
-  padding: 2px;
+  border-radius: 8px;
+  padding: 3px;
   background: rgba(255, 228, 168, 0.98);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
-  transform: translateX(-50%);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5);
+  transform: translate(-50%, -50%);
 }
 
 .shogi-board-host sg-promotion-choices.reversed {
@@ -3986,8 +4004,8 @@ h1 {
 
 .shogi-board-host sg-promotion-choices piece {
   position: relative;
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   font-size: 24px;
   cursor: pointer;
   transform: none !important;
