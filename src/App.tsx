@@ -2426,7 +2426,13 @@ export default function App() {
         </button>
         {menuOpen ? (
           <div className="context-menu global-context-menu">
-            {publicServiceMode && !isBoardGameMode ? (
+            {/*
+              * Board modes keep this even though they hide the matching control
+              * in the top cluster: that slot now holds engine analysis, so this
+              * is the only way in to Google sign-in, and analysis itself needs
+              * an account.
+              */}
+            {publicServiceMode ? (
               <button
                 className={`mobile-menu-account-feature ${aiFeaturesUnlocked ? "is-active" : ""}`}
                 type="button"

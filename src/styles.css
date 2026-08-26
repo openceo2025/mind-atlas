@@ -1123,8 +1123,21 @@ h1 {
   font-size: 11px;
 }
 
+/*
+ * The account control normally lives in the top-right cluster on desktop, and
+ * this menu copy only appears where that cluster is too narrow to hold it.
+ */
 .global-context-menu .mobile-menu-account-feature {
   display: none;
+}
+
+/*
+ * Board modes are the exception at every width. Their top cluster gives that
+ * slot to engine analysis, so without this the menu copy stays hidden on
+ * desktop and a signed-out visitor has no way to reach Google sign-in at all.
+ */
+.app-shell.is-board-game-mode .global-context-menu .mobile-menu-account-feature {
+  display: flex;
 }
 
 .dataset-title-input,

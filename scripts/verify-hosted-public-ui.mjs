@@ -332,6 +332,7 @@ try {
     mockSessionMode = "active";
     await verifyHostedBoardImport(browser);
     await verifyDirectShogiLaunch(browser);
+    await verifySignedOutBoardCanSignIn(browser);
 
     const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
     await seedCompletedOnboarding(page);
@@ -892,6 +893,46 @@ async function verifyDirectShogiLaunch(browser) {
     if (state.modeParam !== null) throw new Error(`Direct shogi launch URL was not consumed safely: ${JSON.stringify(state)}`);
   } finally {
     await context.close();
+  }
+}
+
+/**
+ * A signed-out visitor in a board mode has to be able to sign in.
+ *
+ * The top-right cluster hides its account control there, because that slot now
+ * holds engine analysis, so the menu entry is the only route to Google. It went
+ * missing once when the board menu was simplified, and a visitor who cannot
+ * sign in cannot save, share, or analyze anything.
+ */
+async function verifySignedOutBoardCanSignIn(browser) {
+  const previousMode = mockSessionMode;
+  mockSessionMode = "signed-out";
+  const context = await browser.newContext({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  try {
+    await seedCompletedOnboarding(page);
+    await page.goto(`${appUrl}/?mode=shogi`, { waitUntil: "networkidle" });
+    await page.locator('main[data-notebook-mode="shogi"]').waitFor({ timeout: 15_000 });
+    await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
+    const menu = page.locator(".global-context-menu");
+    await menu.waitFor();
+    const account = menu.locator(".mobile-menu-account-feature");
+    // Visibility, not presence: this control is in the DOM at every width and
+    // is hidden by CSS on desktop, which is exactly how it went missing.
+    if (!(await account.isVisible())) {
+      throw new Error("A signed-out board mode offers no visible way to sign in with Google.");
+    }
+    const label = cleanText(await account.textContent());
+    if (!label.includes("クラウド保存・共有")) {
+      throw new Error(`The signed-out board account entry should offer cloud save and sharing: ${label}`);
+    }
+    const order = await menu.locator(":scope > *").evaluateAll((items) => items.map((item) => item.className.toString().split(" ")[0]));
+    if (order[0] !== "mobile-menu-account-feature") {
+      throw new Error(`The account entry must lead the board menu: ${JSON.stringify(order)}`);
+    }
+  } finally {
+    await context.close();
+    mockSessionMode = previousMode;
   }
 }
 
