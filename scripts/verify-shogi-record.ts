@@ -140,6 +140,10 @@ const dropTargets = buildShogiCandidateTargets(buildShogiCandidateArrows(dropNod
 if (dropTargets.length !== 1 || dropTargets[0].node.id !== dropNodes[0].id || !dropTargets[0].isDrop) {
   throw new Error("A shared drop destination must expose one marker bound to the first variation.");
 }
+const dropArrows = buildShogiCandidateArrows(dropNodes, "sente");
+if (dropArrows.map((arrow) => arrow.dropRole).join(",") !== "pawn,gold") {
+  throw new Error(`Drop candidate arrows did not retain their hand piece roles: ${JSON.stringify(dropArrows.map((arrow) => arrow.dropRole))}`);
+}
 const invalidCandidate = {
   ...dropNodes[0],
   id: "invalid",

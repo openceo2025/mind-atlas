@@ -9,13 +9,14 @@ export type ShogiCandidateArrow = {
   fromSquare?: string;
   toSquare: string;
   isDrop: boolean;
+  dropRole?: string;
 };
 
 const MAX_SHARED_DESTINATION_SPAN = 64;
 const PREFERRED_SHARED_DESTINATION_SPACING = 54;
 
 export function buildShogiCandidateArrows(nodes: AtlasNode[], orientation: "sente" | "gote"): ShogiCandidateArrow[] {
-  const groups = new Map<string, Array<{ node: AtlasNode; label: string; from?: string; to: string }>>();
+  const groups = new Map<string, Array<{ node: AtlasNode; label: string; from?: string; to: string; dropRole?: string }>>();
   for (const node of nodes) {
     const content = findShogiNodeContent(node);
     const usi = content?.usi?.trim();
@@ -25,7 +26,7 @@ export function buildShogiCandidateArrows(nodes: AtlasNode[], orientation: "sent
     const { from, to } = parsed;
     const key = `${from ?? "drop"}-${to}`;
     const group = groups.get(key) ?? [];
-    group.push({ node, label: content.displayText || node.title, from, to });
+    group.push({ node, label: content.displayText || node.title, from, to, dropRole: parsed.dropRole });
     groups.set(key, group);
   }
 
@@ -52,6 +53,7 @@ export function buildShogiCandidateArrows(nodes: AtlasNode[], orientation: "sent
       ...(candidate.from ? { fromSquare: candidate.from } : {}),
       toSquare: candidate.to,
       isDrop: !candidate.from,
+      ...(candidate.dropRole ? { dropRole: candidate.dropRole } : {}),
     };
   }));
 }
@@ -66,11 +68,21 @@ export function buildShogiCandidateTargets(candidates: ShogiCandidateArrow[]): S
   });
 }
 
-function parseShogiCandidateUsi(usi: string): { from?: string; to: string } | null {
+function parseShogiCandidateUsi(usi: string): { from?: string; to: string; dropRole?: string } | null {
   const boardMove = /^([1-9][a-i])([1-9][a-i])(?:\+)?$/.exec(usi);
   if (boardMove) return { from: boardMove[1], to: boardMove[2] };
-  const drop = /^[PLNSGBR]\*([1-9][a-i])$/.exec(usi);
-  return drop ? { to: drop[1] } : null;
+  const drop = /^([PLNSGBR])\*([1-9][a-i])$/.exec(usi);
+  if (!drop) return null;
+  const dropRoles: Record<string, string> = {
+    P: "pawn",
+    L: "lance",
+    N: "knight",
+    S: "silver",
+    G: "gold",
+    B: "bishop",
+    R: "rook",
+  };
+  return { to: drop[2], dropRole: dropRoles[drop[1]] };
 }
 
 function shogiArrowPoint(key: string, orientation: "sente" | "gote"): [number, number] {

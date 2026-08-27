@@ -216,6 +216,19 @@ async function verifyShogi() {
     await page.getByRole("button", { name: "一手戻る" }).click();
     await page.locator(".shogi-viewer-position").filter({ hasText: "4手目" }).waitFor();
     if (await page.locator(".shogi-candidate-arrow-hit").count() !== 2) throw new Error("Shogi drop and move branches are not both marked as candidates.");
+    const dropArrowAlignment = await page.evaluate(() => {
+      const shell = document.querySelector(".shogi-board-shell")?.getBoundingClientRect();
+      const handPiece = document.querySelectorAll(".shogi-hand-host")[1]?.querySelector("piece.bishop")?.getBoundingClientRect();
+      const arrow = document.querySelector(".shogi-drop-arrow-overlay line");
+      if (!shell || !handPiece || !arrow) return null;
+      return {
+        source: { x: Number(arrow.getAttribute("x1")), y: Number(arrow.getAttribute("y1")) },
+        expected: { x: handPiece.left + handPiece.width / 2 - shell.left, y: handPiece.top + handPiece.height / 2 - shell.top },
+      };
+    });
+    if (!dropArrowAlignment || Math.abs(dropArrowAlignment.source.x - dropArrowAlignment.expected.x) > 3 || Math.abs(dropArrowAlignment.source.y - dropArrowAlignment.expected.y) > 3) {
+      throw new Error(`Shogi drop arrow is not anchored to the displayed hand piece: ${JSON.stringify(dropArrowAlignment)}`);
+    }
 
     await page.getByRole("button", { name: "Go to parent layer" }).click();
     await page.locator(".shogi-viewer-position").filter({ hasText: "3手目" }).waitFor();

@@ -41,6 +41,12 @@ interface ShogiViewerProps {
   onStatus?: (message: string) => void;
 }
 
+type DropArrowLayout = {
+  width: number;
+  height: number;
+  arrows: Array<{ id: string; from: [number, number]; to: [number, number] }>;
+};
+
 export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
@@ -68,6 +74,8 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   const [libraryError, setLibraryError] = useState("");
   const [orientation, setOrientation] = useState<"sente" | "gote">("sente");
   const boardRef = useRef<HTMLDivElement>(null);
+  const boardFrameRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const topHandRef = useRef<HTMLDivElement>(null);
   const bottomHandRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<Api | null>(null);
@@ -82,6 +90,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
 
   const candidateArrows = useMemo(() => buildShogiCandidateArrows(variations, orientation), [variations, orientation]);
   const candidateTargets = useMemo(() => buildShogiCandidateTargets(candidateArrows), [candidateArrows]);
+  const [dropArrowLayout, setDropArrowLayout] = useState<DropArrowLayout>({ width: 0, height: 0, arrows: [] });
   const branchTail = currentNode ? findRecordTail(currentNode) : recordRoot ? findRecordTail(recordRoot) : null;
   const coordinateFiles = orientation === "sente" ? ["9", "8", "7", "6", "5", "4", "3", "2", "1"] : ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
   const coordinateRanks = orientation === "sente" ? JAPANESE_RANKS : [...JAPANESE_RANKS].reverse();
@@ -114,6 +123,51 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
     if (!apiRef.current || !boardConfig) return;
     apiRef.current.set(boardConfig, true);
   }, [boardConfig]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    const boardFrame = boardFrameRef.current;
+    if (!shell || !boardFrame || !currentContent || !recordRoot) {
+      setDropArrowLayout({ width: 0, height: 0, arrows: [] });
+      return;
+    }
+    let frameId = 0;
+    const updateLayout = () => {
+      cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        const shellRect = shell.getBoundingClientRect();
+        const boardRect = boardFrame.getBoundingClientRect();
+        const turnColor = currentContent.sfen.split(" ")[1] === "w" ? "gote" : "sente";
+        const handHost = turnColor === orientation ? bottomHandRef.current : topHandRef.current;
+        const arrows = candidateArrows
+          .filter((candidate) => candidate.isDrop && candidate.dropRole)
+          .flatMap((candidate) => {
+            const handPiece = handHost?.querySelector<HTMLElement>(`sg-hp-wrap piece.${candidate.dropRole}`);
+            if (!handPiece) return [];
+            const handRect = handPiece.getBoundingClientRect();
+            return [{
+              id: candidate.node.id,
+              from: [handRect.left + handRect.width / 2 - shellRect.left, handRect.top + handRect.height / 2 - shellRect.top] as [number, number],
+              to: [
+                boardRect.left - shellRect.left + boardRect.width * candidate.to[0] / 900,
+                boardRect.top - shellRect.top + boardRect.height * candidate.to[1] / 900,
+              ] as [number, number],
+            }];
+          });
+        setDropArrowLayout({ width: shellRect.width, height: shellRect.height, arrows });
+      });
+    };
+    updateLayout();
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateLayout);
+    resizeObserver?.observe(shell);
+    resizeObserver?.observe(boardFrame);
+    window.addEventListener("resize", updateLayout, { passive: true });
+    return () => {
+      cancelAnimationFrame(frameId);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateLayout);
+    };
+  }, [candidateArrows, currentContent?.sfen, orientation, recordRoot?.id, libraryReady]);
 
   if (!enabled || !recordRoot || !currentContent || !selectedNode) return null;
 
@@ -204,9 +258,33 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
           <SkipForward size={14} />
         </button>
       </div>
-      <div className={`shogi-board-shell orientation-${orientation}`}>
+      <div className={`shogi-board-shell orientation-${orientation}`} ref={shellRef}>
+        {dropArrowLayout.arrows.length ? (
+          <svg
+            className="shogi-drop-arrow-overlay"
+            viewBox={`0 0 ${dropArrowLayout.width} ${dropArrowLayout.height}`}
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <defs>
+              <marker id={`${candidateArrowheadId}-drop`} markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto">
+                <path d="M0,0 L7,3.5 L0,7 Z" />
+              </marker>
+            </defs>
+            {dropArrowLayout.arrows.map((arrow) => (
+              <line
+                key={`drop-arrow-${arrow.id}`}
+                x1={arrow.from[0]}
+                y1={arrow.from[1]}
+                x2={arrow.to[0]}
+                y2={arrow.to[1]}
+                markerEnd={`url(#${candidateArrowheadId}-drop)`}
+              />
+            ))}
+          </svg>
+        ) : null}
         <div className="shogi-hand-host" ref={topHandRef} />
-        <div className="shogi-board-frame">
+        <div className="shogi-board-frame" ref={boardFrameRef}>
           <div className={`shogi-board-host orientation-${orientation}`} ref={boardRef} />
           <div className="shogi-file-coordinates" aria-hidden="true">
             {coordinateFiles.map((file) => <span key={file}>{file}</span>)}

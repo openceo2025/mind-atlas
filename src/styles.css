@@ -3695,10 +3695,16 @@ h1 {
 }
 
 .shogi-board-shell {
+  position: relative;
   display: grid;
   gap: 4px;
   width: min(100%, 360px);
   margin: 0 auto;
+}
+
+.shogi-hand-host {
+  position: relative;
+  z-index: 2;
 }
 
 .shogi-board-frame {
@@ -3912,6 +3918,16 @@ h1 {
   pointer-events: none;
 }
 
+.shogi-drop-arrow-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
 .shogi-candidate-arrows {
   position: absolute;
   inset: 0;
@@ -3922,7 +3938,8 @@ h1 {
 }
 
 .shogi-candidate-arrows line,
-.chess-candidate-arrows line {
+.chess-candidate-arrows line,
+.shogi-drop-arrow-overlay line {
   stroke: rgba(225, 255, 229, 0.92);
   stroke-linecap: round;
   stroke-width: 10;
@@ -3933,7 +3950,8 @@ h1 {
 }
 
 .shogi-candidate-arrows marker path,
-.chess-candidate-arrows marker path {
+.chess-candidate-arrows marker path,
+.shogi-drop-arrow-overlay marker path {
   fill: rgba(225, 255, 229, 0.96);
 }
 
