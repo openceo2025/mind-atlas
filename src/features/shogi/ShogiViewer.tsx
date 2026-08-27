@@ -229,21 +229,17 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
                   x2={candidate.to[0]}
                   y2={candidate.to[1]}
                   markerEnd={`url(#${candidateArrowheadId})`}
-                  onClick={() => selectVariation(candidate.node)}
                 />
               ))}
             </svg>
             {candidateTargets.map((candidate) => (
-              <button
+              <span
                 key={candidate.node.id}
-                type="button"
                 className={`shogi-candidate-arrow-hit ${candidate.isDrop ? "is-drop" : ""}`}
                 data-candidate-kind={candidate.isDrop ? "drop" : "move"}
                 data-candidate-square={candidate.toSquare}
                 style={{ left: `${(candidate.to[0] / 9)}%`, top: `${(candidate.to[1] / 9)}%` }}
-                onClick={() => selectVariation(candidate.node)}
-                aria-label={candidate.label}
-                title={candidate.label}
+                aria-hidden="true"
               />
             ))}
           </div>

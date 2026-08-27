@@ -231,19 +231,15 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
                 x2={candidate.to[0]}
                 y2={candidate.to[1]}
                 markerEnd={`url(#${candidateArrowheadId})`}
-                onClick={() => selectVariation(candidate.node)}
               />
             ))}
           </svg>
           {candidateArrows.map((candidate) => (
-            <button
+            <span
               key={candidate.node.id}
-              type="button"
               className="chess-candidate-arrow-hit"
               style={{ left: `${candidate.to[0] / 8}%`, top: `${candidate.to[1] / 8}%` }}
-              onClick={() => selectVariation(candidate.node)}
-              aria-label={candidate.label}
-              title={candidate.label}
+              aria-hidden="true"
             />
           ))}
         </div>

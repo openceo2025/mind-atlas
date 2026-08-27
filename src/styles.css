@@ -3740,12 +3740,19 @@ h1 {
 
 .shogi-board-host sg-board {
   overflow: hidden;
+  z-index: 0;
 }
 
 .shogi-board-host sg-squares {
   display: grid;
   grid-template-columns: repeat(9, minmax(0, 1fr));
   grid-template-rows: repeat(9, minmax(0, 1fr));
+  z-index: 0;
+}
+
+.shogi-board-host sg-pieces {
+  z-index: 2;
+  pointer-events: auto;
 }
 
 .shogi-board-host sq {
@@ -3900,7 +3907,8 @@ h1 {
 .shogi-candidate-overlay {
   position: absolute;
   inset: 0;
-  z-index: 7;
+  /* Keep markers above squares but below the board library's pieces. */
+  z-index: 1;
   pointer-events: none;
 }
 
@@ -3919,8 +3927,8 @@ h1 {
   stroke-linecap: round;
   stroke-width: 10;
   fill: none;
-  pointer-events: stroke;
-  cursor: pointer;
+  pointer-events: none;
+  cursor: default;
   filter: drop-shadow(0 0 3px rgba(18, 50, 37, 0.85));
 }
 
@@ -3941,8 +3949,8 @@ h1 {
   background: rgba(225, 255, 229, 0.72);
   box-shadow: 0 0 0 2px rgba(255, 244, 197, 0.62);
   color: #153c2f;
-  cursor: pointer;
-  pointer-events: auto;
+  cursor: default;
+  pointer-events: none;
   transform: translate(-50%, -50%);
 }
 
@@ -4179,7 +4187,7 @@ h1 {
 .chess-candidate-overlay {
   position: absolute;
   inset: 0;
-  z-index: 7;
+  z-index: 1;
   pointer-events: none;
 }
 

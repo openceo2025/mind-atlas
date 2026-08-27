@@ -174,7 +174,9 @@ async function verifyShogi() {
     if (await page.locator(".shogi-candidate-arrow-hit").count() !== 1) throw new Error("Shogi root candidate arrow is not marked on the board.");
     const firstMoveLabel = await page.locator(".shogi-variations button").first().textContent();
     if (!firstMoveLabel?.includes("７六歩") || /[?�]/.test(firstMoveLabel)) throw new Error(`Shogi UTF-8 move label is corrupted: ${firstMoveLabel}`);
-    await page.locator(".shogi-candidate-arrow-hit").first().click();
+    // Existing moves must be reachable through the same board interaction as
+    // newly created moves; the candidate marker must not capture the target.
+    await playShogiMove(page, { fromColumn: 2, fromRow: 6, toColumn: 2, toRow: 5 });
     await page.locator(".shogi-viewer-position").filter({ hasText: "1手目" }).waitFor();
     await page.getByRole("button", { name: "一手戻る" }).click();
     await page.locator(".shogi-viewer-position").filter({ hasText: "開始局面" }).waitFor();
@@ -550,8 +552,7 @@ async function verifyShogiCandidateBranches() {
 
     // A deliberately selected variation must remain the next-step choice
     // after going back to the shared position and advancing again.
-    const candidateTargets = page.locator(".shogi-candidate-arrow-hit");
-    await candidateTargets.nth(1).click();
+    await page.locator(".shogi-variations button").nth(1).click();
     const chosenNodeId = await page.locator('.universe-shell [data-selected="true"]').getAttribute("data-node-id");
     if (!chosenNodeId) throw new Error("Shogi selected variation did not focus a node.");
     await page.getByRole("button", { name: "一手戻る" }).click();
@@ -603,6 +604,12 @@ async function verifyChess() {
       throw new Error(`Chess board should use a stable green-and-white checker pattern: ${JSON.stringify(chessPalette)}`);
     }
     if (await page.locator(".chess-candidate-arrows line").count() < 1) throw new Error("Chess root candidate arrow is missing.");
+    // An already recorded move must also work through normal source/dest
+    // input instead of requiring the visual candidate marker.
+    await clickChessMove(page, "e2", "e4");
+    await page.locator(".chess-viewer-position").filter({ hasText: "1 ply" }).waitFor();
+    await page.getByRole("button", { name: "一手戻る" }).click();
+    await page.locator(".chess-viewer-position").filter({ hasText: "開始局面" }).waitFor();
     const whiteFiles = await chessCoordinatePositions(page);
     await page.getByRole("button", { name: "盤面を反転" }).click();
     const blackFiles = await chessCoordinatePositions(page);
