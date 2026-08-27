@@ -69,7 +69,9 @@ const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "
 const WORKSPACE_PANEL_EXIT_MS = 960;
 const LAYOUT_BIRTH_UNAVAILABLE_NOTICE_MS = 3600;
 const TUTORIAL_TEMPLATE_DELAY_MS = 5000;
-const TUTORIAL_UI_REVEAL_MS = 900;
+// Leave enough time for the main chrome slide-in to finish before asking how
+// the user wants to continue.
+const TUTORIAL_UI_REVEAL_MS = 1400;
 const RENDER_QUALITY_STORAGE_KEY = "mind-atlas-render-quality";
 const ROOT_COMMAND_MAX_ZOOM = 1.08;
 const DEFAULT_DATASET_TITLE = "Mind Atlas";
