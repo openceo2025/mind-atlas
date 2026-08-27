@@ -224,10 +224,12 @@ async function verifyShogi() {
       return {
         source: { x: Number(arrow.getAttribute("x1")), y: Number(arrow.getAttribute("y1")) },
         expected: { x: handPiece.left + handPiece.width / 2 - shell.left, y: handPiece.top + handPiece.height / 2 - shell.top },
+        strokeWidth: Number.parseFloat(getComputedStyle(arrow).strokeWidth),
+        boardWidth: document.querySelector(".shogi-board-frame")?.getBoundingClientRect().width ?? 0,
       };
     });
-    if (!dropArrowAlignment || Math.abs(dropArrowAlignment.source.x - dropArrowAlignment.expected.x) > 3 || Math.abs(dropArrowAlignment.source.y - dropArrowAlignment.expected.y) > 3) {
-      throw new Error(`Shogi drop arrow is not anchored to the displayed hand piece: ${JSON.stringify(dropArrowAlignment)}`);
+    if (!dropArrowAlignment || Math.abs(dropArrowAlignment.source.x - dropArrowAlignment.expected.x) > 3 || Math.abs(dropArrowAlignment.source.y - dropArrowAlignment.expected.y) > 3 || dropArrowAlignment.strokeWidth > dropArrowAlignment.boardWidth / 90 + 0.5) {
+      throw new Error(`Shogi drop arrow is not anchored or scaled to the displayed hand piece: ${JSON.stringify(dropArrowAlignment)}`);
     }
 
     await page.getByRole("button", { name: "Go to parent layer" }).click();

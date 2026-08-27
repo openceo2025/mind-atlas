@@ -3938,8 +3938,7 @@ h1 {
 }
 
 .shogi-candidate-arrows line,
-.chess-candidate-arrows line,
-.shogi-drop-arrow-overlay line {
+.chess-candidate-arrows line {
   stroke: rgba(225, 255, 229, 0.92);
   stroke-linecap: round;
   stroke-width: 10;

@@ -44,6 +44,9 @@ interface ShogiViewerProps {
 type DropArrowLayout = {
   width: number;
   height: number;
+  strokeWidth: number;
+  markerWidth: number;
+  markerHeight: number;
   arrows: Array<{ id: string; from: [number, number]; to: [number, number] }>;
 };
 
@@ -90,7 +93,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
 
   const candidateArrows = useMemo(() => buildShogiCandidateArrows(variations, orientation), [variations, orientation]);
   const candidateTargets = useMemo(() => buildShogiCandidateTargets(candidateArrows), [candidateArrows]);
-  const [dropArrowLayout, setDropArrowLayout] = useState<DropArrowLayout>({ width: 0, height: 0, arrows: [] });
+  const [dropArrowLayout, setDropArrowLayout] = useState<DropArrowLayout>({ width: 0, height: 0, strokeWidth: 0, markerWidth: 0, markerHeight: 0, arrows: [] });
   const branchTail = currentNode ? findRecordTail(currentNode) : recordRoot ? findRecordTail(recordRoot) : null;
   const coordinateFiles = orientation === "sente" ? ["9", "8", "7", "6", "5", "4", "3", "2", "1"] : ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
   const coordinateRanks = orientation === "sente" ? JAPANESE_RANKS : [...JAPANESE_RANKS].reverse();
@@ -128,7 +131,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
     const shell = shellRef.current;
     const boardFrame = boardFrameRef.current;
     if (!shell || !boardFrame || !currentContent || !recordRoot) {
-      setDropArrowLayout({ width: 0, height: 0, arrows: [] });
+      setDropArrowLayout({ width: 0, height: 0, strokeWidth: 0, markerWidth: 0, markerHeight: 0, arrows: [] });
       return;
     }
     let frameId = 0;
@@ -137,6 +140,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       frameId = requestAnimationFrame(() => {
         const shellRect = shell.getBoundingClientRect();
         const boardRect = boardFrame.getBoundingClientRect();
+        const boardScale = boardRect.width / 900;
         const turnColor = currentContent.sfen.split(" ")[1] === "w" ? "gote" : "sente";
         const handHost = turnColor === orientation ? bottomHandRef.current : topHandRef.current;
         const arrows = candidateArrows
@@ -154,7 +158,14 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
               ] as [number, number],
             }];
           });
-        setDropArrowLayout({ width: shellRect.width, height: shellRect.height, arrows });
+        setDropArrowLayout({
+          width: shellRect.width,
+          height: shellRect.height,
+          strokeWidth: 10 * boardScale,
+          markerWidth: 7 * boardScale,
+          markerHeight: 7 * boardScale,
+          arrows,
+        });
       });
     };
     updateLayout();
@@ -267,7 +278,16 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
             aria-hidden="true"
           >
             <defs>
-              <marker id={`${candidateArrowheadId}-drop`} markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto">
+              <marker
+                id={`${candidateArrowheadId}-drop`}
+                markerWidth={dropArrowLayout.markerWidth}
+                markerHeight={dropArrowLayout.markerHeight}
+                viewBox="0 0 7 7"
+                markerUnits="userSpaceOnUse"
+                refX="5.5"
+                refY="3.5"
+                orient="auto"
+              >
                 <path d="M0,0 L7,3.5 L0,7 Z" />
               </marker>
             </defs>
@@ -278,6 +298,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
                 y1={arrow.from[1]}
                 x2={arrow.to[0]}
                 y2={arrow.to[1]}
+                style={{ strokeWidth: dropArrowLayout.strokeWidth }}
                 markerEnd={`url(#${candidateArrowheadId}-drop)`}
               />
             ))}
