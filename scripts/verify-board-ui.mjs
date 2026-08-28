@@ -336,24 +336,38 @@ async function verifyCandidateArrowScale() {
     // piece an arrow starts from and the square it points at stay readable, and
     // the shaft is half transparent because it crosses squares it is not about.
     const clearance = async (selector, label) => {
-      const measured = await page.evaluate((arrowSelector) => {
+      const measured = await page.evaluate(({ arrowSelector, head }) => {
         const line = document.querySelector(arrowSelector);
         const marker = document.querySelector(".shogi-candidate-arrow-hit");
         const board = document.querySelector(".shogi-board-host")?.getBoundingClientRect();
         if (!line || !marker || !board) return null;
         const matrix = line.getScreenCTM();
-        const tip = line.getPointAtLength(line.getTotalLength()).matrixTransform(matrix);
+        const start = line.getPointAtLength(0).matrixTransform(matrix);
+        const shaftEnd = line.getPointAtLength(line.getTotalLength()).matrixTransform(matrix);
         const target = marker.getBoundingClientRect();
         const centre = { x: target.left + target.width / 2, y: target.top + target.height / 2 };
         const square = board.width / 9;
+        // The line stops at the head's base, so the tip is one head further on.
+        const run = Math.hypot(shaftEnd.x - start.x, shaftEnd.y - start.y);
+        const tip = {
+          x: shaftEnd.x + ((shaftEnd.x - start.x) / run) * head * square,
+          y: shaftEnd.y + ((shaftEnd.y - start.y) / run) * head * square,
+        };
+        const round = (value) => Math.round((value / square) * 100) / 100;
         return {
-          gapSquares: Math.round((Math.hypot(tip.x - centre.x, tip.y - centre.y) / square) * 100) / 100,
+          tipGap: round(Math.hypot(tip.x - centre.x, tip.y - centre.y)),
+          shaftGap: round(Math.hypot(shaftEnd.x - centre.x, shaftEnd.y - centre.y)),
           alpha: Number((getComputedStyle(line).stroke.match(/[\d.]+\)$/) ?? ["1)"])[0].replace(")", "")),
         };
-      }, selector);
+      }, { arrowSelector: selector, head: 0.3 });
       if (!measured) throw new Error(`Could not measure the ${label} arrow against its destination.`);
-      if (Math.abs(measured.gapSquares - 1 / 3) > 0.06) {
-        throw new Error(`The ${label} arrow does not stop a third of a square short: ${JSON.stringify(measured)}`);
+      if (Math.abs(measured.tipGap - 1 / 3) > 0.06) {
+        throw new Error(`The ${label} arrow tip does not stop a third of a square short: ${JSON.stringify(measured)}`);
+      }
+      // A shaft drawn to the tip would poke out along the head's slopes and past
+      // its point, so it has to stop a whole head behind the tip.
+      if (Math.abs(measured.shaftGap - measured.tipGap - 0.3) > 0.04) {
+        throw new Error(`The ${label} arrow shaft runs into its head: ${JSON.stringify(measured)}`);
       }
       if (Math.abs(measured.alpha - 0.5) > 0.01) {
         throw new Error(`The ${label} arrow shaft is not half transparent: ${JSON.stringify(measured)}`);
@@ -372,7 +386,7 @@ async function verifyCandidateArrowScale() {
     const boardGap = await clearance(".shogi-candidate-arrows line", "board");
     console.log(
       `verify:board-ui:candidate-arrow-scale:passed head=${atDrop.board}% of a square,`
-      + ` clearance=${boardGap.gapSquares}/${dropGap.gapSquares} squares, shaft alpha=${boardGap.alpha}`,
+      + ` tip=${boardGap.tipGap}/${dropGap.tipGap} squares short, shaft alpha=${boardGap.alpha}`,
     );
   } finally {
     await context.close();

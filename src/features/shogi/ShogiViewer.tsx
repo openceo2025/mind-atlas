@@ -34,28 +34,39 @@ const CANDIDATE_ARROWHEAD_SQUARES = 0.3;
  * something drawn on top of them.
  */
 const CANDIDATE_ARROW_CLEARANCE_SQUARES = 1 / 3;
+/** Shaft left visible behind the head once both ends have been trimmed. */
+const CANDIDATE_ARROW_MIN_SHAFT_SQUARES = 0.2;
 
 /**
- * Pulls both ends of a segment in by `clearance`, keeping enough shaft for the
- * arrowhead. A one-square move is the shortest arrow the board can produce, so
- * the clearance yields rather than letting the arrow collapse or invert.
+ * Works out where to draw the shaft so that the arrow tip lands `clearance`
+ * short of `to` and no part of the shaft shows through the head.
+ *
+ * The returned end is the head's base, not the tip: a stroked line ends in a
+ * round cap and keeps its full width all the way, so a line drawn to the tip
+ * pokes out along the head's slopes and past its point. The head is placed from
+ * this end instead, and covers the last stretch itself.
+ *
+ * A one-square move is the shortest arrow the board can produce; there the
+ * clearance yields rather than letting the shaft disappear behind the head.
  */
 function trimCandidateSegment(
   from: readonly [number, number],
   to: readonly [number, number],
-  clearance: number,
-  minimumShaft: number,
+  square: number,
 ): { from: [number, number]; to: [number, number] } | null {
   const dx = to[0] - from[0];
   const dy = to[1] - from[1];
   const length = Math.hypot(dx, dy);
-  if (!Number.isFinite(length) || length <= 0) return null;
-  const trim = Math.min(clearance, Math.max(0, (length - minimumShaft) / 2));
+  if (!Number.isFinite(length) || length <= 0 || square <= 0) return null;
+  const clearance = CANDIDATE_ARROW_CLEARANCE_SQUARES * square;
+  const headLength = CANDIDATE_ARROWHEAD_SQUARES * square;
+  const minimumSpan = headLength + CANDIDATE_ARROW_MIN_SHAFT_SQUARES * square;
+  const trim = Math.min(clearance, Math.max(0, (length - minimumSpan) / 2));
   const unitX = dx / length;
   const unitY = dy / length;
   return {
     from: [from[0] + unitX * trim, from[1] + unitY * trim],
-    to: [to[0] - unitX * trim, to[1] - unitY * trim],
+    to: [to[0] - unitX * (trim + headLength), to[1] - unitY * (trim + headLength)],
   };
 }
 
@@ -202,8 +213,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
                 boardRect.left - shellRect.left + boardRect.width * candidate.to[0] / 900,
                 boardRect.top - shellRect.top + boardRect.height * candidate.to[1] / 900,
               ],
-              CANDIDATE_ARROW_CLEARANCE_SQUARES * squarePx,
-              CANDIDATE_ARROWHEAD_SQUARES * squarePx,
+              squarePx,
             );
             if (!segment) return [];
             return [{ id: candidate.node.id, from: segment.from, to: segment.to }];
@@ -339,7 +349,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
                 markerHeight={dropArrowLayout.markerHeight}
                 viewBox="0 0 7 7"
                 markerUnits="userSpaceOnUse"
-                refX="7"
+                refX="0"
                 refY="3.5"
                 orient="auto"
               >
@@ -384,7 +394,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
                   viewBox="0 0 7 7"
                   markerWidth={CANDIDATE_ARROWHEAD_SQUARES * SHOGI_SQUARE_UNITS / CANDIDATE_ARROW_STROKE}
                   markerHeight={CANDIDATE_ARROWHEAD_SQUARES * SHOGI_SQUARE_UNITS / CANDIDATE_ARROW_STROKE}
-                  refX="7"
+                  refX="0"
                   refY="3.5"
                   orient="auto"
                 >
@@ -393,12 +403,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
               </defs>
               {candidateArrows.flatMap((candidate) => {
                 if (!candidate.from) return [];
-                const segment = trimCandidateSegment(
-                  candidate.from,
-                  candidate.to,
-                  CANDIDATE_ARROW_CLEARANCE_SQUARES * SHOGI_SQUARE_UNITS,
-                  CANDIDATE_ARROWHEAD_SQUARES * SHOGI_SQUARE_UNITS,
-                );
+                const segment = trimCandidateSegment(candidate.from, candidate.to, SHOGI_SQUARE_UNITS);
                 if (!segment) return [];
                 return [(
                   <line
