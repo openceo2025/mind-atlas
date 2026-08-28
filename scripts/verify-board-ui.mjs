@@ -38,6 +38,7 @@ try {
   if (testScope === "all" || testScope === "go") await verifyGo();
   if (testScope === "all" || testScope === "go-ko") await verifyGoKo();
   if (testScope === "all" || testScope === "promotion") await verifyPromotionChoiceFits();
+  if (testScope === "all" || testScope === "arrow-scale") await verifyCandidateArrowScale();
   if (testScope === "all" || testScope === "light-contrast") await verifyLightThemeContrast();
   if (testScope === "all" || testScope === "merge-dialog") await verifyMergeDialogLayout();
   if (testScope === "all" || testScope === "mobile") {
@@ -235,6 +236,60 @@ async function verifyShogi() {
     await page.getByRole("button", { name: "Go to parent layer" }).click();
     await page.locator(".shogi-viewer-position").filter({ hasText: "3手目" }).waitFor();
     await assertBoardMenuIsSimplified(page);
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * A candidate arrow points at a square; it must not bury it.
+ *
+ * SVG marker units default to the stroke width, so the arrowhead was drawn
+ * seven times the line and covered 70% of a square - the piece it pointed at
+ * disappeared under it. An arrow that starts in a hand tray is drawn by a
+ * second overlay in pixels rather than board units, and its head had drifted to
+ * a tenth of that. Both are stated in squares now, so both are measured here.
+ */
+async function verifyCandidateArrowScale() {
+  const { context, page } = await createPage({ width: 1280, height: 900 });
+  try {
+    const source = "手合割：平手\n手数----指手---------消費時間--\n   1 ７六歩(77)   ( 0:00/00:00:00)\n   2 ３四歩(33)   ( 0:00/00:00:00)\n   3 ２二角成(88) ( 0:00/00:00:00)\n   4 同　銀(31)   ( 0:00/00:00:00)\n   5 ４五角打     ( 0:00/00:00:00)\n   6 ３三銀(22)   ( 0:00/00:00:00)\n   7 ３四角(45)   ( 0:00/00:00:00)\n";
+    await importRecord(page, "arrows.kif", source, ".shogi-viewer");
+    const headPercent = () => page.evaluate(() => {
+      const board = document.querySelector(".shogi-board-host")?.getBoundingClientRect();
+      const square = board ? board.width / 9 : 0;
+      const measure = (marker, unitsPerSquare) => {
+        if (!marker) return null;
+        const width = Number.parseFloat(marker.getAttribute("markerWidth"));
+        // Marker units are stroke widths unless the marker opts out, and the
+        // arrows are stroked at 10 of the 100 units a square spans.
+        const scale = marker.getAttribute("markerUnits") === "userSpaceOnUse" ? 1 : 10;
+        return Math.round(((width * scale) / unitsPerSquare) * 100);
+      };
+      return {
+        board: measure(document.querySelector(".shogi-candidate-arrows marker"), 100),
+        drop: measure(document.querySelector(".shogi-drop-arrow-overlay marker"), square),
+      };
+    });
+
+    // Walk the main line until the continuation is a drop, so both overlays are
+    // on screen at once and can be compared against each other.
+    let atDrop = await headPercent();
+    for (let step = 0; step < 8 && atDrop.drop === null; step += 1) {
+      await page.getByRole("button", { name: "一手進む" }).click();
+      await page.waitForTimeout(350);
+      atDrop = await headPercent();
+    }
+    if (atDrop.drop === null) throw new Error("The drop fixture produced no hand-to-board arrow.");
+    if (atDrop.board !== atDrop.drop) {
+      throw new Error(`A hand arrow is not the size of a board arrow: ${JSON.stringify(atDrop)}`);
+    }
+    for (const [name, percent] of Object.entries(atDrop)) {
+      if (!(percent > 10 && percent <= 35)) {
+        throw new Error(`The ${name} arrowhead is ${percent}% of a square, which hides the square it points at.`);
+      }
+    }
+    console.log(`verify:board-ui:candidate-arrow-scale:passed head=${atDrop.board}% of a square`);
   } finally {
     await context.close();
   }

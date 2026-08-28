@@ -13,6 +13,19 @@ import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, ShogiRecordContent } from "../../types";
 import { formatAppMessage } from "../../i18n/format";
 
+/**
+ * Candidate-arrow geometry, expressed in board squares.
+ *
+ * The board overlay is drawn on a 900-unit grid, so one square is 100 units and
+ * every arrow measurement can be stated as a fraction of a square. Both arrows
+ * on the board and arrows that start in a hand tray use these, which is what
+ * keeps a drop arrow the same size as a move arrow.
+ */
+const SHOGI_SQUARE_UNITS = 100;
+/** Matches the stroke width the candidate arrows are styled with. */
+const CANDIDATE_ARROW_STROKE = 10;
+const CANDIDATE_ARROWHEAD_SQUARES = 0.3;
+
 const PIECE_ROLES: Record<string, string> = {
   pawn: "P",
   lance: "L",
@@ -158,12 +171,17 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
               ] as [number, number],
             }];
           });
+        // This overlay is measured in shell pixels rather than board units, so
+        // each figure is converted through the board scale. Both come from the
+        // same constants the board arrows use, so an arrow that starts in a
+        // hand tray is the same weight and the same head as one that starts on
+        // a square.
         setDropArrowLayout({
           width: shellRect.width,
           height: shellRect.height,
-          strokeWidth: 10 * boardScale,
-          markerWidth: 7 * boardScale,
-          markerHeight: 7 * boardScale,
+          strokeWidth: CANDIDATE_ARROW_STROKE * boardScale,
+          markerWidth: CANDIDATE_ARROWHEAD_SQUARES * SHOGI_SQUARE_UNITS * boardScale,
+          markerHeight: CANDIDATE_ARROWHEAD_SQUARES * SHOGI_SQUARE_UNITS * boardScale,
           arrows,
         });
       });
@@ -316,7 +334,23 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
           <div className="shogi-candidate-overlay">
             <svg className="shogi-candidate-arrows" viewBox="0 0 900 900" preserveAspectRatio="none" aria-hidden="true">
               <defs>
-                <marker id={candidateArrowheadId} markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto">
+                {/*
+                  * The head is sized in squares, not in stroke widths. Marker
+                  * units default to the stroke width, so the 7-unit head this
+                  * arrow is drawn from came out seven times the 10-unit line -
+                  * 70% of a square - and buried the piece it was pointing at.
+                  * The viewBox scales that same shape into the width below, so
+                  * the head is CANDIDATE_ARROWHEAD_SQUARES of one square.
+                  */}
+                <marker
+                  id={candidateArrowheadId}
+                  viewBox="0 0 7 7"
+                  markerWidth={CANDIDATE_ARROWHEAD_SQUARES * SHOGI_SQUARE_UNITS / CANDIDATE_ARROW_STROKE}
+                  markerHeight={CANDIDATE_ARROWHEAD_SQUARES * SHOGI_SQUARE_UNITS / CANDIDATE_ARROW_STROKE}
+                  refX="5.5"
+                  refY="3.5"
+                  orient="auto"
+                >
                   <path d="M0,0 L7,3.5 L0,7 Z" />
                 </marker>
               </defs>
