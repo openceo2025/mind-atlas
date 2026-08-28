@@ -3943,10 +3943,16 @@ h1 {
   pointer-events: none;
 }
 
+/*
+ * The shaft is half transparent because it crosses squares it is not talking
+ * about - a hand arrow spans most of the board - and the pieces underneath it
+ * still have to be readable. The head stays solid: it marks the one square the
+ * arrow is actually about.
+ */
 .shogi-candidate-arrows line,
 .chess-candidate-arrows line,
 .shogi-drop-arrow-overlay line {
-  stroke: rgba(225, 255, 229, 0.92);
+  stroke: rgba(225, 255, 229, 0.5);
   stroke-linecap: round;
   stroke-width: 10;
   fill: none;

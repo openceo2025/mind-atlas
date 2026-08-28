@@ -25,6 +25,39 @@ const SHOGI_SQUARE_UNITS = 100;
 /** Matches the stroke width the candidate arrows are styled with. */
 const CANDIDATE_ARROW_STROKE = 10;
 const CANDIDATE_ARROWHEAD_SQUARES = 0.3;
+/**
+ * How far short of each piece's centre the arrow stops.
+ *
+ * An arrow drawn centre to centre covers both pieces it is talking about. This
+ * clearance leaves the piece it starts from and the square it points at both
+ * legible, so the arrow reads as a relation between two things rather than as
+ * something drawn on top of them.
+ */
+const CANDIDATE_ARROW_CLEARANCE_SQUARES = 1 / 3;
+
+/**
+ * Pulls both ends of a segment in by `clearance`, keeping enough shaft for the
+ * arrowhead. A one-square move is the shortest arrow the board can produce, so
+ * the clearance yields rather than letting the arrow collapse or invert.
+ */
+function trimCandidateSegment(
+  from: readonly [number, number],
+  to: readonly [number, number],
+  clearance: number,
+  minimumShaft: number,
+): { from: [number, number]; to: [number, number] } | null {
+  const dx = to[0] - from[0];
+  const dy = to[1] - from[1];
+  const length = Math.hypot(dx, dy);
+  if (!Number.isFinite(length) || length <= 0) return null;
+  const trim = Math.min(clearance, Math.max(0, (length - minimumShaft) / 2));
+  const unitX = dx / length;
+  const unitY = dy / length;
+  return {
+    from: [from[0] + unitX * trim, from[1] + unitY * trim],
+    to: [to[0] - unitX * trim, to[1] - unitY * trim],
+  };
+}
 
 const PIECE_ROLES: Record<string, string> = {
   pawn: "P",
@@ -162,14 +195,18 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
             const handPiece = handHost?.querySelector<HTMLElement>(`sg-hp-wrap piece.${candidate.dropRole}`);
             if (!handPiece) return [];
             const handRect = handPiece.getBoundingClientRect();
-            return [{
-              id: candidate.node.id,
-              from: [handRect.left + handRect.width / 2 - shellRect.left, handRect.top + handRect.height / 2 - shellRect.top] as [number, number],
-              to: [
+            const squarePx = boardRect.width / 9;
+            const segment = trimCandidateSegment(
+              [handRect.left + handRect.width / 2 - shellRect.left, handRect.top + handRect.height / 2 - shellRect.top],
+              [
                 boardRect.left - shellRect.left + boardRect.width * candidate.to[0] / 900,
                 boardRect.top - shellRect.top + boardRect.height * candidate.to[1] / 900,
-              ] as [number, number],
-            }];
+              ],
+              CANDIDATE_ARROW_CLEARANCE_SQUARES * squarePx,
+              CANDIDATE_ARROWHEAD_SQUARES * squarePx,
+            );
+            if (!segment) return [];
+            return [{ id: candidate.node.id, from: segment.from, to: segment.to }];
           });
         // This overlay is measured in shell pixels rather than board units, so
         // each figure is converted through the board scale. Both come from the
@@ -302,7 +339,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
                 markerHeight={dropArrowLayout.markerHeight}
                 viewBox="0 0 7 7"
                 markerUnits="userSpaceOnUse"
-                refX="5.5"
+                refX="7"
                 refY="3.5"
                 orient="auto"
               >
@@ -347,23 +384,33 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
                   viewBox="0 0 7 7"
                   markerWidth={CANDIDATE_ARROWHEAD_SQUARES * SHOGI_SQUARE_UNITS / CANDIDATE_ARROW_STROKE}
                   markerHeight={CANDIDATE_ARROWHEAD_SQUARES * SHOGI_SQUARE_UNITS / CANDIDATE_ARROW_STROKE}
-                  refX="5.5"
+                  refX="7"
                   refY="3.5"
                   orient="auto"
                 >
                   <path d="M0,0 L7,3.5 L0,7 Z" />
                 </marker>
               </defs>
-              {candidateArrows.filter((candidate) => candidate.from).map((candidate) => (
-                <line
-                  key={`arrow-${candidate.node.id}`}
-                  x1={candidate.from?.[0]}
-                  y1={candidate.from?.[1]}
-                  x2={candidate.to[0]}
-                  y2={candidate.to[1]}
-                  markerEnd={`url(#${candidateArrowheadId})`}
-                />
-              ))}
+              {candidateArrows.flatMap((candidate) => {
+                if (!candidate.from) return [];
+                const segment = trimCandidateSegment(
+                  candidate.from,
+                  candidate.to,
+                  CANDIDATE_ARROW_CLEARANCE_SQUARES * SHOGI_SQUARE_UNITS,
+                  CANDIDATE_ARROWHEAD_SQUARES * SHOGI_SQUARE_UNITS,
+                );
+                if (!segment) return [];
+                return [(
+                  <line
+                    key={`arrow-${candidate.node.id}`}
+                    x1={segment.from[0]}
+                    y1={segment.from[1]}
+                    x2={segment.to[0]}
+                    y2={segment.to[1]}
+                    markerEnd={`url(#${candidateArrowheadId})`}
+                  />
+                )];
+              })}
             </svg>
             {candidateTargets.map((candidate) => (
               <span

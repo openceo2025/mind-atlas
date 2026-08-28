@@ -217,20 +217,38 @@ async function verifyShogi() {
     await page.getByRole("button", { name: "一手戻る" }).click();
     await page.locator(".shogi-viewer-position").filter({ hasText: "4手目" }).waitFor();
     if (await page.locator(".shogi-candidate-arrow-hit").count() !== 2) throw new Error("Shogi drop and move branches are not both marked as candidates.");
+    // The arrow is aimed from the hand piece but starts clear of it, so what is
+    // checked is the direction it leaves by and the gap it leaves behind.
     const dropArrowAlignment = await page.evaluate(() => {
       const shell = document.querySelector(".shogi-board-shell")?.getBoundingClientRect();
       const handPiece = document.querySelectorAll(".shogi-hand-host")[1]?.querySelector("piece.bishop")?.getBoundingClientRect();
       const arrow = document.querySelector(".shogi-drop-arrow-overlay line");
-      if (!shell || !handPiece || !arrow) return null;
+      const boardWidth = document.querySelector(".shogi-board-frame")?.getBoundingClientRect().width ?? 0;
+      if (!shell || !handPiece || !arrow || !boardWidth) return null;
+      const source = { x: Number(arrow.getAttribute("x1")), y: Number(arrow.getAttribute("y1")) };
+      const target = { x: Number(arrow.getAttribute("x2")), y: Number(arrow.getAttribute("y2")) };
+      const centre = { x: handPiece.left + handPiece.width / 2 - shell.left, y: handPiece.top + handPiece.height / 2 - shell.top };
+      const square = boardWidth / 9;
+      const gap = Math.hypot(source.x - centre.x, source.y - centre.y);
+      // How far the start sits off the line from the hand piece to the square.
+      const run = Math.hypot(target.x - centre.x, target.y - centre.y);
+      const drift = run
+        ? Math.abs((target.x - centre.x) * (centre.y - source.y) - (centre.x - source.x) * (target.y - centre.y)) / run
+        : Number.POSITIVE_INFINITY;
       return {
-        source: { x: Number(arrow.getAttribute("x1")), y: Number(arrow.getAttribute("y1")) },
-        expected: { x: handPiece.left + handPiece.width / 2 - shell.left, y: handPiece.top + handPiece.height / 2 - shell.top },
+        gapSquares: gap / square,
+        driftPx: drift,
         strokeWidth: Number.parseFloat(getComputedStyle(arrow).strokeWidth),
-        boardWidth: document.querySelector(".shogi-board-frame")?.getBoundingClientRect().width ?? 0,
+        boardWidth,
       };
     });
-    if (!dropArrowAlignment || Math.abs(dropArrowAlignment.source.x - dropArrowAlignment.expected.x) > 3 || Math.abs(dropArrowAlignment.source.y - dropArrowAlignment.expected.y) > 3 || dropArrowAlignment.strokeWidth > dropArrowAlignment.boardWidth / 90 + 0.5) {
-      throw new Error(`Shogi drop arrow is not anchored or scaled to the displayed hand piece: ${JSON.stringify(dropArrowAlignment)}`);
+    if (
+      !dropArrowAlignment
+      || Math.abs(dropArrowAlignment.gapSquares - 1 / 3) > 0.06
+      || dropArrowAlignment.driftPx > 2
+      || dropArrowAlignment.strokeWidth > dropArrowAlignment.boardWidth / 90 + 0.5
+    ) {
+      throw new Error(`Shogi drop arrow is not aimed from the displayed hand piece: ${JSON.stringify(dropArrowAlignment)}`);
     }
 
     await page.getByRole("button", { name: "Go to parent layer" }).click();
@@ -314,7 +332,48 @@ async function verifyCandidateArrowScale() {
     if (!(drawn.overlayLayer > drawn.markerLayer)) {
       throw new Error(`The hand-to-board arrow is drawn behind the destination marker: ${JSON.stringify(drawn)}`);
     }
-    console.log(`verify:board-ui:candidate-arrow-scale:passed head=${atDrop.board}% of a square, shaft=${drawn.length}px`);
+    // Both ends stop a third of a square short of the piece centres, so the
+    // piece an arrow starts from and the square it points at stay readable, and
+    // the shaft is half transparent because it crosses squares it is not about.
+    const clearance = async (selector, label) => {
+      const measured = await page.evaluate((arrowSelector) => {
+        const line = document.querySelector(arrowSelector);
+        const marker = document.querySelector(".shogi-candidate-arrow-hit");
+        const board = document.querySelector(".shogi-board-host")?.getBoundingClientRect();
+        if (!line || !marker || !board) return null;
+        const matrix = line.getScreenCTM();
+        const tip = line.getPointAtLength(line.getTotalLength()).matrixTransform(matrix);
+        const target = marker.getBoundingClientRect();
+        const centre = { x: target.left + target.width / 2, y: target.top + target.height / 2 };
+        const square = board.width / 9;
+        return {
+          gapSquares: Math.round((Math.hypot(tip.x - centre.x, tip.y - centre.y) / square) * 100) / 100,
+          alpha: Number((getComputedStyle(line).stroke.match(/[\d.]+\)$/) ?? ["1)"])[0].replace(")", "")),
+        };
+      }, selector);
+      if (!measured) throw new Error(`Could not measure the ${label} arrow against its destination.`);
+      if (Math.abs(measured.gapSquares - 1 / 3) > 0.06) {
+        throw new Error(`The ${label} arrow does not stop a third of a square short: ${JSON.stringify(measured)}`);
+      }
+      if (Math.abs(measured.alpha - 0.5) > 0.01) {
+        throw new Error(`The ${label} arrow shaft is not half transparent: ${JSON.stringify(measured)}`);
+      }
+      return measured;
+    };
+    const dropGap = await clearance(".shogi-drop-arrow-overlay line", "hand");
+
+    // Two moves on, the continuation is an ordinary move, so the board overlay
+    // can be held to the same clearance.
+    for (let step = 0; step < 2; step += 1) {
+      await page.getByRole("button", { name: "一手進む" }).click();
+      await page.waitForTimeout(300);
+    }
+    await page.waitForTimeout(400);
+    const boardGap = await clearance(".shogi-candidate-arrows line", "board");
+    console.log(
+      `verify:board-ui:candidate-arrow-scale:passed head=${atDrop.board}% of a square,`
+      + ` clearance=${boardGap.gapSquares}/${dropGap.gapSquares} squares, shaft alpha=${boardGap.alpha}`,
+    );
   } finally {
     await context.close();
   }
