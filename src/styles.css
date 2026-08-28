@@ -3918,10 +3918,16 @@ h1 {
   pointer-events: none;
 }
 
+/*
+ * An arrow that starts in a hand tray is drawn over everything, including the
+ * marker on the square it points at. It shares the marker layer otherwise, and
+ * being written first in the DOM it lost the tie and had its head buried under
+ * that marker - the one thing the arrow exists to point at.
+ */
 .shogi-drop-arrow-overlay {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 2;
   width: 100%;
   height: 100%;
   overflow: visible;
@@ -3938,7 +3944,8 @@ h1 {
 }
 
 .shogi-candidate-arrows line,
-.chess-candidate-arrows line {
+.chess-candidate-arrows line,
+.shogi-drop-arrow-overlay line {
   stroke: rgba(225, 255, 229, 0.92);
   stroke-linecap: round;
   stroke-width: 10;

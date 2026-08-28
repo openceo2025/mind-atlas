@@ -289,7 +289,32 @@ async function verifyCandidateArrowScale() {
         throw new Error(`The ${name} arrowhead is ${percent}% of a square, which hides the square it points at.`);
       }
     }
-    console.log(`verify:board-ui:candidate-arrow-scale:passed head=${atDrop.board}% of a square`);
+
+    // The shaft was never given a stroke, so a hand arrow was a head with
+    // nothing behind it, and the overlay shared the marker layer and lost the
+    // tie on DOM order, so even the head sat behind the marker.
+    const drawn = await page.evaluate(() => {
+      const line = document.querySelector(".shogi-drop-arrow-overlay line");
+      const overlay = document.querySelector(".shogi-drop-arrow-overlay");
+      const markers = document.querySelector(".shogi-candidate-overlay");
+      if (!line || !overlay) return null;
+      const box = line.getBoundingClientRect();
+      return {
+        stroke: getComputedStyle(line).stroke,
+        length: Math.round(Math.hypot(box.width, box.height)),
+        overlayLayer: Number(getComputedStyle(overlay).zIndex),
+        markerLayer: Number(getComputedStyle(markers).zIndex),
+      };
+    });
+    if (!drawn) throw new Error("The hand-to-board arrow lost its line.");
+    if (drawn.stroke === "none" || drawn.stroke === "rgba(0, 0, 0, 0)") {
+      throw new Error(`The hand-to-board arrow has an invisible shaft: ${JSON.stringify(drawn)}`);
+    }
+    if (drawn.length < 40) throw new Error(`The hand-to-board arrow has no length: ${JSON.stringify(drawn)}`);
+    if (!(drawn.overlayLayer > drawn.markerLayer)) {
+      throw new Error(`The hand-to-board arrow is drawn behind the destination marker: ${JSON.stringify(drawn)}`);
+    }
+    console.log(`verify:board-ui:candidate-arrow-scale:passed head=${atDrop.board}% of a square, shaft=${drawn.length}px`);
   } finally {
     await context.close();
   }
