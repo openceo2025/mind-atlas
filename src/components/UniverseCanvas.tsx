@@ -46,7 +46,7 @@ import {
   getBoardMobileTargetNodeDiameterPx,
   getProjectedDiameterPx,
 } from "../layout/boardCamera";
-import { MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_BIRTH_UNAVAILABLE_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
+import { BOARD_NAVIGATION_EVENT, MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_BIRTH_UNAVAILABLE_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { buildContextCopy, CONTEXT_COPY_PRESETS, copyContextMarkdown, type ContextCopyPreset } from "../context/contextCopy";
 import { nodeTreeHasAttachments, readNodeClipboard, writeNodeClipboard } from "../nodeClipboard";
 import { emitOnboardingEvent, getOnboardingCurrentSpaceStep } from "../onboarding/useOnboarding";
@@ -1645,7 +1645,19 @@ function NavigationController({
     ) {
       const store = useAtlasStore.getState();
       store.clearMultiSelection();
-      store.focusParentNode();
+      const canvasBounds = gl.domElement.getBoundingClientRect();
+      const midpoint = canvasBounds.left + canvasBounds.width / 2;
+      const isRightHalf = backgroundClick.x >= midpoint;
+      if (boardGameMode) {
+        window.dispatchEvent(new CustomEvent(BOARD_NAVIGATION_EVENT, {
+          detail: { direction: isRightHalf ? "next" : "previous" },
+        }));
+      } else if (isRightHalf) {
+        const childId = getKeyboardNavigationTarget(store.atlasRoot, store.selectedNodeId, "ArrowUp");
+        if (childId) store.focusNode(childId);
+      } else {
+        store.focusParentNode();
+      }
       window.dispatchEvent(new Event(UNIVERSE_BACKGROUND_CLICK_EVENT));
     }
     backgroundClickRef.current = null;

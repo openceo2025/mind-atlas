@@ -36,6 +36,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
   const {
     rememberChild,
     selectVariation,
+    retreat,
     advance,
     advanceToTail,
     hasNextBranchPoint,
@@ -131,7 +132,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
           disabled={!hasPreviousBranchPoint}
           onClick={replayToPreviousBranchPoint}
         />
-        <button type="button" className="go-viewer-icon" onClick={() => parentNode && focusNode(parentNode.id)} disabled={!parentNode} aria-label="一手戻る">
+        <button type="button" className="go-viewer-icon" onClick={retreat} disabled={!parentNode} aria-label="一手戻る">
           <ChevronLeft size={14} />
         </button>
         <button type="button" className="go-viewer-icon" onClick={advance} disabled={!variations.length} aria-label="一手進む">

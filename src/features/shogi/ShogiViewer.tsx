@@ -123,6 +123,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   const {
     rememberChild,
     selectVariation,
+    retreat,
     advance,
     advanceToTail,
     hasNextBranchPoint,
@@ -318,7 +319,7 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
           disabled={!hasPreviousBranchPoint}
           onClick={replayToPreviousBranchPoint}
         />
-        <button type="button" className="shogi-viewer-icon" onClick={() => jumpTo(parentNode)} disabled={!parentNode} aria-label="一手戻る">
+        <button type="button" className="shogi-viewer-icon" onClick={retreat} disabled={!parentNode} aria-label="一手戻る">
           <ChevronLeft size={14} />
         </button>
         <button type="button" className="shogi-viewer-icon" onClick={advance} disabled={!variations.length} aria-label="一手進む">

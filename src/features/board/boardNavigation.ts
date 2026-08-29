@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { AtlasNode } from "../../types";
+import { BOARD_NAVIGATION_EVENT, type BoardNavigationEventDetail } from "../../events.ts";
 import {
   branchTailAlongMemory,
   findBoardRecordPath,
@@ -82,6 +83,23 @@ export function useBoardBranchNavigation(
     focusNode(next.id);
   };
 
+  const retreat = () => {
+    if (!recordRoot || !currentNode) return;
+    const path = findBoardRecordPath(recordRoot, currentNode.id);
+    const parent = path && path.length > 1 ? path[path.length - 2] : null;
+    if (parent) focusNode(parent.id);
+  };
+
+  useEffect(() => {
+    const handleNavigation = (event: Event) => {
+      const direction = (event as CustomEvent<BoardNavigationEventDetail>).detail?.direction;
+      if (direction === "previous") retreat();
+      if (direction === "next") advance();
+    };
+    window.addEventListener(BOARD_NAVIGATION_EVENT, handleNavigation);
+    return () => window.removeEventListener(BOARD_NAVIGATION_EVENT, handleNavigation);
+  }, [currentNode, recordRoot, recordMemory, focusNode]);
+
   const advanceToTail = () => {
     const initialNode = currentNode ?? recordRoot;
     if (!initialNode || !recordMemory) return;
@@ -109,6 +127,7 @@ export function useBoardBranchNavigation(
   return {
     rememberChild,
     selectVariation,
+    retreat,
     advance,
     advanceToTail,
     // The buttons stay disabled rather than doing nothing when no fork is left.

@@ -807,7 +807,7 @@ async function verifyBackgroundReturnsOneParent(browser) {
       window.__mindAtlasVerifyBackgroundInteractions += 1;
     });
   });
-  await findCanvasBackgroundPoint(page, "Mind Atlas parent return");
+  await findCanvasBackgroundPoint(page, "Mind Atlas parent return", "left");
   await page.waitForTimeout(320);
   const selectedNodeIds = await page.locator('textarea.space-title-editor[data-selected="true"]').evaluateAll((elements) =>
     elements.map((element) => element.getAttribute("data-node-id")).filter(Boolean),
@@ -817,6 +817,15 @@ async function verifyBackgroundReturnsOneParent(browser) {
   }
   const rootSelected = await page.locator('textarea.space-title-editor[data-node-id="atlas-root"][data-selected="true"]').count();
   if (rootSelected) throw new Error("Background click jumped directly to the root instead of one parent.");
+
+  await findCanvasBackgroundPoint(page, "Mind Atlas child navigation", "right");
+  await page.waitForTimeout(1400);
+  const childSelected = await page.locator('textarea.space-title-editor[data-selected="true"]').evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-node-id")).filter(Boolean),
+  );
+  if (!childSelected.includes("layout-alpha-1")) {
+    throw new Error(`Right-half background click did not use the normal child navigation path: ${JSON.stringify(childSelected)}`);
+  }
   await context.close();
 }
 
@@ -931,17 +940,17 @@ async function enterKonamiSequence(page) {
   }
 }
 
-async function findCanvasBackgroundPoint(page, label) {
+async function findCanvasBackgroundPoint(page, label, side = "any") {
   const box = await page.locator("canvas").boundingBox();
   if (!box) throw new Error(`Missing canvas box while testing ${label} background birth`);
   const candidates = [
-    [0.78, 0.24],
     [0.22, 0.24],
-    [0.82, 0.5],
     [0.18, 0.5],
-    [0.72, 0.68],
     [0.28, 0.68],
-  ];
+    [0.78, 0.24],
+    [0.82, 0.5],
+    [0.72, 0.68],
+  ].filter(([xRatio]) => side === "any" || (side === "right" ? xRatio >= 0.5 : xRatio < 0.5));
 
   for (const [xRatio, yRatio] of candidates) {
     const point = {
@@ -2109,7 +2118,15 @@ async function verifyCommandDockAndMobileTextTap(browser) {
 
   await page.locator('textarea.space-title-editor[data-node-id="verify-child"]').blur();
   await page.waitForTimeout(1000);
-  await page.locator("canvas").tap({ position: { x: 340, y: 220 } });
+  await page.evaluate(() => {
+    window.__mindAtlasVerifyMobileBackgroundClicks = 0;
+    window.addEventListener("mindatlas:universe-background-click", () => {
+      window.__mindAtlasVerifyMobileBackgroundClicks += 1;
+    });
+  });
+  await page.locator("canvas").tap({ position: { x: 120, y: 80 } });
+  const mobileBackgroundClicks = await page.evaluate(() => window.__mindAtlasVerifyMobileBackgroundClicks ?? 0);
+  if (mobileBackgroundClicks <= 0) throw new Error(`Mobile left-half canvas tap did not fire a background click: ${mobileBackgroundClicks}`);
   await page.waitForFunction(
     () => document.querySelector('textarea.space-title-editor[data-node-id="verify-child"]')?.getAttribute("data-selected") !== "true",
   );

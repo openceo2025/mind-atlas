@@ -37,6 +37,7 @@ try {
   if (testScope === "all" || testScope === "chess-special") await verifyChessSpecialMoves();
   if (testScope === "all" || testScope === "go") await verifyGo();
   if (testScope === "all" || testScope === "go-ko") await verifyGoKo();
+  if (testScope === "all" || testScope === "spatial-navigation") await verifySpatialBackgroundNavigation();
   if (testScope === "all" || testScope === "promotion") await verifyPromotionChoiceFits();
   if (testScope === "all" || testScope === "arrow-scale") await verifyCandidateArrowScale();
   if (testScope === "all" || testScope === "light-contrast") await verifyLightThemeContrast();
@@ -992,6 +993,93 @@ async function verifyGoKo() {
   } finally {
     await context.close();
   }
+}
+
+async function verifySpatialBackgroundNavigation() {
+  for (const mode of ["shogi", "chess", "go"]) {
+    const { context, page } = await createPage({ width: 1440, height: 900 });
+    try {
+      await importFixture(page, mode);
+      await page.waitForTimeout(500);
+      const initialNodeId = await selectedNodeId(page);
+      if (!initialNodeId) throw new Error(`${mode} spatial navigation has no initial active node.`);
+
+      await clickCanvasHalf(page, "right", `${mode} child navigation`);
+      const childNodeId = await selectedNodeId(page);
+      if (!childNodeId || childNodeId === initialNodeId) {
+        throw new Error(`${mode} right-half background click did not perform one forward navigation: initial=${initialNodeId}, child=${childNodeId}`);
+      }
+
+      await clickCanvasHalf(page, "left", `${mode} parent navigation`);
+      const parentNodeId = await selectedNodeId(page);
+      if (parentNodeId !== initialNodeId) {
+        throw new Error(`${mode} left-half background click did not return to the previous position: expected=${initialNodeId}, actual=${parentNodeId}`);
+      }
+    } finally {
+      await context.close();
+    }
+  }
+
+  const { context, page } = await createPage({ width: 1440, height: 900 });
+  try {
+    await importFixture(page, "go");
+    await page.waitForTimeout(500);
+    await clickCanvasHalf(page, "right", "Go branch setup");
+    const firstMoveId = await selectedNodeId(page);
+    const variations = page.locator(".go-variations button");
+    if (await variations.count() !== 2) throw new Error("Go spatial navigation fixture did not expose two branch choices.");
+    await variations.nth(1).click();
+    await page.waitForTimeout(1400);
+    const preferredChildId = await selectedNodeId(page);
+    if (!preferredChildId || preferredChildId === firstMoveId) {
+      throw new Error(`Go branch choice did not focus the second variation: first=${firstMoveId}, preferred=${preferredChildId}`);
+    }
+    await clickCanvasHalf(page, "left", "Go branch return");
+    if (await selectedNodeId(page) !== firstMoveId) throw new Error("Go left-half background click did not return to the branch position.");
+    await clickCanvasHalf(page, "right", "Go preferred branch");
+    if (await selectedNodeId(page) !== preferredChildId) {
+      throw new Error(`Go right-half background click ignored the preferred variation: expected=${preferredChildId}, actual=${await selectedNodeId(page)}`);
+    }
+  } finally {
+    await context.close();
+  }
+}
+
+async function selectedNodeId(page) {
+  return page.locator('.universe-shell [data-selected="true"]').first().getAttribute("data-node-id");
+}
+
+async function clickCanvasHalf(page, side, label) {
+  const box = await page.locator("canvas").boundingBox();
+  if (!box) throw new Error(`Missing canvas while testing ${label}.`);
+  await page.evaluate(() => {
+    window.__mindAtlasVerifySpatialInteractions = 0;
+    window.__mindAtlasVerifySpatialClicks = 0;
+    window.addEventListener("mindatlas:universe-background-interaction", () => {
+      window.__mindAtlasVerifySpatialInteractions += 1;
+    });
+    window.addEventListener("mindatlas:universe-background-click", () => {
+      window.__mindAtlasVerifySpatialClicks += 1;
+    });
+  });
+  const ratios = side === "right"
+    ? [[0.78, 0.24], [0.82, 0.5], [0.72, 0.68]]
+    : [[0.22, 0.24], [0.18, 0.5], [0.28, 0.68]];
+  let interactionFired = false;
+  for (const [xRatio, yRatio] of ratios) {
+    const before = await page.evaluate(() => window.__mindAtlasVerifySpatialInteractions ?? 0);
+    await page.mouse.click(box.x + box.width * xRatio, box.y + box.height * yRatio);
+    await page.waitForTimeout(80);
+    const after = await page.evaluate(() => window.__mindAtlasVerifySpatialInteractions ?? 0);
+    if (after > before) {
+      interactionFired = true;
+      break;
+    }
+  }
+  if (!interactionFired) throw new Error(`No background interaction fired while testing ${label}.`);
+  const clickCount = await page.evaluate(() => window.__mindAtlasVerifySpatialClicks ?? 0);
+  if (clickCount <= 0) throw new Error(`No background click fired while testing ${label}.`);
+  await page.waitForTimeout(1400);
 }
 
 

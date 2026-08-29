@@ -56,6 +56,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
   const {
     rememberChild,
     selectVariation,
+    retreat,
     advance,
     advanceToTail,
     hasNextBranchPoint,
@@ -198,7 +199,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
           disabled={!hasPreviousBranchPoint}
           onClick={replayToPreviousBranchPoint}
         />
-        <button type="button" className="chess-viewer-icon" onClick={() => jumpTo(parentNode)} disabled={!parentNode} aria-label="一手戻る">
+        <button type="button" className="chess-viewer-icon" onClick={retreat} disabled={!parentNode} aria-label="一手戻る">
           <ChevronLeft size={14} />
         </button>
         <button type="button" className="chess-viewer-icon" onClick={advance} disabled={!variations.length} aria-label="一手進む">
