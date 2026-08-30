@@ -2,6 +2,8 @@
 
 Status: canonical implementation brief - Phase 1 import/view/edit, native-format persistence, record merge, and mode-aware board layout are implemented in Local Developer Mode and Hosted Public Mode; shogi engine analysis is implemented in Hosted Public Mode; chess and Go analysis remain pending
 
+Release-readiness note: the 2026-08-30 Chess/Go audit identified data-safety and SGF-fidelity blockers. The current implementation adds fail-closed guards and bounded beta behavior; use [Chess and Go Release Readiness Audit](./chess-go-release-readiness-audit.md) as the current release gate. “Phase 1 implemented” here describes feature presence, not approval for unrestricted release.
+
 Phase 1 delivery now covers Shogi KIF/KI2/CSA, Chess PGN, and Go SGF in both
 local and hosted modes: records are converted into Atlas nodes, viewed in the
 existing preview window, edited by legal board moves, navigated through

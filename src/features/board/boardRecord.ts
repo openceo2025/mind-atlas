@@ -4,6 +4,11 @@ import type {
   NativeBoardRecordPayload,
   NotebookMode,
 } from "../../types";
+import {
+  assertBoardRecordExportable,
+  assertBoardRecordFileWithinLimits,
+  assertBoardRecordTextWithinLimits,
+} from "./boardRecordSafety.ts";
 
 export type BoardNotebookMode = Exclude<NotebookMode, "standard">;
 
@@ -30,6 +35,7 @@ export async function exportNativeBoardRecord(
 ): Promise<NativeBoardRecordPayload> {
   const mode = requestedMode ?? (isBoardNotebookMode(root.notebookMode) ? root.notebookMode : null);
   if (!mode) throw new Error("This workspace is not a shogi, chess, or Go record.");
+  assertBoardRecordExportable(root, mode);
   const format = BOARD_RECORD_FORMATS[mode].extension;
   let text = "";
   if (mode === "shogi") {
@@ -42,6 +48,7 @@ export async function exportNativeBoardRecord(
     const { exportGoRecord } = await import("../go/goRecord.ts");
     text = exportGoRecord(root);
   }
+  assertBoardRecordTextWithinLimits(text, format.toUpperCase());
   return {
     kind: "board-record",
     schemaVersion: 1,
@@ -73,10 +80,12 @@ export async function importNativeBoardRecordFile(file: File) {
     return { ...(await importShogiRecordFile(file)), mode: "shogi" as const };
   }
   if (lowerName.endsWith(".pgn")) {
+    assertBoardRecordFileWithinLimits(file, "PGN");
     const { importChessRecordFile } = await import("../chess/chessRecord.ts");
     return { ...(await importChessRecordFile(file)), mode: "chess" as const };
   }
   if (lowerName.endsWith(".sgf")) {
+    assertBoardRecordFileWithinLimits(file, "SGF");
     const { importGoRecordFile } = await import("../go/goRecord.ts");
     return { ...(await importGoRecordFile(file)), mode: "go" as const };
   }

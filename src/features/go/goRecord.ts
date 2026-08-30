@@ -2,6 +2,12 @@ import GoBoard, { type Sign, type Vertex } from "@sabaki/go-board";
 import sgf, { type SgfNode } from "@sabaki/sgf";
 import type { AtlasNode, GoRecordContent } from "../../types";
 import { decodeRecordComment, encodeRecordComment } from "../board/recordComment.ts";
+import {
+  assertBoardRecordExportable,
+  assertBoardRecordFileWithinLimits,
+  assertBoardRecordTextWithinLimits,
+  assertParsedRecordTreeWithinLimits,
+} from "../board/boardRecordSafety.ts";
 
 export interface GoImportResult {
   root: AtlasNode;
@@ -19,13 +25,24 @@ export function detectGoRecordFormat(fileName: string): GoFileFormat | null {
 
 export async function importGoRecordFile(file: File): Promise<GoImportResult> {
   if (!detectGoRecordFormat(file.name)) throw new Error("Unsupported Go record. Use SGF.");
-  const text = new TextDecoder("utf-8").decode(new Uint8Array(await file.arrayBuffer())).replace(/^\uFEFF/, "");
+  assertBoardRecordFileWithinLimits(file, "SGF");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const text = decodeSgfBytes(bytes);
   return importGoRecordText(text, datasetNameFromFile(file.name));
 }
 
 export function importGoRecordText(text: string, datasetName = "Imported Go record"): GoImportResult {
-  const tree = sgf.parse(text)[0];
-  if (!tree) throw new Error("The SGF does not contain a Go game.");
+  assertBoardRecordTextWithinLimits(text, "SGF");
+  const trees = sgf.parse(text);
+  if (!trees.length) throw new Error("The SGF does not contain a Go game.");
+  if (trees.length > 1) throw new Error(`This SGF contains ${trees.length} game trees. Multi-game SGF files are not supported yet; import one game at a time.`);
+  const tree = trees[0];
+  assertSupportedGoTree(tree);
+  assertParsedRecordTreeWithinLimits([tree], {
+    format: "SGF",
+    getChildren: (node) => node.children,
+    getCommentText: (node) => (node.data.C ?? []).join("\n"),
+  });
   return treeToAtlas(tree, datasetName);
 }
 
@@ -33,12 +50,13 @@ export function createNewGoRecord(datasetName = "New Go game"): GoImportResult {
   return treeToAtlas({
     id: 0,
     parentId: null,
-    data: { GM: ["1"], FF: ["4"], SZ: ["19"] },
+    data: { GM: ["1"], FF: ["4"], CA: ["UTF-8"], SZ: ["19"], RU: ["Japanese"], KM: ["6.5"], PL: ["B"] },
     children: [],
   }, datasetName);
 }
 
 export function exportGoRecord(root: AtlasNode): string {
+  assertBoardRecordExportable(root, "go");
   const recordRoot = findRecordRoot(root);
   const rootContent = findGoNodeContent(recordRoot);
   if (!recordRoot || !rootContent || rootContent.role !== "record-root") {
@@ -50,16 +68,22 @@ export function exportGoRecord(root: AtlasNode): string {
     data: {
       GM: ["1"],
       FF: ["4"],
+      CA: ["UTF-8"],
       SZ: [String(rootContent.boardSize)],
-      ...Object.fromEntries(Object.entries(rootContent.metadata ?? {}).map(([key, value]) => [key, [value]])),
+      ...Object.fromEntries(Object.entries(rootContent.metadata ?? {})
+        .filter(([key]) => !["GM", "FF", "CA", "SZ", "AB", "AW", "AE", "C"].includes(key))
+        .map(([key, value]) => [key, [value]])),
       ...(rootContent.setupBlack?.length ? { AB: rootContent.setupBlack.map((value) => sgfVertexFromDisplay(value, rootContent.boardSize)) } : {}),
       ...(rootContent.setupWhite?.length ? { AW: rootContent.setupWhite.map((value) => sgfVertexFromDisplay(value, rootContent.boardSize)) } : {}),
+      ...(rootContent.setupEmpty?.length ? { AE: rootContent.setupEmpty.map((value) => sgfVertexFromDisplay(value, rootContent.boardSize)) } : {}),
       C: [encodeRecordComment(recordRoot.title, recordRoot.body)],
     },
     children: [],
   };
   appendChildren(tree, recordRoot, 1);
-  return sgf.stringify(tree);
+  const text = sgf.stringify(tree);
+  assertBoardRecordTextWithinLimits(text, "SGF");
+  return text;
 }
 
 export function findGoRecordRoot(root: AtlasNode, nodeId: string): AtlasNode | null {
@@ -114,6 +138,64 @@ export function sgfVertexToGo(value: string, boardSize: number): Vertex {
   return vertex;
 }
 
+const GO_ROOT_METADATA_KEYS = [
+  "PB", "PW", "BR", "WR", "RE", "DT", "EV", "RO", "GN", "PC", "TM", "OT", "SO", "AP", "GC",
+  "RU", "KM", "HA", "PL", "US", "AN", "ON", "CP", "ST",
+] as const;
+
+const GO_ROOT_ALLOWED_KEYS = new Set<string>([
+  "GM", "FF", "CA", "SZ", "C", "AB", "AW", "AE", ...GO_ROOT_METADATA_KEYS,
+]);
+
+export function canEditGoRecord(content: GoRecordContent) {
+  const rules = content.metadata?.RU?.trim().toLowerCase().replace(/\s+/g, " ");
+  return rules === "japanese";
+}
+
+function assertSupportedGoTree(tree: SgfNode) {
+  const rootData = tree.data;
+  const game = first(rootData.GM);
+  if (game && game !== "1") throw new Error(`Unsupported SGF game type GM[${game}]. Only Go records GM[1] are supported.`);
+  const fileFormat = first(rootData.FF);
+  if (fileFormat && fileFormat !== "4") throw new Error(`Unsupported SGF file format FF[${fileFormat}]. Only FF[4] is supported.`);
+  const charset = first(rootData.CA);
+  if (charset) normalizeSgfCharset(charset);
+  if (first(rootData.SZ).includes(":")) throw new Error("Rectangular SGF boards are not supported yet. Use a square board size.");
+  for (const key of Object.keys(rootData)) {
+    if (!GO_ROOT_ALLOWED_KEYS.has(key)) throw new Error(`Unsupported SGF root property ${key}. Import was stopped before changing the workspace.`);
+    if (!["C", "AB", "AW", "AE"].includes(key) && (rootData[key]?.length ?? 0) > 1) {
+      throw new Error(`Repeated SGF root property ${key} is not supported yet.`);
+    }
+  }
+
+  const stack = tree.children.map((node) => ({ node, index: 1 }));
+  let nodeIndex = 0;
+  while (stack.length) {
+    const current = stack.pop();
+    if (!current) break;
+    nodeIndex += 1;
+    const keys = Object.keys(current.node.data);
+    const hasBlack = Boolean(first(current.node.data.B));
+    const hasWhite = Boolean(first(current.node.data.W));
+    if (!hasBlack && !hasWhite) {
+      throw new Error(`Unsupported SGF non-move node ${nodeIndex} (${keys.join(", ") || "empty"}). Import was stopped before changing the workspace.`);
+    }
+    if (hasBlack && hasWhite) throw new Error(`SGF node ${nodeIndex} contains both B and W moves.`);
+    for (const key of keys) {
+      if (key !== "B" && key !== "W" && key !== "C") {
+        throw new Error(`Unsupported SGF property ${key} on move node ${nodeIndex}. Import was stopped before changing the workspace.`);
+      }
+    }
+    const moveKey = hasBlack ? "B" : "W";
+    if ((current.node.data[moveKey]?.length ?? 0) !== 1 || (current.node.data.C?.length ?? 0) > 1) {
+      throw new Error(`Repeated SGF move or comment property on node ${nodeIndex} is not supported yet.`);
+    }
+    for (let childIndex = current.node.children.length - 1; childIndex >= 0; childIndex -= 1) {
+      stack.push({ node: current.node.children[childIndex], index: nodeIndex + childIndex + 1 });
+    }
+  }
+}
+
 function treeToAtlas(tree: SgfNode, datasetName: string): GoImportResult {
   const rootData = tree.data;
   const boardSize = parseBoardSize(first(rootData.SZ));
@@ -121,6 +203,9 @@ function treeToAtlas(tree: SgfNode, datasetName: string): GoImportResult {
   const recordRootId = makeId("go-root");
   const now = new Date().toISOString();
   const initialBoard = createInitialBoard(rootData, boardSize);
+  const setupBlack = readSetup(rootData, "AB", boardSize);
+  const setupWhite = readSetup(rootData, "AW", boardSize);
+  const setupEmpty = readSetup(rootData, "AE", boardSize);
   const rootContent: GoRecordContent = {
     kind: "go-record",
     schemaVersion: 1,
@@ -130,8 +215,9 @@ function treeToAtlas(tree: SgfNode, datasetName: string): GoImportResult {
     ply: 0,
     boardSize,
     board: boardString(initialBoard),
-    ...(readSetup(rootData, "AB", boardSize).length ? { setupBlack: readSetup(rootData, "AB", boardSize) } : {}),
-    ...(readSetup(rootData, "AW", boardSize).length ? { setupWhite: readSetup(rootData, "AW", boardSize) } : {}),
+    ...(setupBlack.length ? { setupBlack } : {}),
+    ...(setupWhite.length ? { setupWhite } : {}),
+    ...(setupEmpty.length ? { setupEmpty } : {}),
     metadata: readMetadata(rootData),
   };
   const rootText = decodeRecordComment(first(rootData.C), first(rootData.GN) || datasetName);
@@ -161,16 +247,18 @@ function buildChildren(
 ): AtlasNode[] {
   return parent.children.map((child, branchIndex) => {
     const color = first(child.data.B) ? "B" : first(child.data.W) ? "W" : null;
-    if (!color) return makeNode(makeId(`go-node-${ply + 1}`), "thread", "Go note", first(child.data.C) || "", now, undefined, []);
+    if (!color) throw new Error(`Unsupported SGF non-move node after validation at ply ${ply + 1}.`);
     const sign: Sign = color === "B" ? 1 : -1;
     const rawVertex = first(child.data[color]) ?? "";
     const vertex = sgfVertexToGo(rawVertex, boardSize);
     let nextBoard = parentBoard.clone();
     if (vertex[0] >= 0) {
-      if (nextBoard.analyzeMove(sign, vertex).overwrite || nextBoard.analyzeMove(sign, vertex).suicide) {
+      if (nextBoard.analyzeMove(sign, vertex).overwrite) {
         throw new Error(`Illegal SGF move: ${color}[${rawVertex}]`);
       }
-      nextBoard = nextBoard.makeMove(sign, vertex, { preventOverwrite: true, preventSuicide: true, preventKo: true });
+      // SGF replay preserves the recorded path. Rule-specific legality is
+      // applied only when the user creates a new move in GoViewer.
+      nextBoard = nextBoard.makeMove(sign, vertex, { preventOverwrite: true });
     }
     const displayText = vertex[0] >= 0 ? `${color} ${nextBoard.stringifyVertex(vertex)}` : `${color} pass`;
     const content: GoRecordContent = {
@@ -218,13 +306,20 @@ function appendChildren(parent: SgfNode, atlasParent: AtlasNode, nextId: number)
 
 function createInitialBoard(data: Record<string, string[]>, boardSize: number) {
   let board = GoBoard.fromDimensions(boardSize);
-  for (const item of data.AB ?? []) {
-    const vertex = sgfVertexToGo(item, boardSize);
-    if (vertex[0] >= 0) board = board.set(vertex, 1);
-  }
-  for (const item of data.AW ?? []) {
-    const vertex = sgfVertexToGo(item, boardSize);
-    if (vertex[0] >= 0) board = board.set(vertex, -1);
+  board = applySetup(board, data.AB ?? [], boardSize, 1);
+  board = applySetup(board, data.AW ?? [], boardSize, -1);
+  board = applySetup(board, data.AE ?? [], boardSize, 0);
+  return board;
+}
+
+function applySetup(board: GoBoard, values: string[], boardSize: number, sign: Sign) {
+  for (const value of values) {
+    for (const vertex of sgf.parseCompressedVertices(value)) {
+      if (vertex[0] < 0 || vertex[1] < 0 || vertex[0] >= boardSize || vertex[1] >= boardSize) {
+        throw new Error(`SGF setup point ${value} is outside the ${boardSize}x${boardSize} board.`);
+      }
+      board = board.set(vertex, sign);
+    }
   }
   return board;
 }
@@ -237,17 +332,23 @@ function boardString(board: GoBoard) {
   return result;
 }
 
-function readSetup(data: Record<string, string[]>, key: "AB" | "AW", boardSize: number) {
-  return (data[key] ?? []).map((value) => {
-    const vertex = sgfVertexToGo(value, boardSize);
-    if (vertex[0] < 0) return "";
+function readSetup(data: Record<string, string[]>, key: "AB" | "AW" | "AE", boardSize: number) {
+  return (data[key] ?? []).flatMap((value) => sgf.parseCompressedVertices(value).map((vertex) => {
+    if (vertex[0] < 0 || vertex[1] < 0 || vertex[0] >= boardSize || vertex[1] >= boardSize) {
+      throw new Error(`SGF setup point ${value} is outside the ${boardSize}x${boardSize} board.`);
+    }
     return GoBoard.fromDimensions(boardSize).stringifyVertex(vertex);
-  }).filter(Boolean);
+  }));
 }
 
 function readMetadata(data: Record<string, string[]>) {
-  const allowed = ["PB", "PW", "RE", "DT", "EV", "RO", "RU", "KM", "HA", "PL"];
-  return Object.fromEntries(allowed.filter((key) => data[key]?.[0]).map((key) => [key, data[key][0]]));
+  const metadata = Object.fromEntries(GO_ROOT_METADATA_KEYS.filter((key) => data[key]?.[0]).map((key) => [key, data[key][0]]));
+  return {
+    RU: metadata.RU || "Japanese",
+    KM: metadata.KM || "6.5",
+    PL: metadata.PL || "B",
+    ...metadata,
+  };
 }
 
 function first(values: string[] | undefined) {
@@ -255,9 +356,39 @@ function first(values: string[] | undefined) {
 }
 
 function parseBoardSize(value: string) {
-  const parsed = Number(value.split(":")[0] || 19);
+  if (value.includes(":")) throw new Error("Rectangular SGF boards are not supported yet. Use a square board size.");
+  const parsed = Number(value || 19);
   if (!Number.isInteger(parsed) || parsed < 2 || parsed > 25) throw new Error("SGF board size must be between 2 and 25.");
   return parsed;
+}
+
+function decodeSgfBytes(bytes: Uint8Array) {
+  const declared = readDeclaredSgfCharset(bytes);
+  const charset = declared ? normalizeSgfCharset(declared) : null;
+  try {
+    return new TextDecoder(charset ?? "utf-8", { fatal: true }).decode(bytes).replace(/^\uFEFF/, "");
+  } catch (error) {
+    if (charset) throw new Error(`SGF record could not be decoded as ${declared}.`);
+    try {
+      return new TextDecoder("iso-8859-1").decode(bytes).replace(/^\uFEFF/, "");
+    } catch {
+      throw new Error(`SGF record could not be decoded: ${error instanceof Error ? error.message : String(error)}.`);
+    }
+  }
+}
+
+function readDeclaredSgfCharset(bytes: Uint8Array) {
+  const preamble = new TextDecoder("iso-8859-1").decode(bytes.subarray(0, 16 * 1024));
+  return preamble.match(/\bCA\[([^\]]+)\]/i)?.[1]?.trim() || "";
+}
+
+function normalizeSgfCharset(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+  if (["utf-8", "utf8"].includes(normalized)) return "utf-8";
+  if (["iso-8859-1", "iso8859-1", "latin1", "latin-1"].includes(normalized)) return "iso-8859-1";
+  if (["shift-jis", "shiftjis", "sjis", "windows-31j", "cp932"].includes(normalized)) return "shift_jis";
+  if (["euc-jp", "eucjp"].includes(normalized)) return "euc-jp";
+  throw new Error(`Unsupported SGF charset CA[${value}]. Supported charsets are UTF-8, ISO-8859-1, Shift_JIS, and EUC-JP.`);
 }
 
 function sgfVertexFromDisplay(value: string, boardSize: number) {

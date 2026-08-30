@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight, GitBranch, RotateCcw, SkipBack, SkipForward } from "lucide-react";
 import { useMemo, useState } from "react";
 import GoBoard, { type Sign, type Vertex } from "@sabaki/go-board";
-import { findGoNodeContent, findGoRecordRoot, goRecordPath, goVertexToSgf, nearestGoRecordNode, nextGoSign, boardFromGoContent } from "./goRecord";
+import { canEditGoRecord, findGoNodeContent, findGoRecordRoot, goRecordPath, goVertexToSgf, nearestGoRecordNode, nextGoSign, boardFromGoContent } from "./goRecord";
 import { useBoardBranchNavigation } from "../board/boardNavigation";
 import { BoardBranchJumpButton } from "../board/BoardBranchJumpButtons";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
@@ -24,6 +24,8 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
   const currentNode = recordRoot ? nearestGoRecordNode(atlasRoot, selectedNodeId, recordRoot.id) : null;
   const rootContent = findGoNodeContent(recordRoot);
   const currentContent = findGoNodeContent(currentNode) ?? rootContent;
+  const phone19ReplayOnly = Boolean(currentContent && currentContent.boardSize >= 19 && isMobileBoardGameViewport());
+  const canEdit = Boolean(rootContent && canEditGoRecord(rootContent) && !phone19ReplayOnly);
   const path = recordRoot && currentNode ? goRecordPath(recordRoot, currentNode.id) : recordRoot ? [recordRoot] : [];
   const positionHistory = path
     .map((node) => findGoNodeContent(node)?.board)
@@ -58,6 +60,10 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
   }
 
   const addMove = (vertex: Vertex, pass = false) => {
+    if (!canEdit) {
+      onStatus?.(formatAppMessage("board.go.replayOnly"));
+      return;
+    }
     const parent = currentNode ?? recordRoot;
     const parentContent = findGoNodeContent(parent);
     if (!parentContent) return;
@@ -88,7 +94,12 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
       }
     }
     const displayText = pass ? `${color} pass` : `${color} ${board.stringifyVertex(vertex)}`;
-    const childId = addChildNode(parent.id, "", { title: displayText, focus: false, requestEdit: false });
+    const childId = addChildNode(parent.id, "", {
+      title: displayText,
+      focus: false,
+      requestEdit: false,
+      allowBoardRecordNode: true,
+    });
     if (!childId) return;
     const nextContent: GoRecordContent = {
       kind: "go-record",
@@ -114,6 +125,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
       <div className="go-viewer-toolbar">
         <span className="go-viewer-label">囲碁</span>
         <span className="go-viewer-position">{currentContent.ply === 0 ? "開始局面" : `${currentContent.ply} 手目`}</span>
+        <span className="go-viewer-rules">{rootContent.metadata?.RU}</span>
         <button
           type="button"
           className="go-viewer-icon"
@@ -147,10 +159,11 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
         <button type="button" className="go-viewer-icon" onClick={advanceToTail} disabled={!branchTail || branchTail.id === currentNode?.id} aria-label={formatAppMessage("board.navigation.last")} title={formatAppMessage("board.navigation.last")}>
           <SkipForward size={14} />
         </button>
-        <button type="button" className="go-viewer-icon" onClick={() => addMove([-1, -1], true)} aria-label="パス">
+        <button type="button" className="go-viewer-icon" onClick={() => addMove([-1, -1], true)} disabled={!canEdit} aria-label="パス">
           Pass
         </button>
       </div>
+      {!canEdit ? <p className="chess-viewer-note">{formatAppMessage("board.go.replayOnly")}</p> : null}
       <div className={`go-board-host ${flipped ? "is-flipped" : ""}`} style={{ "--go-size": currentContent.boardSize } as React.CSSProperties}>
         {Array.from({ length: currentContent.boardSize * currentContent.boardSize }, (_, index) => {
           const boardIndex = flipped ? currentContent.boardSize * currentContent.boardSize - 1 - index : index;
@@ -174,6 +187,7 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
               type="button"
               className={`go-point ${edgeClasses} ${sign === 1 ? "is-black" : sign === -1 ? "is-white" : ""} ${isStarPoint(x, y, currentContent.boardSize) ? "is-star" : ""} ${isLast ? "is-last" : ""} ${isCandidate ? "is-candidate" : ""}`}
               onClick={() => isCandidate ? selectVariation(candidateNodes[0]) : sign === 0 ? addMove(vertex) : onStatus?.("その交点にはすでに石があります。")}
+              disabled={!isCandidate && sign === 0 && !canEdit}
               aria-label={`${vertexLabel}${sign === 1 ? " 黒" : sign === -1 ? " 白" : ""}${isCandidate ? ` ${formatAppMessage("board.candidateMoves")}` : ""}`}
             >
               <span aria-hidden="true" />
@@ -211,4 +225,12 @@ function isStarPoint(x: number, y: number, size: number) {
 function findRecordTail(node: AtlasNode): AtlasNode {
   const next = node.children.find((child) => findGoNodeContent(child)?.role === "move");
   return next ? findRecordTail(next) : node;
+}
+
+function isMobileBoardGameViewport() {
+  if (typeof window === "undefined" || typeof document === "undefined") return false;
+  const width = Math.round(window.visualViewport?.width ?? window.innerWidth);
+  const fixedHeight = Number.parseFloat(document.documentElement.style.getPropertyValue("--board-mobile-fixed-height"));
+  const height = Number.isFinite(fixedHeight) && fixedHeight > 0 ? fixedHeight : Math.round(window.innerHeight);
+  return width <= 980 && height > width;
 }

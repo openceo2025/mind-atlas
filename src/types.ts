@@ -1093,6 +1093,7 @@ export interface GoRecordContent {
   branchIndex?: number;
   setupBlack?: string[];
   setupWhite?: string[];
+  setupEmpty?: string[];
   metadata?: Record<string, string>;
   /**
    * The header of the record this move came from, kept when a second record is

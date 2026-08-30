@@ -102,6 +102,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
   }, [currentContent?.fen, currentContent?.uci, currentNode?.id, recordRoot?.id]);
 
   if (!enabled || !recordRoot || !currentContent || !selectedNode) return null;
+  const positionState = chessPositionState(currentContent);
 
   function handleBoardMove(orig: string, dest: string) {
     const parent = currentNode ?? recordRoot;
@@ -151,7 +152,12 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     const nextPosition = position.clone();
     nextPosition.play(move);
     const displayText = formatMoveLabel(san);
-    const childId = addChildNode(parent.id, "", { title: displayText, focus: false, requestEdit: false });
+    const childId = addChildNode(parent.id, "", {
+      title: displayText,
+      focus: false,
+      requestEdit: false,
+      allowBoardRecordNode: true,
+    });
     if (!childId) return;
     const nextContent: ChessRecordContent = {
       kind: "chess-record",
@@ -181,6 +187,7 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
       <div className="chess-viewer-toolbar">
         <span className="chess-viewer-label">チェス</span>
         <span className="chess-viewer-position">{currentContent.ply === 0 ? "開始局面" : `${currentContent.ply} ply`}</span>
+        <span className="chess-viewer-state">{positionState}</span>
         <button
           type="button"
           className="chess-viewer-icon"
@@ -381,6 +388,24 @@ function normalizeCastling(uci: string) {
 
 function formatMoveLabel(san: string) {
   return san;
+}
+
+function chessPositionState(content: ChessRecordContent) {
+  const position = positionFromFen(content.fen);
+  const turn = position.turn === "white"
+    ? formatAppMessage("board.chess.whiteToMove")
+    : formatAppMessage("board.chess.blackToMove");
+  const status = position.isCheckmate()
+    ? formatAppMessage("board.chess.checkmate")
+    : position.isStalemate()
+      ? formatAppMessage("board.chess.stalemate")
+      : position.isCheck()
+        ? formatAppMessage("board.chess.check")
+        : position.isInsufficientMaterial()
+          ? formatAppMessage("board.chess.draw")
+          : "";
+  const result = content.metadata?.Result && content.metadata.Result !== "*" ? content.metadata.Result : "";
+  return [turn, status, result].filter(Boolean).join(" · ");
 }
 
 function findPath(root: AtlasNode, targetId: string, path: AtlasNode[] = []): AtlasNode[] | null {

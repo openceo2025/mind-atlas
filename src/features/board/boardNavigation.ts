@@ -50,6 +50,15 @@ export function useBoardBranchNavigation(
   const recordMemory = recordRoot
     ? getRecordMemory(memoryByRecordRef.current, recordRoot.id)
     : null;
+  // Background taps are delivered through a window listener. Keep the
+  // listener's navigation target current even if React has not yet replaced
+  // the listener after a rapid back-then-forward gesture.
+  const currentNodeRef = useRef(currentNode);
+  const recordRootRef = useRef(recordRoot);
+  const recordMemoryRef = useRef(recordMemory);
+  currentNodeRef.current = currentNode;
+  recordRootRef.current = recordRoot;
+  recordMemoryRef.current = recordMemory;
 
   // Landing on a position is itself a branch choice, however the user got
   // there. A merge drops focus straight onto the tail of the new line without
@@ -75,17 +84,20 @@ export function useBoardBranchNavigation(
   };
 
   const advance = () => {
-    const parent = currentNode ?? recordRoot;
-    if (!parent || !recordMemory) return;
-    const next = preferredBranchChild(recordMemory, parent);
+    const parent = currentNodeRef.current ?? recordRootRef.current;
+    const memory = recordMemoryRef.current;
+    if (!parent || !memory) return;
+    const next = preferredBranchChild(memory, parent);
     if (!next) return;
-    rememberChild(parent.id, next.id);
+    memory.set(parent.id, next.id);
     focusNode(next.id);
   };
 
   const retreat = () => {
-    if (!recordRoot || !currentNode) return;
-    const path = findBoardRecordPath(recordRoot, currentNode.id);
+    const root = recordRootRef.current;
+    const node = currentNodeRef.current;
+    if (!root || !node) return;
+    const path = findBoardRecordPath(root, node.id);
     const parent = path && path.length > 1 ? path[path.length - 2] : null;
     if (parent) focusNode(parent.id);
   };
@@ -98,12 +110,13 @@ export function useBoardBranchNavigation(
     };
     window.addEventListener(BOARD_NAVIGATION_EVENT, handleNavigation);
     return () => window.removeEventListener(BOARD_NAVIGATION_EVENT, handleNavigation);
-  }, [currentNode, recordRoot, recordMemory, focusNode]);
+  }, [focusNode]);
 
   const advanceToTail = () => {
-    const initialNode = currentNode ?? recordRoot;
-    if (!initialNode || !recordMemory) return;
-    const tail = branchTailAlongMemory(recordMemory, initialNode);
+    const initialNode = currentNodeRef.current ?? recordRootRef.current;
+    const memory = recordMemoryRef.current;
+    if (!initialNode || !memory) return;
+    const tail = branchTailAlongMemory(memory, initialNode);
     if (tail.id !== initialNode.id) focusNode(tail.id);
   };
 

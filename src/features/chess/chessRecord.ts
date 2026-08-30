@@ -14,6 +14,13 @@ import { makeUci, parseUci } from "chessops/util";
 import type { Position } from "chessops/chess";
 import type { AtlasNode, ChessRecordContent } from "../../types";
 import { decodeRecordComment, encodeRecordComment } from "../board/recordComment.ts";
+import {
+  assertBoardRecordExportable,
+  assertBoardRecordFileWithinLimits,
+  assertBoardRecordTextWithinLimits,
+  assertParsedRecordTreeWithinLimits,
+  decodeUtf8BoardRecord,
+} from "../board/boardRecordSafety.ts";
 
 export interface ChessImportResult {
   root: AtlasNode;
@@ -29,19 +36,33 @@ export function detectChessRecordFormat(fileName: string) {
 
 export async function importChessRecordFile(file: File): Promise<ChessImportResult> {
   if (!detectChessRecordFormat(file.name)) throw new Error("Unsupported chess record. Use PGN.");
-  const text = new TextDecoder("utf-8").decode(new Uint8Array(await file.arrayBuffer())).replace(/^\uFEFF/, "");
+  assertBoardRecordFileWithinLimits(file, "PGN");
+  const text = decodeUtf8BoardRecord(new Uint8Array(await file.arrayBuffer()), "PGN");
   return importChessRecordText(text, datasetNameFromFile(file.name));
 }
 
 export function importChessRecordText(text: string, datasetName = "Imported chess record"): ChessImportResult {
-  const game = parsePgn(text)[0];
-  if (!game) throw new Error("The PGN does not contain a chess game.");
+  assertBoardRecordTextWithinLimits(text, "PGN");
+  const games = parsePgn(text);
+  if (!games.length) throw new Error("The PGN does not contain a chess game.");
+  if (games.length > 1) throw new Error(`This PGN contains ${games.length} games. Multi-game PGN files are not supported yet; import one game at a time.`);
+  const game = games[0];
+  assertSupportedChessGame(game);
+  assertParsedRecordTreeWithinLimits([game.moves], {
+    format: "PGN",
+    getChildren: (node) => node.children,
+    getCommentText: (node) => {
+      if (!("data" in node)) return [...(game.comments ?? [])].join("\n");
+      const data = (node as ChildNode<PgnNodeData>).data;
+      return [...(data.startingComments ?? []), ...(data.comments ?? [])].join("\n");
+    },
+  });
   return gameToAtlas(game, datasetName);
 }
 
 export function createNewChessRecord(datasetName = "New chess game"): ChessImportResult {
   const game: Game<PgnNodeData> = {
-    headers: new Map([["Event", datasetName]]),
+    headers: chessHeaders(new Map([["Event", datasetName]])),
     comments: [],
     moves: new Node<PgnNodeData>(),
   };
@@ -49,6 +70,7 @@ export function createNewChessRecord(datasetName = "New chess game"): ChessImpor
 }
 
 export function exportChessRecord(root: AtlasNode): string {
+  assertBoardRecordExportable(root, "chess");
   const recordRoot = findRecordRoot(root);
   const rootContent = findChessNodeContent(recordRoot);
   if (!recordRoot || !rootContent || rootContent.role !== "record-root") {
@@ -56,12 +78,14 @@ export function exportChessRecord(root: AtlasNode): string {
   }
   const position = positionFromFen(rootContent.fen);
   const game: Game<PgnNodeData> = {
-    headers: new Map(Object.entries(rootContent.metadata ?? {})),
+    headers: chessHeaders(new Map(Object.entries(rootContent.metadata ?? {}))),
     comments: [encodeRecordComment(recordRoot.title, recordRoot.body)],
     moves: new Node<PgnNodeData>(),
   };
   appendPgnChildren(game.moves, recordRoot, position);
-  return makePgn(game);
+  const text = makePgn(game);
+  assertBoardRecordTextWithinLimits(text, "PGN");
+  return text;
 }
 
 export function findChessRecordRoot(root: AtlasNode, nodeId: string): AtlasNode | null {
@@ -83,7 +107,8 @@ export function nearestChessRecordNode(root: AtlasNode, nodeId: string, recordRo
 }
 
 function gameToAtlas(game: Game<PgnNodeData>, datasetName: string): ChessImportResult {
-  const starting = startingPosition(game.headers);
+  const headers = chessHeaders(game.headers);
+  const starting = startingPosition(headers);
   const position = starting.unwrap();
   const recordId = makeId("chess-record");
   const recordRootId = makeId("chess-root");
@@ -96,9 +121,9 @@ function gameToAtlas(game: Game<PgnNodeData>, datasetName: string): ChessImportR
     sourceFormat: "pgn",
     ply: 0,
     fen: makeFen(position.toSetup()),
-    metadata: Object.fromEntries(game.headers),
+    metadata: Object.fromEntries(headers),
   };
-  const rootText = decodeRecordComment([...(game.comments ?? [])].join("\n"), game.headers.get("Event") || datasetName);
+  const rootText = decodeRecordComment([...(game.comments ?? [])].join("\n"), headers.get("Event") || datasetName);
   const recordRoot = makeNode(
     recordRootId,
     "workArea",
@@ -120,6 +145,33 @@ function gameToAtlas(game: Game<PgnNodeData>, datasetName: string): ChessImportR
   );
   root.notebookMode = "chess";
   return { root, recordRootId, datasetName };
+}
+
+function assertSupportedChessGame(game: Game<PgnNodeData>) {
+  const variant = game.headers.get("Variant")?.trim();
+  if (variant && !/^(?:standard|chess)$/i.test(variant)) {
+    throw new Error(`Unsupported chess variant: ${variant}. Only standard chess PGN is supported.`);
+  }
+}
+
+const CHESS_ROSTER_TAGS = ["Event", "Site", "Date", "Round", "White", "Black", "Result"] as const;
+
+function chessHeaders(headers: Map<string, string>) {
+  const normalized = new Map<string, string>();
+  const defaults: Record<typeof CHESS_ROSTER_TAGS[number], string> = {
+    Event: "Untitled chess game",
+    Site: "?",
+    Date: "????.??.??",
+    Round: "-",
+    White: "?",
+    Black: "?",
+    Result: "*",
+  };
+  for (const tag of CHESS_ROSTER_TAGS) normalized.set(tag, headers.get(tag) || defaults[tag]);
+  for (const [key, value] of headers) {
+    if (!CHESS_ROSTER_TAGS.includes(key as typeof CHESS_ROSTER_TAGS[number])) normalized.set(key, value);
+  }
+  return normalized;
 }
 
 function buildMoveChildren(

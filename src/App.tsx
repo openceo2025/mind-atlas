@@ -277,7 +277,7 @@ export default function App() {
   const [boardRecordDialogMode, setBoardRecordDialogMode] = useState<BoardRecordDialogMode>(null);
   const [boardRecordDialogBusy, setBoardRecordDialogBusy] = useState(false);
   const [boardRecordDialogError, setBoardRecordDialogError] = useState("");
-  const [boardRecordMergeStrategy, setBoardRecordMergeStrategy] = useState<BoardRecordMergeStrategy>("deepest-common-position");
+  const [boardRecordMergeStrategy, setBoardRecordMergeStrategy] = useState<BoardRecordMergeStrategy>("record-root");
   const [sharedNotebookRoot, setSharedNotebookRoot] = useState<AtlasNode | null>(null);
   const [sharedNotebookImporting, setSharedNotebookImporting] = useState(false);
   const sharedHostedAutoImportTokenRef = useRef<string | null>(null);
@@ -426,8 +426,8 @@ export default function App() {
       (onboarding.showMainChrome && mobileWorkspacePanelRevealed && mobileOperationPanelTabAvailable));
   const focusPanelOpen = tutorialWorkspaceAvailable && (isBoardGameMode || outlineEditorOpen || selectedNodeId !== atlasRoot.id);
   const operationTargets = useMemo(() => getOperationTargets(selectedPath), [selectedPath]);
-  const boardRootDirectCreationBlocked = isBoardGameMode && selectedPath.length <= 2;
-  const boardRootChildCreationBlocked = isBoardGameMode && selectedNodeId === atlasRoot.id;
+  const boardRootDirectCreationBlocked = isBoardGameMode;
+  const boardRootChildCreationBlocked = isBoardGameMode;
   const tutorialFallbackChildParentId =
     showTutorialNodeControls && selectedNodeId === atlasRoot.id ? atlasRoot.children[0]?.id ?? selectedNodeId : selectedNodeId;
   const tutorialFallbackChildParentPath = useMemo(
@@ -1655,10 +1655,10 @@ export default function App() {
 
   const openBoardRecordDialog = (mode: Exclude<BoardRecordDialogMode, null>) => {
     setBoardRecordDialogError("");
-    // Anchoring on the shared position is what people want almost every time.
-    // Go is the exception: it rejects that strategy because ko legality depends
-    // on how the position was reached.
-    if (mode === "merge") setBoardRecordMergeStrategy(notebookMode === "go" ? "record-root" : "deepest-common-position");
+    // Keep the existing nearest-position option for shogi. Chess and Go use
+    // the record-root anchor so their imported history and legality state are
+    // not silently spliced at a stale position.
+    if (mode === "merge") setBoardRecordMergeStrategy(notebookMode === "shogi" ? "deepest-common-position" : "record-root");
     setBoardRecordDialogMode(mode);
     setMenuOpen(false);
     if (mode === "merge") {
@@ -1684,7 +1684,7 @@ export default function App() {
   };
 
   const applyBoardRecordMerge = async (sourceRoot: AtlasNode) => {
-    const strategy = notebookMode === "go" ? "record-root" : boardRecordMergeStrategy;
+    const strategy = notebookMode === "shogi" ? boardRecordMergeStrategy : "record-root";
     const result = mergeBoardRecords(atlasRoot, sourceRoot, { strategy });
     const nextSelectedId = result.lastAddedNodeId
       ?? findNode(result.root, selectedNodeId)?.id
@@ -2587,7 +2587,7 @@ export default function App() {
                 <Upload size={15} /> {t("menu.import")}
                 <input type="file" accept={publicServiceMode ? HOSTED_IMPORT_ACCEPT_TYPES : IMPORT_ACCEPT_TYPES} onChange={handleImport} />
               </label>
-              <button type="button" onClick={() => { setTextImportOpen(true); setMenuOpen(false); }}>
+              <button type="button" onClick={() => { setTextImportOpen(true); setMenuOpen(false); }} disabled={isBoardGameMode}>
                 <FileText size={15} />
                 <span>
                   {t("menu.importOutline")}
@@ -3429,7 +3429,7 @@ function BoardRecordDialog({
             </button>
           </section>
           {/* Rarely changed, so it sits below the input and the merge button. */}
-          {isMerge && mode !== "go" ? (
+          {isMerge && mode === "shogi" ? (
             <fieldset className="board-record-merge-strategy" disabled={busy}>
               <legend>{t("board.merge.strategy.label")}</legend>
               <label className={mergeStrategy === "deepest-common-position" ? "is-selected" : ""}>

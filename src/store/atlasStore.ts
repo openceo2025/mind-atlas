@@ -371,6 +371,8 @@ interface AtlasStore {
       focus?: boolean;
       persist?: boolean;
       requestEdit?: boolean;
+      /** Internal escape hatch used only when a board viewer creates a move node. */
+      allowBoardRecordNode?: boolean;
     },
   ) => string | undefined;
   addChildNodes: (parentId: string, nodes: ChildNodeDraft[], options?: { focus?: boolean }) => string[];
@@ -1375,6 +1377,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   addChildNode: (parentId, initialBody = "", options = {}) => {
     const state = get();
+    if (isBoardGameNotebookMode(state.atlasRoot.notebookMode) && options.allowBoardRecordNode !== true) return;
     if (blocksBoardGameRootInsertion(state.atlasRoot, parentId)) return;
     const parent = findNode(state.atlasRoot, parentId);
     if (!parent) return;
@@ -1427,6 +1430,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
 
   addChildNodes: (parentId, nodes, options = {}) => {
     const state = get();
+    if (isBoardGameNotebookMode(state.atlasRoot.notebookMode)) return [];
     if (blocksBoardGameRootInsertion(state.atlasRoot, parentId)) return [];
     const parentPath = findNodePath(state.atlasRoot, parentId);
     const parent = parentPath?.at(-1);
@@ -1658,7 +1662,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     const state = get();
     const path = findNodePath(state.atlasRoot, id);
     if (!path || path.length < 2) return undefined;
-    if (isBoardGameNotebookMode(state.atlasRoot.notebookMode) && path.length === 2) return undefined;
+    if (isBoardGameNotebookMode(state.atlasRoot.notebookMode)) return undefined;
     const parent = path[path.length - 2];
     const siblingDepth = path.length - 1;
     const insertIndex = parent.children.length;

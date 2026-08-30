@@ -3398,9 +3398,7 @@ function HierarchyNode({
     typeof activePathIndex === "number" ? selectedPathLength - 1 - activePathIndex : null;
   const isDirectChildOfSelected = parentId === selectedNodeId;
   const isRootDirectChild = depth === 1 && parentId === path[0]?.id;
-  const rootCreationLocked = notebookMode === "shogi" || notebookMode === "chess" || notebookMode === "go"
-    ? node.id === path[0]?.id
-    : false;
+  const rootCreationLocked = boardGameMode;
   const isLabelAnchor = node.id === labelAnchorNodeId;
   const rootActiveDirectChild = selectedNodeId === path[0]?.id && isRootDirectChild;
   const rootOverviewDirectChild = rootOverviewActive && isRootDirectChild;

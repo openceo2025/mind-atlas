@@ -1,4 +1,4 @@
-import { exportChessRecord, importChessRecordFile } from "../src/features/chess/chessRecord.ts";
+import { createNewChessRecord, exportChessRecord, importChessRecordFile, importChessRecordText } from "../src/features/chess/chessRecord.ts";
 
 const source = `[Event "Mind Atlas fixture"]
 [Site "Local"]
@@ -31,6 +31,38 @@ const restoredMove = restoredRoot?.children[0];
 if (restoredRoot?.title !== annotatedRoot.title || restoredRoot.body !== annotatedRoot.body) throw new Error("PGN root annotations did not round-trip.");
 if (restoredMove?.title !== annotatedMove.title || restoredMove.body !== annotatedMove.body) throw new Error("PGN move annotations did not round-trip.");
 console.log(`verify:chess:pgn:passed nodes=${nodeCount} moves=${moveCount}`);
+
+expectError(
+  "multi-game PGN",
+  () => importChessRecordText(`${source}\n\n[Event "Second"]\n\n1. d4 d5 *`),
+  /contains 2 games/i,
+);
+expectError(
+  "unsupported chess variant",
+  () => importChessRecordText('[Event "Atomic"]\n[Variant "Atomic"]\n\n1. e4 *'),
+  /unsupported chess variant/i,
+);
+const newRecord = createNewChessRecord("New fixture");
+const newPgn = exportChessRecord(newRecord.root);
+for (const tag of ["Event", "Site", "Date", "Round", "White", "Black", "Result"]) {
+  if (!newPgn.includes(`[${tag} `)) throw new Error(`New PGN is missing the Seven Tag Roster field ${tag}.`);
+}
+const noteRoot = imported.root.children[0];
+if (!noteRoot || !annotatedMove) throw new Error("Chess note fixture is incomplete.");
+noteRoot.children.push({ ...annotatedMove, id: "ordinary-chess-note", title: "Unsupported note", body: "Must not disappear", structuredContent: undefined, children: [] });
+expectError("ordinary Atlas note export", () => exportChessRecord(imported.root), /unsupported Atlas node/i);
+console.log("verify:chess:boundaries:passed");
+
+function expectError(label: string, action: () => unknown, pattern: RegExp) {
+  try {
+    action();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (pattern.test(message)) return;
+    throw new Error(`${label} failed with an unexpected error: ${message}`);
+  }
+  throw new Error(`${label} should have been rejected.`);
+}
 
 function countNodes(node: { children: Array<{ children: unknown[] }> }): number {
   return 1 + node.children.reduce((sum, child) => sum + countNodes(child), 0);

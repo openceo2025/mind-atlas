@@ -273,7 +273,12 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       return;
     }
     const moveText = formatKIFMove(move);
-    const childId = addChildNode(parent.id, "", { title: moveText, focus: false, requestEdit: false });
+    const childId = addChildNode(parent.id, "", {
+      title: moveText,
+      focus: false,
+      requestEdit: false,
+      allowBoardRecordNode: true,
+    });
     if (!childId) return;
     const nextContent: ShogiRecordContent = {
       kind: "shogi-record",
