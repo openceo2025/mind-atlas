@@ -44,6 +44,7 @@
     "verify:node-search": "node --experimental-strip-types scripts/verify-node-search.ts",
     "verify:shogi": "node --experimental-strip-types scripts/verify-shogi-record.ts",
     "verify:shogi-analysis": "node --experimental-strip-types scripts/verify-shogi-analysis.ts",
+    "verify:board-move-identity": "node --experimental-strip-types scripts/verify-board-move-identity.ts",
     "verify:shogi-source": "node --experimental-strip-types scripts/verify-shogi-source.ts",
     "verify:chess": "node --experimental-strip-types scripts/verify-chess-record.ts",
     "verify:go": "node --experimental-strip-types scripts/verify-go-record.ts",

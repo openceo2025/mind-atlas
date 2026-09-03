@@ -1,3 +1,4 @@
+import { formatKIFMove, Position } from "tsshogi";
 import type { AtlasNode, ShogiRecordContent } from "../../types";
 
 /**
@@ -45,26 +46,53 @@ export function toKifPromotedPieceText(text: string): string {
 export function normalizeShogiNotebookNotation(root: AtlasNode): AtlasNode | null {
   let changed = false;
 
-  const visit = (node: AtlasNode): AtlasNode => {
-    const children = node.children.map(visit);
+  const visit = (node: AtlasNode, parent: AtlasNode | null): AtlasNode => {
+    const children = node.children.map((child) => visit(child, node));
     const childrenChanged = children.some((child, index) => child !== node.children[index]);
     const content = node.structuredContent?.kind === "shogi-record"
       ? (node.structuredContent as ShogiRecordContent)
       : null;
-    const displayText = content?.displayText ?? "";
-    if (content?.role !== "move" || !hasBoardPromotedPieceText(displayText)) {
+    if (content?.role !== "move") {
+      return childrenChanged ? { ...node, children } : node;
+    }
+
+    const displayText = content.displayText ?? "";
+    const nextDisplayText = canonicalMoveText(parent, content) ?? toKifPromotedPieceText(displayText);
+    const nextTitle = titleFollowsGeneratedMove(node.title, displayText)
+      ? nextDisplayText
+      : node.title;
+    const contentChanged = nextDisplayText !== displayText;
+    const titleChanged = nextTitle !== node.title;
+    if (!contentChanged && !titleChanged) {
       return childrenChanged ? { ...node, children } : node;
     }
     changed = true;
-    const nextDisplayText = toKifPromotedPieceText(displayText);
     return {
       ...node,
-      title: node.title === displayText ? nextDisplayText : node.title,
-      structuredContent: { ...content, displayText: nextDisplayText },
+      ...(titleChanged ? { title: nextTitle } : {}),
+      ...(contentChanged ? { structuredContent: { ...content, displayText: nextDisplayText } } : {}),
       children,
     };
   };
 
-  const next = visit(root);
+  const next = visit(root, null);
   return changed ? next : null;
+}
+
+function canonicalMoveText(parent: AtlasNode | null, content: ShogiRecordContent) {
+  const parentContent = parent?.structuredContent;
+  if (!parentContent || parentContent.kind !== "shogi-record" || !content.usi) return null;
+  const position = Position.newBySFEN(parentContent.sfen);
+  const move = position?.createMoveByUSI(content.usi);
+  return position && move && position.isValidMove(move) ? formatKIFMove(move) : null;
+}
+
+function titleFollowsGeneratedMove(title: string, displayText: string) {
+  const normalize = (value: string) => value
+    .trim()
+    .replace(/^[▲△]\s*/, "")
+    .replace(/[0-9]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) + 0xfee0))
+    .replace(/\s+/g, "");
+  const normalizedDisplay = normalize(displayText).replace(/\([０-９]{2}\)$/, "");
+  return normalize(title).replace(/\([０-９]{2}\)$/, "") === normalizedDisplay;
 }

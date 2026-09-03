@@ -5,6 +5,7 @@ import type { Api } from "shogiground/api";
 import type { Config } from "shogiground/config";
 import type { DropDests, Key, MoveDests, PieceName, RoleString } from "shogiground/types";
 import { findShogiNodeContent, findShogiRecordRoot } from "./shogiRecord";
+import { boardMoveIdentity } from "../board/boardMoveIdentity";
 import { BoardBranchJumpButton } from "../board/BoardBranchJumpButtons";
 import { findRecordProvenance } from "../board/recordProvenance";
 import { buildShogiCandidateArrows, buildShogiCandidateTargets } from "./shogiCandidates";
@@ -111,7 +112,6 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const addChildNode = useAtlasStore((state) => state.addChildNode);
-  const updateNode = useAtlasStore((state) => state.updateNode);
   const focusNode = useAtlasStore((state) => state.focusNode);
   const selectedNode = findNode(atlasRoot, selectedNodeId);
   const recordRoot = findShogiRecordRoot(atlasRoot, selectedNodeId);
@@ -260,7 +260,8 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       if (boardConfigRef.current) apiRef.current?.set(boardConfigRef.current, true);
       return;
     }
-    const existing = parent.children.find((child) => findShogiNodeContent(child)?.usi === usi);
+    const moveIdentity = `shogi:${usi.trim().toLowerCase()}`;
+    const existing = parent.children.find((child) => boardMoveIdentity(child) === moveIdentity);
     if (existing) {
       rememberChild(parent.id, existing.id);
       focusNode(existing.id);
@@ -273,13 +274,6 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       return;
     }
     const moveText = formatKIFMove(move);
-    const childId = addChildNode(parent.id, "", {
-      title: moveText,
-      focus: false,
-      requestEdit: false,
-      allowBoardRecordNode: true,
-    });
-    if (!childId) return;
     const nextContent: ShogiRecordContent = {
       kind: "shogi-record",
       schemaVersion: 1,
@@ -292,7 +286,15 @@ export function ShogiViewer({ enabled = true, onStatus }: ShogiViewerProps) {
       displayText: moveText,
       branchIndex: parent.children.filter((child) => findShogiNodeContent(child)?.role === "move").length,
     };
-    updateNode(childId, { structuredContent: nextContent });
+    const childId = addChildNode(parent.id, "", {
+      title: moveText,
+      focus: false,
+      requestEdit: false,
+      allowBoardRecordNode: true,
+      structuredContent: nextContent,
+      boardMoveIdentity: moveIdentity,
+    });
+    if (!childId) return;
     rememberChild(parent.id, childId);
     focusNode(childId);
   }

@@ -13,6 +13,7 @@ import { Chessground } from "chessground";
 import "chessground/assets/chessground.base.css";
 import "chessground/assets/chessground.cburnett.css";
 import { findChessNodeContent, findChessRecordRoot, nearestChessRecordNode } from "./chessRecord";
+import { boardMoveIdentity } from "../board/boardMoveIdentity";
 import { useBoardBranchNavigation } from "../board/boardNavigation";
 import { BoardBranchJumpButton } from "../board/BoardBranchJumpButtons";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
@@ -40,7 +41,6 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const addChildNode = useAtlasStore((state) => state.addChildNode);
-  const updateNode = useAtlasStore((state) => state.updateNode);
   const focusNode = useAtlasStore((state) => state.focusNode);
   const selectedNode = findNode(atlasRoot, selectedNodeId);
   const recordRoot = findChessRecordRoot(atlasRoot, selectedNodeId);
@@ -141,7 +141,8 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
       setPendingPromotion(null);
       return;
     }
-    const existing = parent.children.find((child) => findChessNodeContent(child)?.uci === uci);
+    const moveIdentity = `chess:${uci.trim().toLowerCase()}`;
+    const existing = parent.children.find((child) => boardMoveIdentity(child) === moveIdentity);
     if (existing) {
       setPendingPromotion(null);
       rememberChild(parent.id, existing.id);
@@ -152,13 +153,6 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
     const nextPosition = position.clone();
     nextPosition.play(move);
     const displayText = formatMoveLabel(san);
-    const childId = addChildNode(parent.id, "", {
-      title: displayText,
-      focus: false,
-      requestEdit: false,
-      allowBoardRecordNode: true,
-    });
-    if (!childId) return;
     const nextContent: ChessRecordContent = {
       kind: "chess-record",
       schemaVersion: 1,
@@ -172,8 +166,16 @@ export function ChessViewer({ enabled = true, onStatus }: ChessViewerProps) {
       displayText,
       branchIndex: parent.children.filter((child) => findChessNodeContent(child)?.role === "move").length,
     };
+    const childId = addChildNode(parent.id, "", {
+      title: displayText,
+      focus: false,
+      requestEdit: false,
+      allowBoardRecordNode: true,
+      structuredContent: nextContent,
+      boardMoveIdentity: moveIdentity,
+    });
+    if (!childId) return;
     setPendingPromotion(null);
-    updateNode(childId, { structuredContent: nextContent });
     rememberChild(parent.id, childId);
     focusNode(childId);
   }

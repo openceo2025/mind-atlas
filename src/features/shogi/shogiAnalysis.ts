@@ -1,5 +1,6 @@
 import { formatKIFMove, Position } from "tsshogi";
 import type { AtlasNode, ShogiAnalysisResult, ShogiRecordContent } from "../../types";
+import { boardMoveIdentity } from "../board/boardMoveIdentity.ts";
 
 /**
  * Engine analysis, as the record sees it.
@@ -200,7 +201,8 @@ export function appendShogiAnalysisLine(
     const parent = findNodeById(nextRoot, parentId);
     const parentContent = readShogiRecordContent(parent);
     if (!parent || !parentContent) break;
-    const existing = parent.children.find((child) => readShogiRecordContent(child)?.usi === step.usi);
+    const identity = `shogi:${step.usi.trim().toLowerCase()}`;
+    const existing = parent.children.find((child) => boardMoveIdentity(child) === identity);
     if (existing) {
       parentId = existing.id;
       firstMoveNodeId ??= existing.id;

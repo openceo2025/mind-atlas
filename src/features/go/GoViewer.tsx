@@ -4,6 +4,7 @@ import GoBoard, { type Sign, type Vertex } from "@sabaki/go-board";
 import { canEditGoRecord, findGoNodeContent, findGoRecordRoot, goRecordPath, goVertexToSgf, nearestGoRecordNode, nextGoSign, boardFromGoContent } from "./goRecord";
 import { useBoardBranchNavigation } from "../board/boardNavigation";
 import { BoardBranchJumpButton } from "../board/BoardBranchJumpButtons";
+import { boardMoveIdentity } from "../board/boardMoveIdentity";
 import { findNode, useAtlasStore } from "../../store/atlasStore";
 import type { AtlasNode, GoRecordContent } from "../../types";
 import { formatAppMessage } from "../../i18n/format";
@@ -17,7 +18,6 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
   const selectedNodeId = useAtlasStore((state) => state.selectedNodeId);
   const addChildNode = useAtlasStore((state) => state.addChildNode);
-  const updateNode = useAtlasStore((state) => state.updateNode);
   const focusNode = useAtlasStore((state) => state.focusNode);
   const selectedNode = findNode(atlasRoot, selectedNodeId);
   const recordRoot = findGoRecordRoot(atlasRoot, selectedNodeId);
@@ -70,9 +70,10 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
     const sign = nextGoSign(rootContent, parent);
     const color = sign === 1 ? "B" : "W";
     const rawVertex = pass ? "" : goVertexToSgf(vertex);
+    const moveIdentity = `go:${color}:${(pass ? "pass" : board.stringifyVertex(vertex)).trim().toLowerCase()}`;
     const existing = parent.children.find((child) => {
       const content = findGoNodeContent(child);
-      return content?.role === "move" && content.color === color && (content.vertex === "pass" ? pass : content.vertex === board.stringifyVertex(vertex));
+      return content?.role === "move" && boardMoveIdentity(child) === moveIdentity;
     });
     if (existing) {
       rememberChild(parent.id, existing.id);
@@ -94,13 +95,6 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
       }
     }
     const displayText = pass ? `${color} pass` : `${color} ${board.stringifyVertex(vertex)}`;
-    const childId = addChildNode(parent.id, "", {
-      title: displayText,
-      focus: false,
-      requestEdit: false,
-      allowBoardRecordNode: true,
-    });
-    if (!childId) return;
     const nextContent: GoRecordContent = {
       kind: "go-record",
       schemaVersion: 1,
@@ -115,7 +109,15 @@ export function GoViewer({ enabled = true, onStatus }: GoViewerProps) {
       displayText,
       branchIndex: parent.children.filter((child) => findGoNodeContent(child)?.role === "move").length,
     };
-    updateNode(childId, { structuredContent: nextContent });
+    const childId = addChildNode(parent.id, "", {
+      title: displayText,
+      focus: false,
+      requestEdit: false,
+      allowBoardRecordNode: true,
+      structuredContent: nextContent,
+      boardMoveIdentity: boardMoveIdentity(nextContent) ?? moveIdentity,
+    });
+    if (!childId) return;
     rememberChild(parent.id, childId);
     focusNode(childId);
   };

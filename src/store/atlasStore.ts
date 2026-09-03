@@ -55,6 +55,8 @@ import {
 } from "../context/contextEngine";
 import { normalizeShogiNotebookNotation } from "../features/shogi/shogiNotation";
 import { normalizeRecordProvenanceBodies } from "../features/board/recordProvenance";
+import { boardMoveIdentity } from "../features/board/boardMoveIdentity";
+import { deduplicateBoardRecordMoves } from "../features/board/boardMoveDeduplication";
 import { hydrateMissingNodeTitlesFromBodies } from "../titleMaintenance";
 import { acknowledgeNodeError, isIntrinsicErrorNode } from "../nodeErrorState";
 import {
@@ -91,6 +93,7 @@ import type {
   AgentWorkspaceBinding,
   AtlasEvent,
   AtlasNodeAction,
+  AtlasStructuredContent,
   AtlasNode,
   ChatSettings,
   ClaudeSettings,
@@ -373,6 +376,11 @@ interface AtlasStore {
       requestEdit?: boolean;
       /** Internal escape hatch used only when a board viewer creates a move node. */
       allowBoardRecordNode?: boolean;
+      /** Structured board move data is supplied at creation time to make the
+       * same-move check atomic with the insertion. */
+      structuredContent?: AtlasStructuredContent;
+      /** Parent-scoped identity used to reuse an existing board move. */
+      boardMoveIdentity?: string;
     },
   ) => string | undefined;
   addChildNodes: (parentId: string, nodes: ChildNodeDraft[], options?: { focus?: boolean }) => string[];
@@ -1354,7 +1362,11 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         formatShogiAnalysisStamp(result),
         (parentId, index, title, body) => createNotebookNode(parentId, index, title, body, { usedNodeIds }),
       );
-      const atlasRoot = stabilizePhyllotaxisPositions(line.root);
+      const moveRepair = deduplicateBoardRecordMoves(line.root);
+      const atlasRoot = stabilizePhyllotaxisPositions(moveRepair.root);
+      if (moveRepair.removedNodeIds.length) {
+        console.warn(`Mind Atlas merged ${moveRepair.removedNodeIds.length} duplicate board move node(s) after analysis.`);
+      }
       persistNotebook(atlasRoot);
       const title = formatAppMessage("shogi.analysis.ready");
       const birthMarks = { ...current.birthMarks };
@@ -1381,6 +1393,13 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
     if (blocksBoardGameRootInsertion(state.atlasRoot, parentId)) return;
     const parent = findNode(state.atlasRoot, parentId);
     if (!parent) return;
+    // Keep the duplicate check inside this action. Board input can arrive as
+    // two pointer events before React has rendered the first child, so a UI
+    // check followed by a separate insertion is not sufficient.
+    if (options.boardMoveIdentity) {
+      const existing = parent.children.find((child) => boardMoveIdentity(child) === options.boardMoveIdentity);
+      if (existing) return existing.id;
+    }
     const parentPath = findNodePath(state.atlasRoot, parentId);
     const childDepth = parentPath?.length ?? 1;
     const inheritedAiDialogSettings = createInheritedAiDialogSettings(parentPath ?? [parent], state.aiContextOptions, state.chatSettings, state.codexSettings, state.openClawSettings, state.claudeSettings);
@@ -1399,6 +1418,7 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         aiDialogSettings: inheritedAiDialogSettings,
         codexThreadId: inferCodexThreadIdFromNodePath(parentPath ?? [parent]),
         codexLogPath: inferCodexLogPathFromNodePath(parentPath ?? [parent]),
+        structuredContent: options.structuredContent,
         usedNodeIds,
       },
     );
@@ -1904,11 +1924,16 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       ...(datasetName ? { title: datasetName, subtitle: datasetName, updatedAt: new Date().toISOString() } : {}),
     };
     const repair = repairDuplicateNodeIds(normalizedRoot);
-    const atlasRoot = repair.root;
+    const notationRoot = normalizeShogiNotebookNotation(repair.root) ?? repair.root;
+    const moveRepair = deduplicateBoardRecordMoves(notationRoot);
+    const atlasRoot = moveRepair.root;
     const requestedSelection = options.selectedNodeId ? findNode(atlasRoot, options.selectedNodeId) : null;
     const selectedNode = requestedSelection ?? atlasRoot.children[0] ?? atlasRoot;
     if (repair.repairedIds.length) {
       console.warn(`Mind Atlas repaired ${repair.repairedIds.length} duplicate node id(s) during import.`);
+    }
+    if (moveRepair.removedNodeIds.length) {
+      console.warn(`Mind Atlas merged ${moveRepair.removedNodeIds.length} duplicate board move node(s) during import.`);
     }
     persistNotebook(atlasRoot);
     clearStoredNotificationState();
@@ -3550,9 +3575,10 @@ async function initializeNotebookPersistence() {
     // silver, knight and lance the KIF way. Rewrite them once on load so the
     // board, the record list and the node titles all read the same.
     const notationRoot = repairedRoot ? normalizeShogiNotebookNotation(repairedRoot) ?? repairedRoot : null;
+    const boardMovesRoot = notationRoot ? deduplicateBoardRecordMoves(notationRoot).root : null;
     // Branches merged before the source header moved into the body still carry
     // it only in structured content, where nothing shows it any more.
-    const currentRoot = notationRoot ? normalizeRecordProvenanceBodies(notationRoot) ?? notationRoot : null;
+    const currentRoot = boardMovesRoot ? normalizeRecordProvenanceBodies(boardMovesRoot) ?? boardMovesRoot : null;
     if (currentRoot) writeLegacyNotebookRecovery(currentRoot);
     useAtlasStore.setState((state) => {
       if (!currentRoot) {
@@ -4655,6 +4681,7 @@ function createNotebookNode(
     openClawLogPath?: string;
     claudeLogPath?: string;
     claudeSessionId?: string;
+    structuredContent?: AtlasStructuredContent;
     agentExecution?: AgentExecutionMetadata;
     usedNodeIds?: Set<string>;
   } = {},
@@ -4689,6 +4716,7 @@ function createNotebookNode(
     claudeLogPath: options.claudeLogPath,
     claudeSessionId: options.claudeSessionId,
     agentExecution: options.agentExecution,
+    ...(options.structuredContent ? { structuredContent: options.structuredContent } : {}),
     children: [],
   };
 }

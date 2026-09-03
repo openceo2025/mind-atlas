@@ -5466,10 +5466,10 @@ function UnreadNotificationLinks({
           className={`unread-notification-link is-${notification.kind}`}
           type="button"
           onClick={() => onFocus(notification.nodeId)}
-          title={`${notification.title}: ${node.title || formatAppMessage("ui.app.untitled.39af82f")}`}
+          title={`${notification.title}: ${notificationNodeTitle(node, notification.title)}`}
         >
           <Bell size={12} />
-          <span>{shortNotificationTitle(node.title || notification.title)}</span>
+          <span>{shortNotificationTitle(notificationNodeTitle(node, notification.title))}</span>
         </button>
       ))}
     </nav>
@@ -5517,6 +5517,12 @@ function shortCrumb(title: string) {
 function shortNotificationTitle(title: string) {
   const clean = title.trim() || "Untitled";
   return clean.length > 18 ? `${clean.slice(0, 18)}...` : clean;
+}
+
+function notificationNodeTitle(node: AtlasNode, fallback: string) {
+  const content = node.structuredContent;
+  if (content?.role === "move" && content.displayText?.trim()) return content.displayText;
+  return node.title.trim() || fallback;
 }
 
 function datasetFileName(name: string) {
