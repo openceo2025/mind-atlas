@@ -43,6 +43,7 @@ import {
   startHostedGoogleLogin,
   updateHostedCloudNotebook,
 } from "./hosted/serviceClient";
+import { syncAccountAiPreference } from "./hosted/aiPreference";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
 import type { AtlasNode, CloudNotebookEntry, CloudNotebookListResult, HostedServiceSession, NotebookMode, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
@@ -682,7 +683,9 @@ export default function App() {
     try {
       setHostedSessionLoading(true);
       setHostedSessionError("");
-      setHostedSession(await fetchHostedServiceSession());
+      const session = await fetchHostedServiceSession();
+      setHostedSession(session);
+      syncAccountAiPreference(session);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Mind Atlas service session could not be loaded.";
       setHostedSessionError(message);

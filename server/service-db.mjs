@@ -205,7 +205,45 @@ export async function migrateDatabase() {
       duplicates integer not null default 0,
       updated_at timestamptz not null default now()
     );
+
+    -- The AI model a user last chose; shared by mind-atlas.org and the spatial beta.
+    create table if not exists user_ai_preferences (
+      user_id text primary key references users(id) on delete cascade,
+      provider text not null,
+      model text not null default '',
+      reasoning_effort text not null default '',
+      updated_at timestamptz not null default now()
+    );
   `);
+}
+
+export async function getUserAiPreference(userId) {
+  const result = await pool.query(
+    "select provider, model, reasoning_effort, updated_at from user_ai_preferences where user_id = $1",
+    [userId],
+  );
+  const row = result.rows[0];
+  return row
+    ? { provider: row.provider, model: row.model, reasoningEffort: row.reasoning_effort, updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at }
+    : null;
+}
+
+export async function saveUserAiPreference(userId, { provider, model = "", reasoningEffort = "" }) {
+  const result = await pool.query(
+    `
+      insert into user_ai_preferences (user_id, provider, model, reasoning_effort)
+      values ($1, $2, $3, $4)
+      on conflict (user_id) do update set
+        provider = excluded.provider,
+        model = excluded.model,
+        reasoning_effort = excluded.reasoning_effort,
+        updated_at = now()
+      returning provider, model, reasoning_effort, updated_at
+    `,
+    [userId, provider, model, reasoningEffort],
+  );
+  const row = result.rows[0];
+  return { provider: row.provider, model: row.model, reasoningEffort: row.reasoning_effort, updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at };
 }
 
 export async function upsertGoogleUser(profile) {

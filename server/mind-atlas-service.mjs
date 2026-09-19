@@ -12,6 +12,7 @@ import {
   getCloudNotebook,
   getCloudNotebookByShareToken,
   getSessionUser,
+  getUserAiPreference,
   getUserSubscription,
   insertProductEvents,
   listCloudNotebooks,
@@ -25,6 +26,7 @@ import {
   recordUsageEvent,
   recordAnalyticsIngestStats,
   reserveCredit,
+  saveUserAiPreference,
   refundStaleCreditReservations,
   settleCreditReservation,
   shareCloudNotebook,
@@ -132,7 +134,9 @@ const openAiApiKeyUsable = isUsableServiceSecret(openAiApiKey);
 
 const providerCatalog = createProviderCatalog();
 const providerModelCache = new Map();
-const providerModelAvailabilityCache = new Map();
+const providerModelInflight = new Map();
+const providerModelProbeCache = new Map();
+const openAiTokenParamByModel = new Map();
 const rateLimitBuckets = new Map();
 const userConcurrencyCounts = new Map();
 const activeRealtimeSessions = new Map();
@@ -256,6 +260,11 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/billing/stripe/webhook") {
       await handleStripeWebhook(request, response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/account/ai-preference") {
+      await handleSaveAiPreference(request, response);
       return;
     }
 
@@ -1419,21 +1428,31 @@ async function callOpenAiCompatibleToolTurn(provider, payload) {
       ...buildChatMessages(payload.messages),
     ],
   };
-  if (usesChatCompletionsMaxCompletionTokens(provider, model)) {
-    body.max_completion_tokens = outputTokenLimit;
-  } else {
-    body.max_tokens = outputTokenLimit;
-  }
+  const tokenParam = openAiTokenParam(provider, model);
+  body[tokenParam] = outputTokenLimit;
   if (tools.length) {
     body.tools = tools;
     body.tool_choice = "auto";
   }
   applyReasoningEffort(body, payload.reasoningEffort);
-  const upstream = await fetch(`${provider.baseUrl}/chat/completions`, {
+  const send = (requestBody) => fetch(`${provider.baseUrl}/chat/completions`, {
     method: "POST",
     headers: bearerHeaders(provider.apiKey, { "Content-Type": "application/json" }),
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestBody),
   });
+  let upstream = await send(body);
+  if (upstream.status === 400 && provider.id === "openai") {
+    // Newer models reject max_tokens (and some older ones max_completion_tokens); retry once with the other.
+    const text = await upstream.text();
+    if (isTokenParamError(text)) {
+      const otherParam = tokenParam === "max_tokens" ? "max_completion_tokens" : "max_tokens";
+      const { [tokenParam]: _dropped, ...rest } = body;
+      upstream = await send({ ...rest, [otherParam]: outputTokenLimit });
+      if (upstream.ok) rememberOpenAiTokenParam(provider, model, otherParam);
+    } else {
+      upstream = new Response(text, { status: upstream.status });
+    }
+  }
   const raw = await readUpstreamJson(upstream);
   return {
     text: extractAssistantText(raw),
@@ -1546,7 +1565,31 @@ async function createSessionResponse(user) {
       : null,
     entitlement,
     chatOptions: await createChatOptionsResponse(),
+    aiPreference: user ? await getUserAiPreference(user.id) : null,
   };
+}
+
+const AI_PREFERENCE_EFFORTS = new Set(["", "default", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+// Saves the AI model the user picked so every device (and both the legacy app and the
+// spatial beta) starts with it. The model must be one the service currently offers.
+async function handleSaveAiPreference(request, response) {
+  const user = await requireUser(request);
+  enforceUserRateLimit(user.id, "ai-preference", 60);
+  const payload = await readJson(request, 4096);
+  const provider = providerCatalog.find((item) => item.id === stringValue(payload.provider));
+  if (!provider || !provider.configured) throw new ServiceError(400, "Unknown chat provider");
+  const model = stringValue(payload.model).trim();
+  if (model) {
+    const modelList = await getProviderModelList(provider);
+    if (!modelList.models.includes(model)) {
+      throw new ServiceError(400, "model_not_enabled", `${model} is not enabled for ${provider.label}`, { provider: provider.id, model });
+    }
+  }
+  const reasoningEffort = stringValue(payload.reasoningEffort).trim();
+  if (!AI_PREFERENCE_EFFORTS.has(reasoningEffort)) throw new ServiceError(400, "Unknown reasoning effort");
+  const preference = await saveUserAiPreference(user.id, { provider: provider.id, model, reasoningEffort });
+  sendJson(response, 200, { preference });
 }
 
 async function authenticate(request) {
@@ -1706,25 +1749,56 @@ async function getProviderModelList(provider, options = {}) {
 
   const cacheKey = `${provider.id}:${provider.kind}:${provider.baseUrl}`;
   const cached = providerModelCache.get(cacheKey);
-  if (!options.force && cached && cached.expiresAt > Date.now()) return cached.value;
+  if (!options.force && cached) {
+    if (cached.expiresAt > Date.now()) return cached.value;
+    // Serve the last list at once and refresh in the background: probing new models takes seconds.
+    void refreshProviderModelList(provider, cacheKey, localModels).catch(() => undefined);
+    return cached.value;
+  }
+  return await refreshProviderModelList(provider, cacheKey, localModels);
+}
 
+// One refresh per provider at a time, shared by every caller that is waiting for it.
+function refreshProviderModelList(provider, cacheKey, localModels) {
+  const running = providerModelInflight.get(cacheKey);
+  if (running) return running;
+  const task = loadLiveProviderModelList(provider, cacheKey, localModels).finally(() => providerModelInflight.delete(cacheKey));
+  providerModelInflight.set(cacheKey, task);
+  return task;
+}
+
+async function loadLiveProviderModelList(provider, cacheKey, localModels) {
   try {
     const fetched = await fetchProviderModelIds(provider);
-    const filtered = await filterProviderModelIds(provider, fetched);
-    if (!filtered.length) {
+    const candidates = filterProviderModelIds(provider, fetched);
+    if (!candidates.length) {
       throw new Error(`${provider.label} did not return chat-capable models`);
     }
-    const models = orderProviderModels(provider, filtered);
+    // A model is offered only when credits can be metered for it (priced) and a real
+    // request through the same endpoint the chat uses succeeds (requestable).
+    const priced = filterPricedProviderModels(provider, candidates);
+    const requestable = await filterRequestableProviderModels(provider, priced);
+    if (!requestable.length) {
+      throw new Error(`${provider.label} returned no priced, requestable chat models`);
+    }
+    const models = orderProviderModels(provider, requestable);
     const value = {
       models,
       defaultModel: selectDefaultProviderModel(provider, models),
       source: "live",
-      fetchedCount: filtered.length,
-      hiddenUnpricedCount: Math.max(0, filtered.length - models.length),
+      fetchedCount: candidates.length,
+      hiddenUnpricedCount: Math.max(0, candidates.length - priced.length),
+      unavailableCount: Math.max(0, priced.length - requestable.length),
     };
     cacheProviderModels(cacheKey, value);
     return value;
   } catch (error) {
+    const previous = providerModelCache.get(cacheKey)?.value;
+    if (previous?.source === "live") {
+      // Keep the last good live list through a temporary provider outage.
+      cacheProviderModels(cacheKey, previous, Math.min(providerModelCacheMs, 60_000));
+      return previous;
+    }
     const value = {
       models: localModels,
       defaultModel: selectDefaultProviderModel(provider, localModels),
@@ -1732,6 +1806,7 @@ async function getProviderModelList(provider, options = {}) {
       error: sanitizeProviderError(error),
       fetchedCount: 0,
       hiddenUnpricedCount: 0,
+      unavailableCount: 0,
     };
     cacheProviderModels(cacheKey, value, Math.min(providerModelCacheMs, 60_000));
     return value;
@@ -1752,8 +1827,8 @@ function scheduleProviderModelRefresh() {
 }
 
 function cacheProviderModels(cacheKey, value, ttlMs = providerModelCacheMs) {
-  if (ttlMs <= 0) return;
-  providerModelCache.set(cacheKey, { value, expiresAt: Date.now() + ttlMs });
+  // Kept after expiry so callers can be served the last list while it refreshes.
+  providerModelCache.set(cacheKey, { value, expiresAt: Date.now() + Math.max(0, ttlMs) });
 }
 
 async function fetchProviderModelIds(provider) {
@@ -1786,95 +1861,189 @@ function extractProviderModelIds(raw) {
   return uniqueStrings(data.map((item) => stringValue(item?.id))).filter(Boolean);
 }
 
-async function filterProviderModelIds(provider, models) {
+function filterProviderModelIds(provider, models) {
   const filtered = uniqueStrings(models).filter((model) => !isPlaceholderModel(model));
-  if (provider.id === "openai") return filtered.filter(isOpenAiChatModel);
-  if (provider.id === "anthropic") {
-    const anthropicModels = filtered.filter((model) => {
-      const normalized = model.toLowerCase();
-      return normalized.startsWith("claude-");
-    });
-    return await filterActuallyAvailableAnthropicModels(provider, anthropicModels);
-  }
+  if (provider.id === "openai") return collapseDatedSnapshots(filtered.filter(isOpenAiChatModel));
+  if (provider.id === "anthropic") return filtered.filter((model) => model.toLowerCase().startsWith("claude-"));
   if (provider.id === "deepseek") return filtered.filter((model) => model.toLowerCase().startsWith("deepseek-"));
   return filtered;
 }
 
-async function filterActuallyAvailableAnthropicModels(provider, models) {
-  const output = [];
-  for (const model of models) {
-    if (!requiresAnthropicAvailabilityProbe(model)) {
-      output.push(model);
-      continue;
+// gpt-5.4-2026-03-05 and gpt-4-0613 are pinned copies of an alias that is also listed; offer the alias only.
+function collapseDatedSnapshots(models) {
+  const set = new Set(models);
+  return models.filter((model) => {
+    const base = model.replace(/-\d{4}-\d{2}-\d{2}$/, "").replace(/-\d{4}$/, "");
+    return base === model || !set.has(base);
+  });
+}
+
+async function filterRequestableProviderModels(provider, models) {
+  const available = await mapWithConcurrency(models, 4, (model) => probeProviderModel(provider, model));
+  return models.filter((_, index) => available[index]);
+}
+
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await fn(items[index], index);
     }
-    if (await probeAnthropicModelAvailability(provider, model)) output.push(model);
-  }
-  return output;
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
-function requiresAnthropicAvailabilityProbe(model) {
-  const normalized = model.toLowerCase();
-  return normalized.startsWith("claude-fable-5") || normalized.startsWith("claude-mythos-5");
-}
+const MODEL_PROBE_OK_TTL_MS = 24 * 60 * 60 * 1000;
+const MODEL_PROBE_UNAVAILABLE_TTL_MS = 6 * 60 * 60 * 1000;
+const MODEL_PROBE_TRANSIENT_TTL_MS = 10 * 60 * 1000;
 
-async function probeAnthropicModelAvailability(provider, model) {
+// Sends the smallest real request through the same endpoint the chat uses. Listed is not
+// the same as requestable: some listed models are Responses-API only, retired, or gated.
+async function probeProviderModel(provider, model) {
   const cacheKey = `${provider.id}:${model}`;
-  const cached = providerModelAvailabilityCache.get(cacheKey);
+  const cached = providerModelProbeCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.available;
+  let result;
   try {
-    const response = await fetchWithTimeout(anthropicEndpoint(provider.baseUrl, "/v1/messages"), {
+    result = provider.kind === "anthropic"
+      ? await probeAnthropicModel(provider, model)
+      : await probeOpenAiCompatibleModel(provider, model);
+  } catch (error) {
+    result = { status: "transient", reason: sanitizeProviderError(error) };
+  }
+  const available = result.status === "ok" || (result.status === "transient" && (cached?.available ?? true));
+  const ttl = result.status === "ok"
+    ? MODEL_PROBE_OK_TTL_MS
+    : result.status === "unavailable" ? MODEL_PROBE_UNAVAILABLE_TTL_MS : MODEL_PROBE_TRANSIENT_TTL_MS;
+  providerModelProbeCache.set(cacheKey, { available, status: result.status, reason: result.reason ?? "", expiresAt: Date.now() + ttl });
+  if (result.status === "unavailable") console.log(`model probe: ${cacheKey} unavailable (${result.reason})`);
+  return available;
+}
+
+async function probeOpenAiCompatibleModel(provider, model) {
+  let last = { status: "unavailable", reason: "no response" };
+  for (const tokenParam of openAiTokenParamCandidates(provider, model)) {
+    const response = await fetchWithTimeout(`${provider.baseUrl}/chat/completions`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": provider.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
+      headers: bearerHeaders(provider.apiKey, { "Content-Type": "application/json" }),
       body: JSON.stringify({
         model,
-        max_tokens: 1,
-        messages: [{ role: "user", content: "OK" }],
+        messages: [{ role: "user", content: "Reply with OK." }],
+        [tokenParam]: 16,
       }),
     });
     const text = await response.text();
-    const unavailable = isAnthropicModelUnavailable(text);
-    const available = response.ok || !unavailable;
-    const ttl = unavailable ? Math.min(providerModelRefreshMs, 5 * 60 * 1000) : providerModelCacheMs;
-    providerModelAvailabilityCache.set(cacheKey, { available, expiresAt: Date.now() + Math.max(30_000, ttl) });
-    return available;
-  } catch {
-    return true;
+    if (response.ok) {
+      rememberOpenAiTokenParam(provider, model, tokenParam);
+      return { status: "ok" };
+    }
+    last = classifyModelProbeFailure(response.status, text);
+    if (!isTokenParamError(text)) return last;
   }
+  return last;
 }
 
-function isAnthropicModelUnavailable(text) {
-  return /not available|not have access|use opus|fable.*access|mythos.*access/i.test(stringValue(text));
+async function probeAnthropicModel(provider, model) {
+  const response = await fetchWithTimeout(anthropicEndpoint(provider.baseUrl, "/v1/messages"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": provider.apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1,
+      messages: [{ role: "user", content: "OK" }],
+    }),
+  });
+  const text = await response.text();
+  if (response.ok) return { status: "ok" };
+  return classifyModelProbeFailure(response.status, text);
+}
+
+function classifyModelProbeFailure(status, text) {
+  const reason = `${status} ${sanitizeProviderError(new Error(stringValue(text).slice(0, 300)))}`.trim();
+  // Rate limits, overload and server errors say nothing about the model itself.
+  if (status === 408 || status === 409 || status === 429 || status >= 500) return { status: "transient", reason };
+  return { status: "unavailable", reason };
+}
+
+function isTokenParamError(text) {
+  const value = stringValue(text);
+  return /max_tokens|max_completion_tokens/i.test(value) && /unsupported|not supported|instead/i.test(value);
+}
+
+function openAiTokenParamCandidates(provider, model) {
+  if (provider.id !== "openai") return ["max_tokens"];
+  const preferred = openAiTokenParam(provider, model);
+  return [preferred, preferred === "max_tokens" ? "max_completion_tokens" : "max_tokens"];
+}
+
+function openAiTokenParam(provider, model) {
+  if (provider?.id !== "openai") return "max_tokens";
+  return openAiTokenParamByModel.get(model)
+    ?? (usesChatCompletionsMaxCompletionTokens(provider, model) ? "max_completion_tokens" : "max_tokens");
+}
+
+function rememberOpenAiTokenParam(provider, model, tokenParam) {
+  if (provider?.id === "openai") openAiTokenParamByModel.set(model, tokenParam);
 }
 
 function isOpenAiChatModel(model) {
   const normalized = model.toLowerCase();
-  if (!/^(gpt-|chatgpt-)/.test(normalized)) return false;
+  if (!/^(gpt-|chatgpt-|o\d)/.test(normalized)) return false;
   return ![
     "audio",
     "dall-e",
+    "deep-research",
     "embedding",
     "image",
     "instruct",
+    "live",
     "moderation",
     "realtime",
     "search",
     "transcribe",
+    "translate",
     "tts",
     "whisper",
   ].some((blocked) => normalized.includes(blocked));
 }
 
-function orderProviderModels(provider, fetchedModels) {
-  const preferred = localProviderModels(provider).filter((model) => fetchedModels.includes(model));
-  const output = [...preferred, ...fetchedModels.filter((model) => !preferred.includes(model))];
-  const priced = modelPricePolicy === "require-model"
-    ? output.filter((model) => hasExactModelPrice(provider.id, model))
-    : output;
-  return uniqueStrings(priced).slice(0, Math.max(1, providerModelMaxCount));
+// Newest generation first; within a generation, the most capable (highest priced) first.
+function orderProviderModels(provider, models) {
+  return uniqueStrings(models)
+    .map((model) => ({
+      model,
+      generation: modelGeneration(provider.id, model),
+      outputPrice: Number(resolveExactModelPrice(modelPrices, provider.id, model)?.outputUsdPer1M ?? 0),
+    }))
+    .sort((a, b) => b.generation - a.generation || b.outputPrice - a.outputPrice || a.model.localeCompare(b.model))
+    .map((item) => item.model)
+    .slice(0, Math.max(1, providerModelMaxCount));
+}
+
+function modelGeneration(providerId, model) {
+  const value = stringValue(model).toLowerCase();
+  if (providerId === "openai") {
+    const reasoning = value.match(/^o(\d)/);
+    if (reasoning) return 4.5 + Number(reasoning[1]) / 10;
+    if (value.startsWith("gpt-4o") || value.startsWith("chatgpt-4o")) return 4.05;
+    if (value.startsWith("gpt-4-turbo")) return 4.02;
+    const gpt = value.match(/^(?:gpt|chatgpt)-(\d+(?:\.\d+)?)/);
+    return gpt ? Number(gpt[1]) : 0;
+  }
+  if (providerId === "anthropic") {
+    const claude = value.match(/^claude-[a-z]+-(\d+)(?:-(\d{1,2}))?(?:-|$)/);
+    return claude ? Number(claude[1]) + Number(claude[2] ?? 0) / 10 : 0;
+  }
+  const version = value.match(/v(\d+(?:\.\d+)?)/);
+  return version ? Number(version[1]) : 0;
 }
 
 function localProviderModels(provider) {
@@ -1905,7 +2074,8 @@ function providerModelDetail(provider, modelList) {
   if (modelList.source === "live") {
     const policyNote = modelPricePolicy === "require-model" ? " priced" : "";
     const hiddenNote = modelList.hiddenUnpricedCount ? `; ${modelList.hiddenUnpricedCount} unpriced models hidden` : "";
-    return `${provider.label} key configured; ${modelList.models.length}${policyNote} models fetched${hiddenNote}`;
+    const unavailableNote = modelList.unavailableCount ? `; ${modelList.unavailableCount} not requestable` : "";
+    return `${provider.label} key configured; ${modelList.models.length}${policyNote} models fetched${hiddenNote}${unavailableNote}`;
   }
   if (modelList.source === "fallback") {
     return `${provider.label} key configured; model fetch fallback: ${modelList.error}`;
@@ -1923,12 +2093,11 @@ function publicModelPricing(providerId, model) {
 }
 
 function modelDisplayName(provider, model) {
-  if (provider.id === "anthropic" && model.startsWith("claude-fable-5")) return "Claude Fable 5";
-  if (provider.id === "anthropic" && model.startsWith("claude-mythos-5")) return "Claude Mythos 5";
-  if (provider.id === "anthropic" && model.startsWith("claude-opus-4-8")) return "Claude Opus 4.8";
-  if (provider.id === "anthropic" && model.startsWith("claude-opus-4-1")) return "Claude Opus 4.1";
-  if (provider.id === "anthropic" && model.startsWith("claude-sonnet-5")) return "Claude Sonnet 5";
-  if (provider.id === "anthropic" && model.startsWith("claude-haiku-4-5")) return "Claude Haiku 4.5";
+  if (provider.id === "anthropic") {
+    // claude-opus-4-8 → Claude Opus 4.8, claude-fable-5-1 → Claude Fable 5.1, claude-haiku-4-5-20251001 → Claude Haiku 4.5
+    const match = model.match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/);
+    if (match) return `Claude ${match[1][0].toUpperCase()}${match[1].slice(1)} ${match[2]}${match[3] ? `.${match[3]}` : ""}`;
+  }
   return model;
 }
 
@@ -2810,7 +2979,7 @@ function usesChatCompletionsMaxCompletionTokens(provider, model) {
 
 function supportsReasoningEffort(model) {
   const normalized = stringValue(model).toLowerCase();
-  return /^o\d/.test(normalized) || normalized.startsWith("gpt-5") || normalized.includes("reasoning");
+  return /^o\d/.test(normalized) || /^gpt-([5-9]|\d{2,})/.test(normalized) || normalized.includes("reasoning");
 }
 
 function extractResponseText(data) {
