@@ -58,6 +58,7 @@ import { normalizeRecordProvenanceBodies } from "../features/board/recordProvena
 import { boardMoveIdentity } from "../features/board/boardMoveIdentity";
 import { deduplicateBoardRecordMoves } from "../features/board/boardMoveDeduplication";
 import { hydrateMissingNodeTitlesFromBodies } from "../titleMaintenance";
+import { accountChatSettings } from "../hosted/aiPreference";
 import { acknowledgeNodeError, isIntrinsicErrorNode } from "../nodeErrorState";
 import {
   clearPersistedNotebook,
@@ -898,7 +899,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         || state.claudeSettings.workspace.trim();
       return {
         aiContextOptions: normalizeAiContextOptions(settings?.contextOptions ?? DEFAULT_AI_CONTEXT_OPTIONS),
-        chatSettings: normalizeChatSettings(settings?.chatSettings ?? DEFAULT_CHAT_SETTINGS),
+        // Signed in to the hosted service, the model saved on the account is used on every node.
+        chatSettings: normalizeChatSettings(accountChatSettings() ?? settings?.chatSettings ?? DEFAULT_CHAT_SETTINGS),
         codexSettings: { ...codexSettings, workspace },
         openClawSettings: normalizeOpenClawSettings(settings?.openClawSettings ?? DEFAULT_OPENCLAW_SETTINGS),
         claudeSettings: { ...claudeSettings, workspace },

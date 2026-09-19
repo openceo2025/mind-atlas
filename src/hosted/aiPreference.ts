@@ -22,6 +22,17 @@ export function getAccountAiPreference() {
   return signedIn ? preference : null;
 }
 
+/** The account choice as chat settings, or null when signed out or nothing is saved yet. */
+export function accountChatSettings(): ChatSettings | null {
+  const current = getAccountAiPreference();
+  if (!current?.provider) return null;
+  return {
+    service: current.provider as ChatSettings["service"],
+    model: current.model,
+    reasoningEffort: (current.reasoningEffort || "default") as ChatSettings["reasoningEffort"],
+  };
+}
+
 export function subscribeAccountAiPreference(listener: (preference: HostedAiPreference | null) => void) {
   listeners.add(listener);
   return () => {
