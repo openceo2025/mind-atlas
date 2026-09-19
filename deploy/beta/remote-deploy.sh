@@ -132,7 +132,11 @@ done
 systemctl is-active "$UNIT"
 curl -fsS -m 10 "http://127.0.0.1:$PORT/health"
 echo
-curl -fsS -m 10 -H "Host: $DOMAIN" -o /dev/null -w "nginx (http) -> %{http_code}\n" http://127.0.0.1/.mind-atlas-build.json
+if [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+  curl -fsS -m 10 --resolve "$DOMAIN:443:127.0.0.1" -o /dev/null -w "nginx (https) -> %{http_code}\n" "https://$DOMAIN/.mind-atlas-build.json"
+else
+  curl -fsS -m 10 -H "Host: $DOMAIN" -o /dev/null -w "nginx (http) -> %{http_code}\n" http://127.0.0.1/.mind-atlas-build.json
+fi
 echo "legacy: $(systemctl is-active mind-atlas) $(curl -fsS -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:8788/health)"
 
 echo "== pruning to one generation =="
