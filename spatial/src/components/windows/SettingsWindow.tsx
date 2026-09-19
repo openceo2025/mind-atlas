@@ -8,7 +8,8 @@ import type { FloatWin } from '../../types';
 function modelLabel(m: ChatModel) {
   const name = m.displayName ?? m.model;
   if (!m.pricing) return name;
-  return `${name} · $${m.pricing.inputUsdPer1M} / $${m.pricing.outputUsdPer1M}`;
+  const price = `$${m.pricing.inputUsdPer1M} / $${m.pricing.outputUsdPer1M}`;
+  return `${name} · ${m.pricing.estimated ? t('settings.priceEstimated', { price }) : price}`;
 }
 
 export function SettingsWindow(_: { win: FloatWin }) {

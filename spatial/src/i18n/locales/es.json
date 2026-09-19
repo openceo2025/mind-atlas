@@ -510,6 +510,7 @@
   "settings.model": "Modelo",
   "settings.aiNote": "Se usa para resumir, comparar, expandir, extraer, relacionar y chatear. La disposición usa embeddings, no este modelo.",
   "settings.aiAccount": "Tu elección se guarda en tu cuenta y también se usa en mind-atlas.org.",
+  "settings.priceEstimated": "{price} (estimado)",
   "help.lead": "MindAtlas convierte los pensamientos en tarjetas y las ordena por significado. Cambia los ejes y las mismas tarjetas toman una nueva forma.",
   "help.step1": "Crea tarjetas: doble clic en un espacio vacío, pega texto o suelta archivos.",
   "help.step2": "Las tarjetas se colocan por significado en los ejes X/Y/Z. Arrastra una adonde creas que pertenece: ese será su valor en esos ejes.",

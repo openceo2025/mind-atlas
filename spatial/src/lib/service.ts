@@ -198,7 +198,7 @@ export async function openBillingPortal() {
 export interface ChatModel {
   model: string;
   displayName?: string;
-  pricing?: { inputUsdPer1M: number; outputUsdPer1M: number };
+  pricing?: { inputUsdPer1M: number; outputUsdPer1M: number; estimated?: boolean };
 }
 export interface ChatService {
   id: string;
