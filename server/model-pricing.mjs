@@ -153,8 +153,9 @@ export function modelPriceKeys(providerId, model) {
 export function normalizeModelPriceId(providerId, model) {
   const value = String(model ?? "");
   if (providerId === "openai") {
-    // Dated snapshots (gpt-5.4-2026-03-05, o3-2025-04-16) cost the same as their alias.
-    return value.replace(/-\d{4}-\d{2}-\d{2}$/, "");
+    // Dated snapshots (gpt-5.4-2026-03-05, o3-2025-04-16) and context variants
+    // (gpt-3.5-turbo-16k) cost the same as their alias.
+    return value.replace(/-\d{4}-\d{2}-\d{2}$/, "").replace(/-\d+k$/, "");
   }
   if (providerId === "anthropic") {
     return normalizeAnthropicModelPriceId(value);
