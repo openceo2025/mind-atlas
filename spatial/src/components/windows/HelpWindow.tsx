@@ -1,25 +1,31 @@
 import { t, type MessageKey } from '../../i18n';
 import type { FloatWin } from '../../types';
 
-const SHORTCUTS: [string, MessageKey][] = [
-  ['Click / Shift+Click', 'help.select'],
-  ['Drag', 'help.drag'],
-  ['Alt+Drag', 'help.duplicate'],
-  ['Double-click (empty)', 'help.create'],
-  ['Double-click (card)', 'help.open'],
-  ['Wheel / Pinch', 'help.zoom'],
-  ['Space+Drag / 2 fingers', 'help.pan'],
-  ['Ctrl+G', 'help.group'],
-  ['Delete', 'help.delete'],
-  ['Ctrl+Z / Ctrl+Shift+Z', 'help.undo'],
-  ['Ctrl+K', 'help.palette'],
-  ['N', 'help.newCard'],
-  ['1–6', 'help.presets'],
-  ['F', 'help.fit'],
-  ['Ctrl+V', 'help.paste'],
-];
+// キー名（Ctrl, Shift など）はそのまま、操作の言葉だけ翻訳する
+function shortcuts(): [string, MessageKey][] {
+  const click = t('key.click');
+  const drag = t('key.drag');
+  return [
+    [`${click} / Shift+${click}`, 'help.select'],
+    [drag, 'help.drag'],
+    [`Alt+${drag}`, 'help.duplicate'],
+    [t('key.doubleClickEmpty'), 'help.create'],
+    [t('key.doubleClickCard'), 'help.open'],
+    [t('key.wheelPinch'), 'help.zoom'],
+    [`Space+${drag} / ${t('key.twoFingers')}`, 'help.pan'],
+    ['Ctrl+G', 'help.group'],
+    ['Delete', 'help.delete'],
+    ['Ctrl+Z / Ctrl+Shift+Z', 'help.undo'],
+    ['Ctrl+K', 'help.palette'],
+    ['N', 'help.newCard'],
+    ['1–6', 'help.presets'],
+    ['F', 'help.fit'],
+    ['Ctrl+V', 'help.paste'],
+  ];
+}
 
 export function HelpWindow(_: { win: FloatWin }) {
+  const SHORTCUTS = shortcuts();
   return (
     <div className="fwin-body">
       <p className="lead">{t('help.lead')}</p>
