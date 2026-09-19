@@ -38,7 +38,7 @@ import {
   deleteSession,
 } from "./service-db.mjs";
 import { getEnv, parseJsonEnv, parseListEnv, readIntEnv, serviceRootDir } from "./service-config.mjs";
-import { hasModelPrice, mergeModelPrices, resolveExactModelPrice } from "./model-pricing.mjs";
+import { estimateModelPrice, mergeModelPrices, modelGeneration, resolveExactModelPrice } from "./model-pricing.mjs";
 import { stripePatchFromStripeSubscription } from "./stripe-subscription.mjs";
 import {
   AnalyticsValidationError,
@@ -1789,6 +1789,7 @@ async function loadLiveProviderModelList(provider, cacheKey, localModels) {
       fetchedCount: candidates.length,
       hiddenUnpricedCount: Math.max(0, candidates.length - priced.length),
       unavailableCount: Math.max(0, priced.length - requestable.length),
+      estimatedPriceModels: models.filter((model) => isEstimatedModelPrice(provider.id, model)),
     };
     cacheProviderModels(cacheKey, value);
     return value;
@@ -2021,29 +2022,11 @@ function orderProviderModels(provider, models) {
     .map((model) => ({
       model,
       generation: modelGeneration(provider.id, model),
-      outputPrice: Number(resolveExactModelPrice(modelPrices, provider.id, model)?.outputUsdPer1M ?? 0),
+      outputPrice: Number(resolveModelPriceEntry(provider.id, model)?.outputUsdPer1M ?? 0),
     }))
     .sort((a, b) => b.generation - a.generation || b.outputPrice - a.outputPrice || a.model.localeCompare(b.model))
     .map((item) => item.model)
     .slice(0, Math.max(1, providerModelMaxCount));
-}
-
-function modelGeneration(providerId, model) {
-  const value = stringValue(model).toLowerCase();
-  if (providerId === "openai") {
-    const reasoning = value.match(/^o(\d)/);
-    if (reasoning) return 4.5 + Number(reasoning[1]) / 10;
-    if (value.startsWith("gpt-4o") || value.startsWith("chatgpt-4o")) return 4.05;
-    if (value.startsWith("gpt-4-turbo")) return 4.02;
-    const gpt = value.match(/^(?:gpt|chatgpt)-(\d+(?:\.\d+)?)/);
-    return gpt ? Number(gpt[1]) : 0;
-  }
-  if (providerId === "anthropic") {
-    const claude = value.match(/^claude-[a-z]+-(\d+)(?:-(\d{1,2}))?(?:-|$)/);
-    return claude ? Number(claude[1]) + Number(claude[2] ?? 0) / 10 : 0;
-  }
-  const version = value.match(/v(\d+(?:\.\d+)?)/);
-  return version ? Number(version[1]) : 0;
 }
 
 function localProviderModels(provider) {
@@ -2056,7 +2039,7 @@ function localProviderModels(provider) {
 
 function filterPricedProviderModels(provider, models) {
   if (modelPricePolicy !== "require-model") return models;
-  return models.filter((model) => hasExactModelPrice(provider.id, model));
+  return models.filter((model) => Boolean(resolveModelPriceEntry(provider.id, model)));
 }
 
 function selectDefaultProviderModel(provider, models) {
@@ -2075,7 +2058,10 @@ function providerModelDetail(provider, modelList) {
     const policyNote = modelPricePolicy === "require-model" ? " priced" : "";
     const hiddenNote = modelList.hiddenUnpricedCount ? `; ${modelList.hiddenUnpricedCount} unpriced models hidden` : "";
     const unavailableNote = modelList.unavailableCount ? `; ${modelList.unavailableCount} not requestable` : "";
-    return `${provider.label} key configured; ${modelList.models.length}${policyNote} models fetched${hiddenNote}${unavailableNote}`;
+    const estimatedNote = modelList.estimatedPriceModels?.length
+      ? `; ${modelList.estimatedPriceModels.length} on estimated prices (${modelList.estimatedPriceModels.join(", ")})`
+      : "";
+    return `${provider.label} key configured; ${modelList.models.length}${policyNote} models fetched${hiddenNote}${unavailableNote}${estimatedNote}`;
   }
   if (modelList.source === "fallback") {
     return `${provider.label} key configured; model fetch fallback: ${modelList.error}`;
@@ -2084,11 +2070,12 @@ function providerModelDetail(provider, modelList) {
 }
 
 function publicModelPricing(providerId, model) {
-  const price = resolveExactModelPrice(modelPrices, providerId, model);
-  if (!price) return undefined;
+  const entry = resolveModelPriceEntry(providerId, model);
+  if (!entry) return undefined;
   return {
-    inputUsdPer1M: Number(price.inputUsdPer1M),
-    outputUsdPer1M: Number(price.outputUsdPer1M),
+    inputUsdPer1M: entry.inputUsdPer1M,
+    outputUsdPer1M: entry.outputUsdPer1M,
+    estimated: entry.estimated,
   };
 }
 
@@ -2116,10 +2103,6 @@ function sanitizeProviderError(error) {
 
 function isPlaceholderModel(value) {
   return /staging|mock|placeholder|replace-with|your-/i.test(stringValue(value));
-}
-
-function hasExactModelPrice(providerId, model) {
-  return hasModelPrice(modelPrices, providerId, model);
 }
 
 function anthropicEndpoint(baseUrl, endpoint) {
@@ -2381,6 +2364,8 @@ async function meterReservedUsage({ user, subscription, requestId, provider, mod
       provider,
       model,
       reservedMicroUsd: reservation.reservedMicroUsd,
+      // Billed at an estimated rate because the model has no published price yet.
+      ...(isEstimatedModelPrice(provider, model) ? { priceEstimated: true } : {}),
       ...reservation.metadata,
       ...metadata,
     },
@@ -2418,20 +2403,39 @@ function estimateCostMicroUsd(providerId, model, inputTokens, outputTokens) {
   return Math.max(1, Math.ceil(((inputTokens * inputRate) + (outputTokens * outputRate)) / 1_000_000 * 1_000_000));
 }
 
+/**
+ * The rate a model is billed at: the published price when it is known, otherwise an
+ * estimate from the provider's current generation so a model released today can be used
+ * right away. Estimates are flagged everywhere they surface.
+ */
+function resolveModelPriceEntry(providerId, model) {
+  const exactPrice = resolveExactModelPrice(modelPrices, providerId, model);
+  if (exactPrice) {
+    return { inputUsdPer1M: Number(exactPrice.inputUsdPer1M), outputUsdPer1M: Number(exactPrice.outputUsdPer1M), estimated: false };
+  }
+  const estimate = estimateModelPrice(modelPrices, providerId, model);
+  if (estimate) {
+    return { inputUsdPer1M: Number(estimate.inputUsdPer1M), outputUsdPer1M: Number(estimate.outputUsdPer1M), estimated: true, tier: estimate.tier };
+  }
+  return null;
+}
+
+function isEstimatedModelPrice(providerId, model) {
+  return resolveModelPriceEntry(providerId, model)?.estimated === true;
+}
+
 function resolveModelPrice(providerId, model) {
   const providerKey = `${providerId}:*`;
-  const exactPrice = resolveExactModelPrice(modelPrices, providerId, model);
+  const entry = resolveModelPriceEntry(providerId, model);
   const providerPrice = modelPrices[providerKey];
-  if (modelPricePolicy === "require-model" && !exactPrice) {
-    throw new ServiceError(503, "pricing_not_configured", `Pricing is not configured for ${providerId}:${model}`, { provider: providerId, model });
-  }
-  if ((modelPricePolicy === "require-provider" || modelPricePolicy === "require-model") && !exactPrice && !providerPrice) {
+  if ((modelPricePolicy === "require-provider" || modelPricePolicy === "require-model") && !entry && !providerPrice) {
     throw new ServiceError(503, "pricing_not_configured", `Pricing is not configured for ${providerId}`, { provider: providerId });
   }
-  const price = exactPrice ?? providerPrice ?? {};
+  const price = entry ?? providerPrice ?? {};
   return {
     inputUsdPer1M: Number(price.inputUsdPer1M ?? defaultInputUsdPer1m),
     outputUsdPer1M: Number(price.outputUsdPer1M ?? defaultOutputUsdPer1m),
+    estimated: price.estimated === true,
   };
 }
 
