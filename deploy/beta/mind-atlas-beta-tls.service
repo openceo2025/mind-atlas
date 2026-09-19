@@ -1,0 +1,8 @@
+[Unit]
+Description=Issue the beta.mind-atlas.org certificate once DNS points here
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/mind-atlas-beta/deploy/beta/tls-when-dns-ready.sh

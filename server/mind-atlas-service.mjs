@@ -53,6 +53,7 @@ import {
   promotionContextFromGoogleStart,
 } from "./promotion-attribution.mjs";
 import { fetchSupportedShogiSource } from "./shogi-source.mjs";
+import { createSpatialRoutes, migrateSpatialDatabase } from "./spatial-service.mjs";
 
 const serviceHost = getEnv("MIND_ATLAS_SERVICE_HOST", "127.0.0.1");
 const servicePort = readIntEnv("MIND_ATLAS_SERVICE_PORT", 8788);
@@ -139,7 +140,11 @@ const activeRealtimeSessions = new Map();
 
 assertSafeProductionConfig();
 await migrateDatabase();
-await runServiceMaintenanceOnce("startup");
+// 空間UI（MindAtlas β）用のテーブルを追加する。既存テーブルは変更しない。
+await migrateSpatialDatabase();
+// MIND_ATLAS_MAINTENANCE_INTERVAL_MS=0 のサービス（同じ DB を共有する β）は、
+// セッション削除やクレジット返金を本体に任せて二重実行しない。
+if (maintenanceIntervalMs > 0) await runServiceMaintenanceOnce("startup");
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -174,6 +179,7 @@ const server = http.createServer(async (request, response) => {
         ok: true,
         service: "mind-atlas-service",
         publicService: true,
+        spatial: true,
         configured: {
           google: stagingMockAuth || Boolean(googleClientId && googleClientSecret),
           stripe: stagingMockBilling || Boolean(stripeSecretKey && stripePriceId),
@@ -330,6 +336,10 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (await getSpatialRoutes().handle(request, response, url)) {
+      return;
+    }
+
     if (url.pathname.startsWith("/api/")) {
       sendJson(response, 404, createServiceErrorPayload(new ServiceError(404, "not_found", "Not found")));
       return;
@@ -356,6 +366,26 @@ server.listen(servicePort, serviceHost, () => {
 });
 scheduleProviderModelRefresh();
 scheduleServiceMaintenance();
+
+let spatialRoutes = null;
+function getSpatialRoutes() {
+  // ServiceError はファイル末尾で宣言されるので、最初のリクエスト時に組み立てる
+  spatialRoutes ??= createSpatialRoutes({
+    ServiceError,
+    authenticate,
+    requireUser,
+    readRawBody,
+    sendJson,
+    consumeRateLimit,
+    requestClientIp,
+    serveStatic,
+    publicOrigin,
+    openAiApiKey: openAiApiKeyUsable ? openAiApiKey : "",
+    openAiBaseUrl,
+    mockProviders: stagingMockProviders,
+  });
+  return spatialRoutes;
+}
 
 function assertSafeProductionConfig() {
   if (!isProductionOrigin()) return;
@@ -1476,6 +1506,15 @@ function buildPartnerSystemPrompt(payload) {
   // Prefer the client context engine's compact markdown context; fall back to
   // the legacy JSON dump for older cached browser bundles.
   const contextText = stringValue(payload.contextText).trim();
+  if (stringValue(payload.product) === "spatial") {
+    return [
+      "You are the AI partner inside MindAtlas, a spatial canvas where ideas are cards arranged along semantic axes (X/Y/Z).",
+      "Follow the user's task exactly. When asked for JSON, reply with JSON only.",
+      "Answer in the user's language unless told otherwise. Keep spoken replies short.",
+      "When tools are available, use them to add cards, connect cards, change axes or focus cards, then briefly say what changed.",
+      contextText ? `Current space context:\n${contextText.slice(0, 48000)}` : "",
+    ].filter(Boolean).join("\n\n");
+  }
   const contextBlock = contextText
     ? `Current Mind Atlas notebook context:\n${contextText.slice(0, 48000)}`
     : `Current Mind Atlas context:\n${JSON.stringify(payload.context ?? {}, null, 2).slice(0, 24000)}`;
@@ -2702,7 +2741,7 @@ function setCors(request, response) {
     response.setHeader("Vary", "Origin");
   }
   response.setHeader("Access-Control-Allow-Headers", "Content-Type, Stripe-Signature");
-  response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  response.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
 }
 
 function enforceBrowserOrigin(request, url) {

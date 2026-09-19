@@ -567,6 +567,13 @@ const server = createBridgeServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/embeddings") {
+      // 空間UI（spatial/）の意味配置用。ローカルの OpenAI キーで埋め込みを作る
+      const payload = await readJson(request);
+      sendJson(response, 200, await createSpatialEmbeddings(payload));
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/ai/text-partner-turn") {
       const payload = await readJson(request);
       const result = await createTextPartnerTurn(payload);
@@ -5333,4 +5340,26 @@ class BridgeError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+const spatialEmbeddingCache = new Map();
+const spatialEmbeddingModel = process.env.MIND_ATLAS_EMBEDDING_MODEL ?? "text-embedding-3-small";
+const spatialEmbeddingDims = Number(process.env.MIND_ATLAS_EMBEDDING_DIMS ?? 256);
+
+async function createSpatialEmbeddings(payload) {
+  const texts = Array.isArray(payload?.texts) ? payload.texts.map((text) => String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 1200)) : [];
+  if (!texts.length || texts.length > 64 || texts.some((text) => !text)) throw new BridgeError(400, "texts must be 1-64 non-empty strings");
+  if (!openAiApiKey) throw new BridgeError(503, "OpenAI API key is not configured");
+  const missing = texts.filter((text) => !spatialEmbeddingCache.has(text));
+  if (missing.length) {
+    const upstream = await fetch(`${openAiBaseUrl}/embeddings`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${openAiApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: spatialEmbeddingModel, input: missing, dimensions: spatialEmbeddingDims, encoding_format: "base64" }),
+    });
+    const data = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) throw new BridgeError(502, data?.error?.message ?? `Embedding request failed with ${upstream.status}`);
+    for (const item of data.data ?? []) spatialEmbeddingCache.set(missing[item.index], item.embedding);
+  }
+  return { model: `${spatialEmbeddingModel}@${spatialEmbeddingDims}`, dims: spatialEmbeddingDims, vectors: texts.map((text) => spatialEmbeddingCache.get(text)) };
 }

@@ -1,0 +1,27 @@
+[Unit]
+Description=MindAtlas beta (spatial UI) hosted service
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mind-atlas-beta
+EnvironmentFile=/opt/mind-atlas-beta/.env.service
+ExecStart=/usr/bin/npm run service:start
+Restart=always
+RestartSec=5
+User=www-data
+Group=www-data
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/opt/mind-atlas-beta
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Retry the beta.mind-atlas.org certificate every 5 minutes until DNS is ready
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=mind-atlas-beta-tls.service
+
+[Install]
+WantedBy=timers.target

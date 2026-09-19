@@ -1,0 +1,251 @@
+// LLM を使う AI 操作。配置（意味軸）には使わず、要約・比較・展開などの「考える補助」に使う。
+// hosted では既存のクレジット課金を通り、ローカルでは開発ブリッジのキーで動く。
+import { getLocale, t, type Locale } from '../i18n';
+import type { Card, CardKind, RelationType } from '../types';
+import { aiTurn, type AiTurnMessage } from './service';
+
+const LANGUAGE: Record<Locale, string> = {
+  en: 'English',
+  ja: 'Japanese',
+  es: 'Spanish',
+  'pt-BR': 'Brazilian Portuguese',
+  fr: 'French',
+  de: 'German',
+  ko: 'Korean',
+  'zh-Hans': 'Simplified Chinese',
+  'zh-Hant': 'Traditional Chinese',
+  id: 'Indonesian',
+  hi: 'Hindi',
+  ar: 'Arabic',
+};
+
+export interface AiModelChoice {
+  provider: string;
+  model?: string;
+}
+
+let choice: AiModelChoice = { provider: 'openai' };
+export function setAiModel(next: AiModelChoice) {
+  choice = next;
+}
+export function getAiModel() {
+  return choice;
+}
+
+const SYSTEM = [
+  'You are the thinking assistant inside MindAtlas, a spatial canvas where ideas are cards placed along semantic axes.',
+  'Cards have ids, kinds, titles, bodies and tags. Relations connect cards.',
+  'Be concrete and faithful to the given cards; do not invent facts that are not implied by them unless asked to brainstorm.',
+].join(' ');
+
+export function cardsContext(cards: Card[], maxChars = 24000) {
+  let out = '';
+  for (const c of cards) {
+    const block = [
+      `### [${c.id}] ${c.title}`,
+      `kind: ${c.kind}${c.tags.length ? ` | tags: ${c.tags.join(', ')}` : ''}${c.url ? ` | url: ${c.url}` : ''}`,
+      c.subtitle ? c.subtitle : '',
+      c.body ? c.body.slice(0, 2400) : '',
+      c.facts?.length ? c.facts.map((f) => `- ${f.label}: ${f.value}`).join('\n') : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    if (out.length + block.length > maxChars) break;
+    out += `${block}\n\n`;
+  }
+  return out.trim();
+}
+
+function language() {
+  return LANGUAGE[getLocale()] ?? 'English';
+}
+
+/** モデルが JSON 以外を返したとき。raw は画面での代替表示に使う。 */
+export class AiFormatError extends Error {
+  constructor(public raw: string) {
+    super(t('error.aiFormat'));
+  }
+}
+
+function extractJson<T>(text: string): T {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const body = fenced ? fenced[1] : text;
+  const start = body.indexOf('{');
+  const end = body.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new AiFormatError(text);
+  try {
+    return JSON.parse(body.slice(start, end + 1)) as T;
+  } catch {
+    throw new AiFormatError(text);
+  }
+}
+
+async function runJson<T>(task: string, context: string): Promise<T> {
+  const prompt = [
+    SYSTEM,
+    task,
+    `Write every human-readable string in ${language()}.`,
+    'Reply with a single JSON object only, no prose, no code fences.',
+  ].join('\n\n');
+  const result = await aiTurn({ ...choice, messages: [{ role: 'user', content: prompt }], contextText: context });
+  return extractJson<T>(result.text);
+}
+
+// ── 要約 ─────────────────────────────────────────────
+export type Lens = 'points' | 'risk' | 'opportunity';
+
+export interface SummaryResult {
+  lead: string;
+  points: { text: string; sourceId?: string }[];
+  tags: string[];
+}
+
+export async function summarize(cards: Card[], lens: Lens, variant: number): Promise<SummaryResult> {
+  const focus = {
+    points: 'the key points',
+    risk: 'risks, blockers and weaknesses',
+    opportunity: 'opportunities, tailwinds and strengths',
+  }[lens];
+  let r: SummaryResult;
+  try {
+    r = await runJson<SummaryResult>(
+      [
+        `Summarize the cards below, focusing on ${focus}.`,
+        variant > 0 ? `This is re-run #${variant}: choose a noticeably different angle than an obvious summary.` : '',
+        'Return {"lead": string (2-3 sentences), "points": [{"text": string (one sentence), "sourceId": id of the card it comes from}] (3-5 items), "tags": string[] (2-4 short hashtags without #)}.',
+      ].join('\n'),
+      cardsContext(cards),
+    );
+  } catch (error) {
+    // 散文で返ってきた場合は、そのまま要約文として見せる
+    if (!(error instanceof AiFormatError) || !error.raw.trim()) throw error;
+    return { lead: error.raw.trim().slice(0, 1200), points: [], tags: [] };
+  }
+  return { lead: String(r.lead ?? ''), points: Array.isArray(r.points) ? r.points.slice(0, 6) : [], tags: Array.isArray(r.tags) ? r.tags.slice(0, 5) : [] };
+}
+
+// ── 比較 ─────────────────────────────────────────────
+export interface CompareResult {
+  comment: string;
+  rows: { label: string; values: string[]; best?: number }[];
+  axis: { label: string; low: string; high: string };
+}
+
+export async function compare(cards: Card[], axisLabels: string[]): Promise<CompareResult> {
+  const r = await runJson<CompareResult>(
+    [
+      `Compare the ${cards.length} cards below (in this order: ${cards.map((c) => `[${c.id}]`).join(', ')}).`,
+      `The user currently views them along these axes: ${axisLabels.join(' / ') || 'none'}.`,
+      'Return {"comment": string (2-3 sentences on how they differ and how they could complement each other),',
+      '"rows": [{"label": criterion, "values": one short value per card in the given order, "best": index of the better card or -1}] (4-6 meaningful criteria, include the current axes when relevant),',
+      '"axis": {"label": the single criterion where they differ most, "low": short label for its low end, "high": short label for its high end}}.',
+    ].join('\n'),
+    cardsContext(cards),
+  );
+  return {
+    comment: String(r.comment ?? ''),
+    rows: Array.isArray(r.rows) ? r.rows.slice(0, 8) : [],
+    axis: r.axis ?? { label: '', low: '', high: '' },
+  };
+}
+
+// ── 展開 ─────────────────────────────────────────────
+export interface Draft {
+  kind: CardKind;
+  title: string;
+  body: string;
+  tags: string[];
+  relation?: RelationType;
+}
+
+const DRAFT_KINDS: CardKind[] = ['idea', 'hypothesis', 'issue', 'quote', 'note'];
+
+function cleanDrafts(items: unknown): Draft[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((d: Record<string, unknown>) => ({
+      kind: DRAFT_KINDS.includes(d.kind as CardKind) ? (d.kind as CardKind) : 'idea',
+      title: String(d.title ?? '').slice(0, 120),
+      body: String(d.body ?? '').slice(0, 1200),
+      tags: Array.isArray(d.tags) ? d.tags.map((x) => String(x).replace(/^#/, '')).slice(0, 3) : [],
+      relation: (['derived', 'supports', 'contradicts', 'related'] as RelationType[]).includes(d.relation as RelationType) ? (d.relation as RelationType) : 'derived',
+    }))
+    .filter((d) => d.title);
+}
+
+export async function expand(card: Card, neighbors: Card[]): Promise<Draft[]> {
+  const r = await runJson<{ items: unknown }>(
+    [
+      `Expand the focus card [${card.id}] "${card.title}" into 3 new cards that push the thinking further: one idea (a concrete action), one issue (a risk or open question), one hypothesis (a testable claim).`,
+      'Use the neighboring cards only as background. Do not repeat what the cards already say.',
+      'Return {"items": [{"kind": "idea"|"issue"|"hypothesis", "title": short title, "body": 1-2 sentences, "tags": [1-2 short tags], "relation": "derived"|"supports"|"contradicts"}]}.',
+    ].join('\n'),
+    cardsContext([card, ...neighbors.slice(0, 6)]),
+  );
+  return cleanDrafts(r.items);
+}
+
+export async function extractIdeas(card: Card): Promise<Draft[]> {
+  const r = await runJson<{ items: unknown }>(
+    [
+      `Extract the 3-5 most important standalone points from the card [${card.id}] "${card.title}".`,
+      'Each point becomes a new card: classify it as "quote" (a fact or statement worth keeping), "issue" (a problem or risk), "hypothesis" (a claim) or "idea" (an action).',
+      'Return {"items": [{"kind": ..., "title": short title, "body": the point in 1-2 sentences, "tags": [1-2 short tags]}]}.',
+    ].join('\n'),
+    cardsContext([card]),
+  );
+  return cleanDrafts(r.items).map((d) => ({ ...d, relation: 'derived' }));
+}
+
+// ── 関係の分類 ─────────────────────────────────────────
+export interface RelationSuggestion {
+  from: string;
+  to: string;
+  type: RelationType;
+  reason: string;
+}
+
+export async function classifyRelations(cards: Card[], pairs: [string, string][]): Promise<RelationSuggestion[]> {
+  const r = await runJson<{ relations: unknown }>(
+    [
+      'For each candidate pair of cards, decide the relation type from the first card to the second.',
+      'Types: "supports" (evidence for), "contradicts" (conflicts with or is a risk to), "derived" (the second follows from the first), "related" (same theme), or "none".',
+      `Candidate pairs: ${pairs.map(([a, b]) => `[${a}]→[${b}]`).join(', ')}.`,
+      'Return {"relations": [{"from": id, "to": id, "type": type, "reason": one short sentence}]} and omit pairs typed "none".',
+    ].join('\n'),
+    cardsContext(cards),
+  );
+  const ok: RelationType[] = ['supports', 'contradicts', 'derived', 'related'];
+  return (Array.isArray(r.relations) ? r.relations : [])
+    .map((x: Record<string, unknown>) => ({ from: String(x.from), to: String(x.to), type: x.type as RelationType, reason: String(x.reason ?? '') }))
+    .filter((x) => ok.includes(x.type) && pairs.some(([a, b]) => (a === x.from && b === x.to) || (a === x.to && b === x.from)));
+}
+
+export async function nameClusters(groups: Card[][]): Promise<string[]> {
+  const context = groups.map((g, i) => `## Group ${i + 1}\n${g.map((c) => `- ${c.title}`).join('\n')}`).join('\n\n');
+  const r = await runJson<{ labels: unknown }>(
+    `Give each group of card titles a short name (2-6 words) that captures what its members share. Return {"labels": [one name per group, in order]}.`,
+    context,
+  );
+  return Array.isArray(r.labels) ? r.labels.map((x) => String(x)) : [];
+}
+
+export async function suggestAxisEnds(label: string): Promise<{ low: string; high: string; description: string }> {
+  const r = await runJson<{ low: string; high: string; description: string }>(
+    `The user wants a semantic axis called "${label}" to arrange idea cards. Return {"low": 1-3 word label for the low end, "high": 1-3 word label for the high end, "description": one sentence describing what a high value means}.`,
+    '',
+  );
+  return { low: String(r.low ?? ''), high: String(r.high ?? ''), description: String(r.description ?? '') };
+}
+
+// ── チャット ─────────────────────────────────────────
+export async function chat(history: AiTurnMessage[], cards: Card[], spaceTitle: string) {
+  const intro = [
+    SYSTEM,
+    `The user is working in the space "${spaceTitle}". The cards in focus are provided as context.`,
+    `Answer in ${language()} unless the user writes in another language. Use Markdown lists when helpful.`,
+  ].join('\n');
+  const messages: AiTurnMessage[] = history.map((m, i) => (i === 0 && m.role === 'user' ? { role: 'user', content: `${intro}\n\n${m.content}` } : m));
+  const result = await aiTurn({ ...choice, messages, contextText: cardsContext(cards, 30000) });
+  return result.text;
+}

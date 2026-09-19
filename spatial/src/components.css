@@ -1,0 +1,826 @@
+/* ── キャンバス ─────────────────────────── */
+.canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  cursor: default;
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+}
+
+.canvas.panning,
+.canvas.space {
+  cursor: grab;
+}
+
+.canvas.panning {
+  cursor: grabbing;
+}
+
+.world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+.world-svg {
+  position: absolute;
+  overflow: visible;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.space-label {
+  position: absolute;
+  top: 14px;
+  left: 18px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.space-label h2 {
+  margin: 0;
+  font-size: 17px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.space-label p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+/* 軸ドック（軸の先端。カードのドロップ先） */
+.dock {
+  position: absolute;
+  width: 260px;
+  height: 128px;
+  margin: -64px 0 0 -130px;
+  border-radius: 16px;
+  border: 1.5px dashed rgba(255, 209, 102, 0.28);
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+.dock.over {
+  border-color: var(--gold);
+  background: rgba(255, 209, 102, 0.1);
+  box-shadow: 0 0 40px rgba(255, 209, 102, 0.35);
+}
+
+.dock.dragging {
+  border-color: rgba(255, 209, 102, 0.7);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    box-shadow: 0 0 26px rgba(255, 209, 102, 0.3);
+  }
+}
+
+.axis-caption {
+  position: absolute;
+  white-space: nowrap;
+  pointer-events: none;
+  color: var(--accent-2);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.axis-caption .k {
+  font-size: 18px;
+  letter-spacing: 0.04em;
+}
+
+.axis-caption .n {
+  display: block;
+  font-size: 22px;
+  color: var(--text);
+}
+
+.axis-caption .e {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.end-label {
+  position: absolute;
+  font-size: 13px;
+  color: var(--text-3);
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+/* ── カード ─────────────────────────────── */
+.card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow), inset 0 1px 0 var(--glass-hi);
+  cursor: pointer;
+  will-change: transform;
+  transform-origin: center;
+  transition: border-color 0.15s, box-shadow 0.2s, opacity 0.25s, filter 0.25s;
+  backdrop-filter: blur(6px);
+}
+
+.card:hover {
+  border-color: var(--line-strong);
+}
+
+.card.selected {
+  border-color: var(--accent-2);
+  box-shadow:
+    0 0 0 2px rgba(106, 227, 255, 0.5),
+    0 0 28px rgba(63, 169, 255, 0.55),
+    var(--shadow);
+}
+
+.card.lifted {
+  box-shadow:
+    0 0 0 2px rgba(106, 227, 255, 0.6),
+    0 26px 50px rgba(0, 0, 0, 0.55),
+    0 0 36px rgba(63, 169, 255, 0.5);
+}
+
+.card.dim {
+  opacity: 0.22;
+  filter: saturate(0.4);
+}
+
+.card.flash {
+  animation: flash 1.2s ease-out;
+}
+
+@keyframes flash {
+  0%,
+  40% {
+    box-shadow: 0 0 0 4px rgba(106, 227, 255, 0.9), 0 0 60px rgba(106, 227, 255, 0.8);
+  }
+}
+
+.card.axis {
+  border-color: rgba(255, 209, 102, 0.75);
+  box-shadow: 0 0 0 1px rgba(255, 209, 102, 0.35), 0 0 30px rgba(255, 209, 102, 0.25), var(--shadow);
+}
+
+.card.ai-made {
+  border-style: dashed;
+}
+
+.card-inner {
+  display: flex;
+  gap: 12px;
+  padding: 12px 12px 10px;
+  height: 100%;
+}
+
+.card-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding-right: 18px;
+}
+
+.card-sub {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tags {
+  display: flex;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 6px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(63, 169, 255, 0.14);
+  border: 1px solid rgba(63, 169, 255, 0.22);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.kind-icon {
+  flex: none;
+  width: 44px;
+  height: 52px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  position: relative;
+}
+
+.card-menu {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+}
+
+.card-menu:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.badge {
+  position: absolute;
+  top: -11px;
+  left: 12px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+}
+
+.badge.axis {
+  background: var(--gold);
+  color: #2b1d00;
+  box-shadow: 0 0 12px rgba(255, 209, 102, 0.6);
+}
+
+.badge.ai {
+  background: rgba(106, 227, 255, 0.18);
+  border: 1px solid rgba(106, 227, 255, 0.5);
+  color: var(--accent-2);
+}
+
+.meaning-dots {
+  position: absolute;
+  bottom: 7px;
+  right: 9px;
+  display: flex;
+  gap: 3px;
+}
+
+.meaning-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  opacity: 0.8;
+  box-shadow: 0 0 6px var(--accent-2);
+}
+
+/* 画像カード */
+.card.visual .thumb {
+  position: absolute;
+  inset: 0;
+  border-radius: 11px;
+  overflow: hidden;
+}
+
+.card.visual .thumb-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 30%, rgba(3, 10, 24, 0.92) 85%);
+}
+
+.card.visual .card-inner {
+  position: relative;
+  align-items: flex-end;
+}
+
+.card.visual .card-title,
+.card.visual .card-sub {
+  color: #fff;
+}
+
+/* トピックカード */
+.card.topic {
+  border-color: rgba(106, 227, 255, 0.55);
+  box-shadow: 0 0 40px rgba(63, 169, 255, 0.35), var(--shadow);
+}
+
+.card.topic .card-title {
+  font-size: 20px;
+}
+
+/* グループカード（束） */
+.stack {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  pointer-events: none;
+}
+
+.count-pill {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(255, 179, 71, 0.18);
+  color: var(--warn);
+  margin-left: 6px;
+}
+
+/* 概念（軸）カード */
+.card.concept .card-inner {
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.concept-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1.5px solid var(--gold);
+  color: var(--gold);
+  box-shadow: 0 0 12px rgba(255, 209, 102, 0.35);
+}
+
+.ends {
+  font-size: 11px;
+  color: var(--text-2);
+  margin-top: 2px;
+}
+
+/* 人物カード（写真は使わない） */
+.initials {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 15px;
+  flex: none;
+  background: linear-gradient(135deg, #2b6fff, #34c3ff);
+  color: #fff;
+  align-self: center;
+}
+
+/* ── クラスタ（カードの色リングと群ラベル） ─────── */
+.card.clustered {
+  box-shadow:
+    0 0 0 2.5px hsl(var(--cl-hue) 90% 62% / 0.85),
+    0 0 26px hsl(var(--cl-hue) 90% 55% / 0.35),
+    var(--shadow);
+}
+
+.cluster-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 5px 12px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  background: var(--panel-strong);
+  border: 1.5px solid;
+  z-index: 350;
+  transition: left 0.6s, top 0.6s;
+}
+
+/* ── マーキー選択 ─────────────────────────── */
+.marquee {
+  position: absolute;
+  border: 1px solid var(--accent-2);
+  background: rgba(106, 227, 255, 0.08);
+  pointer-events: none;
+  z-index: 50;
+}
+
+/* ── ラジアルアクション ───────────────────── */
+.radial {
+  position: absolute;
+  width: 0;
+  height: 0;
+  z-index: 80; /* 選択中の操作なので、浮いているウィンドウより手前 */
+}
+
+.radial-ring {
+  position: absolute;
+  width: 200px;
+  height: 200px;
+  left: -100px;
+  top: -100px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(10, 30, 70, 0.9) 36%, rgba(8, 22, 52, 0.75) 37%, rgba(8, 22, 52, 0.55) 70%, transparent 71%);
+  border: 1px solid rgba(106, 190, 255, 0.35);
+  box-shadow: 0 0 40px rgba(63, 169, 255, 0.25);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+:root[data-theme='light'] .radial-ring {
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95) 36%, rgba(255, 255, 255, 0.8) 37%, rgba(255, 255, 255, 0.6) 70%, transparent 71%);
+}
+
+.radial-item {
+  position: absolute;
+  width: 58px;
+  height: 52px;
+  margin: -26px 0 0 -29px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.radial-item:hover:not(:disabled) {
+  background: rgba(63, 169, 255, 0.22);
+  color: var(--accent-2);
+}
+
+.radial-item:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.radial-center {
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  left: -27px;
+  top: -27px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 40% 35%, #7fd8ff, #1f6fff 70%);
+  box-shadow: 0 0 24px rgba(63, 169, 255, 0.8);
+  color: #fff;
+}
+
+.radial-center:hover {
+  box-shadow: 0 0 36px rgba(106, 227, 255, 1);
+}
+
+.radial-tip {
+  position: absolute;
+  top: 108px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--text-2);
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+/* ── Shelf ─────────────────────────────── */
+.shelf {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  right: 250px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.shelf.over {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 30px rgba(106, 227, 255, 0.35);
+}
+
+.shelf-label {
+  font-size: 11px;
+  color: var(--text-2);
+  writing-mode: horizontal-tb;
+  white-space: nowrap;
+  padding-right: 6px;
+  border-right: 1px solid var(--line);
+  line-height: 1.4;
+}
+
+.shelf-items {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  flex: 1;
+  scrollbar-width: none;
+}
+
+.shelf-item {
+  flex: none;
+  width: 148px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--card-bg);
+  cursor: grab;
+  text-align: left;
+}
+
+.shelf-item:hover {
+  border-color: var(--line-strong);
+}
+
+.shelf-item b {
+  display: block;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 96px;
+}
+
+.shelf-item small {
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.shelf-item .kind-icon {
+  width: 26px;
+  height: 30px;
+  font-size: 7px;
+}
+
+.shelf-empty {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 0 8px;
+}
+
+/* ── ミニマップ ───────────────────────────── */
+.minimap {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 226px;
+  z-index: 30;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+}
+
+.minimap svg {
+  display: block;
+  cursor: pointer;
+}
+
+.minimap-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-top: 1px solid var(--line);
+}
+
+.minimap-bar span {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+/* ── 思考の軌跡（軸の履歴） ───────────────────── */
+.trail {
+  position: absolute;
+  top: 66px;
+  left: 14px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  max-width: min(420px, 40%);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.trail-label {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.trail-item {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  color: var(--text-2);
+  border: 1px solid transparent;
+}
+
+.trail-item:hover {
+  background: var(--accent-soft);
+}
+
+.trail-item.current {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: var(--accent-soft);
+}
+
+.trail-sep {
+  color: var(--text-3);
+  font-size: 10px;
+}
+
+/* ── 凡例 ─────────────────────────────── */
+.legend {
+  position: absolute;
+  left: 14px;
+  bottom: 76px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+
+/* ── コマンドパレット / トースト / ゴースト ─────────── */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 5, 15, 0.45);
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  padding-top: 110px;
+}
+
+.palette {
+  width: 560px;
+  max-height: 440px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-strong);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), 0 0 40px rgba(63, 169, 255, 0.2);
+  overflow: hidden;
+}
+
+.palette input {
+  height: 50px;
+  padding: 0 18px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  outline: none;
+  font-size: 15px;
+}
+
+.palette-list {
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 13px;
+}
+
+.palette-item.active {
+  background: var(--accent-soft);
+}
+
+.palette-item small {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.toasts {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.toast {
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-strong);
+  font-size: 12px;
+  box-shadow: var(--shadow);
+}
+
+.drag-ghost {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--accent-2);
+  background: var(--panel-strong);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), 0 0 24px rgba(63, 169, 255, 0.5);
+  font-size: 12px;
+  font-weight: 600;
+  transform: translate(-50%, -50%) rotate(-2deg);
+  white-space: nowrap;
+}
+
+.hint {
+  position: absolute;
+  right: 14px;
+  top: 12px;
+  z-index: 20;
+  font-size: 11px;
+  color: var(--text-3);
+  text-align: right;
+  line-height: 1.7;
+  pointer-events: none;
+}

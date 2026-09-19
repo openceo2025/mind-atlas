@@ -1,0 +1,248 @@
+import { useLayoutEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import {
+  aiBlock,
+  collapseGroup,
+  expandGroup,
+  get,
+  group,
+  isAxisCard,
+  layoutCards,
+  markCompared,
+  openWindow,
+  openWindowAtScreen,
+  proposeClusters,
+  requireAi,
+  select,
+  set,
+  setBusy,
+  spawnDrafts,
+  suggestRelations,
+  toast,
+  toastError,
+  useStore,
+  worldToScreen,
+} from '../store';
+import { engine } from '../lib/physics';
+import { cardSize, cardText } from '../lib/semantic';
+import { cosine, resolveVectors } from '../lib/embeddings';
+import { expand } from '../lib/ai';
+import { t } from '../i18n';
+import { Icon } from './Icons';
+
+const R = 84;
+
+interface Item {
+  key: string;
+  label: string;
+  icon: string;
+  tip: string;
+  disabled?: boolean;
+  busy?: boolean;
+  run: () => void;
+}
+
+export function RadialMenu() {
+  const primary = useStore((s) => s.primary);
+  const selection = useStore((s) => s.selection);
+  const card = useStore((s) => (s.primary ? s.cards[s.primary] : undefined));
+  const dragging = useStore((s) => s.draggingIds.length > 0);
+  const hiddenByWindow = useStore((s) => s.radialHidden);
+  const readOnly = useStore((s) => s.readOnly);
+  const busy = useStore((s) => s.busy);
+  const ref = useRef<HTMLDivElement>(null);
+  const [tip, setTip] = useState<string | null>(null);
+
+  const visible = !!card && card.place === 'canvas' && selection.length > 0 && !dragging && !hiddenByWindow && !readOnly;
+
+  useLayoutEffect(() => {
+    if (!visible || !primary) return;
+    return engine.subscribe(() => {
+      const b = engine.get(primary);
+      const el = ref.current;
+      const st = get();
+      const c = st.cards[primary];
+      if (!b || !el || !c) return;
+      const { w } = cardSize(c);
+      const right = worldToScreen(b.x + (w * b.s) / 2, b.y);
+      const left = worldToScreen(b.x - (w * b.s) / 2, b.y);
+      const onRight = right.x + R + 130 < st.viewport.w;
+      const x = onRight ? right.x + R + 34 : left.x - R - 34;
+      const y = Math.max(R + 40, Math.min(st.viewport.h - R - 60, right.y));
+      el.style.transform = `translate(${x}px, ${y}px)`;
+    });
+  }, [visible, primary]);
+
+  if (!card) return null;
+  const n = selection.length;
+  const isGroup = card.kind === 'group';
+  const aiOk = !aiBlock();
+
+  const items: Item[] = [
+    {
+      key: 'summary',
+      label: t('radial.summary'),
+      icon: 'summary',
+      tip: n > 1 ? t('radial.summaryTipMany', { n }) : t('radial.summaryTip'),
+      run: () => openWindow('summary', selection),
+    },
+    {
+      key: 'compare',
+      label: t('radial.compare'),
+      icon: 'compare',
+      tip: n > 1 ? t('radial.compareTipMany', { n: Math.min(n, 3) }) : t('radial.compareTip'),
+      run: () => {
+        let ids = selection.slice(0, 3);
+        let picked = false;
+        if (ids.length < 2) {
+          // 比較相手は、意味ベクトルが最も近いカード
+          const others = layoutCards().filter((c) => c.id !== card.id && !['concept', 'topic', 'group'].includes(c.kind));
+          if (!others.length) return toast(t('toast.nothingToCompare'));
+          const { vectors } = resolveVectors([cardText(card), ...others.map(cardText)]);
+          let best = 0;
+          others.forEach((_, i) => {
+            if (cosine(vectors[0], vectors[i + 1]) > cosine(vectors[0], vectors[best + 1])) best = i;
+          });
+          ids = [card.id, others[best].id];
+          picked = true;
+          select(ids);
+        }
+        markCompared(ids);
+        openWindow('compare', ids, { picked });
+      },
+    },
+    {
+      key: 'chat',
+      label: t('radial.ask'),
+      icon: 'chat',
+      tip: t('radial.askTip'),
+      run: () => openWindow('chat', selection.slice(0, 12)),
+    },
+    {
+      key: 'bundle',
+      label: t('radial.bundle'),
+      icon: 'bundle',
+      tip: t('radial.bundleTip'),
+      disabled: n < 2,
+      run: () => group(selection),
+    },
+    {
+      key: 'expand',
+      label: isGroup ? (card.expanded ? t('radial.collapse') : t('radial.open')) : t('radial.expand'),
+      icon: 'expand',
+      busy: busy.expand,
+      tip: isGroup ? (card.expanded ? t('radial.collapseTip') : t('radial.openTip')) : aiOk ? t('radial.expandTip') : t(`ai.block.${aiBlock() ?? 'login'}` as 'ai.block.login'),
+      run: () => {
+        if (isGroup) return card.expanded ? collapseGroup(card.id) : expandGroup(card.id);
+        if (!requireAi()) return;
+        const neighbors = layoutCards().filter((c) => c.id !== card.id && c.kind !== 'concept').slice(0, 8);
+        setBusy('expand', true);
+        void expand(card, neighbors)
+          .then((drafts) => {
+            const ids = spawnDrafts(card.id, drafts);
+            if (ids.length) {
+              select(ids);
+              toast(t('toast.expanded', { n: ids.length, title: card.title }));
+            }
+          })
+          .catch(toastError)
+          .finally(() => setBusy('expand', false));
+      },
+    },
+    {
+      key: 'relayout',
+      label: t('radial.axes'),
+      icon: 'cube',
+      tip: isAxisCard(card.id) ? t('radial.axesTip') : t('radial.axesTipCard'),
+      run: () => {
+        const st = get();
+        const existing = st.windows.find((w) => w.type === 'axis');
+        if (existing) set({ windows: st.windows.filter((w) => w.id !== existing.id) });
+        const el = ref.current?.getBoundingClientRect();
+        const canvas = document.querySelector('.canvas')?.getBoundingClientRect();
+        const x = (el?.left ?? 0) - (canvas?.left ?? 0) + R + 30;
+        const y = (el?.top ?? 0) - (canvas?.top ?? 0) - 160;
+        openWindowAtScreen('axis', [card.id], { x, y });
+      },
+    },
+    {
+      key: 'extract',
+      label: t('radial.extract'),
+      icon: 'extract',
+      tip: t('radial.extractTip'),
+      disabled: !card.body || isGroup,
+      run: () => openWindow('extract', [card.id]),
+    },
+    {
+      key: 'organize',
+      label: t('radial.organize'),
+      icon: 'organize',
+      tip: t('radial.organizeTip'),
+      run: () => {
+        void proposeClusters(aiOk);
+        openWindow('cluster', [card.id]);
+      },
+    },
+  ];
+
+  return (
+    <AnimatePresence>
+      {visible && (
+        <div ref={ref} className="radial" onPointerDown={(e) => e.stopPropagation()}>
+          <motion.div
+            key={primary}
+            initial={{ scale: 0.4, opacity: 0, rotate: -40 }}
+            animate={{ scale: 1, opacity: 1, rotate: 0 }}
+            exit={{ scale: 0.4, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 26 }}
+            style={{ position: 'absolute' }}
+          >
+            <div className="radial-ring" style={{ width: R * 2 + 70, height: R * 2 + 70, left: -R - 35, top: -R - 35 }} />
+            {items.map((it, i) => {
+              const a = (i / items.length) * Math.PI * 2 - Math.PI / 2;
+              return (
+                <button
+                  key={it.key}
+                  className={`radial-item ${it.busy ? 'busy' : ''}`}
+                  style={{ left: Math.cos(a) * R, top: Math.sin(a) * R }}
+                  disabled={it.disabled || it.busy}
+                  onMouseEnter={() => setTip(it.tip)}
+                  onMouseLeave={() => setTip(null)}
+                  onClick={() => {
+                    setTip(null);
+                    it.run();
+                  }}
+                  aria-label={it.label}
+                >
+                  <Icon name={it.icon} size={19} />
+                  {it.label}
+                </button>
+              );
+            })}
+            <button
+              className={`radial-center ${busy.relations ? 'busy' : ''}`}
+              title={t('radial.discover')}
+              aria-label={t('radial.discover')}
+              onMouseEnter={() => setTip(t('radial.discoverTip'))}
+              onMouseLeave={() => setTip(null)}
+              onClick={() => {
+                setBusy('relations', true);
+                openWindow('relations', selection);
+                void suggestRelations(selection, aiOk)
+                  .then((k) => {
+                    if (!k) toast(t('toast.noNewRelations'));
+                  })
+                  .finally(() => setBusy('relations', false));
+              }}
+            >
+              <Icon name="sparkle" size={24} />
+            </button>
+            <div className="radial-tip" style={{ top: R + 44, opacity: tip ? 1 : 0.85 }}>
+              {tip ?? (n > 1 ? t('radial.selected', { n }) : card.title)}
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+}

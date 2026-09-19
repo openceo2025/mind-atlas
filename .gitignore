@@ -1,5 +1,7 @@
 node_modules/
 dist/
+dist-spatial/
+poc/
 artifacts/
 coverage/
 test-results/
