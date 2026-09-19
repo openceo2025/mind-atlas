@@ -1,19 +1,14 @@
 import { useEffect, useState } from 'react';
-import { set, useStore } from '../../store';
+import { set, toastError, useStore } from '../../store';
 import { LOCALES, LOCALE_LABELS, getLocale, setLocale, t, type Locale } from '../../i18n';
-import { fetchChatOptions, type ChatService } from '../../lib/service';
-import { getAiModel, setAiModel } from '../../lib/ai';
+import { fetchChatOptions, type ChatModel, type ChatService } from '../../lib/service';
+import { chooseAiModel, getAiModel } from '../../lib/ai';
 import type { FloatWin } from '../../types';
 
-const MODEL_KEY = 'mindatlas-spatial-model';
-
-export function loadSavedModel() {
-  try {
-    const raw = localStorage.getItem(MODEL_KEY);
-    if (raw) setAiModel(JSON.parse(raw));
-  } catch {
-    // 既定のモデルを使う
-  }
+function modelLabel(m: ChatModel) {
+  const name = m.displayName ?? m.model;
+  if (!m.pricing) return name;
+  return `${name} · $${m.pricing.inputUsdPer1M} / $${m.pricing.outputUsdPer1M}`;
 }
 
 export function SettingsWindow(_: { win: FloatWin }) {
@@ -22,6 +17,7 @@ export function SettingsWindow(_: { win: FloatWin }) {
   const session = useStore((s) => s.session);
   const [services, setServices] = useState<ChatService[] | null>(null);
   const [choice, setChoice] = useState(getAiModel());
+  const signedIn = session.mode === 'hosted' && session.authenticated;
 
   useEffect(() => {
     if (session.mode === 'hosted' && !session.authenticated) return;
@@ -30,15 +26,13 @@ export function SettingsWindow(_: { win: FloatWin }) {
       .catch(() => setServices([]));
   }, [session.mode, session.authenticated]);
 
+  // 別の端末や旧 MindAtlas で選び直したモデルがセッション更新で届いたら表示も合わせる
+  useEffect(() => setChoice(getAiModel()), [session.aiPreference]);
+
   const pick = (provider: string, model?: string) => {
-    const next = { provider, model };
+    const next = { ...getAiModel(), provider, model };
     setChoice(next);
-    setAiModel(next);
-    try {
-      localStorage.setItem(MODEL_KEY, JSON.stringify(next));
-    } catch {
-      // この画面の間だけ有効
-    }
+    void chooseAiModel(next, signedIn).catch(toastError);
   };
 
   const service = services?.find((s) => s.id === choice.provider);
@@ -89,13 +83,14 @@ export function SettingsWindow(_: { win: FloatWin }) {
               <select className="input" value={choice.model ?? service.defaultModel} onChange={(e) => pick(choice.provider, e.target.value)}>
                 {service.models.map((m) => (
                   <option key={m.model} value={m.model}>
-                    {m.displayName ?? m.model}
+                    {modelLabel(m)}
                   </option>
                 ))}
               </select>
             </label>
           )}
           <p className="muted small">{t('settings.aiNote')}</p>
+          {signedIn && <p className="muted small">{t('settings.aiAccount')}</p>}
         </>
       )}
     </div>

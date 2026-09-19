@@ -509,6 +509,7 @@
   "settings.provider": "提供方",
   "settings.model": "模型",
   "settings.aiNote": "用于摘要、比较、展开、提取、关系和聊天。布局使用嵌入，而不是这个模型。",
+  "settings.aiAccount": "你的选择会保存到账户，并在 mind-atlas.org 上同样使用。",
   "help.lead": "MindAtlas 把想法变成卡片，并按语义排列。更换轴，同样的卡片就会伸展成新的形状。",
   "help.step1": "创建卡片：双击空白处、粘贴文字，或放入文件。",
   "help.step2": "卡片按语义放在 X/Y/Z 轴上。把卡片拖到你认为合适的位置，这就成为它在这些轴上的值。",

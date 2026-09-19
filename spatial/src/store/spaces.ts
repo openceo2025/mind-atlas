@@ -18,6 +18,7 @@ import { buildDemoSpace } from '../data/demo';
 import { get, newId, now, set, toast, toastError, useStore } from './core';
 import { relayout } from './layout';
 import { fitView } from './ui';
+import { applyAccountAiModel } from '../lib/ai';
 
 const LAST_KEY = 'lastSpaceId';
 
@@ -365,6 +366,7 @@ export async function openSharedSpace(token: string) {
 export async function refreshSession() {
   try {
     const session = await fetchSession();
+    if (session.authenticated) applyAccountAiModel(session.aiPreference);
     set({ session });
     return session;
   } catch {

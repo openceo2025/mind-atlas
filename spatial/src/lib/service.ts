@@ -113,6 +113,15 @@ export interface HostedSession {
   subscription: { status: string; currentPeriodEnd?: string; cancelAtPeriodEnd: boolean } | null;
   credit: { remainingPercent: number; exhausted: boolean } | null;
   entitlement: { aiEnabled: boolean; reason?: string } | null;
+  aiPreference?: AiPreference | null;
+}
+
+/** アカウントに保存された AI モデル（旧 MindAtlas と共通） */
+export interface AiPreference {
+  provider: string;
+  model: string;
+  reasoningEffort: string;
+  updatedAt?: string;
 }
 
 export interface SessionState {
@@ -126,6 +135,7 @@ export interface SessionState {
   aiEnabled: boolean;
   aiReason?: string;
   bridgeOnline?: boolean;
+  aiPreference?: AiPreference | null;
 }
 
 export async function fetchSession(): Promise<SessionState> {
@@ -150,7 +160,15 @@ export async function fetchSession(): Promise<SessionState> {
     creditPercent: data.credit?.remainingPercent ?? null,
     aiEnabled: Boolean(data.entitlement?.aiEnabled),
     aiReason: data.entitlement?.reason,
+    aiPreference: data.aiPreference ?? null,
   };
+}
+
+export async function saveAiPreference(preference: Pick<AiPreference, 'provider' | 'model' | 'reasoningEffort'>) {
+  const data = await json<{ preference: AiPreference }>(
+    await api('/api/account/ai-preference', { method: 'POST', body: JSON.stringify(preference) }),
+  );
+  return data.preference;
 }
 
 export function startLogin() {
@@ -180,6 +198,7 @@ export async function openBillingPortal() {
 export interface ChatModel {
   model: string;
   displayName?: string;
+  pricing?: { inputUsdPer1M: number; outputUsdPer1M: number };
 }
 export interface ChatService {
   id: string;

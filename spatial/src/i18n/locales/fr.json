@@ -509,6 +509,7 @@
   "settings.provider": "Fournisseur",
   "settings.model": "Modèle",
   "settings.aiNote": "Utilisé pour résumer, comparer, développer, extraire, relier et discuter. La disposition utilise des embeddings, pas ce modèle.",
+  "settings.aiAccount": "Votre choix est enregistré dans votre compte et utilisé aussi sur mind-atlas.org.",
   "help.lead": "MindAtlas transforme les pensées en cartes et les organise selon leur sens. Changez les axes et les mêmes cartes prennent une nouvelle forme.",
   "help.step1": "Créez des cartes : double-cliquez sur un espace vide, collez du texte ou déposez des fichiers.",
   "help.step2": "Les cartes sont placées selon leur sens sur les axes X/Y/Z. Glissez-en une là où elle vous semble aller : cela devient sa valeur sur ces axes.",

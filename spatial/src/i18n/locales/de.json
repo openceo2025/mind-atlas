@@ -509,6 +509,7 @@
   "settings.provider": "Anbieter",
   "settings.model": "Modell",
   "settings.aiNote": "Wird für Zusammenfassen, Vergleichen, Erweitern, Extrahieren, Beziehungen und Chat genutzt. Die Anordnung nutzt Embeddings, nicht dieses Modell.",
+  "settings.aiAccount": "Deine Auswahl wird in deinem Konto gespeichert und auch auf mind-atlas.org verwendet.",
   "help.lead": "MindAtlas macht Gedanken zu Karten und ordnet sie nach Bedeutung. Ändere die Achsen, und dieselben Karten nehmen eine neue Form an.",
   "help.step1": "Karten erstellen: leere Fläche doppelklicken, Text einfügen oder Dateien ablegen.",
   "help.step2": "Karten werden nach Bedeutung auf den X/Y/Z-Achsen platziert. Ziehe eine dorthin, wo sie deiner Meinung nach hingehört — das wird ihr Wert auf diesen Achsen.",

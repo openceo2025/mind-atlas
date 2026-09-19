@@ -509,6 +509,7 @@
   "settings.provider": "Penyedia",
   "settings.model": "Model",
   "settings.aiNote": "Dipakai untuk meringkas, membandingkan, mengembangkan, mengekstrak, relasi, dan obrolan. Tata letak memakai embedding, bukan model ini.",
+  "settings.aiAccount": "Pilihan Anda disimpan ke akun Anda dan juga digunakan di mind-atlas.org.",
   "help.lead": "MindAtlas mengubah pikiran menjadi kartu dan menatanya menurut makna. Ganti sumbunya, dan kartu yang sama membentang menjadi bentuk baru.",
   "help.step1": "Buat kartu: klik dua kali ruang kosong, tempel teks, atau letakkan berkas.",
   "help.step2": "Kartu ditempatkan menurut makna pada sumbu X/Y/Z. Seret kartu ke tempat yang menurut Anda tepat — itu menjadi nilainya pada sumbu tersebut.",

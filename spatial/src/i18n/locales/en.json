@@ -547,6 +547,7 @@
   "settings.provider": "Provider",
   "settings.model": "Model",
   "settings.aiNote": "Used for summary, compare, expand, extract, relations and chat. Layout uses embeddings, not this model.",
+  "settings.aiAccount": "Your choice is saved to your account and also used on mind-atlas.org.",
 
   "help.lead": "MindAtlas turns thoughts into cards and arranges them by meaning. Change the axes and the same cards stretch into a new shape.",
   "help.step1": "Create cards: double-click empty space, paste text, or drop files.",

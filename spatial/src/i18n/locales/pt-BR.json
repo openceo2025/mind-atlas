@@ -509,6 +509,7 @@
   "settings.provider": "Provedor",
   "settings.model": "Modelo",
   "settings.aiNote": "Usado para resumir, comparar, expandir, extrair, relacionar e conversar. O layout usa embeddings, não este modelo.",
+  "settings.aiAccount": "Sua escolha é salva na sua conta e também usada no mind-atlas.org.",
   "help.lead": "O MindAtlas transforma pensamentos em cartões e os organiza por significado. Mude os eixos e os mesmos cartões ganham uma nova forma.",
   "help.step1": "Crie cartões: clique duas vezes em um espaço vazio, cole texto ou solte arquivos.",
   "help.step2": "Os cartões são posicionados por significado nos eixos X/Y/Z. Arraste um para onde você acha que ele pertence — isso vira o valor dele nesses eixos.",

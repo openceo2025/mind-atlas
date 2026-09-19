@@ -547,6 +547,7 @@
   "settings.provider": "プロバイダ",
   "settings.model": "モデル",
   "settings.aiNote": "要約・比較・展開・抽出・関係・チャットに使います。配置にはこのモデルではなく埋め込みを使います。",
+  "settings.aiAccount": "選んだモデルはアカウントに保存され、mind-atlas.org でも使われます。",
 
   "help.lead": "MindAtlas は考えをカードにして、意味で並べます。軸を変えると、同じカードが新しい形に伸び直します。",
   "help.step1": "カードを作る：空白をダブルクリック、文章を貼り付け、ファイルを落とす。",

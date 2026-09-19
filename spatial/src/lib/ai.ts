@@ -2,7 +2,7 @@
 // hosted では既存のクレジット課金を通り、ローカルでは開発ブリッジのキーで動く。
 import { getLocale, t, type Locale } from '../i18n';
 import type { Card, CardKind, RelationType } from '../types';
-import { aiTurn, type AiTurnMessage } from './service';
+import { aiTurn, saveAiPreference, ServiceError, type AiPreference, type AiTurnMessage } from './service';
 
 const LANGUAGE: Record<Locale, string> = {
   en: 'English',
@@ -22,14 +22,65 @@ const LANGUAGE: Record<Locale, string> = {
 export interface AiModelChoice {
   provider: string;
   model?: string;
+  reasoningEffort?: string;
 }
 
+const MODEL_KEY = 'mindatlas-spatial-model';
 let choice: AiModelChoice = { provider: 'openai' };
-export function setAiModel(next: AiModelChoice) {
-  choice = next;
-}
+let appliedAccountKey = '';
+
 export function getAiModel() {
   return choice;
+}
+
+function rememberModel(next: AiModelChoice) {
+  choice = next;
+  try {
+    localStorage.setItem(MODEL_KEY, JSON.stringify(next));
+  } catch {
+    // この画面の間だけ有効
+  }
+}
+
+export function loadSavedModel() {
+  try {
+    const raw = localStorage.getItem(MODEL_KEY);
+    if (raw) choice = JSON.parse(raw) as AiModelChoice;
+  } catch {
+    // 既定のモデルを使う
+  }
+}
+
+/** 設定で選んだモデル。ブラウザに覚え、ログイン中はアカウントにも保存する（旧 MindAtlas と共通） */
+export async function chooseAiModel(next: AiModelChoice, saveToAccount: boolean) {
+  rememberModel(next);
+  if (!saveToAccount) return;
+  const saved = await saveAiPreference({ provider: next.provider, model: next.model ?? '', reasoningEffort: next.reasoningEffort ?? '' });
+  appliedAccountKey = accountKey(saved);
+}
+
+/** アカウントに保存されたモデルを使う。別の端末や旧 MindAtlas で選び直したときも追従する */
+export function applyAccountAiModel(preference: AiPreference | null | undefined) {
+  if (!preference?.provider) return;
+  const key = accountKey(preference);
+  if (key === appliedAccountKey) return;
+  appliedAccountKey = key;
+  rememberModel({ provider: preference.provider, model: preference.model || undefined, reasoningEffort: preference.reasoningEffort || undefined });
+}
+
+function accountKey(preference: AiPreference) {
+  return `${preference.provider}|${preference.model}|${preference.reasoningEffort}|${preference.updatedAt ?? ''}`;
+}
+
+/** 選んだモデルが提供されなくなっていたら、その会社の既定モデルで一度だけやり直す */
+async function turn(payload: { messages: AiTurnMessage[]; contextText?: string }) {
+  try {
+    return await aiTurn({ ...choice, ...payload });
+  } catch (error) {
+    if (!(error instanceof ServiceError) || error.code !== 'model_not_enabled' || !choice.model) throw error;
+    rememberModel({ provider: choice.provider });
+    return await aiTurn({ ...choice, ...payload });
+  }
 }
 
 const SYSTEM = [
@@ -87,7 +138,7 @@ async function runJson<T>(task: string, context: string): Promise<T> {
     `Write every human-readable string in ${language()}.`,
     'Reply with a single JSON object only, no prose, no code fences.',
   ].join('\n\n');
-  const result = await aiTurn({ ...choice, messages: [{ role: 'user', content: prompt }], contextText: context });
+  const result = await turn({ messages: [{ role: 'user', content: prompt }], contextText: context });
   return extractJson<T>(result.text);
 }
 
@@ -246,6 +297,6 @@ export async function chat(history: AiTurnMessage[], cards: Card[], spaceTitle: 
     `Answer in ${language()} unless the user writes in another language. Use Markdown lists when helpful.`,
   ].join('\n');
   const messages: AiTurnMessage[] = history.map((m, i) => (i === 0 && m.role === 'user' ? { role: 'user', content: `${intro}\n\n${m.content}` } : m));
-  const result = await aiTurn({ ...choice, messages, contextText: cardsContext(cards, 30000) });
+  const result = await turn({ messages, contextText: cardsContext(cards, 30000) });
   return result.text;
 }
