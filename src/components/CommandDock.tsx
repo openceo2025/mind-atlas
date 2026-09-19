@@ -587,9 +587,9 @@ export function CommandDock() {
     if (!shouldApply()) return;
     setChatOptions(options);
     const current = useAtlasStore.getState();
-    if (findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId)?.chatSettings) return;
     const accountPreference = getAccountAiPreference();
     const useAccountPreference = Boolean(accountPreference && appliedAccountPreferenceRef.current !== accountPreferenceKey(accountPreference));
+    if (!useAccountPreference && findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId)?.chatSettings) return;
     const desired = useAccountPreference && accountPreference
       ? { service: accountPreference.provider, model: accountPreference.model, reasoningEffort: accountPreference.reasoningEffort }
       : current.chatSettings;
@@ -602,8 +602,6 @@ export function CommandDock() {
   // The model saved on the account is the starting point on every device; applied once per change.
   useEffect(() => subscribeAccountAiPreference((preference) => {
     if (!preference || appliedAccountPreferenceRef.current === accountPreferenceKey(preference)) return;
-    const current = useAtlasStore.getState();
-    if (findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId)?.chatSettings) return;
     const desired = { service: preference.provider, model: preference.model, reasoningEffort: preference.reasoningEffort };
     const next = latestChatOptionsRef.current ? resolveChatSettingsFromOptions(latestChatOptionsRef.current, desired) : null;
     if (!next) return;
