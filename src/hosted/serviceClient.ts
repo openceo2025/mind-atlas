@@ -5,6 +5,7 @@ import type {
   CloudNotebookLoadResult,
   CloudNotebookSaveResult,
   CloudNotebookShareResult,
+  HostedAiPreference,
   HostedServiceSession,
   NativeBoardRecordPayload,
   ShogiAnalysisResult,
@@ -58,6 +59,15 @@ export async function openHostedBillingPortal() {
   const response = await hostedFetch("/api/billing/portal", { method: "POST" });
   const data = await readHostedJson<{ url: string }>(response);
   if (data.url && typeof window !== "undefined") window.location.assign(data.url);
+}
+
+export async function saveHostedAiPreference(preference: Pick<HostedAiPreference, "provider" | "model" | "reasoningEffort">): Promise<HostedAiPreference> {
+  const response = await hostedFetch("/api/account/ai-preference", {
+    method: "POST",
+    body: JSON.stringify(preference),
+  });
+  const data = await readHostedJson<{ preference: HostedAiPreference }>(response);
+  return data.preference;
 }
 
 export async function logoutHostedService() {

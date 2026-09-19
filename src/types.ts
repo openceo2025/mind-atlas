@@ -289,6 +289,15 @@ export interface HostedServiceSession {
   credit: HostedServiceCredit | null;
   entitlement: HostedServiceEntitlement;
   chatOptions: ChatOptionsResult;
+  aiPreference?: HostedAiPreference | null;
+}
+
+/** The AI model a signed-in user last chose, stored on their account. */
+export interface HostedAiPreference {
+  provider: string;
+  model: string;
+  reasoningEffort: string;
+  updatedAt?: string;
 }
 
 export interface CodexModelOption {

@@ -12,6 +12,7 @@ import type { AgentCapabilitiesResult } from "../agentRuntime/types";
 import { CONTEXT_BUDGET_PRESETS, buildContextPlan } from "../context/contextEngine";
 import { REALTIME_VOICE_RESTART_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT } from "../events";
 import { isHostedServiceMode } from "../hosted/serviceClient";
+import { getAccountAiPreference, rememberAccountAiPreference, subscribeAccountAiPreference } from "../hosted/aiPreference";
 import {
   buildAiNodeContextWithAttachments,
   findInheritedCommandMode,
@@ -28,6 +29,7 @@ import type {
   AiExecutionMode,
   ChatOptionsResult,
   ChatReasoningEffort,
+  ChatSettings,
   ChatServiceId,
   ClaudePermissionMode,
   ClaudeReasoningEffort,
@@ -134,6 +136,9 @@ export function CommandDock() {
   const [codexOptions, setCodexOptions] = useState<CodexOptionsResult | null>(null);
   const [codeModelRequestError, setCodeModelRequestError] = useState<{ backend: CodeBackendSelection; message: string } | null>(null);
   const [chatOptions, setChatOptions] = useState<ChatOptionsResult | null>(null);
+  const latestChatOptionsRef = useRef<ChatOptionsResult | null>(null);
+  latestChatOptionsRef.current = chatOptions;
+  const appliedAccountPreferenceRef = useRef("");
   const [openClawOptions, setOpenClawOptions] = useState<OpenClawOptionsResult | null>(null);
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
   const [agentWorkspaceInfo, setAgentWorkspaceInfo] = useState<AgentWorkspaceInfo | null>(null);
@@ -583,18 +588,28 @@ export function CommandDock() {
     setChatOptions(options);
     const current = useAtlasStore.getState();
     if (findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId)?.chatSettings) return;
-    const services = visibleChatServices(options.services);
-    const service = services.find((item) => item.id === current.chatSettings.service) ?? services.find((item) => item.id === options.defaultService) ?? services[0];
-    if (!service) return;
-    const currentModelStillAvailable = service.models.some((item) => item.model === current.chatSettings.model);
-    const model = currentModelStillAvailable ? current.chatSettings.model : service.defaultModel || service.models[0]?.model || "";
-    const effort = service.models.find((item) => item.model === model)?.defaultReasoningEffort ?? service.defaultReasoningEffort;
-    setChatSettings({
-      service: service.id,
-      model,
-      reasoningEffort: effort,
-    });
+    const accountPreference = getAccountAiPreference();
+    const useAccountPreference = Boolean(accountPreference && appliedAccountPreferenceRef.current !== accountPreferenceKey(accountPreference));
+    const desired = useAccountPreference && accountPreference
+      ? { service: accountPreference.provider, model: accountPreference.model, reasoningEffort: accountPreference.reasoningEffort }
+      : current.chatSettings;
+    const next = resolveChatSettingsFromOptions(options, desired);
+    if (!next) return;
+    if (useAccountPreference && accountPreference) appliedAccountPreferenceRef.current = accountPreferenceKey(accountPreference);
+    setChatSettings(next);
   }, [setChatSettings]);
+
+  // The model saved on the account is the starting point on every device; applied once per change.
+  useEffect(() => subscribeAccountAiPreference((preference) => {
+    if (!preference || appliedAccountPreferenceRef.current === accountPreferenceKey(preference)) return;
+    const current = useAtlasStore.getState();
+    if (findInheritedAiDialogSettings(current.atlasRoot, current.selectedNodeId)?.chatSettings) return;
+    const desired = { service: preference.provider, model: preference.model, reasoningEffort: preference.reasoningEffort };
+    const next = latestChatOptionsRef.current ? resolveChatSettingsFromOptions(latestChatOptionsRef.current, desired) : null;
+    if (!next) return;
+    appliedAccountPreferenceRef.current = accountPreferenceKey(preference);
+    setChatSettings(next);
+  }), [setChatSettings]);
 
   useEffect(() => {
     if (aboutDemoChatOptions) {
@@ -1340,6 +1355,7 @@ export function CommandDock() {
                 const model = service.defaultModel || service.models[0]?.model || "";
                 const effort = service.models.find((item) => item.model === model)?.defaultReasoningEffort ?? service.defaultReasoningEffort;
                 setChatSettings({ service: service.id, model, reasoningEffort: effort });
+                rememberAccountAiPreference(useAtlasStore.getState().chatSettings);
               }}
             >
               {chatServiceOptions.map((service) => (
@@ -1363,6 +1379,7 @@ export function CommandDock() {
                     ? chatSettings.reasoningEffort
                     : option?.defaultReasoningEffort ?? selectedChatService.defaultReasoningEffort,
                 });
+                rememberAccountAiPreference(useAtlasStore.getState().chatSettings);
               }}
             >
               {chatModelOptions.map((option) => (
@@ -1379,7 +1396,10 @@ export function CommandDock() {
                 value={chatEfforts.includes(chatSettings.reasoningEffort) ? chatSettings.reasoningEffort : selectedChatModel?.defaultReasoningEffort ?? "default"}
                 onFocus={() => setCommandInputEditing(true)}
                 onBlur={() => setCommandInputEditing(false)}
-                onChange={(event) => setChatSettings({ reasoningEffort: event.target.value as ChatReasoningEffort })}
+                onChange={(event) => {
+                  setChatSettings({ reasoningEffort: event.target.value as ChatReasoningEffort });
+                  rememberAccountAiPreference(useAtlasStore.getState().chatSettings);
+                }}
               >
                 {chatEfforts.map((effort) => (
                   <option key={effort} value={effort}>
@@ -2083,6 +2103,28 @@ function fallbackChatServices(): ChatOptionsResult["services"] {
       models: [{ model: "", displayName: "Loaded local model", defaultReasoningEffort: "default", supportedReasoningEfforts: ["default"] }],
     },
   ];
+}
+
+function accountPreferenceKey(preference: { provider: string; model: string; reasoningEffort: string; updatedAt?: string }) {
+  return `${preference.provider}|${preference.model}|${preference.reasoningEffort}|${preference.updatedAt ?? ""}`;
+}
+
+/** Keeps the desired service/model/effort when the service still offers it, else falls back to its defaults. */
+function resolveChatSettingsFromOptions(
+  options: ChatOptionsResult,
+  desired: { service: string; model: string; reasoningEffort: string },
+): ChatSettings | null {
+  const services = visibleChatServices(options.services);
+  const service = services.find((item) => item.id === desired.service) ?? services.find((item) => item.id === options.defaultService) ?? services[0];
+  if (!service) return null;
+  const keepModel = service.id === desired.service && service.models.some((item) => item.model === desired.model);
+  const model = keepModel ? desired.model : service.defaultModel || service.models[0]?.model || "";
+  const option = service.models.find((item) => item.model === model);
+  const efforts = option?.supportedReasoningEfforts ?? service.supportedReasoningEfforts;
+  const reasoningEffort = keepModel && efforts.includes(desired.reasoningEffort as ChatReasoningEffort)
+    ? desired.reasoningEffort as ChatReasoningEffort
+    : option?.defaultReasoningEffort ?? service.defaultReasoningEffort;
+  return { service: service.id, model, reasoningEffort };
 }
 
 function visibleChatServices(services: ChatOptionsResult["services"]) {
