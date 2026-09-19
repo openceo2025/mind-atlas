@@ -1,4 +1,4 @@
-import type { Camera, FloatWin, WindowType } from '../types';
+import type { Camera, Card, FloatWin, WindowType } from '../types';
 import { cardSize, depthScale } from '../lib/semantic';
 import { engine } from '../lib/physics';
 import { canvasCards, get, lookup, newId, screenToWorld, set, worldToScreen } from './core';
@@ -215,10 +215,30 @@ export function fitView(ids?: string[], animate = true) {
   const minY = Math.min(...ys) - 60;
   const maxY = Math.max(...ys) + 60;
   const bottom = w < 700 ? 70 : 90;
-  const zoom = Math.max(0.25, Math.min(1.3, Math.min(w / (maxX - minX), (h - bottom) / (maxY - minY))));
-  const cam = { zoom, x: w / 2 - ((minX + maxX) / 2) * zoom, y: (h - bottom) / 2 + 10 - ((minY + maxY) / 2) * zoom };
+  const fitZoom = Math.max(0.25, Math.min(1.3, Math.min(w / (maxX - minX), (h - bottom) / (maxY - minY))));
+  const place = (zoom: number, shift: number) => ({
+    zoom,
+    x: w / 2 - shift - ((minX + maxX) / 2) * zoom,
+    y: (h - bottom) / 2 + 10 - ((minY + maxY) / 2) * zoom,
+  });
+  // 右下のミニマップの下にカード（Z 軸のドックなど）が隠れないよう、少しずつ縮めて左へ寄せる
+  let cam = place(fitZoom, 0);
+  for (let i = 1; i <= 6 && hiddenByMinimap(cards, cam, w, h); i++) cam = place(fitZoom * (1 - i * 0.05), i * 18);
   if (animate) animateCamera(cam);
   else setCamera(cam);
+}
+
+// ミニマップ（components.css .minimap、900px 未満では非表示）が占める右下の領域
+const MINIMAP_BOX = { w: 226 + 24, h: 196 + 24 };
+
+function hiddenByMinimap(cards: Card[], cam: Camera, w: number, h: number) {
+  if (w <= 900) return false;
+  const left = w - MINIMAP_BOX.w;
+  const top = h - MINIMAP_BOX.h;
+  return cards.some((c) => {
+    const size = cardSize(c);
+    return (c.x + size.w / 2) * cam.zoom + cam.x > left && (c.y + size.h / 2) * cam.zoom + cam.y > top;
+  });
 }
 
 export function focusCard(id: string) {
