@@ -72,6 +72,68 @@ export function hasModelPrice(modelPrices, providerId, model) {
   return Boolean(resolveExactModelPrice(modelPrices, providerId, model));
 }
 
+// Model ids follow a size ladder; a new model usually joins one of these rungs.
+const MODEL_TIERS = [
+  { id: "nano", test: (model) => /(^|[-_.])nano([-_.]|$)|luna/.test(model) },
+  { id: "mini", test: (model) => /(^|[-_.])(mini|flash|haiku|small|lite|air)([-_.]|$)|terra/.test(model) },
+  { id: "large", test: (model) => /(^|[-_.])(pro|max|ultra|opus|fable|mythos)([-_.]|$)/.test(model) },
+];
+
+/** Rough release generation, used for ordering and for estimating a new model's price. */
+export function modelGeneration(providerId, model) {
+  const value = String(model ?? "").toLowerCase();
+  if (providerId === "openai") {
+    const reasoning = value.match(/^o(\d)/);
+    if (reasoning) return 4.5 + Number(reasoning[1]) / 10;
+    if (value.startsWith("gpt-4o") || value.startsWith("chatgpt-4o")) return 4.05;
+    if (value.startsWith("gpt-4-turbo")) return 4.02;
+    const gpt = value.match(/^(?:gpt|chatgpt)-(\d+(?:\.\d+)?)/);
+    return gpt ? Number(gpt[1]) : 0;
+  }
+  if (providerId === "anthropic") {
+    const claude = value.match(/^claude-[a-z]+-(\d+)(?:-(\d{1,2}))?(?:-|$)/);
+    return claude ? Number(claude[1]) + Number(claude[2] ?? 0) / 10 : 0;
+  }
+  const version = value.match(/v(\d+(?:\.\d+)?)/);
+  return version ? Number(version[1]) : 0;
+}
+
+export function modelTier(model) {
+  const value = String(model ?? "").toLowerCase();
+  return MODEL_TIERS.find((tier) => tier.test(value))?.id ?? "standard";
+}
+
+/**
+ * A price for a model nobody has published rates for yet, so it can be offered the day
+ * it ships. Takes the dearest known rate on the same rung of the same provider (the whole
+ * provider when that rung is empty), which bills at or above the real cost in practice.
+ * Returns null when the provider has no known price at all.
+ */
+export function estimateModelPrice(modelPrices, providerId, model) {
+  const tier = modelTier(model);
+  const prefix = `${providerId}:`;
+  const known = Object.entries(modelPrices)
+    .filter(([key, value]) => key.startsWith(prefix) && !key.endsWith(":*") && value && Number.isFinite(Number(value.inputUsdPer1M)))
+    .map(([key, value]) => {
+      const id = key.slice(prefix.length);
+      return { tier: modelTier(id), generation: modelGeneration(providerId, id), value };
+    });
+  if (!known.length) return null;
+  // Older generations (GPT-4 at $30/$60) would wildly overprice a new model, so only the
+  // current and previous generation count.
+  const newest = Math.max(...known.map((entry) => entry.generation));
+  const recent = known.filter((entry) => entry.generation >= newest - 1);
+  const sameProvider = recent.length ? recent : known;
+  const sameTier = sameProvider.filter((entry) => entry.tier === tier);
+  const pool = sameTier.length ? sameTier : sameProvider;
+  return {
+    inputUsdPer1M: Math.max(...pool.map((entry) => Number(entry.value.inputUsdPer1M))),
+    outputUsdPer1M: Math.max(...pool.map((entry) => Number(entry.value.outputUsdPer1M))),
+    estimated: true,
+    tier,
+  };
+}
+
 export function resolveExactModelPrice(modelPrices, providerId, model) {
   for (const key of modelPriceKeys(providerId, model)) {
     const modelPrice = modelPrices[key];

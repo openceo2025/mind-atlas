@@ -1382,7 +1382,7 @@ export function CommandDock() {
             >
               {chatModelOptions.map((option) => (
                 <option key={`${selectedChatService.id}-${option.model || "default"}`} value={option.model}>
-                  {option.displayName}
+                  {option.pricing?.estimated ? `≈ ${option.displayName}` : option.displayName}
                 </option>
               ))}
             </select>

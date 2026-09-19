@@ -228,6 +228,8 @@ export interface ChatModelOption {
   pricing?: {
     inputUsdPer1M: number;
     outputUsdPer1M: number;
+    /** True when the rate is estimated because the model has no published price yet. */
+    estimated?: boolean;
   };
   defaultReasoningEffort: ChatReasoningEffort;
   supportedReasoningEfforts: ChatReasoningEffort[];
