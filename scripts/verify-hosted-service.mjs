@@ -214,7 +214,11 @@ assert.ok(server.includes("deleteExpiredSessions"), "hosted service should clean
 assert.ok(server.includes("markStripeEventProcessing"), "Stripe webhooks should be idempotent by event id");
 assert.ok(server.includes("assertSafeProductionConfig"), "hosted service should refuse unsafe production config");
 assert.ok(server.includes("max_output_tokens: realtimeMaxOutputTokens"), "Realtime sessions should cap response output tokens");
-assert.ok(server.includes("expires_at: expiresAt"), "Realtime sessions should expire server-side");
+// The Realtime API rejects session.expires_at, so the limit lives on our side: a slot that
+// expires and a settlement scheduled from realtimeMaxSessionSeconds.
+assert.ok(!server.includes("expires_at:"), "Realtime session config must not send expires_at");
+assert.ok(server.includes("scheduleRealtimeSettlement"), "Realtime sessions should be settled on a timer");
+assert.ok(server.includes("expiresAt: now + realtimeMaxSessionSeconds * 1000"), "Realtime slots should expire server-side");
 assert.ok(server.includes("enterRealtimeSession"), "Realtime sessions should have a user concurrency cap");
 assert.ok(server.includes("isAllowedAudioMimeType"), "hosted dictation should validate audio MIME types");
 assert.ok(server.includes("createPrivateQueryMetadata"), "web search ledger metadata should avoid storing raw queries");
