@@ -1549,12 +1549,12 @@ function buildPartnerSystemPrompt(payload) {
 }
 
 function buildRealtimeSessionConfig(payload) {
-  const expiresAt = Math.floor(Date.now() / 1000) + realtimeMaxSessionSeconds;
   return {
     type: "realtime",
     model: stringValue(payload.model) || realtimeModel,
     instructions: buildPartnerSystemPrompt(payload),
-    expires_at: expiresAt,
+    // No expires_at: the Realtime API rejects it. The session is bounded by
+    // realtimeMaxSessionSeconds through the slot timer and the client's own timer.
     max_output_tokens: realtimeMaxOutputTokens,
     audio: {
       input: {
@@ -1598,6 +1598,7 @@ async function createSessionResponse(user) {
           periodKey: credit.period_key,
           remainingPercent: creditPercent(credit),
           limitPercent: 100,
+          limitMicroUsd: Number(credit.credit_limit_micro_usd ?? MONTHLY_CREDIT_MICRO_USD),
           exhausted: Number(credit.credit_remaining_micro_usd) <= 0,
           updatedAt: credit.updated_at?.toISOString?.() ?? credit.updated_at ?? undefined,
         }
