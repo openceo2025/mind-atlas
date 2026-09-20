@@ -111,7 +111,8 @@ export interface HostedSession {
   authenticated: boolean;
   user: { id: string; email: string; name: string; pictureUrl: string; role: string } | null;
   subscription: { status: string; currentPeriodEnd?: string; cancelAtPeriodEnd: boolean } | null;
-  credit: { remainingPercent: number; exhausted: boolean } | null;
+  credit: { remainingPercent: number; exhausted: boolean; limitMicroUsd?: number } | null;
+  chatOptions?: { defaultService?: string; services?: ChatService[] };
   entitlement: { aiEnabled: boolean; reason?: string } | null;
   aiPreference?: AiPreference | null;
 }
@@ -132,6 +133,8 @@ export interface SessionState {
   subscriptionActive: boolean;
   subscription: HostedSession['subscription'];
   creditPercent: number | null;
+  creditLimitMicroUsd: number | null;
+  chatServices: ChatService[];
   aiEnabled: boolean;
   aiReason?: string;
   bridgeOnline?: boolean;
@@ -143,9 +146,9 @@ export async function fetchSession(): Promise<SessionState> {
     try {
       const response = await api('/health');
       const ok = response.ok;
-      return { mode: 'local', loaded: true, authenticated: false, user: null, subscriptionActive: false, subscription: null, creditPercent: null, aiEnabled: ok, bridgeOnline: ok };
+      return { mode: 'local', loaded: true, authenticated: false, user: null, subscriptionActive: false, subscription: null, creditPercent: null, creditLimitMicroUsd: null, chatServices: [], aiEnabled: ok, bridgeOnline: ok };
     } catch {
-      return { mode: 'local', loaded: true, authenticated: false, user: null, subscriptionActive: false, subscription: null, creditPercent: null, aiEnabled: false, bridgeOnline: false };
+      return { mode: 'local', loaded: true, authenticated: false, user: null, subscriptionActive: false, subscription: null, creditPercent: null, creditLimitMicroUsd: null, chatServices: [], aiEnabled: false, bridgeOnline: false };
     }
   }
   const data = await json<HostedSession>(await api('/api/service/session'));
@@ -158,6 +161,8 @@ export async function fetchSession(): Promise<SessionState> {
     subscriptionActive: active,
     subscription: data.subscription,
     creditPercent: data.credit?.remainingPercent ?? null,
+    creditLimitMicroUsd: data.credit?.limitMicroUsd ?? null,
+    chatServices: (data.chatOptions?.services ?? []).filter((service) => service.configured),
     aiEnabled: Boolean(data.entitlement?.aiEnabled),
     aiReason: data.entitlement?.reason,
     aiPreference: data.aiPreference ?? null,
@@ -199,6 +204,8 @@ export interface ChatModel {
   model: string;
   displayName?: string;
   pricing?: { inputUsdPer1M: number; outputUsdPer1M: number; estimated?: boolean };
+  defaultReasoningEffort?: string;
+  supportedReasoningEfforts?: string[];
 }
 export interface ChatService {
   id: string;
@@ -206,6 +213,8 @@ export interface ChatService {
   configured: boolean;
   defaultModel: string;
   models: ChatModel[];
+  defaultReasoningEffort?: string;
+  supportedReasoningEfforts?: string[];
 }
 
 export async function fetchChatOptions(): Promise<ChatService[]> {

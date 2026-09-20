@@ -29,7 +29,7 @@ import { SESSION_CHANGED_EVENT } from './lib/service';
 import { idbGet, idbSet } from './lib/idb';
 import { t, useI18n } from './i18n';
 import { Canvas } from './components/Canvas';
-import { DragGhost, ReadOnlyBanner, Sidebar, Toasts, TopBar } from './components/Chrome';
+import { DragGhost, ReadOnlyBanner, ShareUnavailable, Sidebar, Toasts, TopBar } from './components/Chrome';
 import { CommandPalette } from './components/CommandPalette';
 import { panState } from './components/panState';
 
@@ -58,8 +58,11 @@ function useBoot() {
           await openSharedSpace(token);
           return;
         } catch (e) {
+          // 共有が止められたリンクで、この端末に残っている別のスペースを見せない
           toastError(e);
           window.history.replaceState(null, '', '/');
+          set({ shareUnavailable: true, ready: true });
+          return;
         }
       }
       await bootSpaces();
@@ -194,6 +197,8 @@ function Shell() {
       {sidebarOpen && <div className="sidebar-scrim" onClick={() => set({ sidebarOpen: false })} />}
       <main className="main">
         <TopBar />
+        <ShareUnavailable />
+
         <ReadOnlyBanner />
         <div className="stage">
           <Canvas />

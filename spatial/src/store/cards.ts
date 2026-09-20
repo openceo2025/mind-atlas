@@ -1,4 +1,4 @@
-import type { Card, CardKind, RelationType } from '../types';
+import type { AxisKey, Card, CardKind, RelationType } from '../types';
 import { cardSize, clusterCards, depthScale, fallbackClusterLabel, relax, similarityMatrix } from '../lib/semantic';
 import { engine } from '../lib/physics';
 import { t } from '../i18n';
@@ -20,7 +20,7 @@ import {
   undo,
 } from './core';
 import { AXIS_KEYS } from './core';
-import { DOCK, overrideFromPosition, relayout } from './layout';
+import { AXIS_NAME, DOCK, applyAxes, overrideFromPosition, relayout } from './layout';
 import { focusCard, select } from './ui';
 
 export function makeCard(partial: Partial<Card> & { title: string }): Card {
@@ -57,8 +57,8 @@ export function createCard(partial: Partial<Card> & { title: string }, at?: { x:
   set((s) => ({ cards: { ...s.cards, [card.id]: card } }));
   markDirty();
   engine.place(card.id, at?.x ?? 0, at?.y ?? 0, 0.3);
-  if (at && card.place === 'canvas') overrideFromPosition([card.id]);
-  else relayout({ stagger: false, mode: 'soft' });
+  // 置いた場所は仮の場所。手で置いた印は付けず、編集が終わったら意味の位置へ動かす
+  if (!get().editingCardId) relayout({ stagger: false, mode: 'soft' });
   if (opts.select !== false && card.place === 'canvas') select([card.id]);
   return card.id;
 }
@@ -75,7 +75,22 @@ export function updateCard(id: string, patch: Partial<Card>, opts: { relayout?: 
 let relayoutTimer = 0;
 function scheduleRelayout() {
   window.clearTimeout(relayoutTimer);
+  // 編集中は動かさない。beginCardEdit / endCardEdit が終わりを教えてくれる
+  if (get().editingCardId) return;
   relayoutTimer = window.setTimeout(() => relayout({ stagger: false, mode: 'soft' }), 900);
+}
+
+/** カードを編集し始めた：終わるまで意味配置を止め、そのカードはその場に留める */
+export function beginCardEdit(id: string) {
+  if (get().editingCardId === id) return;
+  set({ editingCardId: id });
+}
+
+/** 編集が終わった：意味の位置へ動かす（手で置いたカードはその場所のまま） */
+export function endCardEdit(id: string) {
+  if (get().editingCardId !== id) return;
+  set({ editingCardId: null });
+  relayout({ stagger: false, mode: 'soft' });
 }
 
 // ── 移動・複製・削除 ───────────────────────────────────────
@@ -97,6 +112,25 @@ export function settleAxisCard(id: string) {
   if (!k) return;
   set((s) => ({ cards: { ...s.cards, [id]: { ...s.cards[id], x: DOCK[k].x, y: DOCK[k].y } } }));
   engine.setTarget(id, DOCK[k].x, DOCK[k].y, depthScale(0.62), 'soft');
+}
+
+/** 軸の先端から遠くへ運んだら、その軸から外す（その軸には意味を持たせない） */
+const AXIS_DETACH_DISTANCE = 220;
+
+export function axisToDetach(id: string) {
+  const s = get();
+  const k = AXIS_KEYS.find((key) => s.axes[key] === id);
+  if (!k) return null;
+  const c = s.cards[id];
+  if (!c) return null;
+  return Math.hypot(c.x - DOCK[k].x, c.y - DOCK[k].y) > AXIS_DETACH_DISTANCE ? k : null;
+}
+
+export function detachAxis(key: AxisKey) {
+  const s = get();
+  const id = s.axes[key];
+  if (!id) return;
+  applyAxes({ ...s.axes, [key]: '' }, t('axis.detached', { axis: AXIS_NAME(key) }));
 }
 
 export function duplicate(ids: string[]): string[] {

@@ -1,9 +1,12 @@
 import { memo, useEffect, useRef } from 'react';
 import {
+  AXIS_KEYS,
   axisKeyOf,
   collapseGroup,
   duplicate,
   expandGroup,
+  axisToDetach,
+  detachAxis,
   moveCards,
   openWindow,
   overrideFromPosition,
@@ -14,7 +17,7 @@ import {
   AXIS_NAME,
 } from '../store';
 import { engine } from '../lib/physics';
-import { axisEnds, cardSize } from '../lib/semantic';
+import { axisEnds, axisSlotKey, cardSize } from '../lib/semantic';
 import { dropCards, findDropTarget } from '../lib/drag';
 import { t } from '../i18n';
 import { Icon, KindIcon, Visual } from './Icons';
@@ -41,7 +44,7 @@ function CardViewImpl({ id }: { id: string }) {
   const readOnly = useStore((s) => s.readOnly);
   const humanPlaced = useStore((s) => {
     const o = s.cards[id]?.overrides;
-    return Boolean(o && (o[s.axes.x] !== undefined || o[s.axes.y] !== undefined || o[s.axes.z] !== undefined));
+    return Boolean(o && AXIS_KEYS.some((k) => o[axisSlotKey(s.axes, k)] !== undefined));
   });
   const ref = useRef<HTMLDivElement>(null);
   const { w, h } = card ? cardSize(card) : { w: 0, h: 0 };
@@ -109,9 +112,13 @@ function CardViewImpl({ id }: { id: string }) {
       const target = findDropTarget(ev.clientX, ev.clientY, ids);
       set({ draggingIds: [], dropTarget: null });
       const handled = target && target !== 'canvas' ? dropCards(target, ids, ev.clientX, ev.clientY) : false;
-      // 軸カードは軸の先端へ戻り、それ以外は「置いた場所＝いまの軸での意味」として記録する
+      // 軸の先端から遠くへ運んだ軸カードは、その軸から外す（軸は「意味なし」になる）
+      const detached = handled ? [] : ids.map((x) => ({ id: x, key: axisToDetach(x) })).filter((entry) => entry.key);
+      for (const entry of detached) detachAxis(entry.key!);
+      // 残りの軸カードは軸の先端へ戻り、それ以外は「置いた場所＝いまの軸での意味」として記録する
       ids.forEach((x) => settleAxisCard(x));
-      if (!handled) overrideFromPosition(ids);
+      if (!handled) overrideFromPosition(ids.filter((x) => !detached.some((entry) => entry.id === x)));
+      if (detached.length) overrideFromPosition(detached.map((entry) => entry.id));
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);

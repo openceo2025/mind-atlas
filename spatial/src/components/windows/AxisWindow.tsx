@@ -20,7 +20,7 @@ import {
   useStore,
 } from '../../store';
 import { AXIS_PRESETS } from '../../data/concepts';
-import { axisEnds } from '../../lib/semantic';
+import { axisEnds, axisSlotKey } from '../../lib/semantic';
 import { startGhostDrag } from '../../lib/drag';
 import { suggestAxisEnds } from '../../lib/ai';
 import { t } from '../../i18n';
@@ -48,7 +48,7 @@ export function AxisWindow({ win }: { win: FloatWin }) {
   const focus: Card | undefined = primary ? cards[primary] : cards[win.cardIds[0]];
   const focusable = focus && focus.place === 'canvas' && !['concept', 'group'].includes(focus.kind) && !isAxisCard(focus.id);
   const used = new Set(Object.values(view));
-  const overrideCount = Object.values(cards).filter((c) => AXIS_KEYS.some((k) => c.overrides?.[axes[k]] !== undefined)).length;
+  const overrideCount = Object.values(cards).filter((c) => AXIS_KEYS.some((k) => c.overrides?.[axisSlotKey(axes, k)] !== undefined)).length;
 
   if (readOnly) {
     return (
@@ -91,7 +91,7 @@ export function AxisWindow({ win }: { win: FloatWin }) {
     for (const c of Object.values(next)) {
       if (!c.overrides) continue;
       const o = { ...c.overrides };
-      for (const k of AXIS_KEYS) delete o[axes[k]];
+      for (const k of AXIS_KEYS) delete o[axisSlotKey(axes, k)];
       next[c.id] = { ...c, overrides: Object.keys(o).length ? o : undefined };
     }
     set({ cards: next });
@@ -132,6 +132,7 @@ export function AxisWindow({ win }: { win: FloatWin }) {
               <div className={`slot-box ${dropTarget === `slot:${k}` ? 'over' : ''} ${draft && draft[k] !== axes[k] ? 'changed' : ''}`} data-drop={`slot:${k}`} title={lo || hi ? `${lo} ⟷ ${hi}` : t('axis.cardAxisTip')}>
                 <Icon name={cur?.kind === 'concept' ? 'axis' : 'layers'} size={14} />
                 <select value={view[k]} onChange={(e) => setAxis(k, e.target.value, false)} aria-label={AXIS_NAME(k)}>
+                  <option value="">{t('axis.none')}</option>
                   <optgroup label={t('axis.concepts')}>
                     {concepts.map((c) => (
                       <option key={c.id} value={c.id}>

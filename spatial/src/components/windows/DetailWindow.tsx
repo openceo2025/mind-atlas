@@ -1,9 +1,11 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   AXIS_KEYS,
   AXIS_NAME,
   axisKeyOf,
+  beginCardEdit,
   clearOverrides,
+  endCardEdit,
   deleteCards,
   duplicate,
   get,
@@ -21,7 +23,7 @@ import {
   updateCard,
   useStore,
 } from '../../store';
-import { computeScores } from '../../lib/semantic';
+import { axisSlotKey, computeScores } from '../../lib/semantic';
 import { REL_STYLE, relLabel } from '../../lib/relStyle';
 import { shrinkImage, useDictation } from '../../lib/dictation';
 import { formatTime, t, type MessageKey } from '../../i18n';
@@ -41,6 +43,12 @@ export function DetailWindow({ win }: { win: FloatWin }) {
   const allRelations = useStore((s) => s.relations);
   const relations = allRelations.filter((r) => !r.suggested && (r.from === id || r.to === id));
   const editing = useRef(false);
+  // 開いている間はこのカードを動かさない。閉じたら意味の位置へ落ち着く
+  useEffect(() => {
+    if (readOnly) return;
+    beginCardEdit(id);
+    return () => endCardEdit(id);
+  }, [id, readOnly]);
   const fileRef = useRef<HTMLInputElement>(null);
   const dictation = useDictation(
     (text) => {
@@ -220,10 +228,11 @@ export function DetailWindow({ win }: { win: FloatWin }) {
               {t('detail.positionHint')}
             </div>
             {AXIS_KEYS.map((k: AxisKey) => {
-              const axisId = axes[k];
+              const axisId = axisSlotKey(axes, k);
+              const axisCardId = axes[k];
               const value = k === 'x' ? scores.sx : k === 'y' ? scores.sy : scores.sz;
               const overridden = card.overrides?.[axisId] !== undefined;
-              const axis = cards[axisId];
+              const axis = cards[axisCardId];
               return (
                 <div key={k} className="pos-row">
                   <span className={`pos-label ${overridden ? 'overridden' : ''}`} title={overridden ? t('card.humanPlaced') : t('detail.fromEmbedding')}>

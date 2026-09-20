@@ -3,6 +3,7 @@
 import { getLocale, t, type Locale } from '../i18n';
 import type { Card, CardKind, RelationType } from '../types';
 import { aiTurn, saveAiPreference, ServiceError, type AiPreference, type AiTurnMessage } from './service';
+import { noticeRequestCost } from './cost';
 
 const LANGUAGE: Record<Locale, string> = {
   en: 'English',
@@ -74,6 +75,7 @@ function accountKey(preference: AiPreference) {
 
 /** 選んだモデルが提供されなくなっていたら、その会社の既定モデルで一度だけやり直す */
 async function turn(payload: { messages: AiTurnMessage[]; contextText?: string }) {
+  noticeRequestCost({ chars: payload.messages.reduce((n, m) => n + m.content.length, 0) + (payload.contextText?.length ?? 0) });
   try {
     return await aiTurn({ ...choice, ...payload });
   } catch (error) {

@@ -5,6 +5,18 @@ import { fetchChatOptions, type ChatModel, type ChatService } from '../../lib/se
 import { chooseAiModel, getAiModel } from '../../lib/ai';
 import type { FloatWin } from '../../types';
 
+/** そのモデルが受け付ける「思考の深さ」 */
+function effortsOf(service: ChatService | undefined, model: string | undefined) {
+  const option = service?.models.find((m) => m.model === model);
+  return option?.supportedReasoningEfforts ?? service?.supportedReasoningEfforts ?? [];
+}
+
+function effortLabel(effort: string) {
+  const key = `effort.${effort}` as Parameters<typeof t>[0];
+  const label = t(key);
+  return label === key ? effort : label;
+}
+
 function modelLabel(m: ChatModel) {
   const name = m.displayName ?? m.model;
   if (!m.pricing) return name;
@@ -15,6 +27,7 @@ function modelLabel(m: ChatModel) {
 export function SettingsWindow(_: { win: FloatWin }) {
   const theme = useStore((s) => s.theme);
   const previewFirst = useStore((s) => s.previewFirst);
+  const costNotice = useStore((s) => s.costNotice);
   const session = useStore((s) => s.session);
   const [services, setServices] = useState<ChatService[] | null>(null);
   const [choice, setChoice] = useState(getAiModel());
@@ -31,12 +44,28 @@ export function SettingsWindow(_: { win: FloatWin }) {
   useEffect(() => setChoice(getAiModel()), [session.aiPreference]);
 
   const pick = (provider: string, model?: string) => {
-    const next = { ...getAiModel(), provider, model };
+    const service = services?.find((s) => s.id === provider);
+    const efforts = effortsOf(service, model);
+    const current = getAiModel();
+    const next = {
+      ...current,
+      provider,
+      model,
+      // モデルを変えたら、そのモデルが受け付ける深さに合わせる
+      reasoningEffort: current.reasoningEffort && efforts.includes(current.reasoningEffort) ? current.reasoningEffort : undefined,
+    };
+    setChoice(next);
+    void chooseAiModel(next, signedIn).catch(toastError);
+  };
+
+  const pickEffort = (effort: string) => {
+    const next = { ...getAiModel(), reasoningEffort: effort || undefined };
     setChoice(next);
     void chooseAiModel(next, signedIn).catch(toastError);
   };
 
   const service = services?.find((s) => s.id === choice.provider);
+  const effortOptions = effortsOf(service, choice.model ?? service?.defaultModel);
 
   return (
     <div className="fwin-body">
@@ -60,6 +89,21 @@ export function SettingsWindow(_: { win: FloatWin }) {
       <label className="toggle" onClick={() => set({ previewFirst: !previewFirst })}>
         <span className={`switch ${previewFirst ? 'on' : ''}`} />
         {t('axis.previewFirst')}
+      </label>
+      <label
+        className="toggle"
+        onClick={() => {
+          const next = !costNotice;
+          set({ costNotice: next });
+          try {
+            localStorage.setItem('mindatlas-spatial-cost-notice', next ? '1' : '0');
+          } catch {
+            // この画面の間だけ有効
+          }
+        }}
+      >
+        <span className={`switch ${costNotice ? 'on' : ''}`} />
+        {t('settings.costNotice')}
       </label>
       <div className="sec-title">{t('settings.ai')}</div>
       {services === null ? (
@@ -87,6 +131,21 @@ export function SettingsWindow(_: { win: FloatWin }) {
                     {modelLabel(m)}
                   </option>
                 ))}
+              </select>
+            </label>
+          )}
+          {effortOptions.length > 1 && (
+            <label className="field">
+              <span>{t('settings.effort')}</span>
+              <select className="input" value={choice.reasoningEffort ?? ''} onChange={(e) => pickEffort(e.target.value)}>
+                <option value="">{t('effort.default')}</option>
+                {effortOptions
+                  .filter((effort) => effort !== 'default')
+                  .map((effort) => (
+                    <option key={effort} value={effort}>
+                      {effortLabel(effort)}
+                    </option>
+                  ))}
               </select>
             </label>
           )}

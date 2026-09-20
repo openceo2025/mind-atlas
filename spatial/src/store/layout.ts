@@ -1,5 +1,5 @@
 import type { Axes, AxisKey, Card } from '../types';
-import { SPACE, cardSize, computeScores, depthScale, project, relax, unproject } from '../lib/semantic';
+import { SPACE, axisSlotKey, cardSize, computeScores, depthScale, project, relax, unproject } from '../lib/semantic';
 import { engine, type MotionMode } from '../lib/physics';
 import { subscribeEmbeddings } from '../lib/embeddings';
 import { t } from '../i18n';
@@ -27,11 +27,14 @@ export function relayout(opts: { stagger?: boolean; mode?: MotionMode } = {}) {
     const a = next[s.axes[k]];
     if (a) next[a.id] = { ...a, place: 'canvas', x: DOCK[k].x, y: DOCK[k].y, depth: 0.62 };
   }
+  const editingId = s.editingCardId;
   const nodes = cards.map((c) => {
     const v = scores.values.get(c.id)!;
     const p = project(v.sx, v.sy, v.sz);
     const size = cardSize(c);
     const k = depthScale(v.sz);
+    // 編集中のカードは、書いている場所から動かさない（終わったら意味の位置へ）
+    if (c.id === editingId) return { id: c.id, x: c.x, y: c.y, tx: c.x, ty: c.y, w: size.w * k, h: size.h * k, depth: c.depth, fixed: true };
     return { id: c.id, x: p.x, y: p.y, tx: p.x, ty: p.y, w: size.w * k, h: size.h * k, depth: v.sz };
   });
   const obstacles = AXIS_KEYS.map((k) => ({ x: DOCK[k].x, y: DOCK[k].y, tx: DOCK[k].x, ty: DOCK[k].y, w: 260, h: 124, fixed: true }));
@@ -152,7 +155,7 @@ export function overrideFromPosition(ids: string[]) {
     const { sx, sy } = unproject(c.x, c.y, c.depth);
     cards[id] = {
       ...c,
-      overrides: { ...(c.overrides ?? {}), [s.axes.x]: round(sx), [s.axes.y]: round(sy) },
+      overrides: { ...(c.overrides ?? {}), [axisSlotKey(s.axes, 'x')]: round(sx), [axisSlotKey(s.axes, 'y')]: round(sy) },
       log: [...c.log, { at: now(), code: 'moved', params: { x: lookup(s.axes.x)?.title ?? '', y: lookup(s.axes.y)?.title ?? '' } }].slice(-40),
     };
     changed = true;

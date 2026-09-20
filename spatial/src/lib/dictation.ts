@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { transcribe } from './service';
 import { t } from '../i18n';
+import { noticeRequestCost } from './cost';
 
 /** マイクで録音し、止めたら書き起こして返す（hosted は課金対象、ローカルはブリッジ経由） */
 export function useDictation(onText: (text: string) => void, onError: (message: string) => void) {
@@ -34,6 +35,8 @@ export function useDictation(onText: (text: string) => void, onError: (message: 
       }
       setState('transcribing');
       try {
+        // 音声はトークンで測れないので、サーバーの最低課金額を目安に出す
+        noticeRequestCost({ chars: 0, outputTokens: 0, minimumUsd: 0.002 });
         const { text } = await transcribe(blob);
         if (text?.trim()) onText(text.trim());
       } catch (error) {

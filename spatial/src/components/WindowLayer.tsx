@@ -47,6 +47,10 @@ const META: Record<WindowType, { icon: string }> = {
 };
 
 // 発生源のカードと結ぶ引き出し線を描かないウィンドウ
+/** 左へ放るときの速さ（px/ミリ秒）と、手を離してよい範囲（画面左からの px） */
+const FLING_SPEED = 0.9;
+const FLING_ZONE = 320;
+
 const NO_LEADER: WindowType[] = ['axis', 'preview', 'cluster', 'account', 'share', 'spaces', 'help', 'settings', 'voice', 'agent', 'search'];
 
 export function WindowLayer() {
@@ -214,15 +218,22 @@ function Frame({ win, children, setEl }: { win: FloatWin; children: ReactNode; s
   const onHeadDown = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('button')) return;
     e.preventDefault();
-    let last = { x: e.clientX, y: e.clientY };
+    let last = { x: e.clientX, y: e.clientY, at: performance.now() };
+    // 左のナビへ勢いよく放り投げたら閉じる。ゆっくり動かす普通の移動はそのまま
+    let speedX = 0;
     const move = (ev: PointerEvent) => {
+      const now = performance.now();
+      const dt = Math.max(1, now - last.at);
+      speedX = speedX * 0.6 + ((ev.clientX - last.x) / dt) * 0.4;
       moveWindow(win.id, ev.clientX - last.x, ev.clientY - last.y);
-      last = { x: ev.clientX, y: ev.clientY };
+      last = { x: ev.clientX, y: ev.clientY, at: now };
       engine.notify();
     };
-    const up = () => {
+    const up = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      const stale = performance.now() - last.at > 140;
+      if (!stale && speedX < -FLING_SPEED && ev.clientX < FLING_ZONE) closeWindow(win.id);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);

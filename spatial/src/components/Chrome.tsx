@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
+  bootSpaces,
   canvasCards,
   createCard,
   duplicateCurrentSpace,
@@ -234,6 +235,12 @@ export function TopBar() {
             <Icon name="share" size={16} /> <span className="hide-sm">{t('topbar.share')}</span>
           </button>
         )}
+        {session.mode === 'hosted' && session.creditPercent !== null && (
+          <button className="credit-pill" onClick={() => toggleToolWindow('account')} title={t('topbar.credit')}>
+            <Icon name="sparkle" size={12} />
+            {Math.round(session.creditPercent)}%
+          </button>
+        )}
         <button className="avatar-btn" onClick={() => toggleToolWindow('account')} title={t('topbar.account')} aria-label={t('topbar.account')}>
           {session.user?.pictureUrl ? <img src={session.user.pictureUrl} alt="" referrerPolicy="no-referrer" /> : <Icon name="user" size={18} />}
           {session.subscriptionActive && <span className="plan-dot" />}
@@ -252,6 +259,30 @@ export function ReadOnlyBanner() {
       <button className="btn small primary" onClick={() => void duplicateCurrentSpace()}>
         {t('share.remix')}
       </button>
+    </div>
+  );
+}
+
+/** 共有が止められたリンクを開いたとき。この端末の別のスペースは見せない */
+export function ShareUnavailable() {
+  const shown = useStore((s) => s.shareUnavailable);
+  if (!shown) return null;
+  return (
+    <div className="share-gone">
+      <div className="share-gone-box">
+        <Icon name="info" size={20} />
+        <h2>{t('share.unavailable')}</h2>
+        <p>{t('share.unavailableBody')}</p>
+        <button
+          className="btn primary"
+          onClick={() => {
+            set({ shareUnavailable: false });
+            void bootSpaces();
+          }}
+        >
+          {t('share.openMine')}
+        </button>
+      </div>
     </div>
   );
 }

@@ -47,6 +47,10 @@ export interface State {
   scoreSource: 'server' | 'local';
   draftAxes: Axes | null;
   previewFirst: boolean;
+  /** AIに送る前に見積りを出すか（既定はオフ、設定で切り替え） */
+  costNotice: boolean;
+  /** 共有リンクが使えなくなっているとき */
+  shareUnavailable: boolean;
   // ── UI ──
   selection: string[];
   primary: string | null;
@@ -70,6 +74,8 @@ export interface State {
   session: SessionState;
   theme: 'dark' | 'light';
   sidebarOpen: boolean;
+  /** カードを編集している間は意味配置を止め、終わったら意味の位置へ動かす */
+  editingCardId: string | null;
   busy: Record<string, boolean>;
   ready: boolean;
 }
@@ -80,6 +86,8 @@ export const initialSession: SessionState = {
   authenticated: false,
   user: null,
   subscriptionActive: false,
+  creditLimitMicroUsd: null,
+  chatServices: [],
   subscription: null,
   creditPercent: null,
   aiEnabled: false,
@@ -101,6 +109,14 @@ export const useStore = create<State>(() => ({
   scoreSource: 'local',
   draftAxes: null,
   previewFirst: true,
+  costNotice: (() => {
+    try {
+      return localStorage.getItem('mindatlas-spatial-cost-notice') === '1';
+    } catch {
+      return false;
+    }
+  })(),
+  shareUnavailable: false,
   selection: [],
   primary: null,
   selectedRelation: null,
@@ -123,6 +139,7 @@ export const useStore = create<State>(() => ({
   session: initialSession,
   theme: 'dark',
   sidebarOpen: typeof window !== 'undefined' ? window.innerWidth > 900 : true,
+  editingCardId: null,
   busy: {},
   ready: false,
 }));

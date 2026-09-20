@@ -69,6 +69,11 @@ export interface ScoreSet {
  * 各軸について生スコアを求め、カード集合の中で 0.04..0.96 に広げる。
  * 人が上書きした値（card.overrides[軸ID]）はその軸で最優先する。
  */
+/** 軸が外れている（意味を持たせていない）スロットの上書き値もスロットごとに覚える */
+export function axisSlotKey(axes: Axes, k: AxisKey) {
+  return axes[k] || `none:${k}`;
+}
+
 export function computeScores(cards: Card[], axes: Axes, lookup: (id: string) => Card | undefined): ScoreSet {
   const texts: string[] = cards.map(cardText);
   const axisSlots: Record<AxisKey, { kind: 'concept' | 'card' | 'none'; idx: number[] }> = {
@@ -98,7 +103,7 @@ export function computeScores(cards: Card[], axes: Axes, lookup: (id: string) =>
   }
   const norm: Record<AxisKey, number[]> = { x: [], y: [], z: [] };
   for (const k of AXIS_KEYS) {
-    const axisId = axes[k];
+    const axisId = axisSlotKey(axes, k);
     // 上書きの無いカードだけで幅を決める
     const free = raw[k].filter((_, i) => cards[i].overrides?.[axisId] === undefined);
     const min = free.length ? Math.min(...free) : 0;

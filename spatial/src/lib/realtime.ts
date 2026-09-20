@@ -1,6 +1,7 @@
 // 音声対話（Realtime Talk）。押して話す方式で、AI は空間を操作するツールを使える。
 // hosted では既存の /api/realtime/calls（クレジット予約つき）、ローカルでは開発ブリッジを使う。
 import { createRealtimeCall } from './service';
+import { noticeRequestCost } from './cost';
 
 export type VoiceState = 'connecting' | 'live' | 'listening' | 'responding' | 'closed' | 'error';
 
@@ -73,6 +74,7 @@ export async function startVoiceSession(opts: VoiceSessionOptions): Promise<Voic
   }
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
+  noticeRequestCost({ chars: (opts.contextText ?? '').length, outputTokens: 0, minimumUsd: 0.1 });
   const call = await createRealtimeCall({
     product: 'spatial',
     contextText: opts.contextText,
