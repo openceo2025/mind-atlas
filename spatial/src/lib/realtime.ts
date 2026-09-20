@@ -1,7 +1,7 @@
 // 音声対話（Realtime Talk）。押して話す方式で、AI は空間を操作するツールを使える。
 // hosted では既存の /api/realtime/calls（クレジット予約つき）、ローカルでは開発ブリッジを使う。
-import { createRealtimeCall } from './service';
-import { noticeRequestCost } from './cost';
+import { createRealtimeCall, endRealtimeCall } from './service';
+import { confirmRequestCost } from './cost';
 
 export type VoiceState = 'connecting' | 'live' | 'listening' | 'responding' | 'closed' | 'error';
 
@@ -44,6 +44,8 @@ export async function startVoiceSession(opts: VoiceSessionOptions): Promise<Voic
   let assistantBuf = '';
   let userBuf = '';
   let maxTimer = 0;
+  let responding = false;
+  let sessionId = '';
   const done = new Set<string>();
 
   const send = (event: Record<string, unknown>) => {
@@ -74,13 +76,15 @@ export async function startVoiceSession(opts: VoiceSessionOptions): Promise<Voic
   }
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
-  noticeRequestCost({ chars: (opts.contextText ?? '').length, outputTokens: 0, minimumUsd: 0.1 });
+  // 音声は話した時間ぶんの課金。1分あたりのおおよそで見積りを出す
+  await confirmRequestCost({ chars: (opts.contextText ?? '').length, outputTokens: 0, minimumUsd: 0.12 });
   const call = await createRealtimeCall({
     product: 'spatial',
     contextText: opts.contextText,
     tools: opts.tools.map((t) => ({ type: 'function', name: t.name, description: t.description, parameters: t.parameters })),
     sdp: offer.sdp,
   });
+  sessionId = call.sessionId;
   await pc.setRemoteDescription({ type: 'answer', sdp: call.sdp });
   if (call.maxSessionSeconds) maxTimer = window.setTimeout(() => stop(), call.maxSessionSeconds * 1000);
 
@@ -104,8 +108,10 @@ export async function startVoiceSession(opts: VoiceSessionOptions): Promise<Voic
       assistantBuf += str(ev.delta);
       opts.onTranscript('assistant', assistantBuf, false);
     } else if (type === 'response.created') {
+      responding = true;
       opts.onState('responding');
     } else if (type === 'response.done') {
+      responding = false;
       if (assistantBuf.trim()) opts.onTranscript('assistant', assistantBuf.trim(), true);
       assistantBuf = '';
       if (!listening && !stopped) opts.onState('live');
@@ -116,7 +122,11 @@ export async function startVoiceSession(opts: VoiceSessionOptions): Promise<Voic
       await runTool(str(ev.name), str(ev.arguments), str(ev.call_id));
     } else if (type === 'error' || type.endsWith('.error')) {
       const err = (ev.error ?? {}) as Record<string, unknown>;
-      opts.onError(str(err.message) || type);
+      const message = str(err.message) || type;
+      responding = false;
+      // 話し終わったあとの取り消しなど、会話には影響しないものは黙って流す
+      if (/no active response|cancellation failed|already has an active response/i.test(message)) return;
+      opts.onError(message);
     }
   }
 
@@ -147,6 +157,8 @@ export async function startVoiceSession(opts: VoiceSessionOptions): Promise<Voic
     pc.close();
     stream.getTracks().forEach((tr) => tr.stop());
     audio.srcObject = null;
+    // 通話の終わりを伝える（時間ぶんの課金に確定し、枠をすぐ空ける）
+    void endRealtimeCall(sessionId);
     opts.onState('closed');
   }
 
@@ -155,7 +167,11 @@ export async function startVoiceSession(opts: VoiceSessionOptions): Promise<Voic
       if (stopped || listening) return;
       listening = true;
       userBuf = '';
-      send({ type: 'response.cancel' });
+      // 何も話していないのに取り消すと API がエラーを返す
+      if (responding) {
+        responding = false;
+        send({ type: 'response.cancel' });
+      }
       send({ type: 'input_audio_buffer.clear' });
       stream.getAudioTracks().forEach((tr) => (tr.enabled = true));
       opts.onState('listening');

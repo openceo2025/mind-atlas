@@ -29,7 +29,7 @@ import { SESSION_CHANGED_EVENT } from './lib/service';
 import { idbGet, idbSet } from './lib/idb';
 import { t, useI18n } from './i18n';
 import { Canvas } from './components/Canvas';
-import { DragGhost, ReadOnlyBanner, ShareUnavailable, Sidebar, Toasts, TopBar } from './components/Chrome';
+import { CostConfirm, DragGhost, ReadOnlyBanner, ShareUnavailable, Sidebar, Toasts, TopBar } from './components/Chrome';
 import { CommandPalette } from './components/CommandPalette';
 import { panState } from './components/panState';
 
@@ -206,6 +206,7 @@ function Shell() {
         </div>
       </main>
       <CommandPalette />
+      <CostConfirm />
       <Toasts />
       <DragGhost />
     </div>

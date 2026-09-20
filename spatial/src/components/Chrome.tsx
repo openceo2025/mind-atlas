@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   bootSpaces,
   canvasCards,
+  createBlankSpace,
   createCard,
   duplicateCurrentSpace,
   focusCard,
@@ -41,7 +42,12 @@ export function Sidebar() {
         </div>
         <span className="beta-pill">β</span>
       </div>
-      <div className="nav-section">{t('nav.spaces')}</div>
+      <div className="nav-section">
+        {t('nav.spaces')}
+        <button className="nav-add" onClick={() => void createBlankSpace()} title={t('spaces.new')} aria-label={t('spaces.new')}>
+          <Icon name="plus" size={14} />
+        </button>
+      </div>
       <div className="nav-spaces">
         {spaces
           .filter((m) => !m.cloudOnly)
@@ -259,6 +265,39 @@ export function ReadOnlyBanner() {
       <button className="btn small primary" onClick={() => void duplicateCurrentSpace()}>
         {t('share.remix')}
       </button>
+    </div>
+  );
+}
+
+/** AIに送る前の確認（設定「消費の見込みを表示する」がオンのとき） */
+export function CostConfirm() {
+  const ask = useStore((s) => s.confirmAsk);
+  useEffect(() => {
+    if (!ask) return;
+    // Enter で送信した直後に開くので、その Enter で即 OK にならないよう少し待つ
+    const openedAt = performance.now();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') ask.resolve(false);
+      if (e.key === 'Enter' && performance.now() - openedAt > 400) ask.resolve(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [ask]);
+  if (!ask) return null;
+  return (
+    <div className="ask-scrim" onClick={() => ask.resolve(false)}>
+      <div className="ask-box" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <h3>{ask.title}</h3>
+        <p>{ask.body}</p>
+        <div className="ask-actions">
+          <button className="btn small" onClick={() => ask.resolve(false)}>
+            {t('common.cancel')}
+          </button>
+          <button className="btn small primary" autoFocus onClick={() => ask.resolve(true)}>
+            {t('common.send')}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

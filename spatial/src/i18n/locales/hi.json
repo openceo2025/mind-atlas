@@ -269,6 +269,7 @@
   "common.delete": "हटाएँ",
   "common.remove": "निकालें",
   "common.done": "हो गया",
+  "common.send": "भेजें",
 
   "summary.updated": "{time} को अपडेट किया गया",
   "summary.lens.points": "मुख्य बिंदु",
@@ -339,6 +340,8 @@
   "detail.addImage": "छवि जोड़ें",
   "detail.replaceImage": "बदलें",
   "detail.facts": "आँकड़े",
+  "detail.axisEnds": "इस अक्ष के दोनों सिरों के शब्द",
+  "detail.axisEndsHint": "वैकल्पिक। खाली छोड़ने पर अक्ष पर कोई शब्द नहीं दिखेगा।",
   "detail.position": "वर्तमान अक्षों पर स्थिति",
   "detail.positionHint": "मान एम्बेडिंग से आते हैं। अपना मान तय करने के लिए स्लाइडर हिलाएँ (या कार्ड खींचें); यह हर अक्ष के लिए सहेजा जाता है।",
   "detail.resetPosition": "एम्बेडिंग पर वापस",
@@ -566,6 +569,8 @@
   "settings.aiAccount": "आपका चुना गया मॉडल आपके खाते में सहेजा जाता है और mind-atlas.org पर भी उपयोग होता है।",
   "settings.costNotice": "हर AI अनुरोध से पहले अनुमानित खपत दिखाएँ",
   "cost.estimate": "लगभग {tokens} टोकन · आपके AI उपयोग का लगभग {percent}%",
+  "cost.confirmTitle": "क्या इसे AI को भेजें?",
+  "cost.used": "{tokens} टोकन उपयोग · {percent}% (शेष {remaining}%)",
   "settings.priceEstimated": "{price} (अनुमानित)",
 
   "help.lead": "MindAtlas विचारों को कार्ड में बदलता है और उन्हें अर्थ के अनुसार व्यवस्थित करता है। अक्ष बदलें और वही कार्ड एक नए आकार में ढल जाते हैं।",

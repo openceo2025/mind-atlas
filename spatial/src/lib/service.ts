@@ -112,6 +112,7 @@ export interface HostedSession {
   user: { id: string; email: string; name: string; pictureUrl: string; role: string } | null;
   subscription: { status: string; currentPeriodEnd?: string; cancelAtPeriodEnd: boolean } | null;
   credit: { remainingPercent: number; exhausted: boolean; limitMicroUsd?: number } | null;
+  aiLimits?: { reserveCharsPerToken: number; maxOutputTokens: number };
   chatOptions?: { defaultService?: string; services?: ChatService[] };
   entitlement: { aiEnabled: boolean; reason?: string } | null;
   aiPreference?: AiPreference | null;
@@ -134,6 +135,7 @@ export interface SessionState {
   subscription: HostedSession['subscription'];
   creditPercent: number | null;
   creditLimitMicroUsd: number | null;
+  aiLimits: { reserveCharsPerToken: number; maxOutputTokens: number } | null;
   chatServices: ChatService[];
   aiEnabled: boolean;
   aiReason?: string;
@@ -146,9 +148,9 @@ export async function fetchSession(): Promise<SessionState> {
     try {
       const response = await api('/health');
       const ok = response.ok;
-      return { mode: 'local', loaded: true, authenticated: false, user: null, subscriptionActive: false, subscription: null, creditPercent: null, creditLimitMicroUsd: null, chatServices: [], aiEnabled: ok, bridgeOnline: ok };
+      return { mode: 'local', loaded: true, authenticated: false, user: null, subscriptionActive: false, subscription: null, creditPercent: null, creditLimitMicroUsd: null, aiLimits: null, chatServices: [], aiEnabled: ok, bridgeOnline: ok };
     } catch {
-      return { mode: 'local', loaded: true, authenticated: false, user: null, subscriptionActive: false, subscription: null, creditPercent: null, creditLimitMicroUsd: null, chatServices: [], aiEnabled: false, bridgeOnline: false };
+      return { mode: 'local', loaded: true, authenticated: false, user: null, subscriptionActive: false, subscription: null, creditPercent: null, creditLimitMicroUsd: null, aiLimits: null, chatServices: [], aiEnabled: false, bridgeOnline: false };
     }
   }
   const data = await json<HostedSession>(await api('/api/service/session'));
@@ -162,6 +164,7 @@ export async function fetchSession(): Promise<SessionState> {
     subscription: data.subscription,
     creditPercent: data.credit?.remainingPercent ?? null,
     creditLimitMicroUsd: data.credit?.limitMicroUsd ?? null,
+    aiLimits: data.aiLimits ?? null,
     chatServices: (data.chatOptions?.services ?? []).filter((service) => service.configured),
     aiEnabled: Boolean(data.entitlement?.aiEnabled),
     aiReason: data.entitlement?.reason,
@@ -227,11 +230,19 @@ export interface AiTurnMessage {
   content: string;
 }
 
+export interface AiUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  estimatedCostUsd?: number;
+  creditRemainingPercent?: number;
+}
+
 export interface AiTurnResult {
   text: string;
   provider: string;
   model: string;
-  usage?: { creditRemainingPercent?: number };
+  usage?: AiUsage;
 }
 
 export async function aiTurn(payload: { provider: string; model?: string; messages: AiTurnMessage[]; contextText?: string; reasoningEffort?: string }) {
@@ -246,6 +257,7 @@ export async function aiTurn(payload: { provider: string; model?: string; messag
 }
 
 export interface WebSearchResult {
+  usage?: AiUsage;
   text: string;
   citations?: { url: string; title?: string }[];
   sources?: { url: string; title?: string }[];
@@ -271,7 +283,18 @@ export async function createRealtimeCall(payload: Record<string, unknown>) {
   const sdp = await response.text();
   const max = Number(response.headers.get('X-Mind-Atlas-Realtime-Max-Session-Seconds') ?? '');
   notifySessionChanged();
-  return { sdp, maxSessionSeconds: Number.isFinite(max) && max > 0 ? max : undefined };
+  return {
+    sdp,
+    maxSessionSeconds: Number.isFinite(max) && max > 0 ? max : undefined,
+    sessionId: response.headers.get('X-Mind-Atlas-Realtime-Session-Id') ?? '',
+  };
+}
+
+/** 通話の終わりを伝える。話した時間ぶんだけ課金され、次のセッションもすぐ始められる */
+export async function endRealtimeCall(sessionId: string) {
+  if (!sessionId) return;
+  await api(`/api/realtime/calls/${encodeURIComponent(sessionId)}/end`, { method: 'POST' }).catch(() => undefined);
+  notifySessionChanged();
 }
 
 // ── 埋め込み ─────────────────────────────────────────

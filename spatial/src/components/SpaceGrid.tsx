@@ -30,10 +30,8 @@ export function SpaceGrid() {
   const front = face(1);
   const zEnd = 900 - 150;
 
-  const ends = (k: AxisKey): [string, string] => {
-    const [lo, hi] = axisEnds(lookup(axes[k]));
-    return lo || hi ? [lo, hi] : [t('axis.far'), t('axis.near')];
-  };
+  // 端の言葉は、概念軸かユーザーが決めたときだけ出す（自分のカードを軸にしても勝手に付けない）
+  const ends = (k: AxisKey): [string, string] => axisEnds(lookup(axes[k]));
   const [xl, xh] = ends('x');
   const [yl, yh] = ends('y');
   const [zl, zh] = ends('z');
@@ -115,7 +113,7 @@ export function SpaceGrid() {
             <div className="axis-caption" style={capStyle}>
               <span className="k">{AXIS_NAME(k)}</span>
               <span className="n">{card?.title ?? t('axis.unset')}</span>
-              <span className="e">{lo || hi ? `(${lo || t('axis.far')} ⟷ ${hi || t('axis.near')})` : `(${t('axis.far')} ⟷ ${t('axis.near')})`}</span>
+              {(lo || hi) && <span className="e">{`(${lo} ⟷ ${hi})`}</span>}
             </div>
           </div>
         );

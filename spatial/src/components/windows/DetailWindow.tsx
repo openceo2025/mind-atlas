@@ -203,6 +203,36 @@ export function DetailWindow({ win }: { win: FloatWin }) {
           </>
         )}
 
+        {axisKey && (
+          <>
+            <div className="sec-title">{t('detail.axisEnds')}</div>
+            <div className="hint-inline" style={{ marginBottom: 6 }}>
+              {t('detail.axisEndsHint')}
+            </div>
+            <div className="row-gap">
+              <input
+                className="input slim"
+                value={card.axisEnds?.[0] ?? ''}
+                placeholder={t('axis.newLow')}
+                disabled={readOnly}
+                onFocus={beginEdit}
+                onBlur={endEdit}
+                onChange={(e) => updateCard(id, { axisEnds: [e.target.value, card.axisEnds?.[1] ?? ''] }, { relayout: false })}
+              />
+              <span className="muted small">⟷</span>
+              <input
+                className="input slim"
+                value={card.axisEnds?.[1] ?? ''}
+                placeholder={t('axis.newHigh')}
+                disabled={readOnly}
+                onFocus={beginEdit}
+                onBlur={endEdit}
+                onChange={(e) => updateCard(id, { axisEnds: [card.axisEnds?.[0] ?? '', e.target.value] }, { relayout: false })}
+              />
+            </div>
+          </>
+        )}
+
         {card.facts && card.facts.length > 0 && (
           <>
             <div className="sec-title">{t('detail.facts')}</div>

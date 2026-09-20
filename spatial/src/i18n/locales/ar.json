@@ -269,6 +269,7 @@
   "common.delete": "حذف",
   "common.remove": "إزالة",
   "common.done": "تم",
+  "common.send": "إرسال",
 
   "summary.updated": "حُدّث {time}",
   "summary.lens.points": "النقاط الرئيسية",
@@ -339,6 +340,8 @@
   "detail.addImage": "إضافة صورة",
   "detail.replaceImage": "استبدال",
   "detail.facts": "الأرقام",
+  "detail.axisEnds": "كلمتا طرفَي هذا المحور",
+  "detail.axisEndsHint": "اختياري. إذا تُرك فارغًا، لا يعرض المحور أي كلمات.",
   "detail.position": "الموضع على المحاور الحالية",
   "detail.positionHint": "تأتي القيم من التضمين. حرّك شريط التمرير (أو اسحب البطاقة) لتحديد قيمتك الخاصة؛ وتُحفظ لكل محور.",
   "detail.resetPosition": "العودة إلى التضمين",
@@ -566,6 +569,8 @@
   "settings.aiAccount": "يُحفظ اختيارك في حسابك ويُستخدم أيضًا على mind-atlas.org.",
   "settings.costNotice": "إظهار الاستهلاك المتوقع قبل كل طلب ذكاء اصطناعي",
   "cost.estimate": "نحو {tokens} رمز · نحو {percent}% من رصيد الذكاء الاصطناعي",
+  "cost.confirmTitle": "هل تُرسل هذا إلى الذكاء الاصطناعي؟",
+  "cost.used": "استُخدم {tokens} رمز · {percent}% (المتبقي {remaining}%)",
   "settings.priceEstimated": "{price} (تقديري)",
 
   "help.lead": "يحوّل MindAtlas الأفكار إلى بطاقات ويرتّبها حسب المعنى. غيّر المحاور وستتمدد البطاقات نفسها في شكل جديد.",

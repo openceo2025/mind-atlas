@@ -3,7 +3,7 @@
 import { getLocale, t, type Locale } from '../i18n';
 import type { Card, CardKind, RelationType } from '../types';
 import { aiTurn, saveAiPreference, ServiceError, type AiPreference, type AiTurnMessage } from './service';
-import { noticeRequestCost } from './cost';
+import { confirmRequestCost, reportUsage } from './cost';
 
 const LANGUAGE: Record<Locale, string> = {
   en: 'English',
@@ -75,13 +75,18 @@ function accountKey(preference: AiPreference) {
 
 /** 選んだモデルが提供されなくなっていたら、その会社の既定モデルで一度だけやり直す */
 async function turn(payload: { messages: AiTurnMessage[]; contextText?: string }) {
-  noticeRequestCost({ chars: payload.messages.reduce((n, m) => n + m.content.length, 0) + (payload.contextText?.length ?? 0) });
+  await confirmRequestCost({ chars: payload.messages.reduce((n, m) => n + m.content.length, 0) + (payload.contextText?.length ?? 0) });
+  const send = async () => {
+    const result = await aiTurn({ ...choice, ...payload });
+    reportUsage(result.usage);
+    return result;
+  };
   try {
-    return await aiTurn({ ...choice, ...payload });
+    return await send();
   } catch (error) {
     if (!(error instanceof ServiceError) || error.code !== 'model_not_enabled' || !choice.model) throw error;
     rememberModel({ provider: choice.provider });
-    return await aiTurn({ ...choice, ...payload });
+    return await send();
   }
 }
 
@@ -229,9 +234,11 @@ function cleanDrafts(items: unknown): Draft[] {
 export async function expand(card: Card, neighbors: Card[]): Promise<Draft[]> {
   const r = await runJson<{ items: unknown }>(
     [
-      `Expand the focus card [${card.id}] "${card.title}" into 3 new cards that push the thinking further: one idea (a concrete action), one issue (a risk or open question), one hypothesis (a testable claim).`,
-      'Use the neighboring cards only as background. Do not repeat what the cards already say.',
-      'Return {"items": [{"kind": "idea"|"issue"|"hypothesis", "title": short title, "body": 1-2 sentences, "tags": [1-2 short tags], "relation": "derived"|"supports"|"contradicts"}]}.',
+      `Expand the focus card [${card.id}] "${card.title}" into the cards its own content asks for. Follow the card, not a template.`,
+      'If the card lists things (dates, days, steps, places, people, options, sections), make one card per item, in the same order, keeping each item\'s own label as the title. Do not merge or drop items, and do not add commentary items.',
+      'Only when the card has no such list, branch the thinking instead: one idea (a concrete action), one issue (a risk or open question), one hypothesis (a testable claim).',
+      'Use the neighboring cards only as background. Do not repeat what the cards already say. Produce at most 12 cards.',
+      'Return {"items": [{"kind": "note"|"idea"|"issue"|"hypothesis"|"quote", "title": short title, "body": 1-2 sentences, "tags": [1-2 short tags], "relation": "derived"|"supports"|"contradicts"}]}.',
     ].join('\n'),
     cardsContext([card, ...neighbors.slice(0, 6)]),
   );

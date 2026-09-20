@@ -51,6 +51,8 @@ export interface State {
   costNotice: boolean;
   /** 共有リンクが使えなくなっているとき */
   shareUnavailable: boolean;
+  /** AIに送る前の確認（見込み表示がオンのとき） */
+  confirmAsk: { title: string; body: string; resolve: (ok: boolean) => void } | null;
   // ── UI ──
   selection: string[];
   primary: string | null;
@@ -87,6 +89,7 @@ export const initialSession: SessionState = {
   user: null,
   subscriptionActive: false,
   creditLimitMicroUsd: null,
+  aiLimits: null,
   chatServices: [],
   subscription: null,
   creditPercent: null,
@@ -117,6 +120,7 @@ export const useStore = create<State>(() => ({
     }
   })(),
   shareUnavailable: false,
+  confirmAsk: null,
   selection: [],
   primary: null,
   selectedRelation: null,
@@ -231,6 +235,8 @@ export function toast(text: string, opts: { tone?: Toast['tone']; action?: Toast
 }
 
 export function toastError(error: unknown) {
+  // 確認ダイアログで「やめる」を選んだときは何も出さない
+  if (error instanceof Error && error.name === 'RequestCancelled') return;
   toast(error instanceof Error ? error.message : String(error), { tone: 'error', ms: 5000 });
 }
 

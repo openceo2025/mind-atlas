@@ -269,6 +269,7 @@
   "common.delete": "Delete",
   "common.remove": "Remove",
   "common.done": "Done",
+  "common.send": "Send",
 
   "summary.updated": "Updated {time}",
   "summary.lens.points": "Key points",
@@ -339,6 +340,8 @@
   "detail.addImage": "Add image",
   "detail.replaceImage": "Replace",
   "detail.facts": "Figures",
+  "detail.axisEnds": "Words at each end of this axis",
+  "detail.axisEndsHint": "Optional. Left empty, the axis shows no words.",
   "detail.position": "Position on the current axes",
   "detail.positionHint": "Values come from the embedding. Move a slider (or drag the card) to set your own; it is kept for each axis.",
   "detail.resetPosition": "Back to embedding",
@@ -566,6 +569,8 @@
   "settings.aiAccount": "Your choice is saved to your account and also used on mind-atlas.org.",
   "settings.costNotice": "Show the estimated usage before each AI request",
   "cost.estimate": "About {tokens} tokens · about {percent}% of your AI usage",
+  "cost.confirmTitle": "Send this to the AI?",
+  "cost.used": "Used {tokens} tokens · {percent}% (left {remaining}%)",
   "settings.priceEstimated": "{price} (estimated)",
 
   "help.lead": "MindAtlas turns thoughts into cards and arranges them by meaning. Change the axes and the same cards stretch into a new shape.",

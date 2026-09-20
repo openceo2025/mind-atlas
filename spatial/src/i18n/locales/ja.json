@@ -269,6 +269,7 @@
   "common.delete": "削除",
   "common.remove": "外す",
   "common.done": "完了",
+  "common.send": "送る",
 
   "summary.updated": "最終更新 {time}",
   "summary.lens.points": "要点",
@@ -339,6 +340,8 @@
   "detail.addImage": "画像を追加",
   "detail.replaceImage": "差し替え",
   "detail.facts": "数値",
+  "detail.axisEnds": "この軸の両端の言葉",
+  "detail.axisEndsHint": "任意です。空のままなら、軸に言葉は出ません。",
   "detail.position": "現在の軸での位置",
   "detail.positionHint": "値は埋め込みから計算されます。スライダーを動かす（またはカードをドラッグする）と自分の値を設定でき、軸ごとに保存されます。",
   "detail.resetPosition": "埋め込みに戻す",
@@ -566,6 +569,8 @@
   "settings.aiAccount": "選んだモデルはアカウントに保存され、mind-atlas.org でも使われます。",
   "settings.costNotice": "AIに送る前に、消費の見込みを表示する",
   "cost.estimate": "およそ {tokens} トークン・AI残量のおよそ {percent}%",
+  "cost.confirmTitle": "AIに送りますか？",
+  "cost.used": "{tokens} トークン使用・{percent}%（残り {remaining}%）",
   "settings.priceEstimated": "{price}（推定）",
 
   "help.lead": "MindAtlas は考えをカードにして、意味で並べます。軸を変えると、同じカードが新しい形に伸び直します。",

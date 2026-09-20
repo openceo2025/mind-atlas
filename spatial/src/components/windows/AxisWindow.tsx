@@ -116,9 +116,9 @@ export function AxisWindow({ win }: { win: FloatWin }) {
             }}
           >
             <option value="">{t('axis.presets')}</option>
-            {AXIS_PRESETS.map((p) => (
+            {AXIS_PRESETS.map((p, index) => (
               <option key={p.id} value={p.id}>
-                {t(p.name)}
+                {index + 1}. {t(p.name)}
               </option>
             ))}
           </select>

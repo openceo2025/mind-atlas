@@ -6,7 +6,7 @@ import type { FloatWin } from '../../types';
 import { Icon } from '../Icons';
 import { AiNotice, Spinner, useAiBlock } from './common';
 import { Markdownish } from './Markdownish';
-import { noticeRequestCost } from '../../lib/cost';
+import { confirmRequestCost, reportUsage } from '../../lib/cost';
 
 /** Web 検索して、結果と出典をカードとして空間に置く */
 export function SearchWindow({ win }: { win: FloatWin }) {
@@ -24,8 +24,9 @@ export function SearchWindow({ win }: { win: FloatWin }) {
     setBusy(true);
     setError('');
     try {
-      noticeRequestCost({ chars: q.length, outputTokens: 512 });
+      await confirmRequestCost({ chars: q.length, outputTokens: 512 });
       const r = await webSearch(q);
+      reportUsage(r.usage);
       updateWindowData(win.id, { result: { ...r, query: q }, query: q });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

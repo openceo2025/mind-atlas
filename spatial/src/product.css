@@ -1069,3 +1069,66 @@ kbd {
   font-size: 13px;
   line-height: 1.7;
 }
+
+/* サイドバー：スペースを増やす + ボタン */
+.nav-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nav-add {
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.nav-add:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* AIに送る前の確認 */
+.ask-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 5, 15, 0.5);
+}
+
+.ask-box {
+  width: min(360px, calc(100vw - 32px));
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+}
+
+.ask-box h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.ask-box p {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.ask-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
