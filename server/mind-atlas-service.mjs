@@ -9,6 +9,7 @@ import {
   createCloudNotebook,
   deleteCloudNotebook,
   deleteExpiredSessions,
+  ensureCreditAccount,
   getCloudNotebook,
   getCloudNotebookByShareToken,
   getSessionUser,
@@ -82,6 +83,10 @@ const transcriptionModel = getEnv("MIND_ATLAS_TRANSCRIPTION_MODEL", "gpt-4o-tran
 const maxOutputTokens = readIntEnv("MIND_ATLAS_SERVICE_MAX_OUTPUT_TOKENS", 4096);
 const realtimeMaxOutputTokens = readIntEnv("MIND_ATLAS_REALTIME_MAX_OUTPUT_TOKENS", 512);
 const realtimeMaxSessionSeconds = readIntEnv("MIND_ATLAS_REALTIME_MAX_SESSION_SECONDS", 300);
+// Voice is billed for the time it actually ran. The session reservation is only a hold;
+// what is kept is duration x rate, floored at the minimum and capped by the hold.
+const realtimeUsdPerMinute = Number(getEnv("MIND_ATLAS_REALTIME_USD_PER_MINUTE", "0.12")) || 0.12;
+const realtimeMinMicroUsd = readIntEnv("MIND_ATLAS_REALTIME_MIN_MICRO_USD", 20_000);
 const highCostMaxOutputTokens = readIntEnv("MIND_ATLAS_SERVICE_HIGH_COST_MAX_OUTPUT_TOKENS", 2048);
 const highCostOutputUsdPer1m = Number(getEnv("MIND_ATLAS_SERVICE_HIGH_COST_OUTPUT_USD_PER_1M", "50"));
 const realtimeSessionMicroUsd = readIntEnv("MIND_ATLAS_REALTIME_SESSION_MICRO_USD", 750_000);
@@ -141,6 +146,7 @@ const openAiTokenParamByModel = new Map();
 const rateLimitBuckets = new Map();
 const userConcurrencyCounts = new Map();
 const activeRealtimeSessions = new Map();
+const openRealtimeSessions = new Map();
 
 assertSafeProductionConfig();
 await migrateDatabase();
@@ -332,6 +338,11 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/realtime/calls") {
       await handleRealtimeCall(request, response);
+      return;
+    }
+
+    if (request.method === "POST" && /^\/api\/realtime\/calls\/[A-Za-z0-9_-]+\/end$/.test(url.pathname)) {
+      await handleRealtimeCallEnd(request, response, url.pathname.split("/")[4]);
       return;
     }
 
@@ -1199,28 +1210,73 @@ async function handleRealtimeCall(request, response) {
     await refundUsageReservation({ user, subscription, reservation, provider: "openai", model, reason: "realtime_upstream_error" });
     throw error;
   }
-  const account = await meterReservedUsage({
-    user,
-    subscription,
-    requestId,
-    provider: "openai",
+  // The call is live now. It is settled when the browser reports the end (or when the
+  // session limit runs out), so a short conversation costs a short conversation.
+  openRealtimeSessions.set(requestId, {
+    userId: user.id,
     model,
-    usage: {
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-      estimatedCostMicroUsd: realtimeSessionMicroUsd,
-      durationMs: Date.now() - startedAt,
-    },
     reservation,
-    metadata: { kind: "realtime_session_reservation" },
+    startedAt: Date.now(),
+    release: releaseRealtimeSession,
+    timer: scheduleRealtimeSettlement(requestId),
   });
   response.writeHead(200, {
     "Content-Type": "application/sdp",
-    "X-Mind-Atlas-Credit-Remaining-Percent": String(Math.round(creditPercent(account))),
+    "X-Mind-Atlas-Credit-Remaining-Percent": String(Math.round(creditPercent(await ensureCreditAccount(user.id, subscription)))),
     "X-Mind-Atlas-Realtime-Max-Session-Seconds": String(realtimeMaxSessionSeconds),
+    "X-Mind-Atlas-Realtime-Session-Id": requestId,
   });
   response.end(text);
+}
+
+function scheduleRealtimeSettlement(requestId) {
+  const timer = setTimeout(() => {
+    void settleRealtimeSession(requestId, "timeout");
+  }, (realtimeMaxSessionSeconds + 5) * 1000);
+  timer.unref?.();
+  return timer;
+}
+
+/** 実際に話していた時間ぶんだけ課金し、余りは返す */
+async function settleRealtimeSession(requestId, reason) {
+  const session = openRealtimeSessions.get(requestId);
+  if (!session) return null;
+  openRealtimeSessions.delete(requestId);
+  clearTimeout(session.timer);
+  session.release();
+  const durationMs = Math.max(0, Date.now() - session.startedAt);
+  const minutes = Math.min(realtimeMaxSessionSeconds, durationMs / 1000) / 60;
+  const byDuration = Math.round(minutes * realtimeUsdPerMinute * 1_000_000);
+  const costMicroUsd = Math.min(session.reservation.reservedMicroUsd, Math.max(realtimeMinMicroUsd, byDuration));
+  try {
+    const user = { id: session.userId };
+    const subscription = await getUserSubscription(session.userId);
+    return await meterReservedUsage({
+      user,
+      subscription,
+      requestId,
+      provider: "openai",
+      model: session.model,
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, estimatedCostMicroUsd: costMicroUsd, durationMs },
+      reservation: session.reservation,
+      metadata: { kind: "realtime_session", seconds: Math.round(durationMs / 1000), endedBy: reason },
+    });
+  } catch (error) {
+    console.error("Failed to settle a Realtime session", error);
+    return null;
+  }
+}
+
+async function handleRealtimeCallEnd(request, response, requestId) {
+  const user = await requireUser(request);
+  const session = openRealtimeSessions.get(requestId);
+  if (!session || session.userId !== user.id) {
+    // Already settled by the timer, or not this user's session: nothing to do.
+    sendJson(response, 200, { settled: false });
+    return;
+  }
+  const account = await settleRealtimeSession(requestId, "client");
+  sendJson(response, 200, { settled: true, creditRemainingPercent: account ? Math.round(creditPercent(account)) : undefined });
 }
 
 async function handleAudioTranscription(request, response) {
@@ -1479,6 +1535,10 @@ async function callOpenAiCompatibleToolTurn(provider, payload) {
       const { [tokenParam]: _dropped, ...rest } = body;
       upstream = await send({ ...rest, [otherParam]: outputTokenLimit });
       if (upstream.ok) rememberOpenAiTokenParam(provider, model, otherParam);
+    } else if (isReasoningEffortError(text) && body.reasoning_effort) {
+      const { reasoning_effort: _effort, ...rest } = body;
+      upstream = await send(rest);
+      if (upstream.ok) openAiEffortUnsupported.add(model);
     } else {
       upstream = new Response(text, { status: upstream.status });
     }
@@ -1553,7 +1613,7 @@ function buildRealtimeSessionConfig(payload) {
     type: "realtime",
     model: stringValue(payload.model) || realtimeModel,
     instructions: buildPartnerSystemPrompt(payload),
-    // No expires_at: the Realtime API rejects it. The session is bounded by
+    // No expires_at field — the Realtime API rejects it. The session is bounded by
     // realtimeMaxSessionSeconds through the slot timer and the client's own timer.
     max_output_tokens: realtimeMaxOutputTokens,
     audio: {
@@ -1604,6 +1664,8 @@ async function createSessionResponse(user) {
         }
       : null,
     entitlement,
+    // The browser estimates a request with the same numbers the reservation uses.
+    aiLimits: { reserveCharsPerToken: chatReserveCharsPerToken, maxOutputTokens },
     chatOptions: await createChatOptionsResponse(),
     aiPreference: user ? await getUserAiPreference(user.id) : null,
   };
@@ -1669,13 +1731,13 @@ async function createChatOptionsResponse() {
       configured: provider.configured,
       defaultModel: modelList.defaultModel,
       defaultReasoningEffort: provider.defaultReasoningEffort,
-      supportedReasoningEfforts: provider.supportedReasoningEfforts,
+      supportedReasoningEfforts: modelReasoningEfforts(provider, modelList.defaultModel),
       models: modelList.models.map((model) => ({
         model,
         displayName: modelDisplayName(provider, model),
         pricing: publicModelPricing(provider.id, model),
         defaultReasoningEffort: provider.defaultReasoningEffort,
-        supportedReasoningEfforts: provider.supportedReasoningEfforts,
+        supportedReasoningEfforts: modelReasoningEfforts(provider, model),
       })),
       detail: provider.configured
         ? providerModelDetail(provider, modelList)
@@ -3007,13 +3069,28 @@ function nodeHeadersToFetchHeaders(headers) {
   return output;
 }
 
+// OpenAI's thinking models take a reasoning effort; the older chat models do not.
+// A model that rejects the value is remembered so the next request leaves it out.
+const OPENAI_REASONING_EFFORTS = ["default", "none", "low", "medium", "high", "xhigh", "max"];
+const openAiEffortUnsupported = new Set();
+
+function modelReasoningEfforts(provider, model) {
+  if (provider.id !== "openai") return provider.supportedReasoningEfforts;
+  if (!model || !supportsReasoningEffort(model) || openAiEffortUnsupported.has(model)) return ["default"];
+  return OPENAI_REASONING_EFFORTS;
+}
+
 function applyReasoningEffort(body, effort) {
   const value = stringValue(effort);
-  if (!value || value === "default" || value === "none") return;
-  if (!supportsReasoningEffort(body.model)) return;
-  if (value === "minimal" || value === "low" || value === "medium" || value === "high") {
+  if (!value || value === "default") return;
+  if (!supportsReasoningEffort(body.model) || openAiEffortUnsupported.has(body.model)) return;
+  if (OPENAI_REASONING_EFFORTS.includes(value) || value === "minimal") {
     body.reasoning_effort = value;
   }
+}
+
+function isReasoningEffortError(text) {
+  return /reasoning_effort/i.test(stringValue(text));
 }
 
 function usesChatCompletionsMaxCompletionTokens(provider, model) {
