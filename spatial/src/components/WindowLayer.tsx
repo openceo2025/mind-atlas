@@ -7,7 +7,6 @@ import type { FloatWin, WindowType } from '../types';
 import { t, type MessageKey } from '../i18n';
 import { Icon } from './Icons';
 import { SummaryWindow } from './windows/SummaryWindow';
-import { CompareWindow } from './windows/CompareWindow';
 import { ExtractWindow } from './windows/ExtractWindow';
 import { AxisWindow } from './windows/AxisWindow';
 import { PreviewWindow } from './windows/PreviewWindow';
@@ -27,7 +26,6 @@ import { AgentWindowSlot } from './windows/AgentWindowSlot';
 
 const META: Record<WindowType, { icon: string }> = {
   summary: { icon: 'sparkle' },
-  compare: { icon: 'scale' },
   extract: { icon: 'extract' },
   axis: { icon: 'axis' },
   preview: { icon: 'cube' },
@@ -47,9 +45,15 @@ const META: Record<WindowType, { icon: string }> = {
 };
 
 // 発生源のカードと結ぶ引き出し線を描かないウィンドウ
-/** 左へ放るときの速さ（px/ミリ秒）と、手を離してよい範囲（画面左からの px） */
-const FLING_SPEED = 0.9;
-const FLING_ZONE = 320;
+/** 左ナビが閉じているときに、閉じる合図とみなす画面左からの幅 */
+const NAV_FALLBACK = 84;
+
+/** ポインタが左ナビの上にあるか（ナビが無ければ画面の左端） */
+function overNav(x: number, y: number) {
+  const r = document.querySelector('.sidebar')?.getBoundingClientRect();
+  if (!r || r.width < 8) return x < NAV_FALLBACK;
+  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
 
 const NO_LEADER: WindowType[] = ['axis', 'preview', 'cluster', 'account', 'share', 'spaces', 'help', 'settings', 'voice', 'agent', 'search'];
 
@@ -150,8 +154,6 @@ function Content({ win }: { win: FloatWin }) {
   switch (win.type) {
     case 'summary':
       return <SummaryWindow win={win} />;
-    case 'compare':
-      return <CompareWindow win={win} />;
     case 'extract':
       return <ExtractWindow win={win} />;
     case 'axis':
@@ -218,22 +220,20 @@ function Frame({ win, children, setEl }: { win: FloatWin; children: ReactNode; s
   const onHeadDown = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('button')) return;
     e.preventDefault();
-    let last = { x: e.clientX, y: e.clientY, at: performance.now() };
-    // 左のナビへ勢いよく放り投げたら閉じる。ゆっくり動かす普通の移動はそのまま
-    let speedX = 0;
+    let last = { x: e.clientX, y: e.clientY };
+    // 左ナビまで運んで手を離したら閉じる。速さは見ないので空振りしない
+    const nav = document.querySelector('.sidebar');
     const move = (ev: PointerEvent) => {
-      const now = performance.now();
-      const dt = Math.max(1, now - last.at);
-      speedX = speedX * 0.6 + ((ev.clientX - last.x) / dt) * 0.4;
       moveWindow(win.id, ev.clientX - last.x, ev.clientY - last.y);
-      last = { x: ev.clientX, y: ev.clientY, at: now };
+      last = { x: ev.clientX, y: ev.clientY };
+      nav?.classList.toggle('drop-close', overNav(ev.clientX, ev.clientY));
       engine.notify();
     };
     const up = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      const stale = performance.now() - last.at > 140;
-      if (!stale && speedX < -FLING_SPEED && ev.clientX < FLING_ZONE) closeWindow(win.id);
+      nav?.classList.remove('drop-close');
+      if (overNav(ev.clientX, ev.clientY)) closeWindow(win.id);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);

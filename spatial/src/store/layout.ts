@@ -10,7 +10,8 @@ export const AXIS_NAME = (k: AxisKey) => t(`axis.${k}` as 'axis.x');
 
 // 軸カードが収まる「ドック」のワールド座標（軸の先端）
 const zlen = Math.hypot(SPACE.ZX, SPACE.ZY);
-export const Z_UNIT = { x: SPACE.ZX / zlen, y: SPACE.ZY / zlen };
+/** Z軸の高い側（手前）へ向かう単位ベクトル。奥はその反対の右上 */
+export const Z_UNIT = { x: -SPACE.ZX / zlen, y: SPACE.ZY / zlen };
 export const DOCK: Record<AxisKey, { x: number; y: number }> = {
   x: { x: SPACE.W / 2 + 200, y: 0 },
   y: { x: 0, y: -SPACE.H / 2 - 150 },
@@ -35,7 +36,8 @@ export function relayout(opts: { stagger?: boolean; mode?: MotionMode } = {}) {
     const k = depthScale(v.sz);
     // 編集中のカードは、書いている場所から動かさない（終わったら意味の位置へ）
     if (c.id === editingId) return { id: c.id, x: c.x, y: c.y, tx: c.x, ty: c.y, w: size.w * k, h: size.h * k, depth: c.depth, fixed: true };
-    return { id: c.id, x: p.x, y: p.y, tx: p.x, ty: p.y, w: size.w * k, h: size.h * k, depth: v.sz };
+    // 手で置いたカードは置いた場所のまま。周りのカードのほうが避ける
+    return { id: c.id, x: p.x, y: p.y, tx: p.x, ty: p.y, w: size.w * k, h: size.h * k, depth: v.sz, fixed: handPlaced(c, s.axes) };
   });
   const obstacles = AXIS_KEYS.map((k) => ({ x: DOCK[k].x, y: DOCK[k].y, tx: DOCK[k].x, ty: DOCK[k].y, w: 260, h: 124, fixed: true }));
   relax([...nodes, ...obstacles], 110);
@@ -144,7 +146,13 @@ function ensurePreviewWindow() {
 }
 
 // ── 人による上書き ─────────────────────────────────────────
-/** ドラッグで置いた位置を、いまの X/Y 軸での値として記録する */
+/** 人が X と Y の両方を決めたカード。意味配置はもう動かさない */
+export function handPlaced(card: Card, axes: Axes) {
+  const o = card.overrides;
+  return Boolean(o && o[axisSlotKey(axes, 'x')] !== undefined && o[axisSlotKey(axes, 'y')] !== undefined);
+}
+
+/** ドラッグで置いた位置と奥行きを、いまの軸での値として記録する */
 export function overrideFromPosition(ids: string[]) {
   const s = get();
   const cards = { ...s.cards };
@@ -155,7 +163,12 @@ export function overrideFromPosition(ids: string[]) {
     const { sx, sy } = unproject(c.x, c.y, c.depth);
     cards[id] = {
       ...c,
-      overrides: { ...(c.overrides ?? {}), [axisSlotKey(s.axes, 'x')]: round(sx), [axisSlotKey(s.axes, 'y')]: round(sy) },
+      overrides: {
+        ...(c.overrides ?? {}),
+        [axisSlotKey(s.axes, 'x')]: round(sx),
+        [axisSlotKey(s.axes, 'y')]: round(sy),
+        [axisSlotKey(s.axes, 'z')]: round(c.depth),
+      },
       log: [...c.log, { at: now(), code: 'moved', params: { x: lookup(s.axes.x)?.title ?? '', y: lookup(s.axes.y)?.title ?? '' } }].slice(-40),
     };
     changed = true;

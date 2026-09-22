@@ -9,8 +9,8 @@ import {
   createCard,
   ensureConcept,
   fitView,
+  createChild,
   group,
-  markCompared,
   openWindow,
   proposeClusters,
   redo,
@@ -68,16 +68,7 @@ export function CommandPalette() {
         },
       },
       { id: 'sum', label: t('cmd.summary'), hint: 'AI', enabled: n > 0, run: () => openWindow('summary', selection) },
-      {
-        id: 'cmp',
-        label: t('cmd.compare'),
-        hint: '2–3',
-        enabled: n >= 2,
-        run: () => {
-          markCompared(selection.slice(0, 3));
-          openWindow('compare', selection.slice(0, 3));
-        },
-      },
+      { id: 'child', label: t('cmd.child'), hint: '', enabled: edit && n >= 1, run: () => createChild(p) },
       { id: 'chat', label: t('cmd.chat'), hint: 'AI', run: () => (n ? openWindow('chat', selection.slice(0, 12)) : toggleToolWindow('chat')) },
       { id: 'web', label: t('cmd.search'), hint: 'Web', run: () => toggleToolWindow('search') },
       { id: 'voice', label: t('cmd.voice'), hint: 'AI', run: () => toggleToolWindow('voice') },

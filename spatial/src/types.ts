@@ -45,9 +45,10 @@ export type RelationType =
   | 'supports'
   | 'contradicts'
   | 'axis-of'
+  // 以前の「比較」機能の名残。すでにある空間のために残してある
   | 'compared-with';
 
-export const USER_RELATION_TYPES: RelationType[] = ['related', 'supports', 'contradicts', 'derived', 'source', 'compared-with'];
+export const USER_RELATION_TYPES: RelationType[] = ['related', 'supports', 'contradicts', 'derived', 'source'];
 
 export interface Fact {
   label: string;
@@ -157,7 +158,6 @@ export interface SpaceMeta {
 
 export type WindowType =
   | 'summary'
-  | 'compare'
   | 'extract'
   | 'axis'
   | 'preview'

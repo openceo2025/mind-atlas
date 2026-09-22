@@ -7,6 +7,7 @@ import { classifyRelations, nameClusters } from '../lib/ai';
 import {
   addLog,
   addRelationRaw,
+  canvasCards,
   get,
   isAxisCard,
   layoutCards,
@@ -106,6 +107,16 @@ export function moveCards(ids: string[], dx: number, dy: number) {
   }
 }
 
+/** Shift ドラッグ：奥行きだけを動かす（奥へ行くほど右上へ寄り、小さくなる） */
+export function placeAtDepth(places: { id: string; x: number; y: number; depth: number }[]) {
+  set((s) => {
+    const cards = { ...s.cards };
+    for (const p of places) if (cards[p.id]) cards[p.id] = { ...cards[p.id], x: p.x, y: p.y, depth: p.depth };
+    return { cards };
+  });
+  for (const p of places) engine.setTarget(p.id, p.x, p.y, depthScale(p.depth), 'drag');
+}
+
 /** 軸になっているカードは、どこに置かれても軸の先端へ戻る */
 export function settleAxisCard(id: string) {
   const k = AXIS_KEYS.find((key) => get().axes[key] === id);
@@ -131,6 +142,44 @@ export function detachAxis(key: AxisKey) {
   const id = s.axes[key];
   if (!id) return;
   applyAxes({ ...s.axes, [key]: '' }, t('axis.detached', { axis: AXIS_NAME(key) }));
+}
+
+/**
+ * あるカードから、つながった子カードを生やす。押すたびに親の右へ increment して並ぶ。
+ * 中身を書く前に意味配置で飛ばされないよう、置いた場所を「手で置いた」として覚える。
+ */
+export function createChild(parentId: string) {
+  const s = get();
+  const parent = s.cards[parentId];
+  if (!parent || parent.place !== 'canvas' || s.readOnly) return;
+  snapshot();
+  const { w } = cardSize(parent);
+  const x = parent.x + w / 2 + 150;
+  const others = canvasCards(s).filter((c) => c.id !== parentId);
+  const born = s.relations.filter((r) => !r.suggested && r.from === parentId && r.type === 'derived').length;
+  let y = parent.y;
+  for (let i = born; i < born + 16; i++) {
+    y = parent.y + i * 124;
+    if (!others.some((c) => Math.abs(c.x - x) < 150 && Math.abs(c.y - y) < 108)) break;
+  }
+  const card = makeCard({
+    kind: 'note',
+    title: t('card.newTitle'),
+    x,
+    y,
+    depth: parent.depth,
+    log: [{ at: now(), code: 'childOf', params: { title: parent.title } }],
+  });
+  set((st) => ({ cards: { ...st.cards, [card.id]: card } }));
+  engine.place(card.id, parent.x, parent.y, depthScale(parent.depth) * 0.5);
+  engine.setTarget(card.id, x, y, depthScale(parent.depth), 'soft');
+  addRelationRaw(parentId, card.id, 'derived');
+  addLog(parentId, 'spawned', { n: 1 });
+  markDirty();
+  overrideFromPosition([card.id]);
+  set({ highlight: [card.id] });
+  window.setTimeout(() => set((st) => (st.highlight.includes(card.id) ? { highlight: [] } : {})), 1200);
+  return card.id;
 }
 
 export function duplicate(ids: string[]): string[] {
@@ -429,16 +478,6 @@ export function acceptRelation(id: string) {
 
 export function dismissRelation(id: string) {
   set((s) => ({ relations: s.relations.filter((r) => r.id !== id) }));
-}
-
-export function markCompared(ids: string[]) {
-  const [a, b] = ids;
-  if (!a || !b) return;
-  const s = get();
-  if (s.relations.some((r) => r.type === 'compared-with' && ((r.from === a && r.to === b) || (r.from === b && r.to === a)))) return;
-  addRelationRaw(a, b, 'compared-with');
-  addLog(a, 'compared', { title: lookup(b)?.title ?? '' });
-  addLog(b, 'compared', { title: lookup(a)?.title ?? '' });
 }
 
 /**

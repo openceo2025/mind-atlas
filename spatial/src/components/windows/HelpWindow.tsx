@@ -8,6 +8,7 @@ function shortcuts(): [string, MessageKey][] {
   return [
     [`${click} / Shift+${click}`, 'help.select'],
     [drag, 'help.drag'],
+    [`Shift+${drag}`, 'help.depth'],
     [`Alt+${drag}`, 'help.duplicate'],
     [t('key.doubleClickEmpty'), 'help.create'],
     [t('key.doubleClickCard'), 'help.open'],

@@ -1,11 +1,9 @@
 import { useStore, DOCK, Z_UNIT, AXIS_NAME, lookup } from '../store';
 import { t } from '../i18n';
-import { SPACE, axisEnds, cardSize } from '../lib/semantic';
+import { SPACE, axisEnds, cardSize, zOffset } from '../lib/semantic';
 import type { AxisKey } from '../types';
 
 const H = { x: SPACE.W / 2, y: SPACE.H / 2 };
-const ZX = SPACE.ZX / 2;
-const ZY = SPACE.ZY / 2;
 
 /** 意味空間の枠（各軸の値域）と、X/Y/Z 軸・軸ドック */
 export function SpaceGrid() {
@@ -14,11 +12,11 @@ export function SpaceGrid() {
   const dropTarget = useStore((s) => s.dropTarget);
   const dragging = useStore((s) => s.draggingIds.length > 0);
 
-  // 値域の箱（奥 z=0 と 手前 z=1 の2面）
-  const corner = (sx: number, sy: number, sz: number) => ({
-    x: sx * H.x + sz * ZX,
-    y: -sy * H.y + sz * ZY,
-  });
+  // 値域の箱（奥 z=0 と 手前 z=1 の2面）。sz は -1（奥）か 1（手前）
+  const corner = (sx: number, sy: number, sz: number) => {
+    const o = zOffset((sz + 1) / 2);
+    return { x: sx * H.x + o.x, y: -sy * H.y + o.y };
+  };
   const face = (sz: number) =>
     [
       [-1, -1],

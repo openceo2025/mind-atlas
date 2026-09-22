@@ -30,7 +30,6 @@ export function windowScreenPos(w: FloatWin) {
 
 export const WINDOW_WIDTH: Record<WindowType, number> = {
   summary: 380,
-  compare: 560,
   extract: 400,
   axis: 320,
   preview: 420,

@@ -185,31 +185,6 @@ export async function summarize(cards: Card[], lens: Lens, variant: number): Pro
   return { lead: String(r.lead ?? ''), points: Array.isArray(r.points) ? r.points.slice(0, 6) : [], tags: Array.isArray(r.tags) ? r.tags.slice(0, 5) : [] };
 }
 
-// ── 比較 ─────────────────────────────────────────────
-export interface CompareResult {
-  comment: string;
-  rows: { label: string; values: string[]; best?: number }[];
-  axis: { label: string; low: string; high: string };
-}
-
-export async function compare(cards: Card[], axisLabels: string[]): Promise<CompareResult> {
-  const r = await runJson<CompareResult>(
-    [
-      `Compare the ${cards.length} cards below (in this order: ${cards.map((c) => `[${c.id}]`).join(', ')}).`,
-      `The user currently views them along these axes: ${axisLabels.join(' / ') || 'none'}.`,
-      'Return {"comment": string (2-3 sentences on how they differ and how they could complement each other),',
-      '"rows": [{"label": criterion, "values": one short value per card in the given order, "best": index of the better card or -1}] (4-6 meaningful criteria, include the current axes when relevant),',
-      '"axis": {"label": the single criterion where they differ most, "low": short label for its low end, "high": short label for its high end}}.',
-    ].join('\n'),
-    cardsContext(cards),
-  );
-  return {
-    comment: String(r.comment ?? ''),
-    rows: Array.isArray(r.rows) ? r.rows.slice(0, 8) : [],
-    axis: r.axis ?? { label: '', low: '', high: '' },
-  };
-}
-
 // ── 展開 ─────────────────────────────────────────────
 export interface Draft {
   kind: CardKind;

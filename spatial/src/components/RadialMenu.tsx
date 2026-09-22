@@ -3,12 +3,12 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   aiBlock,
   collapseGroup,
+  createChild,
   expandGroup,
   get,
   group,
   isAxisCard,
   layoutCards,
-  markCompared,
   openWindow,
   openWindowAtScreen,
   proposeClusters,
@@ -24,8 +24,7 @@ import {
   worldToScreen,
 } from '../store';
 import { engine } from '../lib/physics';
-import { cardSize, cardText } from '../lib/semantic';
-import { cosine, resolveVectors } from '../lib/embeddings';
+import { cardSize } from '../lib/semantic';
 import { expand } from '../lib/ai';
 import { t } from '../i18n';
 import { Icon } from './Icons';
@@ -47,13 +46,15 @@ export function RadialMenu() {
   const selection = useStore((s) => s.selection);
   const card = useStore((s) => (s.primary ? s.cards[s.primary] : undefined));
   const dragging = useStore((s) => s.draggingIds.length > 0);
+  const linking = useStore((s) => Boolean(s.linking));
   const hiddenByWindow = useStore((s) => s.radialHidden);
   const readOnly = useStore((s) => s.readOnly);
   const busy = useStore((s) => s.busy);
   const ref = useRef<HTMLDivElement>(null);
   const [tip, setTip] = useState<string | null>(null);
 
-  const visible = !!card && card.place === 'canvas' && selection.length > 0 && !dragging && !hiddenByWindow && !readOnly;
+  // 線を引いている間は、輪が相手のカードを隠さないように消える
+  const visible = !!card && card.place === 'canvas' && selection.length > 0 && !dragging && !linking && !hiddenByWindow && !readOnly;
 
   useLayoutEffect(() => {
     if (!visible || !primary) return;
@@ -87,29 +88,13 @@ export function RadialMenu() {
       run: () => openWindow('summary', selection),
     },
     {
-      key: 'compare',
-      label: t('radial.compare'),
-      icon: 'compare',
-      tip: n > 1 ? t('radial.compareTipMany', { n: Math.min(n, 3) }) : t('radial.compareTip'),
-      run: () => {
-        let ids = selection.slice(0, 3);
-        let picked = false;
-        if (ids.length < 2) {
-          // 比較相手は、意味ベクトルが最も近いカード
-          const others = layoutCards().filter((c) => c.id !== card.id && !['concept', 'topic', 'group'].includes(c.kind));
-          if (!others.length) return toast(t('toast.nothingToCompare'));
-          const { vectors } = resolveVectors([cardText(card), ...others.map(cardText)]);
-          let best = 0;
-          others.forEach((_, i) => {
-            if (cosine(vectors[0], vectors[i + 1]) > cosine(vectors[0], vectors[best + 1])) best = i;
-          });
-          ids = [card.id, others[best].id];
-          picked = true;
-          select(ids);
-        }
-        markCompared(ids);
-        openWindow('compare', ids, { picked });
-      },
+      key: 'child',
+      label: t('radial.child'),
+      icon: 'childCard',
+      tip: t('radial.childTip'),
+      disabled: card.kind === 'concept' || isAxisCard(card.id),
+      // 押すたびに、親につながった空のカードが隣へ増えていく
+      run: () => createChild(card.id),
     },
     {
       key: 'chat',

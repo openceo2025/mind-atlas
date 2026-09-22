@@ -73,14 +73,13 @@ const P: Record<string, ReactNode> = {
       <path d="M8 8h8M8 12h8M8 16h5" />
     </>
   ),
-  compare: (
+  childCard: (
     <>
-      <rect x="3" y="5" width="7.5" height="14" rx="1.5" />
-      <rect x="13.5" y="5" width="7.5" height="14" rx="1.5" />
-      <path d="M10.5 12h3" />
+      <rect x="2.5" y="4" width="9" height="7" rx="1.6" />
+      <rect x="12.5" y="13" width="9" height="7" rx="1.6" />
+      <path d="M7 11v3.5A2 2 0 0 0 9 16.5h3.5" />
     </>
   ),
-  scale: <path d="M12 4v16M6 20h12M4 8h16M4 8l-2.5 6a3 3 0 0 0 5 0L4 8Zm16 0-2.5 6a3 3 0 0 0 5 0L20 8Z" />,
   extract: (
     <>
       <path d="M8 3.5H5.5a2 2 0 0 0-2 2V8M16 3.5h2.5a2 2 0 0 1 2 2V8M8 20.5H5.5a2 2 0 0 1-2-2V16M16 20.5h2.5a2 2 0 0 0 2-2V16" />

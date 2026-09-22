@@ -1,5 +1,11 @@
 /* ── 製品版で追加した部品 ─────────────────────────── */
 
+/* 道具の窓を左ナビまで運ぶと、離した時点で閉じる（その目印） */
+.sidebar.drop-close {
+  background: linear-gradient(180deg, rgba(20, 60, 110, 0.92), rgba(8, 26, 56, 0.92));
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
 /* レイアウト：サイドバーの開閉とスマホ対応 */
 .app.no-sidebar {
   grid-template-columns: 0 minmax(0, 1fr);

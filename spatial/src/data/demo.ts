@@ -255,7 +255,7 @@ const RELATIONS: [string, string, Relation['type'], string?][] = [
   ['quote', 'article', 'source'],
   ['wind', 'planA', 'derived'],
   ['battery', 'planB', 'derived'],
-  ['planA', 'planB', 'compared-with'],
+  ['planA', 'planB', 'related'],
   ['expert', 'battery', 'supports'],
   ['greentech', 'battery', 'related'],
   ['grid', 'planA', 'contradicts'],

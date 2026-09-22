@@ -10,6 +10,7 @@ import {
   moveCards,
   openWindow,
   overrideFromPosition,
+  placeAtDepth,
   select,
   set,
   settleAxisCard,
@@ -17,13 +18,16 @@ import {
   AXIS_NAME,
 } from '../store';
 import { engine } from '../lib/physics';
-import { axisEnds, axisSlotKey, cardSize } from '../lib/semantic';
+import { DEPTH_HIGH, DEPTH_LOW, axisEnds, axisSlotKey, cardSize, project, unproject } from '../lib/semantic';
 import { dropCards, findDropTarget } from '../lib/drag';
 import { t } from '../i18n';
 import { Icon, KindIcon, Visual } from './Icons';
 import type { Card } from '../types';
 import { panState } from './panState';
 import { startLinkDrag } from './linking';
+
+/** Shift ドラッグ：この距離だけ縦に引くと、奥行きが 1 つ分変わる */
+const DEPTH_DRAG_PX = 420;
 
 const matches = (c: Card, q: string) => {
   const s = q.toLowerCase();
@@ -65,14 +69,58 @@ function CardViewImpl({ id }: { id: string }) {
   if (!card) return null;
   const hidden = card.place !== 'canvas';
 
+  // Shift ドラッグ：上へ引くほど奥（右上へ寄って小さく）、下へ引くほど手前。
+  // 動かさずに離したときは、これまで通り選択の切り替え。
+  const startDepthDrag = (e: React.PointerEvent) => {
+    const st = useStore.getState();
+    const ids = (st.selection.includes(id) ? st.selection : [id]).filter((x) => st.cards[x]?.place === 'canvas' && !axisKeyOf(x, st.axes));
+    if (st.readOnly || !ids.length) return select([id], 'toggle');
+    const from = ids.map((x) => {
+      const c = st.cards[x];
+      const u = unproject(c.x, c.y, c.depth);
+      return { id: x, sx: u.sx, sy: u.sy, depth: c.depth };
+    });
+    const start = { x: e.clientX, y: e.clientY };
+    let started = false;
+    const move = (ev: PointerEvent) => {
+      if (!started) {
+        if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 5) return;
+        started = true;
+        ids.forEach((x) => engine.setLift(x, true));
+        set({ draggingIds: ids });
+      }
+      const delta = (start.y - ev.clientY) / DEPTH_DRAG_PX;
+      placeAtDepth(
+        from.map((b) => {
+          const depth = Math.max(DEPTH_LOW, Math.min(DEPTH_HIGH, b.depth - delta));
+          const p = project(b.sx, b.sy, depth);
+          return { id: b.id, x: p.x, y: p.y, depth };
+        }),
+      );
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      if (!started) return select([id], 'toggle');
+      ids.forEach((x) => engine.setLift(x, false));
+      set({ draggingIds: [] });
+      overrideFromPosition(ids);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 || panState.space || panState.pinching) return;
     e.stopPropagation();
     const st = useStore.getState();
-    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+    if (e.ctrlKey || e.metaKey) {
       select([id], 'toggle');
       return;
     }
+    if (e.shiftKey) return startDepthDrag(e);
     if (!st.selection.includes(id)) select([id]);
     else set({ primary: id, radialHidden: false, selectedRelation: null });
     if (st.readOnly) return;
@@ -145,6 +193,8 @@ function CardViewImpl({ id }: { id: string }) {
     }
   };
 
+  // 手前のカードほど上に重なる。奥行きは負にもなるので、下駄を履かせて正の値にする
+  const layer = Math.round((card.depth + 1) * 100);
   const visual = Boolean(card.image) || (card.visual && (card.kind === 'image' || card.kind === 'idea'));
   const meaning = Math.min(5, Math.floor((card.log.length - 1 + relCount) / 2));
   const cls = [
@@ -173,7 +223,7 @@ function CardViewImpl({ id }: { id: string }) {
       style={{
         width: w,
         height: h,
-        zIndex: dragging ? 900 : selected ? 400 + Math.round(card.depth * 100) : Math.round(card.depth * 100) + (axisKey ? 300 : 0),
+        zIndex: dragging ? 900 : selected ? 400 + layer : layer + (axisKey ? 300 : 0),
         opacity: hidden ? 0 : undefined,
         pointerEvents: hidden ? 'none' : undefined,
         ...(clusterHue !== undefined ? ({ '--cl-hue': clusterHue } as React.CSSProperties) : {}),
