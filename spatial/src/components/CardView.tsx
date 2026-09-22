@@ -125,6 +125,15 @@ function CardViewImpl({ id }: { id: string }) {
     window.addEventListener('pointercancel', up);
   };
 
+  // 右クリック（長押し）で、そのカードにできることを出す
+  const onContextMenu = (e: React.MouseEvent) => {
+    if (readOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!selected) select([id]);
+    set({ cardMenu: { ids: useStore.getState().selection.includes(id) ? useStore.getState().selection : [id], x: e.clientX, y: e.clientY } });
+  };
+
   const onDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (card.kind === 'group') {
@@ -171,6 +180,7 @@ function CardViewImpl({ id }: { id: string }) {
       }}
       onPointerDown={onPointerDown}
       onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
       title={card.kind === 'group' ? t('card.groupHint') : t('card.detailHint')}
     >
       {card.kind === 'group' && !card.expanded && (

@@ -4,6 +4,7 @@ import { getLocale, t, type Locale } from '../i18n';
 import type { Card, CardKind, RelationType } from '../types';
 import { aiTurn, saveAiPreference, ServiceError, type AiPreference, type AiTurnMessage } from './service';
 import { confirmRequestCost, reportUsage } from './cost';
+import { SPACE_TOOLS, executeSpaceTool } from './spaceTools';
 
 const LANGUAGE: Record<Locale, string> = {
   en: 'English',
@@ -74,7 +75,9 @@ function accountKey(preference: AiPreference) {
 }
 
 /** 選んだモデルが提供されなくなっていたら、その会社の既定モデルで一度だけやり直す */
-async function turn(payload: { messages: AiTurnMessage[]; contextText?: string }) {
+type TurnPayload = { messages: AiTurnMessage[]; contextText?: string; tools?: { type: 'function'; name: string; description: string; parameters: Record<string, unknown> }[] };
+
+async function turn(payload: TurnPayload) {
   await confirmRequestCost({ chars: payload.messages.reduce((n, m) => n + m.content.length, 0) + (payload.contextText?.length ?? 0) });
   const send = async () => {
     const result = await aiTurn({ ...choice, ...payload });
@@ -299,13 +302,63 @@ export async function suggestAxisEnds(label: string): Promise<{ low: string; hig
 }
 
 // ── チャット ─────────────────────────────────────────
-export async function chat(history: AiTurnMessage[], cards: Card[], spaceTitle: string) {
+const MAX_TOOL_TURNS = 6;
+
+export interface ChatStep {
+  tool: string;
+  ok: boolean;
+  text: string;
+}
+
+/**
+ * チャット。道具を渡してあるので、AI はカードを作る・直す・消す・つなぐ・軸を変える
+ * といった操作を自分で行い、終わってから答えを返す。
+ */
+export async function chat(
+  history: AiTurnMessage[],
+  cards: Card[],
+  spaceTitle: string,
+  opts: { onStep?: (step: ChatStep) => void } = {},
+) {
   const intro = [
     SYSTEM,
-    `The user is working in the space "${spaceTitle}". The cards in focus are provided as context.`,
+    `The user is working in the space "${spaceTitle}". The cards below are what the user can see right now.`,
+    'You can change the space with the tools: create, update, delete, link, bundle cards, set an axis or focus a card.',
+    'Use a tool only when the user asks for a change or when you must look something up; never guess a card id — search or use the ids in the context.',
+    'After the tools have run, tell the user briefly what you changed.',
     `Answer in ${language()} unless the user writes in another language. Use Markdown lists when helpful.`,
   ].join('\n');
   const messages: AiTurnMessage[] = history.map((m, i) => (i === 0 && m.role === 'user' ? { role: 'user', content: `${intro}\n\n${m.content}` } : m));
-  const result = await turn({ messages, contextText: cardsContext(cards, 30000) });
-  return result.text;
+  const tools = SPACE_TOOLS.map((tool) => ({ type: 'function' as const, name: tool.name, description: tool.description, parameters: tool.parameters }));
+
+  for (let i = 0; i < MAX_TOOL_TURNS; i += 1) {
+    const result = await turn({ messages, contextText: cardsContext(cards, 30000), tools });
+    const calls = result.toolCalls ?? [];
+    if (!calls.length) return result.text;
+    messages.push({ role: 'assistant', content: result.text, toolCalls: calls });
+    for (const call of calls) {
+      let args: Record<string, unknown> = {};
+      try {
+        args = call.arguments ? (JSON.parse(call.arguments) as Record<string, unknown>) : {};
+      } catch {
+        args = {};
+      }
+      const outcome = await executeSpaceTool(call.name, args).catch((error: unknown) => ({
+        ok: false,
+        text: error instanceof Error ? error.message : String(error),
+      }));
+      opts.onStep?.({ tool: call.name, ok: outcome.ok, text: outcome.text });
+      messages.push({
+        role: 'tool',
+        name: call.name,
+        toolCallId: call.callId,
+        content: [outcome.text, 'data' in outcome && outcome.data !== undefined ? JSON.stringify(outcome.data) : '']
+          .filter(Boolean)
+          .join('\n')
+          .slice(0, 4000),
+      });
+    }
+  }
+  const last = await turn({ messages, contextText: cardsContext(cards, 30000) });
+  return last.text;
 }

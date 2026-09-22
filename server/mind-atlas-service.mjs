@@ -1485,6 +1485,18 @@ function createMockProviderToolTurn(provider, payload) {
   const userText = Array.isArray(payload.messages)
     ? payload.messages.map((message) => message?.role === "user" ? stringValue(message.content) : "").filter(Boolean).at(-1) ?? ""
     : "";
+  // Staging only: "/tool <name> <json>" makes the mock ask for that tool once, so the
+  // whole tool loop can be exercised without a provider.
+  const toolRequest = userText.match(/\/tool\s+([a-z_]+)\s*(\{[\s\S]*\})?/i);
+  const alreadyCalled = Array.isArray(payload.messages) && payload.messages.some((message) => message?.role === "tool");
+  if (toolRequest && !alreadyCalled) {
+    return {
+      text: "",
+      toolCalls: [{ callId: `mock_${crypto.randomUUID()}`, name: toolRequest[1], arguments: toolRequest[2] ?? "{}" }],
+      model,
+      raw: { model, usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } },
+    };
+  }
   const text = `[staging:${provider.id}] ${provider.label} mock reply for "${userText.slice(0, 120) || "Mind Atlas request"}"`;
   const inputTokens = estimateTokens(JSON.stringify(payload.messages ?? "") + JSON.stringify(payload.context ?? ""));
   const outputTokens = estimateTokens(text);

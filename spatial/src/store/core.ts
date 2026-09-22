@@ -51,6 +51,8 @@ export interface State {
   costNotice: boolean;
   /** 共有リンクが使えなくなっているとき */
   shareUnavailable: boolean;
+  /** カードの右クリックメニュー */
+  cardMenu: { ids: string[]; x: number; y: number } | null;
   /** AIに送る前の確認（見込み表示がオンのとき） */
   confirmAsk: { title: string; body: string; resolve: (ok: boolean) => void } | null;
   // ── UI ──
@@ -120,6 +122,7 @@ export const useStore = create<State>(() => ({
     }
   })(),
   shareUnavailable: false,
+  cardMenu: null,
   confirmAsk: null,
   selection: [],
   primary: null,

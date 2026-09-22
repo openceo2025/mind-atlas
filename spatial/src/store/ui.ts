@@ -108,6 +108,9 @@ export function openWindowAtScreen(type: WindowType, cardIds: string[], at: { x:
 }
 
 /** 同じ種類の道具ウィンドウがあれば前面に、無ければ開く */
+/** 左ナビから開く道具は、選択ではなく空間全体を相手にする */
+const WHOLE_SPACE_TOOLS: WindowType[] = ['chat', 'search', 'voice', 'spaces', 'help', 'settings', 'account', 'share', 'axis'];
+
 export function toggleToolWindow(type: WindowType, at?: { x: number; y: number }, data?: Record<string, unknown>) {
   const s = get();
   const existing = s.windows.find((w) => w.type === type);
@@ -117,7 +120,8 @@ export function toggleToolWindow(type: WindowType, at?: { x: number; y: number }
     return;
   }
   const width = WINDOW_WIDTH[type];
-  openWindowAtScreen(type, s.selection.slice(0, 12), at ?? { x: s.viewport.w - width - 16, y: 64 }, width, data);
+  const cardIds = WHOLE_SPACE_TOOLS.includes(type) ? [] : s.selection.slice(0, 12);
+  openWindowAtScreen(type, cardIds, at ?? { x: s.viewport.w - width - 16, y: 64 }, width, data);
 }
 
 export function focusWindow(id: string, hideRadial = true) {

@@ -4,6 +4,9 @@ import {
   bootSpaces,
   canvasCards,
   createBlankSpace,
+  deleteCards,
+  duplicate,
+  toShelf,
   createCard,
   duplicateCurrentSpace,
   focusCard,
@@ -264,6 +267,43 @@ export function ReadOnlyBanner() {
       <Icon name="info" size={14} /> {t('share.banner')}
       <button className="btn small primary" onClick={() => void duplicateCurrentSpace()}>
         {t('share.remix')}
+      </button>
+    </div>
+  );
+}
+
+/** カードを右クリックしたときのメニュー（削除・複製・棚へ・詳細） */
+export function CardMenu() {
+  const menu = useStore((s) => s.cardMenu);
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => set({ cardMenu: null });
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('keydown', close);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('keydown', close);
+    };
+  }, [menu]);
+  if (!menu) return null;
+  const run = (fn: () => void) => () => {
+    set({ cardMenu: null });
+    fn();
+  };
+  const n = menu.ids.length;
+  return (
+    <div className="card-context" style={{ left: Math.min(menu.x, window.innerWidth - 190), top: Math.min(menu.y, window.innerHeight - 170) }} onPointerDown={(e) => e.stopPropagation()}>
+      <button onClick={run(() => openWindow('detail', [menu.ids[0]]))}>
+        <Icon name="edit" size={13} /> {t('card.details')}
+      </button>
+      <button onClick={run(() => duplicate(menu.ids))}>
+        <Icon name="copy" size={13} /> {t('detail.duplicate')}
+      </button>
+      <button onClick={run(() => toShelf(menu.ids))}>
+        <Icon name="shelf" size={13} /> {t('detail.toShelf')}
+      </button>
+      <button className="danger" onClick={run(() => deleteCards(menu.ids))}>
+        <Icon name="trash" size={13} /> {n > 1 ? t('cmd.deleteMany', { n }) : t('common.delete')}
       </button>
     </div>
   );

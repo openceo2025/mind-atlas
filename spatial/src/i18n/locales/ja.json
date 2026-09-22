@@ -354,6 +354,7 @@
   "detail.toShelf": "一時置き場へ",
 
   "chat.wholeSpace": "文脈：スペース全体",
+  "chat.visibleCards": "文脈：いま見えているカード {n} 枚",
   "chat.q1": "この考えに足りないものは？",
   "chat.q2": "主な対立点をまとめて",
   "chat.q3": "次の打ち手を3つ提案して",
@@ -511,6 +512,7 @@
   "cmd.placeholderSelected": "{n} 件を選択中 — コマンドを入力",
   "cmd.none": "該当するコマンドはありません",
   "cmd.newCard": "新しいカード",
+  "cmd.deleteMany": "{n} 枚を削除",
   "cmd.summary": "選択を要約",
   "cmd.compare": "選択を比較",
   "cmd.chat": "AIに質問",

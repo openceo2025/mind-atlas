@@ -225,9 +225,20 @@ export async function fetchChatOptions(): Promise<ChatService[]> {
   return (data.services ?? []).filter((s) => s.configured);
 }
 
+export interface AiToolCall {
+  callId: string;
+  name: string;
+  arguments: string;
+}
+
 export interface AiTurnMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'tool';
   content: string;
+  /** assistant が道具を使うと決めたとき */
+  toolCalls?: AiToolCall[];
+  /** role: 'tool' の返答 */
+  toolCallId?: string;
+  name?: string;
 }
 
 export interface AiUsage {
@@ -242,14 +253,22 @@ export interface AiTurnResult {
   text: string;
   provider: string;
   model: string;
+  toolCalls?: AiToolCall[];
   usage?: AiUsage;
 }
 
-export async function aiTurn(payload: { provider: string; model?: string; messages: AiTurnMessage[]; contextText?: string; reasoningEffort?: string }) {
+export async function aiTurn(payload: {
+  provider: string;
+  model?: string;
+  messages: AiTurnMessage[];
+  contextText?: string;
+  reasoningEffort?: string;
+  tools?: { type: 'function'; name: string; description: string; parameters: Record<string, unknown> }[];
+}) {
   const result = await json<AiTurnResult>(
     await api('/api/ai/text-partner-turn', {
       method: 'POST',
-      body: JSON.stringify({ ...payload, product: 'spatial', tools: [] }),
+      body: JSON.stringify({ ...payload, product: 'spatial', tools: payload.tools ?? [] }),
     }),
   );
   notifySessionChanged();

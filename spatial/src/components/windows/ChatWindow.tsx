@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { addRelationRaw, createCard, get, layoutCards, lookup, spawnDrafts, toast, updateWindowData, useStore } from '../../store';
-import { chat } from '../../lib/ai';
+import { addRelationRaw, createCard, lookup, spawnDrafts, toast, updateWindowData, useStore } from '../../store';
+import { chat, type ChatStep } from '../../lib/ai';
+import { visibleContextCards } from '../../lib/spaceTools';
 import type { AiTurnMessage } from '../../lib/service';
 import { t } from '../../i18n';
 import type { FloatWin } from '../../types';
@@ -14,6 +15,7 @@ export function ChatWindow({ win }: { win: FloatWin }) {
   const messages = (win.data?.messages as AiTurnMessage[] | undefined) ?? [];
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [steps, setSteps] = useState<ChatStep[]>([]);
   const [error, setError] = useState('');
   const block = useAiBlock();
   const listRef = useRef<HTMLDivElement>(null);
@@ -32,9 +34,12 @@ export function ChatWindow({ win }: { win: FloatWin }) {
     const next: AiTurnMessage[] = [...messages, { role: 'user', content: q }];
     updateWindowData(win.id, { messages: next });
     setBusy(true);
+    setSteps([]);
     try {
-      const context = contextIds.length ? contextIds.map((id) => lookup(id)).filter((c) => c) : layoutCards(get()).slice(0, 40);
-      const answer = await chat(next.slice(-12), context as NonNullable<ReturnType<typeof lookup>>[], title);
+      // 選んだカードがあればそれ、無ければ「いま画面で読めているカード」をまとめて渡す
+      const picked = contextIds.map((id) => lookup(id)).filter(Boolean) as NonNullable<ReturnType<typeof lookup>>[];
+      const context = picked.length ? picked : visibleContextCards(60);
+      const answer = await chat(next.slice(-12), context, title, { onStep: (step) => setSteps((prev) => [...prev, step]) });
       updateWindowData(win.id, { messages: [...next, { role: 'assistant', content: answer }] });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -62,7 +67,9 @@ export function ChatWindow({ win }: { win: FloatWin }) {
       <div className="fwin-body chat-body" ref={listRef}>
         <div className="context-chips">
           <Icon name="layers" size={12} />
-          {contextTitles.length ? contextTitles.slice(0, 4).join(' · ') + (contextTitles.length > 4 ? ` +${contextTitles.length - 4}` : '') : t('chat.wholeSpace')}
+          {contextTitles.length
+            ? contextTitles.slice(0, 4).join(' · ') + (contextTitles.length > 4 ? ` +${contextTitles.length - 4}` : '')
+            : t('chat.visibleCards', { n: visibleContextCards(60).length })}
         </div>
         {block && <AiNotice block={block} />}
         {!messages.length && !block && (
@@ -84,6 +91,15 @@ export function ChatWindow({ win }: { win: FloatWin }) {
             )}
           </div>
         ))}
+        {steps.length > 0 && (
+          <div className="tool-steps">
+            {steps.map((step, i) => (
+              <div key={i} className={`tool-step ${step.ok ? '' : 'bad'}`}>
+                <Icon name={step.ok ? 'check' : 'info'} size={11} /> {step.text}
+              </div>
+            ))}
+          </div>
+        )}
         {busy && (
           <div className="msg assistant">
             <span className="spinner" /> {t('common.thinking')}

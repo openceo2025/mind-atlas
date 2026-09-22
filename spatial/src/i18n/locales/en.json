@@ -354,6 +354,7 @@
   "detail.toShelf": "Move to shelf",
 
   "chat.wholeSpace": "Context: the whole space",
+  "chat.visibleCards": "Context: {n} cards you can see",
   "chat.q1": "What is missing from this thinking?",
   "chat.q2": "Summarize the main tensions",
   "chat.q3": "Suggest three next actions",
@@ -511,6 +512,7 @@
   "cmd.placeholderSelected": "{n} selected — type a command",
   "cmd.none": "No matching commands",
   "cmd.newCard": "New card",
+  "cmd.deleteMany": "Delete {n} cards",
   "cmd.summary": "Summarize selection",
   "cmd.compare": "Compare selection",
   "cmd.chat": "Ask AI",

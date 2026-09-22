@@ -354,6 +354,7 @@
   "detail.toShelf": "शेल्फ़ पर ले जाएँ",
 
   "chat.wholeSpace": "संदर्भ: पूरा स्पेस",
+  "chat.visibleCards": "संदर्भ: दिख रहे {n} कार्ड",
   "chat.q1": "इस सोच में क्या कमी है?",
   "chat.q2": "मुख्य तनावों का सारांश दें",
   "chat.q3": "अगले तीन कदम सुझाएँ",
@@ -511,6 +512,7 @@
   "cmd.placeholderSelected": "{n} चुने गए — कमांड लिखें",
   "cmd.none": "कोई मेल खाती कमांड नहीं",
   "cmd.newCard": "नया कार्ड",
+  "cmd.deleteMany": "{n} कार्ड हटाएँ",
   "cmd.summary": "चयन का सारांश",
   "cmd.compare": "चयन की तुलना",
   "cmd.chat": "AI से पूछें",
