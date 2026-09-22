@@ -32,6 +32,14 @@ fi
 
 echo "== laying commit $SHA over $APP =="
 mkdir -p "$APP"
+# git archive carries only tracked files, so clear the paths it owns first: a file
+# deleted in this commit would otherwise survive here and break the build.
+tar -tzf "$ARCHIVE" | cut -d/ -f1 | sort -u | while read -r entry; do
+  case "$entry" in
+    "" | node_modules | .env.service | .deploy-commit | dist | dist-spatial) continue ;;
+  esac
+  rm -rf "${APP:?}/$entry"
+done
 tar -xzf "$ARCHIVE" -C "$APP"
 echo "$SHA" > "$APP/.deploy-commit"
 
