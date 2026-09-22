@@ -87,6 +87,19 @@ const realtimeMaxSessionSeconds = readIntEnv("MIND_ATLAS_REALTIME_MAX_SESSION_SE
 // what is kept is duration x rate, floored at the minimum and capped by the hold.
 const realtimeUsdPerMinute = Number(getEnv("MIND_ATLAS_REALTIME_USD_PER_MINUTE", "0.12")) || 0.12;
 const realtimeMinMicroUsd = readIntEnv("MIND_ATLAS_REALTIME_MIN_MICRO_USD", 20_000);
+
+// ── Decision model (TypeSafe Jev): typed values with probabilities, never prose.
+// Classification, scoring and tool picking live here instead of on a chat model, which is
+// what makes them roughly fifty times cheaper and an order of magnitude faster.
+const decisionApiKey = getEnv("MIND_ATLAS_TYPESAFE_API_KEY", getEnv("TYPESAFE_API_KEY"));
+const decisionBaseUrl = getEnv("MIND_ATLAS_TYPESAFE_BASE_URL", "https://api.typesafe.ai/v1").replace(/\/+$/, "");
+const decisionProviderId = "typesafe";
+const decisionModel = getEnv("MIND_ATLAS_DECISION_MODEL", "jev-latest");
+// The API allows 64k tokens for the state plus every question; stay well inside it.
+const decisionMaxChars = readIntEnv("MIND_ATLAS_DECISION_MAX_CHARS", 60_000);
+const decisionMaxQuestions = readIntEnv("MIND_ATLAS_DECISION_MAX_QUESTIONS", 120);
+const decisionTimeoutMs = readIntEnv("MIND_ATLAS_DECISION_TIMEOUT_MS", 20_000);
+
 const highCostMaxOutputTokens = readIntEnv("MIND_ATLAS_SERVICE_HIGH_COST_MAX_OUTPUT_TOKENS", 2048);
 const highCostOutputUsdPer1m = Number(getEnv("MIND_ATLAS_SERVICE_HIGH_COST_OUTPUT_USD_PER_1M", "50"));
 const realtimeSessionMicroUsd = readIntEnv("MIND_ATLAS_REALTIME_SESSION_MICRO_USD", 750_000);
@@ -134,6 +147,9 @@ const analyticsHmacKey = getEnv("MIND_ATLAS_ANALYTICS_HMAC_KEY");
 const stagingMockAuth = readBoolEnv("MIND_ATLAS_STAGING_MOCK_AUTH", false);
 const stagingMockBilling = readBoolEnv("MIND_ATLAS_STAGING_MOCK_BILLING", false);
 const stagingMockProviders = readBoolEnv("MIND_ATLAS_STAGING_MOCK_PROVIDERS", false);
+// Declared here because it needs the staging switch above: with mocks on, the decision
+// model answers locally, so the harness runs without a TypeSafe key.
+const decisionConfigured = stagingMockProviders || isUsableServiceSecret(decisionApiKey);
 const stagingMockEmail = getEnv("MIND_ATLAS_STAGING_MOCK_EMAIL", "staging-user@example.test");
 const stagingMockName = getEnv("MIND_ATLAS_STAGING_MOCK_NAME", "Staging User");
 const openAiApiKeyUsable = isUsableServiceSecret(openAiApiKey);
@@ -196,6 +212,7 @@ const server = http.createServer(async (request, response) => {
           openai: stagingMockProviders || openAiApiKeyUsable,
           anthropic: providerCatalog.some((provider) => provider.id === "anthropic" && provider.configured),
           deepseek: providerCatalog.some((provider) => provider.id === "deepseek" && provider.configured),
+          decide: decisionConfigured,
           stagingMocks: {
             auth: stagingMockAuth,
             billing: stagingMockBilling,
@@ -328,6 +345,11 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname.startsWith("/api/share/notebooks/")) {
       await handleCloudNotebookPublicLoad(request, response, url.pathname.slice("/api/share/notebooks/".length));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/ai/decide") {
+      await handleDecide(request, response);
       return;
     }
 
@@ -1139,6 +1161,147 @@ async function handleTextPartnerTurn(request, response) {
   });
 }
 
+/**
+ * Ask the decision model. The body is the System One shape: a state to look at and a map
+ * of typed questions. Nothing here writes text, so output tokens cost nothing and a whole
+ * batch of questions settles for a fraction of a single chat turn.
+ */
+async function handleDecide(request, response) {
+  const { user, subscription } = await requireAiEntitlement(request, response);
+  if (!decisionConfigured) throw new ServiceError(503, "decision_unavailable", "The decision model is not configured");
+  const payload = await readJson(request, decisionMaxChars * 2 + 8192);
+  const questions = payload.questions && typeof payload.questions === "object" && !Array.isArray(payload.questions) ? payload.questions : null;
+  const names = questions ? Object.keys(questions) : [];
+  if (!names.length) throw new ServiceError(400, "No questions to decide");
+  if (names.length > decisionMaxQuestions) {
+    throw new ServiceError(413, "too_many_questions", `At most ${decisionMaxQuestions} questions per request`);
+  }
+  const state = payload.state ?? "";
+  const stateChars = typeof state === "string" ? state.length : JSON.stringify(state).length;
+  const questionChars = JSON.stringify(questions).length;
+  if (stateChars + questionChars > decisionMaxChars) {
+    throw new ServiceError(413, "request_too_large", "Decision request is too large for hosted service mode");
+  }
+  const startedAt = Date.now();
+  const requestId = `req_${crypto.randomUUID()}`;
+  const purpose = stringValue(payload.purpose).slice(0, 40);
+  const estimatedInputTokens = Math.max(1, Math.ceil((stateChars + questionChars) / chatReserveCharsPerToken));
+  const reservation = await reserveUsageCredit({
+    user,
+    subscription,
+    requestId,
+    provider: decisionProviderId,
+    model: decisionModel,
+    amountMicroUsd: Math.max(1, estimateCostMicroUsd(decisionProviderId, decisionModel, Math.ceil(estimatedInputTokens * 1.5), 0)),
+    metadata: { kind: "decide", purpose, questions: names.length, estimatedInputTokens },
+  });
+  let result;
+  try {
+    result = await callDecisionModel({ state, questions });
+  } catch (error) {
+    await refundUsageReservation({ user, subscription, reservation, provider: decisionProviderId, model: decisionModel, reason: "decide_upstream_error" });
+    throw error;
+  }
+  const inputTokens = numberValue(result.usage?.input_tokens) ?? estimatedInputTokens;
+  const outputTokens = numberValue(result.usage?.output_tokens) ?? 0;
+  const usage = {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    estimatedCostMicroUsd: estimateCostMicroUsd(decisionProviderId, result.model || decisionModel, inputTokens, outputTokens),
+    durationMs: Date.now() - startedAt,
+  };
+  const account = await meterReservedUsage({
+    user,
+    subscription,
+    requestId,
+    provider: decisionProviderId,
+    model: result.model || decisionModel,
+    usage,
+    reservation,
+    metadata: { kind: "decide", purpose, questions: names.length },
+  });
+  sendJson(response, 200, {
+    answers: result.answers,
+    model: result.model || decisionModel,
+    usage: {
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      totalTokens: usage.totalTokens,
+      estimatedCostUsd: usage.estimatedCostMicroUsd / 1_000_000,
+      durationMs: usage.durationMs,
+      creditRemainingPercent: creditPercent(account),
+    },
+  });
+}
+
+async function callDecisionModel({ state, questions }) {
+  if (stagingMockProviders) return createMockDecision({ state, questions });
+  const body = { model: decisionModel, state, questions };
+  let upstream;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    upstream = await fetch(`${decisionBaseUrl}/systemone`, {
+      method: "POST",
+      headers: bearerHeaders(decisionApiKey, { "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(decisionTimeoutMs),
+    });
+    // 429 (rate limited) and 529 (overloaded) are the two the docs say to back off on.
+    if (upstream.status !== 429 && upstream.status !== 529) break;
+    await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+  }
+  const raw = await readUpstreamJson(upstream);
+  const answers = raw?.answers && typeof raw.answers === "object" ? raw.answers : {};
+  return { answers, model: stringValue(raw?.model) || decisionModel, usage: raw?.usage };
+}
+
+/**
+ * Staging only. Answers are deterministic so the local harness can exercise every path;
+ * a test drives a specific answer by putting [[jev:<question>=<value>]] in the state.
+ */
+function createMockDecision({ state, questions }) {
+  const text = (typeof state === "string" ? state : JSON.stringify(state ?? "")).toLowerCase();
+  const scripted = new Map();
+  for (const match of text.matchAll(/\[\[jev:([a-z0-9_.:-]+)=([^\]]+)\]\]/gi)) scripted.set(match[1].toLowerCase(), match[2].trim());
+  const answers = {};
+  for (const [name, question] of Object.entries(questions)) {
+    const want = scripted.get(String(name).toLowerCase());
+    const criteria = question?.criteria;
+    if (question?.type === "score") {
+      const levels = Array.isArray(criteria) && criteria.length > 1 ? criteria : ["low", "high"];
+      const top = levels.length - 1;
+      const score = want === undefined ? top / 2 : Math.max(0, Math.min(top, Number(want) || 0));
+      answers[name] = {
+        type: "score",
+        score,
+        legend: Object.fromEntries(levels.map((level, index) => [String(index), level])),
+        confidence: want === undefined ? 0.55 : 0.95,
+      };
+      continue;
+    }
+    if (question?.type === "choice") {
+      const options = criteria && typeof criteria === "object" && !Array.isArray(criteria) ? Object.keys(criteria) : [];
+      if (!options.length) continue;
+      // Take what the test asked for, else the option whose own name shows up in the state.
+      const picked = options.find((option) => option.toLowerCase() === String(want ?? "").toLowerCase())
+        ?? options.find((option) => option.length > 2 && text.includes(option.toLowerCase()))
+        ?? options[0];
+      const confidence = want === undefined ? 0.6 : 0.95;
+      const rest = (1 - confidence) / Math.max(1, options.length - 1);
+      answers[name] = {
+        type: "choice",
+        choice: picked,
+        probabilities: Object.fromEntries(options.map((option) => [option, option === picked ? confidence : rest])),
+        confidence,
+      };
+      continue;
+    }
+    answers[name] = { type: "noul", noul: want === undefined ? 0.5 : /^(1|true|yes|y)$/i.test(want) ? 0.96 : 0.04 };
+  }
+  const inputTokens = Math.max(1, estimateTokens(text) + estimateTokens(JSON.stringify(questions)));
+  return { answers, model: `mock-${decisionModel}`, usage: { input_tokens: inputTokens, output_tokens: 0 } };
+}
+
 async function handleRealtimeCall(request, response) {
   const { user, subscription } = await requireAiEntitlement(request, null, { attachConcurrency: false });
   if (!stagingMockProviders && !openAiApiKeyUsable) throw new ServiceError(503, "OpenAI API key is not configured");
@@ -1678,6 +1841,7 @@ async function createSessionResponse(user) {
     entitlement,
     // The browser estimates a request with the same numbers the reservation uses.
     aiLimits: { reserveCharsPerToken: chatReserveCharsPerToken, maxOutputTokens },
+    decide: { configured: decisionConfigured, model: decisionModel, maxQuestions: decisionMaxQuestions, maxChars: decisionMaxChars },
     chatOptions: await createChatOptionsResponse(),
     aiPreference: user ? await getUserAiPreference(user.id) : null,
   };

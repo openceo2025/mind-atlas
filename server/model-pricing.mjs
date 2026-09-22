@@ -65,6 +65,11 @@ export function createBuiltinModelPrices(_now = new Date()) {
 
     "deepseek:deepseek-flash": price(0.3, 1.2),
     "deepseek:deepseek-v4-pro": price(1.32, 3.96),
+
+    // Decision model (System One): input only, output is free.
+    // https://docs.typesafe.ai/api, checked 2026-09-23
+    "typesafe:jev-latest": price(0.042, 0),
+    "typesafe:jev-1": price(0.042, 0),
   };
 }
 

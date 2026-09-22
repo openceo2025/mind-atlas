@@ -1,15 +1,16 @@
-// IndexedDB の最小ラッパー。スペース本体・一覧状態・埋め込みキャッシュを保存する。
+// IndexedDB の最小ラッパー。スペース本体・一覧状態・埋め込み・軸の採点を保存する。
 // 使えない環境（プライベートブラウズ等）ではメモリ上だけで動く。
 
 const DB_NAME = 'mindatlas-spatial';
-const DB_VERSION = 1;
-export type StoreName = 'spaces' | 'kv' | 'embeddings';
+const DB_VERSION = 2;
+export type StoreName = 'spaces' | 'kv' | 'embeddings' | 'axisScores';
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 const memory: Record<StoreName, Map<string, unknown>> = {
   spaces: new Map(),
   kv: new Map(),
   embeddings: new Map(),
+  axisScores: new Map(),
 };
 
 function open(): Promise<IDBDatabase | null> {
@@ -19,7 +20,7 @@ function open(): Promise<IDBDatabase | null> {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
-        for (const name of ['spaces', 'kv', 'embeddings']) {
+        for (const name of ['spaces', 'kv', 'embeddings', 'axisScores']) {
           if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
         }
       };

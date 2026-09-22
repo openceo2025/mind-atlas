@@ -177,6 +177,7 @@
   "relation.axis-of": "Axis",
   "relation.compared-with": "Compared",
   "relation.similarity": "{n}% similar in meaning",
+  "relation.judged": "Judged by AI ({n}%)",
   "relation.missing": "This relation no longer exists.",
   "relation.notePlaceholder": "Why are they connected? (optional)",
   "relation.delete": "Delete relation",
@@ -341,6 +342,10 @@
 
   "chat.wholeSpace": "Context: the whole space",
   "chat.visibleCards": "Context: {n} cards you can see",
+  "chat.done.deleted": "Deleted {n} cards: {titles}",
+  "chat.done.linked": "Linked \"{a}\" and \"{b}\"",
+  "chat.done.grouped": "Bundled {n} cards",
+  "chat.done.focused": "Moved to \"{title}\"",
   "chat.q1": "What is missing from this thinking?",
   "chat.q2": "Summarize the main tensions",
   "chat.q3": "Suggest three next actions",
@@ -589,7 +594,7 @@
   "help.presets": "Switch axis presets",
   "help.fit": "Fit all",
   "help.paste": "Paste text, URL or image as cards",
-  "help.privacy": "Your spaces are stored in this browser. When signed in, they also sync to your account. Card text is sent to the server to compute embeddings.",
+  "help.privacy": "Your spaces are stored in this browser. When signed in, they also sync to your account. Card text is sent to the server to compute embeddings, to answer with AI, and to score the semantic axes.",
 
   "toast.semanticReady": "Meaning computed — cards moved to their semantic places",
   "toast.axesChanged": "Axes changed: {list}",

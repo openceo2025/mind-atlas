@@ -2,6 +2,7 @@ import type { Axes, AxisKey, Card } from '../types';
 import { SPACE, axisSlotKey, cardSize, computeScores, depthScale, project, relax, unproject } from '../lib/semantic';
 import { engine, type MotionMode } from '../lib/physics';
 import { subscribeEmbeddings } from '../lib/embeddings';
+import { subscribeAxisScores } from '../lib/axisScores';
 import { t } from '../i18n';
 import { AXIS_KEYS, addLog, get, layoutCards, lookup, markDirty, newId, now, set, snapshot, toast } from './core';
 import { closeWindowsOfType, openWindowAtScreen, windowScreenPos } from './ui';
@@ -71,6 +72,15 @@ subscribeEmbeddings(() => {
     relayout({ stagger: true, mode: 'layout' });
     if (before === 'local' && get().scoreSource === 'server' && layoutCards().length > 1) toast(t('toast.semanticReady'));
   }, 180);
+});
+
+let scoreTimer = 0;
+subscribeAxisScores(() => {
+  // 判断モデルの採点が届いた。手で置いたカードはそのまま、残りが本来の位置へ移る
+  window.clearTimeout(scoreTimer);
+  scoreTimer = window.setTimeout(() => {
+    if (get().ready) relayout({ stagger: false, mode: 'soft' });
+  }, 220);
 });
 
 export function applyAxes(axes: Axes, reason?: string) {

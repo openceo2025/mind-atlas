@@ -4,6 +4,8 @@ import { engine } from '../lib/physics';
 import { t } from '../i18n';
 import type { Draft } from '../lib/ai';
 import { classifyRelations, nameClusters } from '../lib/ai';
+import { classifyNewCards, judgeRelations } from '../lib/decisions';
+import { decideEnabled } from '../lib/decide';
 import {
   addLog,
   addRelationRaw,
@@ -509,7 +511,15 @@ export async function suggestRelations(focus: string[] | undefined, useAi: boole
     type: 'related',
     label: t('relation.similarity', { n: Math.round(Math.max(0, c.score) * 100) }),
   }));
-  if (useAi) {
+  if (decideEnabled()) {
+    // 種類の判定は判断モデルへ。「どれでもない」も選べるので、近いだけの組はここで落ちる
+    try {
+      const judged = await judgeRelations(top.map((c) => [c.a, c.b] as [string, string]));
+      if (judged.length) suggestions = judged;
+    } catch {
+      // 判断モデルが使えなければ、近さだけの提案のまま続ける
+    }
+  } else if (useAi) {
     try {
       const involved = [...new Set(top.flatMap((c) => [c.a, c.b]))].map((id) => s.cards[id]);
       const typed = await classifyRelations(involved, top.map((c) => [c.a, c.b]));
@@ -598,5 +608,7 @@ export function importDrafts(drafts: (Partial<Card> & { title: string; parent?: 
   for (const [a, b] of rels) addRelationRaw(a, b, 'contains');
   markDirty();
   relayout({ stagger: true });
+  // 種別とタグは判断モデルに見立ててもらう（届いたら静かに直る）
+  void classifyNewCards(ids);
   return ids;
 }

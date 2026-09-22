@@ -1,5 +1,7 @@
 import type { Axes, AxisKey, Card, Cluster } from '../types';
 import { cosine, resolveVectors } from './embeddings';
+import { axisScore, requestAxisScore, type AxisDefinition } from './axisScores';
+import { decideEnabled } from './decide';
 
 // ── 意味空間の幾何（ワールド座標） ───────────────────────────
 export const SPACE = {
@@ -69,6 +71,15 @@ export function poleTexts(axis: Card): [string, string] {
   return [`${axis.title}: ${lo}.${desc}`, `${axis.title}: ${hi}.${desc}`];
 }
 
+/** 判断モデルに渡す軸の説明。概念カードなら両極、ふつうのカードなら「その主題への近さ」 */
+export function axisDefinition(axes: Axes, k: AxisKey, axis: Card | undefined): AxisDefinition | null {
+  if (!axis) return null;
+  const slot = axisSlotKey(axes, k);
+  if (axis.kind !== 'concept') return { slot, label: axis.title, low: '', high: '', similarity: true };
+  const [low, high] = axis.axisEnds ?? ['low', 'high'];
+  return { slot, label: axis.title, low: low || 'low', high: high || 'high', similarity: false };
+}
+
 export function axisEnds(axis: Card | undefined): [string, string] {
   if (!axis) return ['', ''];
   if (axis.axisEnds) return axis.axisEnds;
@@ -119,8 +130,10 @@ export function computeScores(cards: Card[], axes: Axes, lookup: (id: string) =>
     });
   }
   const norm: Record<AxisKey, number[]> = { x: [], y: [], z: [] };
+  const askDecider = decideEnabled();
   for (const k of AXIS_KEYS) {
     const axisId = axisSlotKey(axes, k);
+    const definition = axisDefinition(axes, k, lookup(axes[k]));
     // 上書きの無いカードだけで幅を決める
     const free = raw[k].filter((_, i) => cards[i].overrides?.[axisId] === undefined);
     const min = free.length ? Math.min(...free) : 0;
@@ -129,7 +142,13 @@ export function computeScores(cards: Card[], axes: Axes, lookup: (id: string) =>
     const range = Math.max(max - min, 1e-6);
     norm[k] = raw[k].map((s, i) => {
       const o = cards[i].overrides?.[axisId];
-      if (o !== undefined) return o;
+      if (o !== undefined) return o; // 人が置いた場所が最優先
+      if (definition) {
+        // 判断モデルの採点は軸に対する絶対位置なので、そのまま使う
+        const judged = axisScore(axisId, texts[i]);
+        if (judged !== undefined) return judged;
+        if (askDecider) requestAxisScore(definition, cards[i], texts[i]);
+      }
       if (free.length < 2) return 0.5;
       return 0.5 + ((s - mid) / range) * 0.92;
     });

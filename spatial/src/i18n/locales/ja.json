@@ -177,6 +177,7 @@
   "relation.axis-of": "軸",
   "relation.compared-with": "比較",
   "relation.similarity": "意味の近さ {n}%",
+  "relation.judged": "AIの判定 {n}%",
   "relation.missing": "この関係はもうありません。",
   "relation.notePlaceholder": "つながりの理由（任意）",
   "relation.delete": "関係を削除",
@@ -341,6 +342,10 @@
 
   "chat.wholeSpace": "文脈：スペース全体",
   "chat.visibleCards": "文脈：いま見えているカード {n} 枚",
+  "chat.done.deleted": "{n} 枚のカードを削除しました：{titles}",
+  "chat.done.linked": "「{a}」と「{b}」をつなぎました",
+  "chat.done.grouped": "{n} 枚を束ねました",
+  "chat.done.focused": "「{title}」に寄りました",
   "chat.q1": "この考えに足りないものは？",
   "chat.q2": "主な対立点をまとめて",
   "chat.q3": "次の打ち手を3つ提案して",
@@ -589,7 +594,7 @@
   "help.presets": "軸のプリセットを切り替え",
   "help.fit": "全体を表示",
   "help.paste": "文章・URL・画像をカードとして貼り付け",
-  "help.privacy": "スペースはこのブラウザに保存されます。ログイン中はアカウントにも同期されます。埋め込みを計算するため、カードの文章はサーバーに送られます。",
+  "help.privacy": "スペースはこのブラウザに保存されます。ログイン中はアカウントにも同期されます。カードの文章は、埋め込みの計算・AIの回答・意味軸の採点のためにサーバーへ送られます。",
 
   "toast.semanticReady": "意味の計算が終わり、カードが意味の位置へ移動しました",
   "toast.axesChanged": "軸を切り替えました：{list}",

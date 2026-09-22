@@ -18,6 +18,7 @@ import {
   zoomAt,
 } from '../store';
 import { setCanvasEl, clientToWorld } from '../lib/drag';
+import { classifyNewCards } from '../lib/decisions';
 import { cardSize } from '../lib/semantic';
 import { engine } from '../lib/physics';
 import { parseText } from '../lib/importExport';
@@ -79,7 +80,9 @@ export async function ingest(items: { text?: string; files?: File[] }, at?: { x:
   if (drafts.length <= 1) {
     const lines = text.split('\n');
     const title = lines[0].slice(0, 80);
-    createCard({ kind: 'note', title, body: lines.length > 1 || lines[0].length > 80 ? text : '' }, at);
+    const id = createCard({ kind: 'note', title, body: lines.length > 1 || lines[0].length > 80 ? text : '' }, at);
+    // 貼ったものが何なのか（覚書・課題・引用…）と、既にあるタグを見立ててもらう
+    void classifyNewCards([id]);
   } else {
     importDrafts(drafts);
     toast(t('spaces.importedCards', { n: drafts.length }));

@@ -92,6 +92,7 @@ export const initialSession: SessionState = {
   subscriptionActive: false,
   creditLimitMicroUsd: null,
   aiLimits: null,
+  decide: null,
   chatServices: [],
   subscription: null,
   creditPercent: null,

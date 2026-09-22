@@ -113,6 +113,7 @@ export interface HostedSession {
   subscription: { status: string; currentPeriodEnd?: string; cancelAtPeriodEnd: boolean } | null;
   credit: { remainingPercent: number; exhausted: boolean; limitMicroUsd?: number } | null;
   aiLimits?: { reserveCharsPerToken: number; maxOutputTokens: number };
+  decide?: DecideConfig;
   chatOptions?: { defaultService?: string; services?: ChatService[] };
   entitlement: { aiEnabled: boolean; reason?: string } | null;
   aiPreference?: AiPreference | null;
@@ -136,6 +137,8 @@ export interface SessionState {
   creditPercent: number | null;
   creditLimitMicroUsd: number | null;
   aiLimits: { reserveCharsPerToken: number; maxOutputTokens: number } | null;
+  /** 判断モデル（文章を書かず、型と確信度のついた値だけを返す） */
+  decide: DecideConfig | null;
   chatServices: ChatService[];
   aiEnabled: boolean;
   aiReason?: string;
@@ -148,9 +151,9 @@ export async function fetchSession(): Promise<SessionState> {
     try {
       const response = await api('/health');
       const ok = response.ok;
-      return { mode: 'local', loaded: true, authenticated: false, user: null, subscriptionActive: false, subscription: null, creditPercent: null, creditLimitMicroUsd: null, aiLimits: null, chatServices: [], aiEnabled: ok, bridgeOnline: ok };
+      return { mode: 'local', loaded: true, authenticated: false, user: null, subscriptionActive: false, subscription: null, creditPercent: null, creditLimitMicroUsd: null, aiLimits: null, decide: null, chatServices: [], aiEnabled: ok, bridgeOnline: ok };
     } catch {
-      return { mode: 'local', loaded: true, authenticated: false, user: null, subscriptionActive: false, subscription: null, creditPercent: null, creditLimitMicroUsd: null, aiLimits: null, chatServices: [], aiEnabled: false, bridgeOnline: false };
+      return { mode: 'local', loaded: true, authenticated: false, user: null, subscriptionActive: false, subscription: null, creditPercent: null, creditLimitMicroUsd: null, aiLimits: null, decide: null, chatServices: [], aiEnabled: false, bridgeOnline: false };
     }
   }
   const data = await json<HostedSession>(await api('/api/service/session'));
@@ -165,6 +168,7 @@ export async function fetchSession(): Promise<SessionState> {
     creditPercent: data.credit?.remainingPercent ?? null,
     creditLimitMicroUsd: data.credit?.limitMicroUsd ?? null,
     aiLimits: data.aiLimits ?? null,
+    decide: data.decide ?? null,
     chatServices: (data.chatOptions?.services ?? []).filter((service) => service.configured),
     aiEnabled: Boolean(data.entitlement?.aiEnabled),
     aiReason: data.entitlement?.reason,
@@ -255,6 +259,44 @@ export interface AiTurnResult {
   model: string;
   toolCalls?: AiToolCall[];
   usage?: AiUsage;
+}
+
+// ── 判断モデル（System One） ───────────────────────────
+// 文章は返らない。型のついた値と、校正された確信度だけが返る。
+export interface DecideConfig {
+  configured: boolean;
+  model: string;
+  maxQuestions: number;
+  maxChars: number;
+}
+
+export interface DecideQuestion {
+  type: 'noul' | 'choice' | 'score';
+  instructions: string;
+  /** choice は {選択肢: 説明}、score は低い順の水準、noul は {true, false} */
+  criteria?: Record<string, string | null> | string[];
+}
+
+export interface DecideAnswer {
+  type?: 'noul' | 'choice' | 'score';
+  /** 「その通りである」確率 */
+  noul?: number;
+  choice?: string;
+  /** 水準の並びの上の位置（0..水準数-1）。水準の間の値も返る */
+  score?: number;
+  probabilities?: Record<string, number>;
+  legend?: Record<string, string>;
+  confidence?: number;
+}
+
+export interface DecideResult {
+  answers: Record<string, DecideAnswer>;
+  model: string;
+  usage?: AiUsage;
+}
+
+export async function aiDecide(payload: { state: unknown; questions: Record<string, DecideQuestion>; purpose?: string }) {
+  return await json<DecideResult>(await api('/api/ai/decide', { method: 'POST', body: JSON.stringify(payload) }));
 }
 
 export async function aiTurn(payload: {

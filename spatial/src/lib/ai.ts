@@ -5,6 +5,7 @@ import type { Card, CardKind, RelationType } from '../types';
 import { aiTurn, saveAiPreference, ServiceError, type AiPreference, type AiTurnMessage } from './service';
 import { confirmRequestCost, reportUsage } from './cost';
 import { SPACE_TOOLS, executeSpaceTool } from './spaceTools';
+import { routeSpaceRequest } from './decisions';
 
 const LANGUAGE: Record<Locale, string> = {
   en: 'English',
@@ -295,6 +296,15 @@ export async function chat(
   spaceTitle: string,
   opts: { onStep?: (step: ChatStep) => void } = {},
 ) {
+  // まず判断モデルに読ませる。既にあるカードを消す・つなぐ・束ねる・寄るだけなら
+  // ここで終わり、チャットモデルは一度も呼ばれない（往復ぶんの費用がまるごと消える）。
+  const said = [...history].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const routed = await routeSpaceRequest(said, cards).catch(() => ({}) as { action?: undefined; tool?: undefined });
+  if (routed.action) {
+    opts.onStep?.({ tool: routed.action.tool, ok: true, text: routed.action.done });
+    return routed.action.done;
+  }
+
   const intro = [
     SYSTEM,
     `The user is working in the space "${spaceTitle}". The cards below are what the user can see right now.`,
@@ -304,7 +314,14 @@ export async function chat(
     `Answer in ${language()} unless the user writes in another language. Use Markdown lists when helpful.`,
   ].join('\n');
   const messages: AiTurnMessage[] = history.map((m, i) => (i === 0 && m.role === 'user' ? { role: 'user', content: `${intro}\n\n${m.content}` } : m));
-  const tools = SPACE_TOOLS.map((tool) => ({ type: 'function' as const, name: tool.name, description: tool.description, parameters: tool.parameters }));
+  // 道具が絞れているなら、その道具だけを渡す（毎ターンの入力が 3〜4 割減る）
+  const needed = routed.tool ? new Set([routed.tool, 'get_space_overview', 'search_cards']) : null;
+  const tools = SPACE_TOOLS.filter((tool) => !needed || needed.has(tool.name)).map((tool) => ({
+    type: 'function' as const,
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+  }));
 
   for (let i = 0; i < MAX_TOOL_TURNS; i += 1) {
     const result = await turn({ messages, contextText: cardsContext(cards, 30000), tools });

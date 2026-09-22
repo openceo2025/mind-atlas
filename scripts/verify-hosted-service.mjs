@@ -11,6 +11,7 @@ const packageJson = JSON.parse(read("package.json"));
 const server = read("server/mind-atlas-service.mjs");
 const serviceDb = read("server/service-db.mjs");
 const admin = read("server/admin.mjs");
+const modelPricing = read("server/model-pricing.mjs");
 const envExample = read(".env.example");
 const serviceEnv = read("deploy/conoha/env.service.example");
 const conohaNginx = read("deploy/conoha/nginx.conf");
@@ -309,6 +310,18 @@ assert.ok(
 assert.ok(
   stagingDocs.includes("http://127.0.0.1:8088/api/billing/stripe/webhook"),
   "staging docs should include the local Stripe webhook forwarding URL",
+);
+
+// Decision model (System One): typed answers only, metered like every other AI call.
+assert.ok(server.includes('url.pathname === "/api/ai/decide"'), "hosted service should expose the decision route");
+assert.ok(server.includes("${decisionBaseUrl}/systemone"), "decisions should go to the System One endpoint");
+assert.ok(server.includes('kind: "decide"'), "decision usage should be recorded in the ledger");
+assert.ok(server.includes("createMockDecision"), "decisions should have a staging mock so the local harness works without a key");
+assert.ok(modelPricing.includes('"typesafe:jev-latest"'), "the decision model needs a price to be metered");
+assert.equal(
+  /console\.[a-z]+\([^)]*decisionApiKey/.test(server),
+  false,
+  "the decision API key must never be logged",
 );
 
 console.log("Hosted service verification passed");
