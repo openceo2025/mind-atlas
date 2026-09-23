@@ -36,6 +36,8 @@ interface Item {
   label: string;
   icon: string;
   tip: string;
+  /** 同じことをする鍵盤の手 */
+  shortcut?: string;
   disabled?: boolean;
   busy?: boolean;
   run: () => void;
@@ -107,7 +109,9 @@ export function RadialMenu() {
       key: 'bundle',
       label: t('radial.bundle'),
       icon: 'bundle',
-      tip: t('radial.bundleTip'),
+      // Ctrl+G とまったく同じ処理（store の group）を呼ぶ
+      tip: n < 2 ? t('radial.bundleNeedTwo') : t('radial.bundleTip'),
+      shortcut: 'Ctrl+G',
       disabled: n < 2,
       run: () => group(selection),
     },
@@ -173,7 +177,7 @@ export function RadialMenu() {
   return (
     <AnimatePresence>
       {visible && (
-        <div ref={ref} className="radial" onPointerDown={(e) => e.stopPropagation()}>
+        <div ref={ref} className="radial" role="menu" aria-label={n > 1 ? t('radial.selected', { n }) : card.title} onPointerDown={(e) => e.stopPropagation()}>
           <motion.div
             key={primary}
             initial={{ scale: 0.4, opacity: 0, rotate: -40 }}
@@ -193,14 +197,21 @@ export function RadialMenu() {
                   disabled={it.disabled || it.busy}
                   onMouseEnter={() => setTip(it.tip)}
                   onMouseLeave={() => setTip(null)}
-                  onClick={() => {
+                  onClick={(e) => {
                     setTip(null);
+                    // 焦点を残すと、次に押した Enter がこのボタンをもう一度押してしまう
+                    e.currentTarget.blur();
                     it.run();
                   }}
-                  aria-label={it.label}
+                  onFocus={() => setTip(it.tip)}
+                  onBlur={() => setTip(null)}
+                  role="menuitem"
+                  aria-keyshortcuts={it.shortcut}
+                  aria-label={it.shortcut ? `${it.label} (${it.shortcut})` : it.label}
                 >
                   <Icon name={it.icon} size={19} />
-                  {it.label}
+                  <span className="radial-label">{it.label}</span>
+                  {it.shortcut && <kbd className="radial-kbd">{it.shortcut}</kbd>}
                 </button>
               );
             })}
@@ -210,7 +221,8 @@ export function RadialMenu() {
               aria-label={t('radial.discover')}
               onMouseEnter={() => setTip(t('radial.discoverTip'))}
               onMouseLeave={() => setTip(null)}
-              onClick={() => {
+              onClick={(e) => {
+                e.currentTarget.blur();
                 setBusy('relations', true);
                 openWindow('relations', selection);
                 void suggestRelations(selection, aiOk)
@@ -223,7 +235,8 @@ export function RadialMenu() {
               <Icon name="sparkle" size={24} />
             </button>
             <div className="radial-tip" style={{ top: R + 44, opacity: tip ? 1 : 0.85 }}>
-              {tip ?? (n > 1 ? t('radial.selected', { n }) : card.title)}
+              <span className="radial-count">{n > 1 ? t('radial.selected', { n }) : card.title}</span>
+              {tip && <span className="radial-hint">{tip}</span>}
             </div>
           </motion.div>
         </div>

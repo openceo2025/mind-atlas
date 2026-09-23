@@ -269,6 +269,22 @@ useStore.subscribe((s, prev) => {
   }
 });
 
+/**
+ * Ctrl+S。保存はもともと自動だが、押した人を不安にさせないよう、待たずにいま書き込んで
+ * 結果を伝える。書き込む道すじは自動保存とまったく同じもの。
+ */
+export async function saveNow() {
+  const s = get();
+  if (s.readOnly) {
+    toast(t('save.readOnly'));
+    return;
+  }
+  const pending = s.saveState !== 'saved';
+  await flushSave();
+  if (cloudEnabled()) void saveToCloud();
+  toast(pending ? t('toast.saveDone') : t('toast.saveAuto'));
+}
+
 window.addEventListener('beforeunload', () => {
   if (get().saveState === 'dirty') void flushSave();
 });

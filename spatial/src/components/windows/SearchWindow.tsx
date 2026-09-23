@@ -6,7 +6,7 @@ import type { FloatWin } from '../../types';
 import { Icon } from '../Icons';
 import { AiNotice, Spinner, useAiBlock } from './common';
 import { Markdownish } from './Markdownish';
-import { confirmRequestCost, reportUsage } from '../../lib/cost';
+import { RequestCancelled, confirmRequestCost, reportUsage } from '../../lib/cost';
 
 /** Web 検索して、結果と出典をカードとして空間に置く */
 export function SearchWindow({ win }: { win: FloatWin }) {
@@ -29,7 +29,8 @@ export function SearchWindow({ win }: { win: FloatWin }) {
       reportUsage(r.usage);
       updateWindowData(win.id, { result: { ...r, query: q }, query: q });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // やめたのはエラーではない
+      if (!(e instanceof RequestCancelled)) setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -66,7 +67,12 @@ export function SearchWindow({ win }: { win: FloatWin }) {
             value={query}
             placeholder={t('search.placeholder')}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && void run()}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              e.stopPropagation();
+              void run();
+            }}
             autoFocus
           />
           <button className="btn primary" disabled={!query.trim() || busy || Boolean(block)} onClick={() => void run()}>

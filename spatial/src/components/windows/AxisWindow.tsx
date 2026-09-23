@@ -205,7 +205,12 @@ export function AxisWindow({ win }: { win: FloatWin }) {
 
         <div className="sec-title">{t('axis.newAxis')}</div>
         <div className="form-grid">
-          <input className="input" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('axis.newLabel')} onKeyDown={(e) => e.key === 'Enter' && create()} />
+          <input className="input" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('axis.newLabel')} onKeyDown={(e) => {
+            if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            e.stopPropagation();
+            create();
+          }} />
           <div className="row-gap">
             <input className="input" value={low} onChange={(e) => setLow(e.target.value)} placeholder={t('axis.newLow')} />
             <span>⟷</span>

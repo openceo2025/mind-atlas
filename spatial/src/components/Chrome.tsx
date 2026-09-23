@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   bootSpaces,
@@ -187,7 +187,12 @@ export function TopBar() {
               renameSpace(e.target.value);
               setEditing(false);
             }}
-            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              e.stopPropagation();
+              (e.target as HTMLInputElement).blur();
+            }}
           />
         ) : (
           <h1 onDoubleClick={() => setEditing(true)} title={readOnly ? title : t('topbar.renameHint')}>
@@ -207,7 +212,10 @@ export function TopBar() {
           placeholder={t('topbar.searchPlaceholder')}
           onChange={(e) => set({ query: e.target.value })}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && query) jumpToMatch();
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+              e.stopPropagation();
+              if (query) jumpToMatch();
+            }
             if (e.key === 'Escape') {
               set({ query: '' });
               (e.target as HTMLInputElement).blur();
@@ -312,28 +320,83 @@ export function CardMenu() {
 /** AIに送る前の確認（設定「消費の見込みを表示する」がオンのとき） */
 export function CostConfirm() {
   const ask = useStore((s) => s.confirmAsk);
+  const box = useRef<HTMLDivElement>(null);
+  const done = useRef(false);
+
   useEffect(() => {
     if (!ask) return;
-    // Enter で送信した直後に開くので、その Enter で即 OK にならないよう少し待つ
+    done.current = false;
+    // 開いている間、鍵盤はこの箱のもの。決める・やめる以外は外へ通さない。
     const openedAt = performance.now();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') ask.resolve(false);
-      if (e.key === 'Enter' && performance.now() - openedAt > 400) ask.resolve(true);
+    const answer = (ok: boolean) => {
+      if (done.current) return;
+      done.current = true;
+      ask.resolve(ok);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const before = document.activeElement as HTMLElement | null;
+    // ボタンではなく箱に焦点を置く。Enter が「押されたボタン」として二度走らないように
+    box.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        // 送信に使った Enter がそのまま OK にならないよう、ひと呼吸だけ待つ
+        if (performance.now() - openedAt < 250) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        answer(true);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        answer(false);
+        return;
+      }
+      if (e.key === 'Tab') {
+        // 焦点は箱の中だけを回る
+        const buttons = [...(box.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
+        if (!buttons.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        const next = e.shiftKey ? at - 1 : at + 1;
+        buttons[(next + buttons.length) % buttons.length].focus();
+        return;
+      }
+      // それ以外の打鍵も、後ろの空間のショートカットには届かせない
+      e.stopPropagation();
+    };
+    // capture で受けるので、App の共通ショートカットより先に止められる
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      before?.focus?.();
+    };
   }, [ask]);
+
   if (!ask) return null;
   return (
-    <div className="ask-scrim" onClick={() => ask.resolve(false)}>
-      <div className="ask-box" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <h3>{ask.title}</h3>
-        <p>{ask.body}</p>
+    <div className="ask-scrim" onPointerDown={() => ask.resolve(false)}>
+      <div
+        ref={box}
+        className="ask-box"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="ask-title"
+        aria-describedby="ask-body"
+        tabIndex={-1}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <h3 id="ask-title">{ask.title}</h3>
+        <p id="ask-body">{ask.body}</p>
         <div className="ask-actions">
           <button className="btn small" onClick={() => ask.resolve(false)}>
             {t('common.cancel')}
           </button>
-          <button className="btn small primary" autoFocus onClick={() => ask.resolve(true)}>
+          <button className="btn small primary" onClick={() => ask.resolve(true)}>
             {t('common.send')}
           </button>
         </div>

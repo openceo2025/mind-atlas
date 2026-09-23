@@ -78,7 +78,12 @@ export function SpacesWindow({ win }: { win: FloatWin }) {
               renameSpace(e.target.value);
               setEditing(false);
             }}
-            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              e.stopPropagation();
+              (e.target as HTMLInputElement).blur();
+            }}
           />
         ) : (
           <div className="row-gap">

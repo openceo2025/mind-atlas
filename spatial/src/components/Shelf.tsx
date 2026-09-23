@@ -57,7 +57,10 @@ export function Shelf() {
               value={text}
               onChange={(e) => setText(e.target.value)}
               onBlur={() => !text && setAdding(false)}
-              onKeyDown={(e) => e.key === 'Escape' && setAdding(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setAdding(false);
+                if (e.key === 'Enter') e.stopPropagation();
+              }}
               placeholder={t('shelf.notePlaceholder')}
             />
           </form>

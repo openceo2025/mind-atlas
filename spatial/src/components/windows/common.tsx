@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { aiBlock, aiBlockMessage, toggleToolWindow, useStore, type AiBlock } from '../../store';
 import { startLogin } from '../../lib/service';
 import { t } from '../../i18n';
+import { RequestCancelled } from '../../lib/cost';
 import { Icon } from '../Icons';
 
 /** AI が使えないときの案内（ログイン／購読／ブリッジ起動） */
@@ -46,7 +47,12 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], enabled = tru
     setState((s) => ({ data: s.data, loading: true }));
     fn()
       .then((data) => n === seq.current && setState({ data, loading: false }))
-      .catch((e: unknown) => n === seq.current && setState({ error: e instanceof Error ? e.message : String(e), loading: false }));
+      .catch((e: unknown) => {
+        if (n !== seq.current) return;
+        // 確認ダイアログでやめたのはエラーではない
+        if (e instanceof RequestCancelled) setState({ loading: false });
+        else setState({ error: e instanceof Error ? e.message : String(e), loading: false });
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, enabled]);
   return state;

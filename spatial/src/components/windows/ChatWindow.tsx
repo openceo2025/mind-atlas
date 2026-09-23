@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { addRelationRaw, createCard, lookup, spawnDrafts, toast, updateWindowData, useStore } from '../../store';
 import { chat, type ChatStep } from '../../lib/ai';
 import { visibleContextCards } from '../../lib/spaceTools';
+import { RequestCancelled } from '../../lib/cost';
 import type { AiTurnMessage } from '../../lib/service';
 import { t } from '../../i18n';
 import type { FloatWin } from '../../types';
@@ -42,7 +43,13 @@ export function ChatWindow({ win }: { win: FloatWin }) {
       const answer = await chat(next.slice(-12), context, title, { onStep: (step) => setSteps((prev) => [...prev, step]) });
       updateWindowData(win.id, { messages: [...next, { role: 'assistant', content: answer }] });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (e instanceof RequestCancelled) {
+        // 送るのをやめた：書いた文は入力欄に戻し、会話にも残さない
+        updateWindowData(win.id, { messages });
+        setInput(text);
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       setBusy(false);
     }
@@ -116,11 +123,15 @@ export function ChatWindow({ win }: { win: FloatWin }) {
           placeholder={t('chat.placeholder')}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              void send();
-            }
+            if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+            // 入力欄の Enter は、ここで完結させる（外側のショートカットへは渡さない）
+            e.stopPropagation();
+            if (e.shiftKey) return; // 改行
+            e.preventDefault();
+            void send();
           }}
+          aria-keyshortcuts="Enter Control+Enter"
+          title={t('chat.keys')}
         />
         <button className="btn primary" disabled={!input.trim() || busy || Boolean(block)} onClick={() => void send()} aria-label={t('chat.send')}>
           <Icon name="send" size={14} />

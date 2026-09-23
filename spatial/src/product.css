@@ -1195,3 +1195,81 @@ kbd {
 .tool-step.bad {
   color: var(--bad, #ff8080);
 }
+
+/* ── 操作の輪：押せるものが押せると分かり、鍵盤でも辿れるように ─────────── */
+.radial-item {
+  width: 62px;
+  height: 56px;
+  margin: -28px 0 0 -31px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.03);
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.14s ease, color 0.14s ease;
+}
+
+.radial-item:hover:not(:disabled),
+.radial-item:focus-visible {
+  background: rgba(63, 169, 255, 0.2);
+  border-color: rgba(106, 190, 255, 0.55);
+  color: var(--accent-2);
+  transform: scale(1.06);
+  outline: none;
+}
+
+.radial-item:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.radial-item:disabled {
+  opacity: 0.32;
+  filter: saturate(0.4);
+}
+
+.radial-label {
+  max-width: 58px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+/* 鍵盤の手（Ctrl+G など）は、ボタンの右肩に小さく */
+.radial-kbd {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  padding: 0 4px;
+  font: 600 8.5px/14px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-2);
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.radial-center:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 3px;
+}
+
+.radial-tip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  /* 輪の入れ物は幅 0 なので、中身の幅で広がるようにする */
+  width: max-content;
+  max-width: 260px;
+  white-space: normal;
+  text-align: center;
+}
+
+.radial-count {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.radial-hint {
+  color: var(--text-2);
+}

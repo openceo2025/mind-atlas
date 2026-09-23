@@ -14,6 +14,7 @@ import {
   openWindow,
   redo,
   refreshSession,
+  saveNow,
   saveToCloud,
   screenToWorld,
   select,
@@ -38,6 +39,12 @@ const THEME_KEY = 'mindatlas-spatial-theme';
 const typing = (e: KeyboardEvent) => {
   const el = e.target as HTMLElement;
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable;
+};
+
+/** 焦点が空間そのものにあるか（ボタンや窓の中に残っていないか） */
+const onCanvas = () => {
+  const el = document.activeElement as HTMLElement | null;
+  return !el || el === document.body || el.classList.contains('canvas') || el.tagName === 'MAIN';
 };
 
 function shareTokenFromUrl() {
@@ -121,6 +128,12 @@ function useKeyboard() {
         set({ paletteOpen: !s.paletteOpen });
         return;
       }
+      // 書いている途中でも効く。保存は自動だが、押した手にはすぐ答える
+      if (mod && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        void saveNow();
+        return;
+      }
       if (typing(e) || s.paletteOpen) return;
       const edit = !s.readOnly;
       if (e.code === 'Space') {
@@ -169,7 +182,9 @@ function useKeyboard() {
         }
       } else if (e.key === '?') {
         toggleToolWindow('help');
-      } else if (e.key === 'Enter' && s.selection.length === 1) {
+      } else if (e.key === 'Enter' && s.selection.length === 1 && onCanvas()) {
+        // ボタンに焦点が残っているときの Enter は、そのボタンを押すためのもの。
+        // 空間そのものを見ているときだけ、選んだカードを開く。
         openWindow('detail', s.selection);
       }
     };

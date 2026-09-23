@@ -6,6 +6,7 @@ import { t } from '../../i18n';
 import type { FloatWin } from '../../types';
 import { Icon } from '../Icons';
 import { AiNotice, useAiBlock } from './common';
+import { RequestCancelled } from '../../lib/cost';
 import { SPACE_TOOLS, executeSpaceTool, visibleContextCards } from '../../lib/spaceTools';
 
 // チャットと同じ道具一式を使う（作る・直す・消す・つなぐ・束ねる・軸・移動）
@@ -57,6 +58,10 @@ export function VoiceWindow(_: { win: FloatWin }) {
         onError: (m) => setError(m),
       });
     } catch (e) {
+      if (e instanceof RequestCancelled) {
+        setState('idle');
+        return;
+      }
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg === 'insecure' ? t('voice.insecure') : msg);
       setState('error');
