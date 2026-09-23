@@ -124,7 +124,7 @@ export function settleAxisCard(id: string) {
   const k = AXIS_KEYS.find((key) => get().axes[key] === id);
   if (!k) return;
   set((s) => ({ cards: { ...s.cards, [id]: { ...s.cards[id], x: DOCK[k].x, y: DOCK[k].y } } }));
-  engine.setTarget(id, DOCK[k].x, DOCK[k].y, depthScale(0.62), 'soft');
+  engine.setTarget(id, DOCK[k].x, DOCK[k].y, depthScale(0.38), 'soft');
 }
 
 /** 軸の先端から遠くへ運んだら、その軸から外す（その軸には意味を持たせない） */

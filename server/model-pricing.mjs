@@ -2,7 +2,7 @@
 // A model the provider lists is offered only when it has a price here or in
 // MIND_ATLAS_MODEL_PRICES_JSON (which overrides these entries).
 //
-// Sources, checked 2026-09-19:
+// Sources, checked 2026-09-23:
 //   OpenAI    https://developers.openai.com/api/docs/pricing
 //   Anthropic https://platform.claude.com/docs/en/about-claude/pricing
 //   DeepSeek  https://api-docs.deepseek.com/quick_start/pricing (peak-hour rates, the higher of the two)
@@ -17,6 +17,8 @@ export function mergeModelPrices(overrides = {}, now = new Date()) {
 export function createBuiltinModelPrices(_now = new Date()) {
   return {
     "openai:gpt-6-astra": price(10, 50),
+    "openai:gpt-6-sol": price(2, 10),
+    "openai:gpt-6-luna": price(0.1, 0.5),
     "openai:gpt-5.6-sol": price(4, 20),
     "openai:gpt-5.6-terra": price(2, 12),
     "openai:gpt-5.6-luna": price(0.2, 1.2),
@@ -49,8 +51,11 @@ export function createBuiltinModelPrices(_now = new Date()) {
     "openai:gpt-4": price(30, 60),
     "openai:gpt-3.5-turbo": price(0.5, 1.5),
 
+    "anthropic:claude-fable-5-1": price(10, 50),
     "anthropic:claude-fable-5": price(10, 50),
+    "anthropic:claude-mythos-5-1": price(10, 50),
     "anthropic:claude-mythos-5": price(10, 50),
+    "anthropic:claude-opus-5-5": price(4, 20),
     "anthropic:claude-opus-5": price(5, 25),
     "anthropic:claude-opus-4-8": price(5, 25),
     "anthropic:claude-opus-4-7": price(5, 25),
@@ -172,10 +177,14 @@ export function normalizeModelPriceId(providerId, model) {
   return value;
 }
 
-function normalizeAnthropicModelPriceId(model) {
-  const patterns = [
+// 長い（具体的な）名前から先に照合する。claude-opus-5-5 を claude-opus-5 と取り違えると、
+// 一つ前の世代の値段で課金してしまう。
+const ANTHROPIC_PRICE_PREFIXES = [
+    "claude-fable-5-1",
     "claude-fable-5",
+    "claude-mythos-5-1",
     "claude-mythos-5",
+    "claude-opus-5-5",
     "claude-opus-5",
     "claude-opus-4-8",
     "claude-opus-4-7",
@@ -187,8 +196,10 @@ function normalizeAnthropicModelPriceId(model) {
     "claude-sonnet-4-5",
     "claude-haiku-4-5",
     "claude-haiku-3-5",
-  ];
-  return patterns.find((prefix) => model.startsWith(prefix)) ?? model;
+].sort((a, b) => b.length - a.length);
+
+function normalizeAnthropicModelPriceId(model) {
+  return ANTHROPIC_PRICE_PREFIXES.find((prefix) => model.startsWith(prefix)) ?? model;
 }
 
 function price(inputUsdPer1M, outputUsdPer1M) {

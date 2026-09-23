@@ -69,20 +69,20 @@ export function SpaceGrid() {
             </g>
           ))}
         </g>
-        {/* 軸 */}
+        {/* 軸：X は下端、Y は左端、Z は原点から右上へ */}
         <g strokeWidth="2.2" fill="none" markerEnd="url(#arrow)">
-          <line x1={-H.x - 60} y1={0} x2={DOCK.x.x - 140} y2={0} stroke="url(#ax-x)" />
-          <line x1={0} y1={H.y + 60} x2={0} y2={DOCK.y.y + 70} stroke="url(#ax-y)" />
+          <line x1={-H.x - 60} y1={H.y} x2={DOCK.x.x - 140} y2={H.y} stroke="url(#ax-x)" />
+          <line x1={-H.x} y1={H.y + 60} x2={-H.x} y2={DOCK.y.y + 70} stroke="url(#ax-y)" />
           <line x1={-Z_UNIT.x * 520} y1={-Z_UNIT.y * 520} x2={Z_UNIT.x * zEnd} y2={Z_UNIT.y * zEnd} stroke="url(#ax-z)" />
         </g>
-        <circle r="5" fill="#6ae3ff" style={{ filter: 'drop-shadow(0 0 6px #6ae3ff)' }} />
+        <circle cx={-H.x} cy={H.y} r="5" fill="#6ae3ff" style={{ filter: 'drop-shadow(0 0 6px #6ae3ff)' }} />
       </svg>
 
       {/* 低い側の端ラベル */}
-      <div className="end-label" style={{ left: -H.x - 60, top: -18 }}>
+      <div className="end-label" style={{ left: -H.x + 24, top: H.y + 20 }}>
         {xl}
       </div>
-      <div className="end-label" style={{ left: 0, top: H.y + 80 }}>
+      <div className="end-label" style={{ left: -H.x - 165, top: H.y - 40 }}>
         {yl}
       </div>
       <div className="end-label" style={{ left: -Z_UNIT.x * 540, top: -Z_UNIT.y * 540 - 14 }}>

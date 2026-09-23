@@ -11,11 +11,12 @@ export const AXIS_NAME = (k: AxisKey) => t(`axis.${k}` as 'axis.x');
 
 // 軸カードが収まる「ドック」のワールド座標（軸の先端）
 const zlen = Math.hypot(SPACE.ZX, SPACE.ZY);
-/** Z軸の高い側（手前）へ向かう単位ベクトル。奥はその反対の右上 */
-export const Z_UNIT = { x: -SPACE.ZX / zlen, y: SPACE.ZY / zlen };
+/** Z軸の高い側（奥）へ向かう単位ベクトル。右上 */
+export const Z_UNIT = { x: SPACE.ZX / zlen, y: -SPACE.ZY / zlen };
+// X は箱の下端、Y は箱の左端に寄せる（第一象限のような見え方）
 export const DOCK: Record<AxisKey, { x: number; y: number }> = {
-  x: { x: SPACE.W / 2 + 200, y: 0 },
-  y: { x: 0, y: -SPACE.H / 2 - 150 },
+  x: { x: SPACE.W / 2 + 200, y: SPACE.H / 2 },
+  y: { x: -SPACE.W / 2, y: -SPACE.H / 2 - 150 },
   z: { x: Z_UNIT.x * 900, y: Z_UNIT.y * 900 },
 };
 
@@ -27,7 +28,7 @@ export function relayout(opts: { stagger?: boolean; mode?: MotionMode } = {}) {
   const next = { ...s.cards };
   for (const k of AXIS_KEYS) {
     const a = next[s.axes[k]];
-    if (a) next[a.id] = { ...a, place: 'canvas', x: DOCK[k].x, y: DOCK[k].y, depth: 0.62 };
+    if (a) next[a.id] = { ...a, place: 'canvas', x: DOCK[k].x, y: DOCK[k].y, depth: 0.38 };
   }
   const editingId = s.editingCardId;
   const nodes = cards.map((c) => {

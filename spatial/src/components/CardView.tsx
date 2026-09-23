@@ -92,7 +92,7 @@ function CardViewImpl({ id }: { id: string }) {
       const delta = (start.y - ev.clientY) / DEPTH_DRAG_PX;
       placeAtDepth(
         from.map((b) => {
-          const depth = Math.max(DEPTH_LOW, Math.min(DEPTH_HIGH, b.depth - delta));
+          const depth = Math.max(DEPTH_LOW, Math.min(DEPTH_HIGH, b.depth + delta));
           const p = project(b.sx, b.sy, depth);
           return { id: b.id, x: p.x, y: p.y, depth };
         }),
@@ -193,8 +193,8 @@ function CardViewImpl({ id }: { id: string }) {
     }
   };
 
-  // 手前のカードほど上に重なる。奥行きは負にもなるので、下駄を履かせて正の値にする
-  const layer = Math.round((card.depth + 1) * 100);
+  // 手前のカードほど上に重なる（depth は 0=手前 … 1=奥。範囲外にもなるので下駄を履かせる）
+  const layer = Math.round((2 - card.depth) * 100);
   const visual = Boolean(card.image) || (card.visual && (card.kind === 'image' || card.kind === 'idea'));
   const meaning = Math.min(5, Math.floor((card.log.length - 1 + relCount) / 2));
   const cls = [

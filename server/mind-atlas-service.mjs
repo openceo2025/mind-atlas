@@ -1270,7 +1270,10 @@ function createMockDecision({ state, questions }) {
     if (question?.type === "score") {
       const levels = Array.isArray(criteria) && criteria.length > 1 ? criteria : ["low", "high"];
       const top = levels.length - 1;
-      const score = want === undefined ? top / 2 : Math.max(0, Math.min(top, Number(want) || 0));
+      // Unscripted answers are spread deterministically by the question text, so the local
+      // harness sees a believable layout instead of every card landing on one spot.
+      const spread = [...`${name}:${stringValue(question.instructions)}`].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 100_000, 7);
+      const score = want === undefined ? (spread % (top * 4 + 1)) / 4 : Math.max(0, Math.min(top, Number(want) || 0));
       answers[name] = {
         type: "score",
         score,
@@ -1696,6 +1699,8 @@ async function callOpenAiCompatibleToolTurn(provider, payload) {
     body.tool_choice = "auto";
   }
   applyReasoningEffort(body, payload.reasoningEffort);
+  // Remembered from an earlier refusal: with tools, this model needs "none" spelled out.
+  if (tools.length && openAiToolsNeedNoEffort.has(model)) body.reasoning_effort = "none";
   const send = (requestBody) => fetch(`${provider.baseUrl}/chat/completions`, {
     method: "POST",
     headers: bearerHeaders(provider.apiKey, { "Content-Type": "application/json" }),
@@ -1710,10 +1715,18 @@ async function callOpenAiCompatibleToolTurn(provider, payload) {
       const { [tokenParam]: _dropped, ...rest } = body;
       upstream = await send({ ...rest, [otherParam]: outputTokenLimit });
       if (upstream.ok) rememberOpenAiTokenParam(provider, model, otherParam);
-    } else if (isReasoningEffortError(text) && body.reasoning_effort) {
-      const { reasoning_effort: _effort, ...rest } = body;
-      upstream = await send(rest);
-      if (upstream.ok) openAiEffortUnsupported.add(model);
+    } else if (isReasoningEffortError(text) && (body.reasoning_effort || tools.length)) {
+      // Some models refuse function tools in /v1/chat/completions unless the effort is
+      // explicitly "none" — dropping the field is not enough, their default effort still
+      // counts. Try that first, then fall back to sending no effort at all.
+      upstream = tools.length ? await send({ ...body, reasoning_effort: "none" }) : new Response(text, { status: 400 });
+      if (upstream.ok) {
+        openAiToolsNeedNoEffort.add(model);
+      } else if (body.reasoning_effort) {
+        const { reasoning_effort: _effort, ...rest } = body;
+        upstream = await send(rest);
+        if (upstream.ok) openAiEffortUnsupported.add(model);
+      }
     } else {
       upstream = new Response(text, { status: upstream.status });
     }
@@ -3249,6 +3262,8 @@ function nodeHeadersToFetchHeaders(headers) {
 // A model that rejects the value is remembered so the next request leaves it out.
 const OPENAI_REASONING_EFFORTS = ["default", "none", "low", "medium", "high", "xhigh", "max"];
 const openAiEffortUnsupported = new Set();
+/** Models that take function tools only when reasoning_effort is explicitly "none" */
+const openAiToolsNeedNoEffort = new Set();
 
 function modelReasoningEfforts(provider, model) {
   if (provider.id !== "openai") return provider.supportedReasoningEfforts;

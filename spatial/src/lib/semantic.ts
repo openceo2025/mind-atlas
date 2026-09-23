@@ -7,13 +7,13 @@ import { decideEnabled } from './decide';
 export const SPACE = {
   W: 1320, // X軸の長さ
   H: 740, // Y軸の長さ
-  ZX: 250, // Z軸の方向（右上 = 奥）。斜めのずれは控えめに
-  ZY: 150,
+  ZX: 25, // Z軸の方向（右上 = 奥）。ずれはごく控えめで、遠さは主に大きさで表す
+  ZY: 15,
 };
 
-/** 奥行き（0=奥, 1=手前）による画面上のずれ。奥へ離れるほど右上へ寄る */
-export function zOffset(sz: number) {
-  const away = 0.5 - sz;
+/** 奥行き（0=手前, 1=奥）による画面上のずれ。奥へ離れるほど右上へ寄る */
+export function zOffset(depth: number) {
+  const away = depth - 0.5;
   return { x: away * SPACE.ZX, y: -away * SPACE.ZY };
 }
 
@@ -41,8 +41,8 @@ export function unproject(x: number, y: number, sz: number) {
   };
 }
 
-/** 奥ほど小さく、手前ほど大きい */
-export const depthScale = (d: number) => Math.max(0.4, Math.min(1.4, 0.72 + 0.46 * d));
+/** 奥ほど小さく、手前ほど大きい（d は 0=手前 … 1=奥） */
+export const depthScale = (d: number) => Math.max(0.4, Math.min(1.4, 1.18 - 0.46 * d));
 
 /** Shift ドラッグで動かせる奥行きの範囲 */
 export const DEPTH_LOW = -0.8;
@@ -177,8 +177,10 @@ interface RelaxNode {
   fixed?: boolean;
 }
 
-/** これ以上 Z が離れていたら、画面で重なっていても押しのけない */
+/** これ以上 Z が離れていたら、重なってよい（そのための Z 軸） */
 const DEPTH_APART = 0.16;
+/** ただし完全に隠れると触れなくなるので、この割合までは押しのける */
+const DEPTH_OVERLAP = 0.55;
 
 /** 矩形の重なりを押し出しで解消しつつ、意味上の目標位置に弱く引き戻す */
 export function relax(nodes: RelaxNode[], iterations = 140, gap = 16) {
@@ -191,12 +193,13 @@ export function relax(nodes: RelaxNode[], iterations = 140, gap = 16) {
         const a = nodes[i];
         const b = nodes[j];
         if (a.fixed && b.fixed) continue;
-        if (a.depth !== undefined && b.depth !== undefined && Math.abs(a.depth - b.depth) > DEPTH_APART) continue;
+        const far = a.depth !== undefined && b.depth !== undefined && Math.abs(a.depth - b.depth) > DEPTH_APART;
+        const room = far ? DEPTH_OVERLAP : 1;
         const dx = b.x - a.x;
         const dy = b.y - a.y;
-        const ox = (a.w + b.w) / 2 + gap - Math.abs(dx);
+        const ox = ((a.w + b.w) / 2 + gap) * room - Math.abs(dx);
         if (ox <= 0) continue;
-        const oy = (a.h + b.h) / 2 + gap - Math.abs(dy);
+        const oy = ((a.h + b.h) / 2 + gap) * room - Math.abs(dy);
         if (oy <= 0) continue;
         moved = true;
         const wa = a.fixed ? 0 : b.fixed ? 1 : 0.5;
