@@ -3,7 +3,9 @@
 // 実際の画面は、字幕が出ている間を 1 場面として残し、場面と場面の間（字幕の無いつなぎ）は切る。
 // 場面の中は、画面がどれだけ動いているかで速さを変える（動いている所は等速、止まっている所ほど速く）。
 // 録画は画面が変わったときだけ絵が届くので、絵の届く密度がそのまま「動いている量」になる。
-//   node promo/beta-launch/edit.mjs
+//   node promo/beta-launch/edit.mjs                       （日本語の導入）
+//   node promo/beta-launch/edit.mjs --lang en             （英語の導入）
+//   node promo/beta-launch/edit.mjs --lang en --intro-only（導入だけの短い動画）
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +15,9 @@ const out = path.join(here, "out");
 const FPS = 30;
 const read = (p) => JSON.parse(fs.readFileSync(path.join(out, p), "utf8"));
 const main = read("timeline.json");
+const lang = process.argv.includes("--lang") ? process.argv[process.argv.indexOf("--lang") + 1] : "ja";
+const suffix = lang === "ja" ? "" : `-${lang}`;
+const introOnly = process.argv.includes("--intro-only");
 
 // ── 録画の各区切りを「動画の時刻（元の時間軸）」で扱えるようにする ──
 let offset = 0;
@@ -96,9 +101,9 @@ function runScene(scene, minSeconds) {
 
 // ── 組み立て ──
 function build(layout) {
-  const intro = read(path.join(`intro-${layout}`, "timeline.json"));
+  const intro = read(path.join(`intro-${layout}${suffix}`, "timeline.json"));
   const iseg = intro.segments[0];
-  const iFrames = iseg.frames.map((f) => ({ file: `intro-${layout}/frames/${f.file}`, t: f.at - iseg.start }));
+  const iFrames = iseg.frames.map((f) => ({ file: `intro-${layout}${suffix}/frames/${f.file}`, t: f.at - iseg.start }));
   const frames = [];
   const cues = [];
   // 1) 導入（等速）
@@ -112,7 +117,7 @@ function build(layout) {
   for (const e of intro.events) cues.push({ t: e.t, kind: e.kind });
   // 2) 実際の画面（場面ごと）
   const sceneLog = [];
-  scenes.forEach((scene, i) => {
+  (introOnly ? [] : scenes).forEach((scene, i) => {
     const start = frames.length / FPS;
     const ts = runScene(scene, i === 0 ? 2.0 : 2.6);
     for (const t of ts) frames.push({ file: frameAt(app, t), kind: "app", t });
@@ -127,11 +132,12 @@ function build(layout) {
   });
   // 3) 締め（等速）
   const endStart = frames.length / FPS;
-  for (let i = 0; i < Math.round((end.to - end.from) * FPS); i++) frames.push({ file: frameAt(end, end.from + i / FPS), kind: "end", t: end.from + i / FPS });
+  if (!introOnly) for (let i = 0; i < Math.round((end.to - end.from) * FPS); i++) frames.push({ file: frameAt(end, end.from + i / FPS), kind: "end", t: end.from + i / FPS });
   cues.push({ t: Number(endStart.toFixed(3)), kind: "end" });
   const duration = Number((frames.length / FPS).toFixed(3));
   const size = layout === "vertical" ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
-  fs.writeFileSync(path.join(out, `edit-${layout}.json`), JSON.stringify({ fps: FPS, ...size, duration, frames, cues }));
+  const file = `edit-${introOnly ? "intro-" : ""}${layout}${suffix}.json`;
+  fs.writeFileSync(path.join(out, file), JSON.stringify({ fps: FPS, ...size, duration, frames, cues }));
   return { duration, introLen, sceneLog, app: endStart - introLen };
 }
 

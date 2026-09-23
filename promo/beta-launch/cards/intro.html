@@ -14,7 +14,7 @@
     text-shadow: 0 4px 30px rgba(0, 0, 0, .85), 0 0 60px rgba(4, 11, 26, .95); }
   /* 散らかった背景の上でも読めるよう、言葉の後ろを暗くする */
   .line::before { content: ""; position: absolute; left: 50%; top: 50%; width: 1.25em; height: 1em; z-index: -1;
-    transform: translate(-50%, -50%) scale(14, 3.2); background: radial-gradient(closest-side, rgba(3, 8, 20, .9), rgba(3, 8, 20, .6) 55%, rgba(3, 8, 20, 0)); }
+    transform: translate(-50%, -50%) scale(14, var(--backY, 3.2)); background: radial-gradient(closest-side, rgba(3, 8, 20, .9), rgba(3, 8, 20, .6) 55%, rgba(3, 8, 20, 0)); }
   .line.name::before { display: none; }
   .line em { font-style: normal; color: #6ae3ff; }
   .line em.warn { color: #ff7a59; }
@@ -34,9 +34,9 @@
 <div class="line" id="l1"></div>
 <div class="line" id="l2"></div>
 <div class="line" id="l3"></div>
-<div class="line name" id="l4">マインドアトラス</div>
-<div class="brand" id="brand">MindAtlas<span>β</span><small>Think in space.</small></div>
-<div class="meter" id="meter"><div class="row"><span>思考の余力</span><b id="pct">100%</b></div><div class="bar"><div class="fill" id="fill"></div></div></div>
+<div class="line name" id="l4"></div>
+<div class="brand" id="brand"></div>
+<div class="meter" id="meter"><div class="row"><span id="meterLabel">思考の余力</span><b id="pct">100%</b></div><div class="bar"><div class="fill" id="fill"></div></div></div>
 <script src="intro.js"></script>
 </body>
 </html>

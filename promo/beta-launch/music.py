@@ -225,7 +225,7 @@ for event in timeline.get("events", []):
 
 # ── 仕上げ：出だしと終わりをなだらかに、音量をそろえる ─────────────────
 fade_in = int((0.25 if beats else 1.0) * SR)
-fade_out = int(2.6 * SR)
+fade_out = int(min(2.6, DURATION * 0.1) * SR)  # 短い動画では終わりの減衰も短く
 master = np.ones(N)
 master[:fade_in] = np.linspace(0, 1, fade_in) ** 1.5
 master[-fade_out:] = np.linspace(1, 0, fade_out) ** 1.3

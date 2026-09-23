@@ -45,6 +45,31 @@ node promo/beta-launch/encode.mjs mindatlas-beta-60s.mp4 --edit out/edit-landsca
 node promo/beta-launch/vertical.mjs --name mindatlas-beta-60s-vertical.mp4 --edit out/edit-vertical.json --audio out/music-60s.wav
 ```
 
+## 導入アニメーション・英語版
+
+| できあがり | 場所 |
+|---|---|
+| 横 | `out/mindatlas-intro-en.mp4` |
+| 縦 | `out/mindatlas-intro-en-vertical.mp4` |
+
+約15秒、導入だけの動画（音つき）。`cards/intro.html?lang=en` で、言葉・依頼の吹き出し・
+メーター（Mental reserve）がすべて英語になります。拍の時刻は日本語版と同じです。
+
+| 日本語 | 英語 |
+|---|---|
+| AIをフル活用している人ほど | The more you work with AI, |
+| 認知と判断で、脳機能の消耗が激しい。 | the more your brain drains from thinking and deciding. |
+| AI時代の、新しい思考整理ツール | A new way to organize your thinking for the AI era. |
+| マインドアトラス | MindAtlas — Think in space. β |
+
+```bash
+node promo/beta-launch/record-intro.mjs --lang en
+node promo/beta-launch/edit.mjs --lang en --intro-only
+python promo/beta-launch/music.py out/edit-intro-landscape-en.json out/music-intro-en.wav
+node promo/beta-launch/encode.mjs mindatlas-intro-en.mp4 --edit out/edit-intro-landscape-en.json --audio out/music-intro-en.wav
+node promo/beta-launch/vertical.mjs --name mindatlas-intro-en-vertical.mp4 --edit out/edit-intro-vertical-en.json --audio out/music-intro-en.wav
+```
+
 ## 構成（約53秒）
 
 | 時間 | 場面 | 字幕 |

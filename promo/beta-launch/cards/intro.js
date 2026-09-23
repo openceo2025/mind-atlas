@@ -11,9 +11,16 @@
   const H = innerHeight;
   const portrait = H > W;
   const S = Math.min(W, H) / 1080;
+  // ?lang=en で英語版（言葉・依頼の吹き出し・メーターの名前がすべて英語になる）
+  const EN = new URLSearchParams(location.search).get('lang') === 'en';
   const root = document.documentElement.style;
-  root.setProperty('--size', `${(portrait ? 86 : 90) * S}px`);
-  root.setProperty('--name', `${(portrait ? 108 : 150) * S}px`);
+  root.setProperty('--size', `${(portrait ? (EN ? 72 : 86) : EN ? 82 : 90) * S}px`);
+  root.setProperty('--name', `${(portrait ? (EN ? 140 : 108) : EN ? 170 : 150) * S}px`);
+  if (EN) {
+    root.setProperty('--backY', portrait ? '4.4' : '3.2');
+    document.body.style.fontFamily = '"Segoe UI", "Inter", system-ui, sans-serif';
+    document.documentElement.lang = 'en';
+  }
   root.setProperty('--brand', `${(portrait ? 56 : 60) * S}px`);
   root.setProperty('--meter', `${(portrait ? 760 : 820) * S}px`);
 
@@ -23,9 +30,23 @@
 
   const $ = (id) => document.getElementById(id);
   const br = portrait ? '<br>' : '';
-  $('l1').innerHTML = `AIを<em>フル活用</em>${br}している人ほど`;
-  $('l2').innerHTML = `認知と判断で、<br>脳機能の<em class="warn">消耗</em>が激しい。`;
-  $('l3').innerHTML = `AI時代の、<br>新しい<em>思考整理</em>ツール`;
+  const sp = portrait ? '<br>' : ' ';
+  if (EN) {
+    $('l1').innerHTML = `The more you${sp}<em>work with AI</em>,`;
+    $('l2').innerHTML = portrait
+      ? `the more your brain<br><em class="warn">drains</em> from thinking<br>and deciding.`
+      : `the more your brain <em class="warn">drains</em><br>from thinking and deciding.`;
+    $('l3').innerHTML = `A new way to${sp}<em>organize your thinking</em><br>for the AI era.`;
+    $('l4').textContent = 'MindAtlas';
+    $('brand').innerHTML = 'Think in space.<span>β</span>';
+    $('meterLabel').textContent = 'Mental reserve';
+  } else {
+    $('l1').innerHTML = `AIを<em>フル活用</em>${br}している人ほど`;
+    $('l2').innerHTML = `認知と判断で、<br>脳機能の<em class="warn">消耗</em>が激しい。`;
+    $('l3').innerHTML = `AI時代の、<br>新しい<em>思考整理</em>ツール`;
+    $('l4').textContent = 'マインドアトラス';
+    $('brand').innerHTML = 'MindAtlas<span>β</span><small>Think in space.</small>';
+  }
 
   const canvas = $('fx');
   canvas.width = W;
@@ -57,10 +78,14 @@
   }
 
   // ── 1〜2) AI への依頼の吹き出し ─────────────────────────
-  const PROMPTS = ['要約して', '比較して', '次の案は？', 'レビューお願い', '英訳して', '表にまとめて', 'メールの下書き', '議事録を作って', 'コードを直して',
+  const PROMPTS_EN = ['Summarize this', 'Compare these', "What's next?", 'Review please', 'Translate it', 'Make a table', 'Draft an email', 'Meeting notes',
+    'Fix my code', 'Shorter', 'Sources?', 'Another angle', 'Pitch outline', 'Research the market', 'List the risks', 'Undo that', 'Plan A or B?', 'Make a to-do',
+    'Chart it', 'Key points only', 'Think again', 'Keep going', 'Counterarguments?', 'Priorities?', 'Show the numbers', 'Rephrase'];
+  const PROMPTS_JA = ['要約して', '比較して', '次の案は？', 'レビューお願い', '英訳して', '表にまとめて', 'メールの下書き', '議事録を作って', 'コードを直して',
     'もっと短く', '根拠は？', '別の視点で', '企画のたたき台', '市場を調べて', 'リスクを洗い出して', 'やっぱり元に戻して', 'A案とB案どっち？', 'ToDoにして',
     'グラフにして', '要点だけ', 'もう一度考えて', 'さっきの続き', '反論を出して', '優先順位は？', '数字で示して', '言い換えて'];
-  const FONT = `700 ${Math.round(30 * S)}px "Yu Gothic UI", "Meiryo", sans-serif`;
+  const PROMPTS = EN ? PROMPTS_EN : PROMPTS_JA;
+  const FONT = `${EN ? 600 : 700} ${Math.round(30 * S)}px ${EN ? '"Segoe UI", "Inter", sans-serif' : '"Yu Gothic UI", "Meiryo", sans-serif'}`;
   ctx.font = FONT;
   const bubbles = [];
   let spawned = 0;
@@ -340,7 +365,7 @@
     const shiver = t > B.drain + 1.8 && t < B.collapse ? `translateX(${(rnd() - 0.5) * 6 * strain * S}px)` : '';
     line($('l2'), B.drain, B.collapse - 0.1, t, shiver);
     const l3 = $('l3');
-    l3.style.top = portrait ? '76%' : '79%';
+    l3.style.top = portrait ? (EN ? '75%' : '76%') : '79%';
     line(l3, B.order + 0.2, B.name - 0.35, t);
     const name = $('l4');
     const nk = ease((t - B.name) / 0.7);
