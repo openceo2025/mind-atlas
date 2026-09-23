@@ -37,9 +37,9 @@ export class Recorder {
     return this.videoTime + (Date.now() / 1000 - this.current.segment.startedAt);
   }
 
-  /** 効果音を置く目印（音づくりで使う） */
-  mark(kind) {
-    this.events.push({ t: Number(this.now().toFixed(3)), kind });
+  /** 出来事の目印（効果音・字幕の切り替わり・カーソルの位置。縦版の画面づくりでも使う） */
+  mark(kind, data) {
+    this.events.push({ t: Number(this.now().toFixed(3)), kind, ...(data === undefined ? {} : { data }) });
   }
 
   async stop() {
@@ -74,7 +74,7 @@ export class Recorder {
 }
 
 /** なめらかに動くカーソル（始めと終わりをゆっくり） */
-export function makeHand(page) {
+export function makeHand(page, onMove = () => {}) {
   const pos = { x: 1700, y: 980 };
   const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
   const glide = async (x, y, ms = 650) => {
@@ -83,6 +83,7 @@ export function makeHand(page) {
     for (let i = 1; i <= steps; i++) {
       const k = ease(i / steps);
       await page.mouse.move(from.x + (x - from.x) * k, from.y + (y - from.y) * k);
+      onMove(from.x + (x - from.x) * k, from.y + (y - from.y) * k);
       await page.waitForTimeout(ms / steps);
     }
     pos.x = x;
@@ -98,6 +99,7 @@ export function makeHand(page) {
     pos.x = x;
     pos.y = y;
     await page.mouse.move(x, y);
+    onMove(x, y);
   };
   return { glide, click, park, pos };
 }

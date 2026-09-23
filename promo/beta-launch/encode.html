@@ -29,7 +29,7 @@ function planFrames(tl) {
     const s = tl.segments[si];
     const wall = s.start + (t - offset);
     while (fi + 1 < s.frames.length && s.frames[fi + 1].at <= wall) fi += 1;
-    plan.push(s.frames[fi].file);
+    plan.push({ file: s.frames[fi].file, segment: s.name, t });
   }
   return plan;
 }
@@ -67,11 +67,58 @@ function readWav(buf) {
   throw new Error('bad wav');
 }
 
-window.runEncode = async ({ name }) => {
+const bitmapOf = async (url) => createImageBitmap(await (await fetch(url)).blob());
+
+/** 縦版の組み立て：真ん中に録画の切り出し、上下に飾り、字幕は切り替わりでふわっと入れ替える */
+async function verticalPainter(tl, { window: win, captions }) {
+  const plain = await bitmapOf('out/vertical/plain.png');
+  const none = await bitmapOf('out/vertical/chrome-none.png');
+  const chrome = await Promise.all(captions.map((_, i) => bitmapOf(`out/vertical/chrome-${i}.png`)));
+  const capEvents = tl.events.filter((e) => e.kind === 'caption').map((e) => ({ t: e.t, img: e.data ? chrome[captions.indexOf(e.data.ja)] ?? none : none }));
+  const cursor = tl.events.filter((e) => e.kind === 'cursor').map((e) => ({ t: e.t, x: e.data.x * 1.5 }));
+  const cursorAt = (t) => {
+    if (!cursor.length) return 960;
+    let prev = cursor[0];
+    for (const c of cursor) { if (c.t > t) return prev.x + (c.x - prev.x) * ((t - prev.t) / Math.max(1e-6, c.t - prev.t)); prev = c; }
+    return prev.x;
+  };
+  let left = null;
+  return (ctx, bitmap, step) => {
+    if (!step.segment.startsWith('app')) {
+      // 冒頭と締め：中央を正方形で切り出して、上下は背景へなじませる
+      ctx.drawImage(plain, 0, 0);
+      ctx.drawImage(bitmap, 420, 0, 1080, 1080, 0, 420, 1080, 1080);
+      for (const [y0, y1] of [[420, 560], [1500, 1360]]) {
+        const g = ctx.createLinearGradient(0, y0, 0, y1);
+        g.addColorStop(0, '#040b1a');
+        g.addColorStop(1, 'rgba(4,11,26,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, Math.min(y0, y1), 1080, Math.abs(y1 - y0));
+      }
+      left = null;
+      return;
+    }
+    // カーソルを追いかけて、切り出す場所をゆっくり動かす
+    const target = Math.max(0, Math.min(1920 - 1080, cursorAt(step.t) - 540));
+    left = left === null ? target : left + (target - left) * (1 - Math.exp(-(1 / tl.fps) / 0.55));
+    ctx.drawImage(bitmap, Math.round(left), 40, 1080, win.h, 0, win.y, 1080, win.h);
+    let cur = { t: 0, img: none };
+    let prev = cur;
+    for (const e of capEvents) { if (e.t > step.t) break; prev = cur; cur = e; }
+    const p = Math.max(0, Math.min(1, (step.t - cur.t) / 0.35));
+    ctx.globalAlpha = 1;
+    ctx.drawImage(p < 1 ? prev.img : cur.img, 0, 0);
+    if (p < 1) { ctx.globalAlpha = p; ctx.drawImage(cur.img, 0, 0); ctx.globalAlpha = 1; }
+  };
+}
+
+window.runEncode = async ({ name, layout = 'landscape', ...options }) => {
   const tl = await (await fetch('out/timeline.json')).json();
-  const W = tl.width;
-  const H = tl.height;
+  const vertical = layout === 'vertical';
+  const W = vertical ? 1080 : tl.width;
+  const H = vertical ? 1920 : tl.height;
   const plan = planFrames(tl);
+  const paint = vertical ? await verticalPainter(tl, options) : null;
   log(`frames: ${plan.length} (${tl.duration}s @ ${tl.fps}fps)`);
 
   // ── 映像 ──
@@ -96,15 +143,19 @@ window.runEncode = async ({ name }) => {
   const canvas = new OffscreenCanvas(W, H);
   const ctx = canvas.getContext('2d');
   let current = '';
+  let bitmap = null;
   for (let i = 0; i < plan.length; i++) {
-    if (plan[i] !== current) {
-      current = plan[i];
-      const bitmap = await createImageBitmap(await (await fetch(`out/frames/${current}`)).blob());
-      ctx.fillStyle = '#040b1a';
-      ctx.fillRect(0, 0, W, H);
-      ctx.drawImage(bitmap, 0, 0, W, H);
-      bitmap.close();
+    if (plan[i].file !== current) {
+      current = plan[i].file;
+      bitmap?.close();
+      bitmap = await bitmapOf(`out/frames/${current}`);
+      if (!paint) {
+        ctx.fillStyle = '#040b1a';
+        ctx.fillRect(0, 0, W, H);
+        ctx.drawImage(bitmap, 0, 0, W, H);
+      }
     }
+    if (paint) paint(ctx, bitmap, plan[i]);
     const frame = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / tl.fps), duration: Math.round(1e6 / tl.fps) });
     venc.encode(frame, { keyFrame: i % (tl.fps * 2) === 0 });
     frame.close();

@@ -28,12 +28,17 @@ const server = http.createServer((req, res) => {
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const port = server.address().port;
-fs.writeFileSync(path.join(out, "check.html"), `<body style="margin:0;background:#111"><canvas id=c width=1920 height=${Math.ceil(times.length / 4) * 270}></canvas></body>`);
+// 縦の動画は細い枠で 8 列に並べる
+const tall = /vertical/.test(file);
+const cols = tall ? 8 : 4;
+const tw = tall ? 240 : 480;
+const th = tall ? 427 : 270;
+fs.writeFileSync(path.join(out, "check.html"), `<body style="margin:0;background:#111"><canvas id=c width=${cols * tw} height=${Math.ceil(times.length / cols) * th}></canvas></body>`);
 
 const browser = await chromium.launch({ channel: "chrome", headless: true });
-const page = await browser.newPage({ viewport: { width: 1920, height: Math.ceil(times.length / 4) * 270 } });
+const page = await browser.newPage({ viewport: { width: cols * tw, height: Math.ceil(times.length / cols) * th } });
 await page.goto(`http://127.0.0.1:${port}/check.html`);
-const info = await page.evaluate(async ({ src, times }) => {
+const info = await page.evaluate(async ({ src, times, cols, tw, th }) => {
   const v = document.createElement("video");
   v.muted = true;
   // 画面に置かないと、次の絵が描かれた合図（requestVideoFrameCallback）が来ない
@@ -46,9 +51,9 @@ const info = await page.evaluate(async ({ src, times }) => {
     v.currentTime = times[i];
     await new Promise((ok) => { v.onseeked = ok; });
     await Promise.race([new Promise((ok) => v.requestVideoFrameCallback(() => ok())), new Promise((ok) => setTimeout(ok, 400))]);
-    const x = (i % 4) * 480;
-    const y = Math.floor(i / 4) * 270;
-    g.drawImage(v, x, y, 480, 270);
+    const x = (i % cols) * tw;
+    const y = Math.floor(i / cols) * th;
+    g.drawImage(v, x, y, tw, th);
     g.fillStyle = "#000a";
     g.fillRect(x + 4, y + 4, 60, 22);
     g.fillStyle = "#fff";
@@ -56,7 +61,7 @@ const info = await page.evaluate(async ({ src, times }) => {
     g.fillText(`${times[i]}s`, x + 10, y + 20);
   }
   return { duration: v.duration, w: v.videoWidth, h: v.videoHeight };
-}, { src: `/${file}`, times });
+}, { src: `/${file}`, times, cols, tw, th });
 await page.screenshot({ path: path.join(out, "check.png") });
 console.log(JSON.stringify(info), "→", path.join(out, "check.png"));
 await browser.close();

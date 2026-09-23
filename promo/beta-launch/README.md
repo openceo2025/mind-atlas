@@ -1,11 +1,12 @@
 # MindAtlas β 宣伝動画（X / YouTube）
 
-53秒・1920×1080・H.264 + AAC の MP4 と、YouTube 用サムネイル（1280×720）を作る一式。
+53秒・H.264 + AAC の MP4（横 1920×1080 と 縦 1080×1920）と、YouTube 用サムネイル（1280×720）を作る一式。
 実際のアプリを台本どおりに操作して録画し、字幕と音楽を重ねています。
 
 | できあがり | 場所 |
 |---|---|
-| 動画 | `out/mindatlas-beta.mp4` |
+| 動画（横・X / YouTube） | `out/mindatlas-beta.mp4` |
+| 動画（縦・Shorts / X / リール / TikTok） | `out/mindatlas-beta-vertical.mp4` |
 | サムネイル | `out/thumbnail.png` |
 
 `out/` は生成物なので git には入れていません（コマ画像が数百MBあります）。
@@ -38,12 +39,21 @@
    node promo/beta-launch/record.mjs
    python promo/beta-launch/music.py
    node promo/beta-launch/encode.mjs
+   node promo/beta-launch/vertical.mjs
    node promo/beta-launch/thumbnail.mjs
    ```
 3. 確かめる（映像の中の決めた時刻を並べた一枚ができる）
    ```bash
    node promo/beta-launch/lib/check-mp4.mjs
+   node promo/beta-launch/lib/check-mp4.mjs mindatlas-beta-vertical.mp4
    ```
+
+### 縦版のつくり
+
+横版と同じ録画を使い回しています。録画から 1080×860 を**縮小せずに**切り出して真ん中に置き、
+上に見出し（思考を、空間に。）、下に字幕を大きく描き直し、いちばん下に URL を置いています。
+どこを切り出すかは録画中に記録したカーソルの位置を追いかけ、ゆっくり動かします。
+冒頭と締めは中央を正方形で切り出しています。
 
 必要なのは Google Chrome と Python（numpy）だけです。ffmpeg は要りません。MP4 への圧縮は
 Chrome 自身の H.264 / AAC 符号器（WebCodecs）で行い、`lib/mp4.js` がそれを MP4 に詰めます。
@@ -57,6 +67,7 @@ Chrome 自身の H.264 / AAC 符号器（WebCodecs）で行い、`lib/mp4.js` �
 | `cards/` | 冒頭と締めの画面（HTML / CSS のアニメーション） |
 | `music.py` | 音楽と効果音をその場で合成（既存の楽曲・音源は使っていない） |
 | `encode.html` / `encode.mjs` / `lib/mp4.js` | Chrome で H.264 / AAC に圧縮し、faststart の MP4 に詰める |
+| `vertical.mjs` | 縦版の飾り（見出し・字幕・URL）を字幕ごとに描き、縦の MP4 にする |
 | `thumbnail.mjs` | サムネイル |
 | `lib/recorder.mjs`, `lib/contact.mjs`, `lib/check-mp4.mjs` | 録画と確認用の道具 |
 

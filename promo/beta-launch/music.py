@@ -160,4 +160,5 @@ with wave.open(str(path), "wb") as w:
     w.setsampwidth(2)
     w.setframerate(SR)
     w.writeframes(pcm.tobytes())
-print(f"music: {path} ({DURATION:.1f}s, {len(timeline.get('events', []))} cues)")
+cues = sum(1 for e in timeline.get("events", []) if e["kind"] in ("pop", "click", "whoosh"))
+print(f"music: {path} ({DURATION:.1f}s, {cues} sound cues)")

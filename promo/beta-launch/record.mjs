@@ -70,14 +70,22 @@ await wait(5500);
 await closeWindows();
 await wait(400);
 
-const hand = makeHand(page);
+// カーソルの位置は縦版で「どこを映すか」を決めるのに使う（録画中だけ記録される）
+const hand = makeHand(page, (x, y) => rec.current && rec.mark("cursor", { x: Math.round(x), y: Math.round(y) }));
 await frame();
 await hand.park(1150, 650);
-const caption = (ja, en) => page.evaluate(([a, b]) => window.__promo.caption(a, b), [ja, en]);
-const hideCaption = () => page.evaluate(() => window.__promo.hide());
+const caption = async (ja, en) => {
+  rec.mark("caption", { ja, en });
+  await page.evaluate(([a, b]) => window.__promo.caption(a, b), [ja, en]);
+};
+const hideCaption = async () => {
+  rec.mark("caption", null);
+  await page.evaluate(() => window.__promo.hide());
+};
 
 // ── 1) 意味で並ぶ ───────────────────────────────────────
 await rec.start(page, "app");
+rec.mark("cursor", { x: hand.pos.x, y: hand.pos.y });
 await wait(300);
 await caption("メモを置くだけ。AIが【意味】で並べる。", "Drop in your notes — AI lays them out by meaning.");
 await wait(2800);
