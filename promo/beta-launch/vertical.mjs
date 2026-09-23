@@ -15,6 +15,12 @@ const out = path.join(here, "out");
 const dir = path.join(out, "vertical");
 fs.mkdirSync(dir, { recursive: true });
 const timeline = JSON.parse(fs.readFileSync(path.join(out, "timeline.json"), "utf8"));
+// --edit out/edit-landscape.json などで編集版、--audio で音の差し替え
+const arg = (name) => {
+  const i = process.argv.indexOf(`--${name}`);
+  return i > 0 ? process.argv[i + 1] : null;
+};
+
 
 // 字幕の並び（録画のときに記録した順）
 const captions = [];
@@ -99,7 +105,14 @@ await encoder.goto(`http://127.0.0.1:${server.address().port}/encode.html`);
 await encoder.waitForFunction(() => typeof window.runEncode === "function");
 const result = await encoder.evaluate(
   (opts) => window.runEncode(opts),
-  { name: "mindatlas-beta-vertical.mp4", layout: "vertical", window: WINDOW, captions: captions.map((c) => c.ja) },
+  {
+    name: arg("name") ?? "mindatlas-beta-vertical.mp4",
+    layout: "vertical",
+    window: WINDOW,
+    captions: captions.map((c) => c.ja),
+    ...(arg("edit") ? { edit: arg("edit") } : {}),
+    ...(arg("audio") ? { audio: arg("audio") } : {}),
+  },
 );
 console.log(JSON.stringify(result));
 await browser.close();

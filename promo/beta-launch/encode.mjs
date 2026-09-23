@@ -9,7 +9,13 @@ import { renderLandscapeCaptions } from "./lib/captions.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const out = path.join(here, "out");
-const name = process.argv[2] || "mindatlas-beta.mp4";
+const name = process.argv[2] && !process.argv[2].startsWith("--") ? process.argv[2] : "mindatlas-beta.mp4";
+// --edit out/edit-landscape.json などで編集版、--audio で音の差し替え
+const arg = (name) => {
+  const i = process.argv.indexOf(`--${name}`);
+  return i > 0 ? process.argv[i + 1] : null;
+};
+
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".json": "application/json", ".jpg": "image/jpeg", ".png": "image/png", ".wav": "audio/wav", ".css": "text/css" };
 
 // このフォルダだけを、自分の機械の中だけに見せる
@@ -46,7 +52,7 @@ page.on("console", (m) => console.log(m.text()));
 page.setDefaultTimeout(30 * 60_000);
 await page.goto(`http://127.0.0.1:${port}/encode.html`);
 await page.waitForFunction(() => typeof window.runEncode === "function");
-const result = await page.evaluate((opts) => window.runEncode(opts), { name, layout: "landscape", captions: captions.map((c) => c.ja) });
+const result = await page.evaluate((opts) => window.runEncode(opts), { name, layout: "landscape", captions: captions.map((c) => c.ja), ...(arg("edit") ? { edit: arg("edit") } : {}), ...(arg("audio") ? { audio: arg("audio") } : {}) });
 console.log(JSON.stringify(result));
 await browser.close();
 server.close();

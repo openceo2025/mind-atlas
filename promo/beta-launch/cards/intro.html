@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>MindAtlas β — intro</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #040b1a; }
+  body { font-family: "Yu Gothic UI", "Hiragino Sans", "Noto Sans JP", "Meiryo", sans-serif; color: #fff; }
+  canvas { position: fixed; inset: 0; }
+  /* 言葉の層。キャンバスの上に重ねる */
+  .line { position: fixed; left: 0; right: 0; top: 50%; transform: translateY(-50%); text-align: center; pointer-events: none;
+    font-size: var(--size); font-weight: 900; line-height: 1.22; letter-spacing: .03em; opacity: 0;
+    text-shadow: 0 4px 30px rgba(0, 0, 0, .85), 0 0 60px rgba(4, 11, 26, .95); }
+  /* 散らかった背景の上でも読めるよう、言葉の後ろを暗くする */
+  .line::before { content: ""; position: absolute; left: 50%; top: 50%; width: 1.25em; height: 1em; z-index: -1;
+    transform: translate(-50%, -50%) scale(14, 3.2); background: radial-gradient(closest-side, rgba(3, 8, 20, .9), rgba(3, 8, 20, .6) 55%, rgba(3, 8, 20, 0)); }
+  .line.name::before { display: none; }
+  .line em { font-style: normal; color: #6ae3ff; }
+  .line em.warn { color: #ff7a59; }
+  .name { font-size: var(--name); letter-spacing: .08em; background: linear-gradient(90deg, #9fe7ff, #6ae3ff 40%, #8fb7ff); -webkit-background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(0 6px 36px rgba(63, 169, 255, .55)); }
+  .brand { position: fixed; left: 0; right: 0; text-align: center; opacity: 0; font: 800 var(--brand) / 1 "Segoe UI", "Inter", system-ui, sans-serif; letter-spacing: .02em; }
+  .brand span { font-size: .55em; color: #ffd166; border: .06em solid rgba(255, 209, 102, .7); border-radius: .25em; padding: .1em .25em; margin-left: .3em; vertical-align: .25em; }
+  .brand small { display: block; margin-top: .6em; font: 600 .5em/1 "Segoe UI", system-ui, sans-serif; color: rgba(190, 215, 255, .8); letter-spacing: .06em; }
+  /* 思考の余力（消耗していく様子） */
+  .meter { position: fixed; left: 50%; transform: translateX(-50%); width: var(--meter); opacity: 0; font: 700 calc(var(--size) * .3) / 1 "Yu Gothic UI", "Meiryo", sans-serif; color: #cfe0ff; }
+  .meter .row { display: flex; justify-content: space-between; margin-bottom: .45em; }
+  .meter .bar { height: calc(var(--size) * .16); border-radius: 999px; background: rgba(255, 255, 255, .1); overflow: hidden; border: 1px solid rgba(255, 255, 255, .18); }
+  .meter .fill { height: 100%; width: 100%; border-radius: 999px; }
+</style>
+</head>
+<body>
+<canvas id="fx"></canvas>
+<div class="line" id="l1"></div>
+<div class="line" id="l2"></div>
+<div class="line" id="l3"></div>
+<div class="line name" id="l4">マインドアトラス</div>
+<div class="brand" id="brand">MindAtlas<span>β</span><small>Think in space.</small></div>
+<div class="meter" id="meter"><div class="row"><span>思考の余力</span><b id="pct">100%</b></div><div class="bar"><div class="fill" id="fill"></div></div></div>
+<script src="intro.js"></script>
+</body>
+</html>

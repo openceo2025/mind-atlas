@@ -29,7 +29,7 @@ function planFrames(tl) {
     const s = tl.segments[si];
     const wall = s.start + (t - offset);
     while (fi + 1 < s.frames.length && s.frames[fi + 1].at <= wall) fi += 1;
-    plan.push({ file: s.frames[fi].file, segment: s.name, t });
+    plan.push({ file: `frames/${s.frames[fi].file}`, segment: s.name, t });
   }
   return plan;
 }
@@ -164,6 +164,11 @@ async function verticalPainter(tl, { window: win, captions }) {
   smooth('w', 0.1);
 
   return (ctx, bitmap, step) => {
+    if (step.segment === 'intro') {
+      // 導入は縦向きに撮ってあるので、そのまま
+      ctx.drawImage(bitmap, 0, 0, 1080, 1920);
+      return;
+    }
     if (!step.segment.startsWith('app')) {
       // 冒頭と締め：中央を正方形で切り出して、上下は背景へなじませる
       ctx.drawImage(plain, 0, 0);
@@ -193,14 +198,17 @@ async function verticalPainter(tl, { window: win, captions }) {
   };
 }
 
-window.runEncode = async ({ name, layout = 'landscape', ...options }) => {
+window.runEncode = async ({ name, layout = 'landscape', edit = null, audio: audioFile = 'out/music.wav', ...options }) => {
   const tl = await (await fetch('out/timeline.json')).json();
   const vertical = layout === 'vertical';
   const W = vertical ? 1080 : tl.width;
   const H = vertical ? 1920 : tl.height;
-  const plan = planFrames(tl);
+  // 編集版（edit.mjs の結果）があれば、その並びどおりに絵を置く。t は元の録画の時刻
+  const cut = edit ? await (await fetch(edit)).json() : null;
+  const plan = cut ? cut.frames.map((f) => ({ file: f.file, segment: f.kind, t: f.t })) : planFrames(tl);
+  const duration = cut ? cut.duration : tl.duration;
   const paint = vertical ? await verticalPainter(tl, options) : await landscapePainter(tl, options);
-  log(`frames: ${plan.length} (${tl.duration}s @ ${tl.fps}fps)`);
+  log(`frames: ${plan.length} (${duration}s @ ${tl.fps}fps)`);
 
   // ── 映像 ──
   const config = await pickCodec(W, H);
@@ -229,7 +237,7 @@ window.runEncode = async ({ name, layout = 'landscape', ...options }) => {
     if (plan[i].file !== current) {
       current = plan[i].file;
       bitmap?.close();
-      bitmap = await bitmapOf(`out/frames/${current}`);
+      bitmap = await bitmapOf(`out/${current}`);
     }
     paint(ctx, bitmap, plan[i]);
     const frame = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / tl.fps), duration: Math.round(1e6 / tl.fps) });
@@ -246,8 +254,8 @@ window.runEncode = async ({ name, layout = 'landscape', ...options }) => {
   // ── 音 ──
   let audio = null;
   try {
-    const wav = readWav(await (await fetch('out/music.wav')).arrayBuffer());
-    const need = Math.round(tl.duration * wav.rate);
+    const wav = readWav(await (await fetch(audioFile)).arrayBuffer());
+    const need = Math.round(duration * wav.rate);
     const planes = wav.planes.map((p) => { const q = new Float32Array(need); q.set(p.subarray(0, need)); return q; });
     const aSamples = [];
     let asc = null;
@@ -291,7 +299,7 @@ window.runEncode = async ({ name, layout = 'landscape', ...options }) => {
   video.src = URL.createObjectURL(new Blob([mp4], { type: 'video/mp4' }));
   await new Promise((resolve, reject) => { video.onloadedmetadata = resolve; video.onerror = () => reject(new Error('the MP4 does not load')); });
   const probe = [];
-  for (const t of [1, tl.duration / 2, tl.duration - 1]) {
+  for (const t of [1, duration / 2, duration - 1]) {
     video.currentTime = t;
     await new Promise((resolve) => { video.onseeked = resolve; });
     const c = new OffscreenCanvas(64, 36);

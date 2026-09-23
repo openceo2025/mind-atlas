@@ -11,6 +11,40 @@
 
 `out/` は生成物なので git には入れていません（コマ画像が数百MBあります）。
 
+## 1分版（導入アニメーションつき）
+
+| できあがり | 場所 |
+|---|---|
+| 横 | `out/mindatlas-beta-60s.mp4` |
+| 縦 | `out/mindatlas-beta-60s-vertical.mp4` |
+
+約56秒。JavaScript で描いた導入（`cards/intro.html` / `intro.js`）から、実際の画面へつなぎます。
+
+| 時間 | 導入 | 画面 |
+|---|---|---|
+| 0:00 | AIをフル活用している人ほど | AI への依頼の吹き出しが、どんどん積み上がる |
+| 0:04 | 認知と判断で、脳機能の消耗が激しい。 | 画面があふれて赤みを帯び、「思考の余力」が 100% → 8% に減る |
+| 0:08 | AI時代の、新しい思考整理ツール | 混沌が点に縮み、X / Y / Z の軸にそってカードとして整列する |
+| 0:12 | マインドアトラス / MindAtlas β | 名前。光の玉が広がって、そのまま実際の画面へ |
+| 0:15 | 以降、実際の画面（6場面）→ 締め | |
+
+実際の画面は `edit.mjs` が編集します。字幕の出ている間を 1 場面として残し、場面と場面の
+つなぎ（字幕の無い所）は切ります。場面の中は、画面がどれだけ動いているかで速さを変えます
+（動いている所は等速、止まっている所ほど速く、最大 2.5 倍。字幕が入る最初の 0.8 秒は落ち着かせる）。
+録画は画面が変わったときだけ絵が届くので、その密度をそのまま「動いている量」に使っています。
+
+導入の間の音は、鼓動・通知音・ざわめきが増えていく張りつめた音にし、整列するところで和音に解き放ちます。
+
+作り直し方（録画はそのまま使い回せます）：
+
+```bash
+node promo/beta-launch/record-intro.mjs
+node promo/beta-launch/edit.mjs
+python promo/beta-launch/music.py out/edit-landscape.json out/music-60s.wav
+node promo/beta-launch/encode.mjs mindatlas-beta-60s.mp4 --edit out/edit-landscape.json --audio out/music-60s.wav
+node promo/beta-launch/vertical.mjs --name mindatlas-beta-60s-vertical.mp4 --edit out/edit-vertical.json --audio out/music-60s.wav
+```
+
 ## 構成（約53秒）
 
 | 時間 | 場面 | 字幕 |
@@ -74,6 +108,9 @@ Chrome 自身の H.264 / AAC 符号器（WebCodecs）で行い、`lib/mp4.js` �
 | `music.py` | 音楽と効果音をその場で合成（既存の楽曲・音源は使っていない） |
 | `encode.html` / `encode.mjs` / `lib/mp4.js` | Chrome で H.264 / AAC に圧縮し、faststart の MP4 に詰める |
 | `vertical.mjs` | 縦版の飾り（見出し・字幕・URL）を字幕ごとに描き、縦の MP4 にする |
+| `cards/intro.html`, `cards/intro.js` | 1分版の導入アニメーション（横・縦どちらの大きさでも動く） |
+| `record-intro.mjs` | 導入を横と縦で録る |
+| `edit.mjs` | 1分版の編集（場面の選び出し・つなぎのカット・止まっている所の早送り） |
 | `thumbnail.mjs` | サムネイル |
 | `lib/recorder.mjs`, `lib/contact.mjs`, `lib/check-mp4.mjs` | 録画と確認用の道具 |
 
