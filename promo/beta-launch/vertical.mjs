@@ -1,8 +1,8 @@
 // 縦（9:16・1080×1920）版。横版と同じ録画を使い回す。
 //
-// 画面の真ん中に、録画から 1080×860 を等倍で切り出して置く（縮小しないので文字がつぶれない）。
-// どこを切り出すかはカーソルの位置を追いかけて決め、ゆっくり動かす。
-// 横版に焼き込んだ字幕は切り出しの外（下）になるので、縦版では下に大きく描き直す。
+// 画面の真ん中の窓に、録画のうち「いま大事な所」（カーソル・窓・操作の輪・選んだカード）が
+// 全部入るよう切り出して置く。ふだんは等倍、入らないときだけ少し引く（encode.html の verticalPainter）。
+// 字幕は下に大きく描く。
 //   node promo/beta-launch/vertical.mjs
 import fs from "node:fs";
 import http from "node:http";
@@ -21,7 +21,7 @@ const captions = [];
 for (const e of timeline.events) if (e.kind === "caption" && e.data && !captions.some((c) => c.ja === e.data.ja)) captions.push(e.data);
 
 // ── 1) 画面の飾り（上の見出し・下の字幕・いちばん下の URL）を、字幕ごとに一枚ずつ ──
-const WINDOW = { y: 470, h: 860 };
+const WINDOW = { y: 430, h: 900 };
 const bg = `radial-gradient(900px 700px at 60% 30%, rgba(24,70,150,.42), transparent 70%), radial-gradient(800px 800px at 20% 90%, rgba(40,90,200,.22), transparent 70%), #040b1a`;
 const page = (caption, plain) => `<!doctype html><html lang="ja"><head><meta charset="utf-8"><style>
 * { margin: 0; box-sizing: border-box; }
@@ -32,14 +32,14 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: transp
 .bottom { top: ${WINDOW.y + WINDOW.h}px; height: ${1920 - WINDOW.y - WINDOW.h}px; background-position: 0 -${WINDOW.y + WINDOW.h}px; }
 .all { top: 0; height: 1920px; }
 .edge { position: absolute; left: 0; width: 1080px; height: 2px; background: linear-gradient(90deg, transparent, rgba(106,227,255,.8), transparent); box-shadow: 0 0 24px rgba(63,169,255,.7); }
-.brand { position: absolute; top: 92px; left: 0; width: 1080px; display: flex; justify-content: center; align-items: center; gap: 18px; font: 800 56px/1 "Segoe UI", system-ui, sans-serif; }
+.brand { position: absolute; top: 70px; left: 0; width: 1080px; display: flex; justify-content: center; align-items: center; gap: 18px; font: 800 56px/1 "Segoe UI", system-ui, sans-serif; }
 .orb { width: 54px; height: 54px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #9fe7ff, #2a7bff 55%, #0a2a66); box-shadow: 0 0 36px rgba(63,169,255,.85); }
 .beta { font-size: 30px; color: #ffd166; border: 2px solid rgba(255,209,102,.7); border-radius: 11px; padding: 5px 11px; }
-.head { position: absolute; top: 196px; left: 0; width: 1080px; text-align: center; font-size: 104px; font-weight: 900; letter-spacing: .03em; text-shadow: 0 6px 40px rgba(63,169,255,.45); }
+.head { position: absolute; top: 158px; left: 0; width: 1080px; text-align: center; font-size: 104px; font-weight: 900; letter-spacing: .03em; text-shadow: 0 6px 40px rgba(63,169,255,.45); }
 .head em, .cap b em { font-style: normal; color: #6ae3ff; }
 .head em { background: linear-gradient(90deg, #6ae3ff, #8fb7ff); -webkit-background-clip: text; color: transparent; }
-.sub { position: absolute; top: 340px; left: 0; width: 1080px; text-align: center; font-size: 42px; font-weight: 800; color: #dce8ff; }
-.cap { position: absolute; top: ${WINDOW.y + WINDOW.h + 60}px; left: 60px; width: 960px; display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; }
+.sub { position: absolute; top: 300px; left: 0; width: 1080px; text-align: center; font-size: 42px; font-weight: 800; color: #dce8ff; }
+.cap { position: absolute; top: ${WINDOW.y + WINDOW.h + 56}px; left: 60px; width: 960px; display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; }
 .cap b { font-size: 68px; line-height: 1.28; font-weight: 900; text-shadow: 0 4px 30px rgba(63,169,255,.4); word-break: keep-all; overflow-wrap: anywhere; }
 .cap small { font: 600 32px/1.3 "Segoe UI", system-ui, sans-serif; color: rgba(200,225,255,.8); }
 .url { position: absolute; top: 1790px; left: 50%; transform: translateX(-50%); font: 700 40px/1 "Segoe UI", system-ui, sans-serif; padding: 20px 40px; border-radius: 999px;

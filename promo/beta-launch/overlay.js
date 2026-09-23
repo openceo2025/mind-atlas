@@ -50,7 +50,28 @@
     setTimeout(() => r.remove(), 700);
   }, true);
 
+  // 縦版の「どこを映すか」のために、大事な場所（カーソル・窓・操作の輪・選択中や生まれたての
+  // カード・範囲選択）を 0.1 秒ごとに記録しておく
+  const roi = [];
+  let pointer = null;
+  addEventListener('mousemove', (e) => { pointer = [e.clientX - 20, e.clientY - 20, 40, 40]; }, true);
+  const rect = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width && r.height ? [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] : null;
+  };
+  setInterval(() => {
+    const boxes = [];
+    if (pointer) boxes.push([...pointer, 'cursor']);
+    for (const el of document.querySelectorAll('.fwin')) { const b = rect(el); if (b) boxes.push([...b, 'window']); }
+    for (const el of document.querySelectorAll('.radial-ring')) { const b = rect(el); if (b) boxes.push([...b, 'ring']); }
+    for (const el of document.querySelectorAll('.marquee')) { const b = rect(el); if (b) boxes.push([...b, 'marquee']); }
+    const picked = [...document.querySelectorAll('.card.selected, .card.flash, .card.lifted')].slice(0, 4);
+    for (const el of picked) { const b = rect(el); if (b) boxes.push([...b, 'card']); }
+    roi.push({ t: Date.now(), boxes });
+  }, 100);
+
   window.__promo = {
+    roi,
     /** 字幕を出す。ja の中の【】で囲んだ語は色を変える */
     caption(ja, en) {
       const [b, small] = caption.children;

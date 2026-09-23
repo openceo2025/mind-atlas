@@ -74,14 +74,9 @@ await wait(400);
 const hand = makeHand(page, (x, y) => rec.current && rec.mark("cursor", { x: Math.round(x), y: Math.round(y) }));
 await frame();
 await hand.park(1150, 650);
-const caption = async (ja, en) => {
-  rec.mark("caption", { ja, en });
-  await page.evaluate(([a, b]) => window.__promo.caption(a, b), [ja, en]);
-};
-const hideCaption = async () => {
-  rec.mark("caption", null);
-  await page.evaluate(() => window.__promo.hide());
-};
+// 字幕は映像に焼き込まず、時刻だけ記録する（書き出すときに横・縦それぞれの形で重ねる）
+const caption = async (ja, en) => rec.mark("caption", { ja, en });
+const hideCaption = async () => rec.mark("caption", null);
 
 // ── 1) 意味で並ぶ ───────────────────────────────────────
 await rec.start(page, "app");
@@ -184,6 +179,13 @@ rec.mark("pop");
 await wait(1700);
 await hideCaption();
 await wait(400);
+// ページが記録した「大事な場所」を、動画の時刻に直して残す
+const appStart = rec.current.segment.startedAt;
+const appBase = rec.videoTime;
+for (const sample of await page.evaluate(() => window.__promo.roi)) {
+  const t = appBase + (sample.t / 1000 - appStart);
+  if (t >= appBase) rec.events.push({ t: Number(t.toFixed(3)), kind: "roi", data: sample.boxes });
+}
 await rec.stop();
 
 // ── 締め ───────────────────────────────────────────────

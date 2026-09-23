@@ -69,20 +69,100 @@ function readWav(buf) {
 
 const bitmapOf = async (url) => createImageBitmap(await (await fetch(url)).blob());
 
-/** 縦版の組み立て：真ん中に録画の切り出し、上下に飾り、字幕は切り替わりでふわっと入れ替える */
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+/** 字幕の切り替わり：いまの字幕と、ひとつ前の字幕（消えていく方） */
+function captionState(events, t) {
+  let cur = { t: -1, img: null };
+  let prev = cur;
+  for (const e of events) { if (e.t > t) break; prev = cur; cur = e; }
+  return { cur, prev };
+}
+
+/** 横版：録画の上に字幕を重ねる（ふわっと浮かんで出て、すっと消える） */
+async function landscapePainter(tl, { captions }) {
+  const imgs = await Promise.all(captions.map((_, i) => bitmapOf(`out/landscape/caption-${i}.png`)));
+  const events = tl.events.filter((e) => e.kind === 'caption').map((e) => ({ t: e.t, img: e.data ? imgs[captions.indexOf(e.data.ja)] : null }));
+  return (ctx, bitmap, step) => {
+    ctx.fillStyle = '#040b1a';
+    ctx.fillRect(0, 0, tl.width, tl.height);
+    ctx.drawImage(bitmap, 0, 0, tl.width, tl.height);
+    if (!step.segment.startsWith('app')) return;
+    const { cur, prev } = captionState(events, step.t);
+    const p = clamp01((step.t - cur.t) / 0.45);
+    if (prev.img && p < 1) { ctx.globalAlpha = 1 - p; ctx.drawImage(prev.img, 0, 0); }
+    if (cur.img) { const k = 1 - Math.pow(1 - p, 3); ctx.globalAlpha = p; ctx.drawImage(cur.img, 0, Math.round((1 - k) * 36)); }
+    ctx.globalAlpha = 1;
+  };
+}
+
+/**
+ * 縦版：真ん中の窓に、いま大事な場所（カーソル・窓・操作の輪・選んだカード・範囲選択）が
+ * 全部入るように切り出す。入らないときは少し引いて（最大 0.83 倍まで）収める。
+ * 動きは先の出来事も見て決めるので、操作の瞬間に遅れて追いかけることがない。
+ */
 async function verticalPainter(tl, { window: win, captions }) {
   const plain = await bitmapOf('out/vertical/plain.png');
   const none = await bitmapOf('out/vertical/chrome-none.png');
   const chrome = await Promise.all(captions.map((_, i) => bitmapOf(`out/vertical/chrome-${i}.png`)));
   const capEvents = tl.events.filter((e) => e.kind === 'caption').map((e) => ({ t: e.t, img: e.data ? chrome[captions.indexOf(e.data.ja)] ?? none : none }));
-  const cursor = tl.events.filter((e) => e.kind === 'cursor').map((e) => ({ t: e.t, x: e.data.x * 1.5 }));
-  const cursorAt = (t) => {
-    if (!cursor.length) return 960;
-    let prev = cursor[0];
-    for (const c of cursor) { if (c.t > t) return prev.x + (c.x - prev.x) * ((t - prev.t) / Math.max(1e-6, c.t - prev.t)); prev = c; }
-    return prev.x;
+  const roi = tl.events.filter((e) => e.kind === 'roi').map((e) => ({ t: e.t, boxes: e.data.map(([x, y, w, h, kind]) => ({ x: x * 1.5, y: y * 1.5, w: w * 1.5, h: h * 1.5, kind })) }));
+  const aspect = 1080 / win.h;
+  const maxW = Math.min(1920, 1080 * aspect); // 切り出しの高さは録画の高さ（1080）まで
+  const PAD = 56;
+
+  const union = (boxes) => {
+    if (!boxes.length) return null;
+    const x1 = Math.min(...boxes.map((b) => b.x)) - PAD;
+    const y1 = Math.min(...boxes.map((b) => b.y)) - PAD;
+    const x2 = Math.max(...boxes.map((b) => b.x + b.w)) + PAD;
+    const y2 = Math.max(...boxes.map((b) => b.y + b.h)) + PAD;
+    return { cx: (x1 + x2) / 2, cy: (y1 + y2) / 2, w: Math.max(1080, x2 - x1, (y2 - y1) * aspect) };
   };
-  let left = null;
+  // 入りきらないときは、選んだカード → 窓 の順にあきらめ、手元（カーソル・輪・範囲選択）を優先する
+  const need = (boxes) => {
+    const tries = [boxes, boxes.filter((b) => b.kind !== 'card'), boxes.filter((b) => b.kind !== 'card' && b.kind !== 'window')];
+    for (const set of tries) { const u = union(set); if (u && u.w <= maxW) return u; }
+    const u = union(tries[2]) ?? union(boxes);
+    return u ? { ...u, w: maxW } : null;
+  };
+
+  // 先に、アプリの部分の全コマについて「映したい所」を出しておく
+  const frames = Math.round(tl.duration * tl.fps);
+  const want = new Array(frames).fill(null);
+  let ri = 0;
+  let last = { cx: 960, cy: 540, w: 1080 };
+  for (let i = 0; i < frames; i++) {
+    const t = i / tl.fps;
+    while (ri + 1 < roi.length && roi[ri + 1].t <= t) ri++;
+    if (!roi.length || roi[ri].t > t + 0.2) continue;
+    last = need(roi[ri].boxes) ?? last;
+    want[i] = last;
+  }
+  // 先回り：少し先（0.6 秒）までに必要になる広さを今から取り、中心は少し先の平均に寄せる
+  const LEAD = Math.round(0.6 * tl.fps);
+  const plan = want.map((w, i) => {
+    if (!w) return null;
+    let W = w.w, cx = 0, cy = 0, n = 0;
+    for (let j = Math.max(0, i - 4); j <= Math.min(frames - 1, i + LEAD); j++) {
+      const v = want[j];
+      if (!v) continue;
+      W = Math.max(W, v.w);
+      if (j >= i) { cx += v.cx; cy += v.cy; n += 1; }
+    }
+    return { cx: cx / n, cy: cy / n, w: W };
+  });
+  // ぶれないよう前後になだらかにする（遅れの出ない、前から後ろからの二度がけ）
+  const smooth = (key, k) => {
+    let v = null;
+    for (let i = 0; i < frames; i++) { if (!plan[i]) { v = null; continue; } v = v === null ? plan[i][key] : v + (plan[i][key] - v) * k; plan[i][key] = v; }
+    v = null;
+    for (let i = frames - 1; i >= 0; i--) { if (!plan[i]) { v = null; continue; } v = v === null ? plan[i][key] : v + (plan[i][key] - v) * k; plan[i][key] = v; }
+  };
+  smooth('cx', 0.12);
+  smooth('cy', 0.12);
+  smooth('w', 0.1);
+
   return (ctx, bitmap, step) => {
     if (!step.segment.startsWith('app')) {
       // 冒頭と締め：中央を正方形で切り出して、上下は背景へなじませる
@@ -95,20 +175,21 @@ async function verticalPainter(tl, { window: win, captions }) {
         ctx.fillStyle = g;
         ctx.fillRect(0, Math.min(y0, y1), 1080, Math.abs(y1 - y0));
       }
-      left = null;
       return;
     }
-    // カーソルを追いかけて、切り出す場所をゆっくり動かす
-    const target = Math.max(0, Math.min(1920 - 1080, cursorAt(step.t) - 540));
-    left = left === null ? target : left + (target - left) * (1 - Math.exp(-(1 / tl.fps) / 0.55));
-    ctx.drawImage(bitmap, Math.round(left), 40, 1080, win.h, 0, win.y, 1080, win.h);
-    let cur = { t: 0, img: none };
-    let prev = cur;
-    for (const e of capEvents) { if (e.t > step.t) break; prev = cur; cur = e; }
-    const p = Math.max(0, Math.min(1, (step.t - cur.t) / 0.35));
-    ctx.globalAlpha = 1;
-    ctx.drawImage(p < 1 ? prev.img : cur.img, 0, 0);
-    if (p < 1) { ctx.globalAlpha = p; ctx.drawImage(cur.img, 0, 0); ctx.globalAlpha = 1; }
+    const i = Math.min(frames - 1, Math.round(step.t * tl.fps));
+    const cam = plan[i] ?? { cx: 960, cy: 540, w: 1080 };
+    const cw = Math.max(1080, Math.min(maxW, cam.w));
+    const ch = cw / aspect;
+    const x0 = Math.max(0, Math.min(1920 - cw, cam.cx - cw / 2));
+    const y0 = Math.max(0, Math.min(1080 - ch, cam.cy - ch / 2));
+    ctx.fillStyle = '#040b1a';
+    ctx.fillRect(0, win.y, 1080, win.h);
+    ctx.drawImage(bitmap, x0, y0, cw, ch, 0, win.y, 1080, win.h);
+    const { cur, prev } = captionState(capEvents, step.t);
+    const p = clamp01((step.t - cur.t) / 0.35);
+    ctx.drawImage(p < 1 ? prev.img ?? none : cur.img ?? none, 0, 0);
+    if (p < 1) { ctx.globalAlpha = p; ctx.drawImage(cur.img ?? none, 0, 0); ctx.globalAlpha = 1; }
   };
 }
 
@@ -118,7 +199,7 @@ window.runEncode = async ({ name, layout = 'landscape', ...options }) => {
   const W = vertical ? 1080 : tl.width;
   const H = vertical ? 1920 : tl.height;
   const plan = planFrames(tl);
-  const paint = vertical ? await verticalPainter(tl, options) : null;
+  const paint = vertical ? await verticalPainter(tl, options) : await landscapePainter(tl, options);
   log(`frames: ${plan.length} (${tl.duration}s @ ${tl.fps}fps)`);
 
   // ── 映像 ──
@@ -149,13 +230,8 @@ window.runEncode = async ({ name, layout = 'landscape', ...options }) => {
       current = plan[i].file;
       bitmap?.close();
       bitmap = await bitmapOf(`out/frames/${current}`);
-      if (!paint) {
-        ctx.fillStyle = '#040b1a';
-        ctx.fillRect(0, 0, W, H);
-        ctx.drawImage(bitmap, 0, 0, W, H);
-      }
     }
-    if (paint) paint(ctx, bitmap, plan[i]);
+    paint(ctx, bitmap, plan[i]);
     const frame = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / tl.fps), duration: Math.round(1e6 / tl.fps) });
     venc.encode(frame, { keyFrame: i % (tl.fps * 2) === 0 });
     frame.close();
