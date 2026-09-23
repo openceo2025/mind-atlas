@@ -156,14 +156,31 @@ export function createChild(parentId: string) {
   if (!parent || parent.place !== 'canvas' || s.readOnly) return;
   snapshot();
   const { w } = cardSize(parent);
-  const x = parent.x + w / 2 + 150;
-  const others = canvasCards(s).filter((c) => c.id !== parentId);
+  const kid = cardSize({ kind: 'note' } as Card);
   const born = s.relations.filter((r) => !r.suggested && r.from === parentId && r.type === 'derived').length;
-  let y = parent.y;
-  for (let i = born; i < born + 16; i++) {
-    y = parent.y + i * 124;
-    if (!others.some((c) => Math.abs(c.x - x) < 150 && Math.abs(c.y - y) < 108)) break;
+  // 他のカードの下に隠れず、遠くへも行かないよう、親のすぐ右から近い順に空いている所を探す
+  const cards = canvasCards(s);
+  const free = (px: number, py: number) =>
+    !cards.some((c) => {
+      const o = cardSize(c);
+      return Math.abs(c.x - px) < (o.w + kid.w) / 2 + 14 && Math.abs(c.y - py) < (o.h + kid.h) / 2 + 14;
+    });
+  const stepX = kid.w + 30;
+  const stepY = kid.h + 28;
+  const home = { x: parent.x + w / 2 + 40 + kid.w / 2, y: parent.y + born * stepY };
+  const spots: { x: number; y: number; cost: number }[] = [];
+  for (let gx = -3; gx <= 4; gx++) {
+    for (let gy = -4; gy <= 6; gy++) {
+      const px = home.x + gx * stepX;
+      const py = home.y + gy * stepY;
+      // 右と下を少しだけ好む（左や上は遠回り扱い）
+      const cost = Math.hypot((px - home.x) * (gx < 0 ? 1.6 : 1), (py - home.y) * (gy < 0 ? 1.3 : 1));
+      spots.push({ x: px, y: py, cost });
+    }
   }
+  spots.sort((a, b) => a.cost - b.cost);
+  const spot = spots.find((p) => free(p.x, p.y)) ?? home;
+  const { x, y } = spot;
   const card = makeCard({
     kind: 'note',
     title: t('card.newTitle'),

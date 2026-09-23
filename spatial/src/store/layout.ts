@@ -31,20 +31,24 @@ export function relayout(opts: { stagger?: boolean; mode?: MotionMode } = {}) {
     if (a) next[a.id] = { ...a, place: 'canvas', x: DOCK[k].x, y: DOCK[k].y, depth: 0.38 };
   }
   const editingId = s.editingCardId;
+  // 新しい文章の意味（埋め込み）がまだ届いていないと、そろわない間は全体が簡易ベクトルに落ちる。
+  // そこで並べ直すと、関係のないカードまで一斉に飛んで、届いた瞬間にまた戻る。
+  // その間は今ある場所に留め、届いてから（subscribeEmbeddings が呼び直す）動かす。
+  const waiting = scores.source === 'local' && s.scoreSource === 'server';
   const nodes = cards.map((c) => {
     const v = scores.values.get(c.id)!;
     const p = project(v.sx, v.sy, v.sz);
     const size = cardSize(c);
     const k = depthScale(v.sz);
     // 編集中のカードは、書いている場所から動かさない（終わったら意味の位置へ）
-    if (c.id === editingId) return { id: c.id, x: c.x, y: c.y, tx: c.x, ty: c.y, w: size.w * k, h: size.h * k, depth: c.depth, fixed: true };
+    if (c.id === editingId || waiting) return { id: c.id, x: c.x, y: c.y, tx: c.x, ty: c.y, w: size.w * k, h: size.h * k, depth: c.depth, fixed: true };
     // 手で置いたカードは置いた場所のまま。周りのカードのほうが避ける
     return { id: c.id, x: p.x, y: p.y, tx: p.x, ty: p.y, w: size.w * k, h: size.h * k, depth: v.sz, fixed: handPlaced(c, s.axes) };
   });
   const obstacles = AXIS_KEYS.map((k) => ({ x: DOCK[k].x, y: DOCK[k].y, tx: DOCK[k].x, ty: DOCK[k].y, w: 260, h: 124, fixed: true }));
   relax([...nodes, ...obstacles], 110);
   for (const n of nodes) next[n.id] = { ...next[n.id], x: n.x, y: n.y, depth: n.depth };
-  set({ cards: next, scoreSource: scores.source });
+  set({ cards: next, scoreSource: waiting ? 'server' : scores.source });
 
   // 動く距離が短いものから順に動かす（伸びていく感覚）
   const ids = [...nodes.map((n) => n.id), ...AXIS_KEYS.map((k) => s.axes[k]).filter((id) => next[id])];
