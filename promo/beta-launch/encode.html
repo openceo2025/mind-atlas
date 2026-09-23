@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>MindAtlas promo — encoder</title>
+</head>
+<body style="background:#000;color:#9cf;font:14px monospace">
+<pre id="log">encoder ready</pre>
+<script type="module">
+// 撮った絵と音を、Chrome 自身の H.264 / AAC 符号器（WebCodecs）で圧縮して MP4 にする
+import { buildMp4 } from './lib/mp4.js';
+
+const log = (s) => { document.getElementById('log').textContent += `\n${s}`; console.log(s); };
+
+/** 動画の時刻 t に映す絵（その時刻までで最新のもの） */
+function planFrames(tl) {
+  const total = Math.round(tl.duration * tl.fps);
+  const plan = [];
+  let offset = 0;
+  let si = 0;
+  let fi = 0;
+  for (let i = 0; i < total; i++) {
+    const t = i / tl.fps;
+    while (si < tl.segments.length - 1 && t >= offset + (tl.segments[si].end - tl.segments[si].start)) {
+      offset += tl.segments[si].end - tl.segments[si].start;
+      si += 1;
+      fi = 0;
+    }
+    const s = tl.segments[si];
+    const wall = s.start + (t - offset);
+    while (fi + 1 < s.frames.length && s.frames[fi + 1].at <= wall) fi += 1;
+    plan.push(s.frames[fi].file);
+  }
+  return plan;
+}
+
+async function pickCodec(width, height) {
+  // B フレームを作らないソフトウェア符号器（OpenH264）を優先する
+  const tries = [
+    { codec: 'avc1.42e028', hardwareAcceleration: 'prefer-software' },
+    { codec: 'avc1.4d0028', hardwareAcceleration: 'prefer-software' },
+    { codec: 'avc1.640028', hardwareAcceleration: 'no-preference' },
+  ];
+  for (const t of tries) {
+    const config = { ...t, width, height, bitrate: 14_000_000, framerate: 30, avc: { format: 'avc' }, latencyMode: 'quality' };
+    if ((await VideoEncoder.isConfigSupported(config)).supported) return config;
+  }
+  throw new Error('no H.264 encoder');
+}
+
+function readWav(buf) {
+  const view = new DataView(buf);
+  let at = 12;
+  let fmt = null;
+  while (at < view.byteLength) {
+    const id = String.fromCharCode(...new Uint8Array(buf, at, 4));
+    const size = view.getUint32(at + 4, true);
+    if (id === 'fmt ') fmt = { channels: view.getUint16(at + 10, true), rate: view.getUint32(at + 12, true), bits: view.getUint16(at + 22, true) };
+    if (id === 'data') {
+      const frames = size / (fmt.channels * 2);
+      const planes = Array.from({ length: fmt.channels }, () => new Float32Array(frames));
+      for (let i = 0; i < frames; i++) for (let c = 0; c < fmt.channels; c++) planes[c][i] = view.getInt16(at + 8 + (i * fmt.channels + c) * 2, true) / 32768;
+      return { ...fmt, planes };
+    }
+    at += 8 + size + (size % 2);
+  }
+  throw new Error('bad wav');
+}
+
+window.runEncode = async ({ name }) => {
+  const tl = await (await fetch('out/timeline.json')).json();
+  const W = tl.width;
+  const H = tl.height;
+  const plan = planFrames(tl);
+  log(`frames: ${plan.length} (${tl.duration}s @ ${tl.fps}fps)`);
+
+  // ── 映像 ──
+  const config = await pickCodec(W, H);
+  log(`video: ${config.codec} ${config.hardwareAcceleration}`);
+  const vSamples = [];
+  let avcC = null;
+  let lastTs = -1;
+  let reordered = false;
+  const venc = new VideoEncoder({
+    output: (chunk, meta) => {
+      if (meta?.decoderConfig?.description) avcC = new Uint8Array(meta.decoderConfig.description);
+      if (chunk.timestamp <= lastTs) reordered = true;
+      lastTs = chunk.timestamp;
+      const data = new Uint8Array(chunk.byteLength);
+      chunk.copyTo(data);
+      vSamples.push({ data, key: chunk.type === 'key' });
+    },
+    error: (e) => log(`video error: ${e.message}`),
+  });
+  venc.configure(config);
+  const canvas = new OffscreenCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  let current = '';
+  for (let i = 0; i < plan.length; i++) {
+    if (plan[i] !== current) {
+      current = plan[i];
+      const bitmap = await createImageBitmap(await (await fetch(`out/frames/${current}`)).blob());
+      ctx.fillStyle = '#040b1a';
+      ctx.fillRect(0, 0, W, H);
+      ctx.drawImage(bitmap, 0, 0, W, H);
+      bitmap.close();
+    }
+    const frame = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / tl.fps), duration: Math.round(1e6 / tl.fps) });
+    venc.encode(frame, { keyFrame: i % (tl.fps * 2) === 0 });
+    frame.close();
+    while (venc.encodeQueueSize > 4) await new Promise((r) => setTimeout(r, 1));
+    if (i % 150 === 0) log(`  video ${i}/${plan.length}`);
+  }
+  await venc.flush();
+  venc.close();
+  if (reordered) throw new Error('encoder produced reordered frames (B-frames); container would need ctts');
+  log(`video done: ${vSamples.length} samples, ${(vSamples.reduce((a, s) => a + s.data.length, 0) / 1e6).toFixed(1)} MB`);
+
+  // ── 音 ──
+  let audio = null;
+  try {
+    const wav = readWav(await (await fetch('out/music.wav')).arrayBuffer());
+    const need = Math.round(tl.duration * wav.rate);
+    const planes = wav.planes.map((p) => { const q = new Float32Array(need); q.set(p.subarray(0, need)); return q; });
+    const aSamples = [];
+    let asc = null;
+    const aenc = new AudioEncoder({
+      output: (chunk, meta) => {
+        if (meta?.decoderConfig?.description) asc = new Uint8Array(meta.decoderConfig.description);
+        const data = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(data);
+        aSamples.push({ data });
+      },
+      error: (e) => log(`audio error: ${e.message}`),
+    });
+    const bitrate = 192_000;
+    aenc.configure({ codec: 'mp4a.40.2', sampleRate: wav.rate, numberOfChannels: wav.channels, bitrate });
+    const block = 1024 * 16;
+    for (let at = 0; at < need; at += block) {
+      const n = Math.min(block, need - at);
+      const data = new Float32Array(n * wav.channels);
+      for (let c = 0; c < wav.channels; c++) data.set(planes[c].subarray(at, at + n), c * n);
+      const audioData = new AudioData({ format: 'f32-planar', sampleRate: wav.rate, numberOfFrames: n, numberOfChannels: wav.channels, timestamp: Math.round((at / wav.rate) * 1e6), data });
+      aenc.encode(audioData);
+      audioData.close();
+    }
+    await aenc.flush();
+    aenc.close();
+    if (!asc) throw new Error('no AudioSpecificConfig');
+    audio = { sampleRate: wav.rate, channels: wav.channels, asc, samples: aSamples, frameSize: 1024, bitrate };
+    log(`audio done: ${aSamples.length} AAC frames`);
+  } catch (error) {
+    log(`audio skipped: ${error.message}`);
+  }
+
+  // ── 詰めて、保存して、確かめる ──
+  const mp4 = buildMp4({ video: { width: W, height: H, fps: tl.fps, avcC, samples: vSamples }, audio });
+  const saved = await fetch(`/save?name=${encodeURIComponent(name)}`, { method: 'POST', body: mp4 });
+  if (!saved.ok) throw new Error(`save failed: ${saved.status}`);
+  log(`saved ${name}: ${(mp4.length / 1e6).toFixed(1)} MB`);
+
+  const video = document.createElement('video');
+  video.muted = true;
+  video.src = URL.createObjectURL(new Blob([mp4], { type: 'video/mp4' }));
+  await new Promise((resolve, reject) => { video.onloadedmetadata = resolve; video.onerror = () => reject(new Error('the MP4 does not load')); });
+  const probe = [];
+  for (const t of [1, tl.duration / 2, tl.duration - 1]) {
+    video.currentTime = t;
+    await new Promise((resolve) => { video.onseeked = resolve; });
+    const c = new OffscreenCanvas(64, 36);
+    const g = c.getContext('2d');
+    g.drawImage(video, 0, 0, 64, 36);
+    const px = g.getImageData(0, 0, 64, 36).data;
+    let sum = 0;
+    for (let i = 0; i < px.length; i += 4) sum += px[i] + px[i + 1] + px[i + 2];
+    probe.push({ t: Number(t.toFixed(1)), brightness: Math.round(sum / (px.length / 4) / 3) });
+  }
+  return { bytes: mp4.length, duration: video.duration, width: video.videoWidth, height: video.videoHeight, codec: config.codec, audio: Boolean(audio), probe };
+};
+</script>
+</body>
+</html>
