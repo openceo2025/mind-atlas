@@ -60,7 +60,26 @@ export function cardSize(card: Card): { w: number; h: number } {
 
 // ── 埋め込みに渡す文章 ───────────────────────────────────
 export function cardText(card: Card) {
+  return frozenText.get(card.id) ?? liveText(card);
+}
+
+function liveText(card: Card) {
   return [card.title, card.subtitle, card.body, card.tags.join(' ')].filter(Boolean).join('\n');
+}
+
+// 文字を打っている間は、打ちかけの文章で意味を計算しない（埋め込みも採点も頼まない）。
+// 書き始める前の文章のまま扱い、書き終えたら新しい文章で計算する。
+const frozenText = new Map<string, string>();
+
+export function freezeCardText(card: Card) {
+  if (!frozenText.has(card.id)) frozenText.set(card.id, liveText(card));
+}
+
+/** 書き終えた。文章が変わっていれば true */
+export function thawCardText(card: Card) {
+  const before = frozenText.get(card.id);
+  frozenText.delete(card.id);
+  return before !== undefined && before !== liveText(card);
 }
 
 /** 概念（軸）カードの両極の文章。axisPoles が無ければラベルと両端語から作る */

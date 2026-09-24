@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { addRelationRaw, createCard, lookup, requireAi, toast, updateWindowData, useStore } from '../../store';
+import { addRelationRaw, createCard, get, lookup, requireAi, toast, updateWindowData, useStore } from '../../store';
 import { webSearch, type WebSearchResult } from '../../lib/service';
 import { t } from '../../i18n';
 import type { FloatWin } from '../../types';
@@ -16,7 +16,9 @@ export function SearchWindow({ win }: { win: FloatWin }) {
   const [error, setError] = useState('');
   const result = win.data?.result as (WebSearchResult & { query: string }) | undefined;
   const block = useAiBlock();
-  const contextIds = win.cardIds;
+  const result0 = win.data?.result as { about?: string[] } | undefined;
+  // 結果をカードにしたら、検索したときに選んでいたカードとつなぐ
+  const contextIds = win.cardIds.length ? win.cardIds : result0?.about ?? [];
 
   const run = async () => {
     const q = query.trim();
@@ -24,10 +26,18 @@ export function SearchWindow({ win }: { win: FloatWin }) {
     setBusy(true);
     setError('');
     try {
-      await confirmRequestCost({ chars: q.length, outputTokens: 512 });
-      const r = await webSearch(q);
+      // 入力された文は、そのまま検索語になる。「これ」「こっち」が何を指すか分かるよう、
+      // 選んでいるカードがあれば背景として添える（検索するのは入力した問いのほう）
+      const about = get()
+        .selection.map((id) => lookup(id))
+        .filter((c) => c && c.kind !== 'concept')
+        .slice(0, 4) as NonNullable<ReturnType<typeof lookup>>[];
+      const background = about.map((c) => `- ${c.title}${c.body ? `: ${c.body.replace(/\s+/g, ' ').slice(0, 160)}` : ''}`).join('\n');
+      const input = background ? `${q}\n\n---\nBackground (the user's own notes, only to understand what the question refers to; search for the question above):\n${background}`.slice(0, 990) : q;
+      await confirmRequestCost({ chars: input.length, outputTokens: 512 });
+      const r = await webSearch(input);
       reportUsage(r.usage);
-      updateWindowData(win.id, { result: { ...r, query: q }, query: q });
+      updateWindowData(win.id, { result: { ...r, query: q, about: about.map((c) => c.id) }, query: q });
     } catch (e) {
       // やめたのはエラーではない
       if (!(e instanceof RequestCancelled)) setError(e instanceof Error ? e.message : String(e));

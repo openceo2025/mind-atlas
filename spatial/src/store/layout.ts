@@ -23,7 +23,10 @@ export const DOCK: Record<AxisKey, { x: number; y: number }> = {
 // ── 再配置（意味軸） ───────────────────────────────────────
 export function relayout(opts: { stagger?: boolean; mode?: MotionMode } = {}) {
   const s = get();
-  const cards = layoutCards(s);
+  // 開いているグループの中身は、意味配置では動かさない。グループのカードとの位置関係を保ったまま付いていく
+  const inOpenGroup = (c: Card) => Boolean(c.groupId && s.cards[c.groupId]?.expanded && s.cards[c.groupId]?.place === 'canvas');
+  const grouped = layoutCards(s).filter(inOpenGroup);
+  const cards = layoutCards(s).filter((c) => !inOpenGroup(c));
   const scores = computeScores(cards, s.axes, lookup);
   const next = { ...s.cards };
   for (const k of AXIS_KEYS) {
@@ -46,12 +49,24 @@ export function relayout(opts: { stagger?: boolean; mode?: MotionMode } = {}) {
     return { id: c.id, x: p.x, y: p.y, tx: p.x, ty: p.y, w: size.w * k, h: size.h * k, depth: v.sz, fixed: handPlaced(c, s.axes) };
   });
   const obstacles = AXIS_KEYS.map((k) => ({ x: DOCK[k].x, y: DOCK[k].y, tx: DOCK[k].x, ty: DOCK[k].y, w: 260, h: 124, fixed: true }));
-  relax([...nodes, ...obstacles], 110);
+  // 開いているグループの中身も、他のカードが避ける障害物にする
+  const members = grouped.map((c) => {
+    const size = cardSize(c);
+    const k = depthScale(c.depth);
+    return { x: c.x, y: c.y, tx: c.x, ty: c.y, w: size.w * k, h: size.h * k, fixed: true };
+  });
+  relax([...nodes, ...obstacles, ...members], 110);
   for (const n of nodes) next[n.id] = { ...next[n.id], x: n.x, y: n.y, depth: n.depth };
+  for (const c of grouped) {
+    const before = s.cards[c.groupId!];
+    const g = next[c.groupId!];
+    const off = c.groupOffset ?? { x: c.x - before.x, y: c.y - before.y };
+    next[c.id] = { ...next[c.id], x: g.x + off.x, y: g.y + off.y, depth: g.depth, groupOffset: off };
+  }
   set({ cards: next, scoreSource: waiting ? 'server' : scores.source });
 
   // 動く距離が短いものから順に動かす（伸びていく感覚）
-  const ids = [...nodes.map((n) => n.id), ...AXIS_KEYS.map((k) => s.axes[k]).filter((id) => next[id])];
+  const ids = [...nodes.map((n) => n.id), ...grouped.map((c) => c.id), ...AXIS_KEYS.map((k) => s.axes[k]).filter((id) => next[id])];
   const moved = ids
     .map((id) => {
       const b = engine.get(id);
@@ -168,7 +183,7 @@ export function handPlaced(card: Card, axes: Axes) {
 }
 
 /** ドラッグで置いた位置と奥行きを、いまの軸での値として記録する */
-export function overrideFromPosition(ids: string[]) {
+export function overrideFromPosition(ids: string[], opts: { relayout?: boolean; log?: boolean } = {}) {
   const s = get();
   const cards = { ...s.cards };
   let changed = false;
@@ -184,14 +199,14 @@ export function overrideFromPosition(ids: string[]) {
         [axisSlotKey(s.axes, 'y')]: round(sy),
         [axisSlotKey(s.axes, 'z')]: round(c.depth),
       },
-      log: [...c.log, { at: now(), code: 'moved', params: { x: lookup(s.axes.x)?.title ?? '', y: lookup(s.axes.y)?.title ?? '' } }].slice(-40),
+      log: opts.log === false ? c.log : [...c.log, { at: now(), code: 'moved', params: { x: lookup(s.axes.x)?.title ?? '', y: lookup(s.axes.y)?.title ?? '' } }].slice(-40),
     };
     changed = true;
   }
   if (!changed) return;
   set({ cards });
   markDirty();
-  relayout({ stagger: false, mode: 'soft' });
+  if (opts.relayout !== false) relayout({ stagger: false, mode: 'soft' });
 }
 
 /** 詳細ウィンドウのスライダーから、特定の軸での値を直接設定する */

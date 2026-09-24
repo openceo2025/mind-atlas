@@ -439,6 +439,15 @@
   z-index: 80; /* 選択中の操作なので、浮いているウィンドウより手前 */
 }
 
+/* 子カードを作った直後：薄くして、生まれたカードの作業を邪魔しない（押せるまま） */
+.radial > div {
+  transition: opacity 0.25s ease;
+}
+
+.radial.faded > div {
+  opacity: 0.22 !important;
+}
+
 .radial-ring {
   position: absolute;
   width: 200px;

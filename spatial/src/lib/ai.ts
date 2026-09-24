@@ -4,7 +4,7 @@ import { getLocale, t, type Locale } from '../i18n';
 import type { Card, CardKind, RelationType } from '../types';
 import { aiTurn, saveAiPreference, ServiceError, type AiPreference, type AiTurnMessage } from './service';
 import { confirmRequestCost, reportUsage } from './cost';
-import { SPACE_TOOLS, executeSpaceTool } from './spaceTools';
+import { SPACE_TOOLS, executeSpaceTool, relationsContext } from './spaceTools';
 import { routeSpaceRequest } from './decisions';
 
 const LANGUAGE: Record<Locale, string> = {
@@ -142,14 +142,61 @@ function extractJson<T>(text: string): T {
   }
 }
 
-async function runJson<T>(task: string, context: string): Promise<T> {
+type ToolSpec = { type: 'function'; name: string; description: string; parameters: Record<string, unknown> };
+
+const toolSpec = (name: string): ToolSpec[] =>
+  SPACE_TOOLS.filter((tool) => tool.name === name).map((tool) => ({ type: 'function' as const, name: tool.name, description: tool.description, parameters: tool.parameters }));
+
+/** 道具の呼び出しを実行して、会話に結果を足す */
+async function runToolCalls(messages: AiTurnMessage[], text: string, calls: NonNullable<AiTurnMessage['toolCalls']>, onStep?: (step: ChatStep) => void) {
+  messages.push({ role: 'assistant', content: text, toolCalls: calls });
+  for (const call of calls) {
+    let args: Record<string, unknown> = {};
+    try {
+      args = call.arguments ? (JSON.parse(call.arguments) as Record<string, unknown>) : {};
+    } catch {
+      args = {};
+    }
+    const outcome = await executeSpaceTool(call.name, args).catch((error: unknown) => ({
+      ok: false,
+      text: error instanceof Error ? error.message : String(error),
+    }));
+    onStep?.({ tool: call.name, ok: outcome.ok, text: outcome.text });
+    messages.push({
+      role: 'tool',
+      name: call.name,
+      toolCallId: call.callId,
+      content: [outcome.text, 'data' in outcome && outcome.data !== undefined ? JSON.stringify(outcome.data) : '']
+        .filter(Boolean)
+        .join('\n')
+        .slice(0, 6000),
+    });
+  }
+}
+
+/**
+ * JSON で答えてもらう AI 操作。web が true なら、必要なときに AI がネット検索してから答える
+ * （要約・展開・抽出など、あらゆる AI 操作で外の情報を足して考えられるように）。
+ */
+async function runJson<T>(task: string, context: string, opts: { web?: boolean } = {}): Promise<T> {
   const prompt = [
     SYSTEM,
     task,
+    opts.web ? 'If current or outside facts would clearly improve the answer, call web_search first (at most twice); otherwise answer from the cards.' : '',
     `Write every human-readable string in ${language()}.`,
     'Reply with a single JSON object only, no prose, no code fences.',
-  ].join('\n\n');
-  const result = await turn({ messages: [{ role: 'user', content: prompt }], contextText: context });
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  const messages: AiTurnMessage[] = [{ role: 'user', content: prompt }];
+  const tools = opts.web ? toolSpec('web_search') : undefined;
+  for (let i = 0; tools && i < 2; i += 1) {
+    const result = await turn({ messages, contextText: context, tools });
+    const calls = result.toolCalls ?? [];
+    if (!calls.length) return extractJson<T>(result.text);
+    await runToolCalls(messages, result.text, calls);
+  }
+  const result = await turn({ messages, contextText: context });
   return extractJson<T>(result.text);
 }
 
@@ -177,6 +224,7 @@ export async function summarize(cards: Card[], lens: Lens, variant: number): Pro
         'Return {"lead": string (2-3 sentences), "points": [{"text": string (one sentence), "sourceId": id of the card it comes from}] (3-5 items), "tags": string[] (2-4 short hashtags without #)}.',
       ].join('\n'),
       cardsContext(cards),
+      { web: true },
     );
   } catch (error) {
     // 散文で返ってきた場合は、そのまま要約文として見せる
@@ -219,7 +267,8 @@ export async function expand(card: Card, neighbors: Card[]): Promise<Draft[]> {
       'Use the neighboring cards only as background. Do not repeat what the cards already say. Produce at most 12 cards.',
       'Return {"items": [{"kind": "note"|"idea"|"issue"|"hypothesis"|"quote", "title": short title, "body": 1-2 sentences, "tags": [1-2 short tags], "relation": "derived"|"supports"|"contradicts"}]}.',
     ].join('\n'),
-    cardsContext([card, ...neighbors.slice(0, 6)]),
+    [cardsContext([card, ...neighbors.slice(0, 12)]), relationsContext([card, ...neighbors.slice(0, 12)])].filter(Boolean).join('\n\n'),
+    { web: true },
   );
   return cleanDrafts(r.items);
 }
@@ -232,6 +281,7 @@ export async function extractIdeas(card: Card): Promise<Draft[]> {
       'Return {"items": [{"kind": ..., "title": short title, "body": the point in 1-2 sentences, "tags": [1-2 short tags]}]}.',
     ].join('\n'),
     cardsContext([card]),
+    { web: true },
   );
   return cleanDrafts(r.items).map((d) => ({ ...d, relation: 'derived' }));
 }
@@ -278,7 +328,7 @@ export async function suggestAxisEnds(label: string): Promise<{ low: string; hig
 }
 
 // ── チャット ─────────────────────────────────────────
-const MAX_TOOL_TURNS = 6;
+const MAX_TOOL_TURNS = 10;
 
 export interface ChatStep {
   tool: string;
@@ -308,49 +358,31 @@ export async function chat(
   const intro = [
     SYSTEM,
     `The user is working in the space "${spaceTitle}". The cards below are what the user can see right now.`,
-    'You can change the space with the tools: create, update, delete, link, bundle cards, set an axis or focus a card.',
-    'Use a tool only when the user asks for a change or when you must look something up; never guess a card id — search or use the ids in the context.',
+    'The first cards in the context are the ones the user selected; the rest are cards connected to them. "Connections" lists the relations (derived = the second card was born from the first; contains = group membership).',
+    'You can read anything in this space yourself: search_cards, read_card (whole body and connections), get_related_cards (walk children/parents/relations) and list_cards. Look things up as many times as you need before answering instead of saying you cannot see something.',
+    'Use web_search for current or outside facts the cards do not contain.',
+    'You can change the space with the tools: create, update, delete, link, bundle cards, set an axis or focus a card. Change things only when the user asks for a change; never guess a card id — search or use the ids in the context.',
     'After the tools have run, tell the user briefly what you changed.',
     `Answer in ${language()} unless the user writes in another language. Use Markdown lists when helpful.`,
   ].join('\n');
   const messages: AiTurnMessage[] = history.map((m, i) => (i === 0 && m.role === 'user' ? { role: 'user', content: `${intro}\n\n${m.content}` } : m));
   // 道具が絞れているなら、その道具だけを渡す（毎ターンの入力が 3〜4 割減る）
-  const needed = routed.tool ? new Set([routed.tool, 'get_space_overview', 'search_cards']) : null;
+  // 読む道具とネット検索は、道具を絞ったときも必ず渡す
+  const needed = routed.tool ? new Set([routed.tool, 'get_space_overview', 'search_cards', 'read_card', 'get_related_cards', 'list_cards', 'web_search']) : null;
   const tools = SPACE_TOOLS.filter((tool) => !needed || needed.has(tool.name)).map((tool) => ({
     type: 'function' as const,
     name: tool.name,
     description: tool.description,
     parameters: tool.parameters,
   }));
+  const contextText = [cardsContext(cards, 30000), relationsContext(cards)].filter(Boolean).join('\n\n');
 
   for (let i = 0; i < MAX_TOOL_TURNS; i += 1) {
-    const result = await turn({ messages, contextText: cardsContext(cards, 30000), tools });
+    const result = await turn({ messages, contextText, tools });
     const calls = result.toolCalls ?? [];
     if (!calls.length) return result.text;
-    messages.push({ role: 'assistant', content: result.text, toolCalls: calls });
-    for (const call of calls) {
-      let args: Record<string, unknown> = {};
-      try {
-        args = call.arguments ? (JSON.parse(call.arguments) as Record<string, unknown>) : {};
-      } catch {
-        args = {};
-      }
-      const outcome = await executeSpaceTool(call.name, args).catch((error: unknown) => ({
-        ok: false,
-        text: error instanceof Error ? error.message : String(error),
-      }));
-      opts.onStep?.({ tool: call.name, ok: outcome.ok, text: outcome.text });
-      messages.push({
-        role: 'tool',
-        name: call.name,
-        toolCallId: call.callId,
-        content: [outcome.text, 'data' in outcome && outcome.data !== undefined ? JSON.stringify(outcome.data) : '']
-          .filter(Boolean)
-          .join('\n')
-          .slice(0, 4000),
-      });
-    }
+    await runToolCalls(messages, result.text, calls, opts.onStep);
   }
-  const last = await turn({ messages, contextText: cardsContext(cards, 30000) });
+  const last = await turn({ messages, contextText });
   return last.text;
 }

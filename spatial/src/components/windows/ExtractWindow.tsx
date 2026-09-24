@@ -47,7 +47,7 @@ export function ExtractWindow({ win }: { win: FloatWin }) {
     setBusy('extractAi', true);
     void extractIdeas(card)
       .then((drafts) => {
-        const ids = spawnDrafts(card.id, drafts, 280);
+        const ids = spawnDrafts(card.id, drafts);
         if (ids.length) {
           select(ids);
           toast(t('toast.extractedMany', { n: ids.length }));

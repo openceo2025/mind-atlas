@@ -3,6 +3,8 @@ import {
   AXIS_KEYS,
   axisKeyOf,
   collapseGroup,
+  deleteCards,
+  dragFollowers,
   duplicate,
   expandGroup,
   axisToDetach,
@@ -14,12 +16,13 @@ import {
   select,
   set,
   settleAxisCard,
+  settleGroupMembers,
   useStore,
   AXIS_NAME,
 } from '../store';
 import { engine } from '../lib/physics';
 import { DEPTH_HIGH, DEPTH_LOW, axisEnds, axisSlotKey, cardSize, project, unproject } from '../lib/semantic';
-import { dropCards, findDropTarget } from '../lib/drag';
+import { dropCards, findDropTarget, overNav } from '../lib/drag';
 import { t } from '../i18n';
 import { Icon, KindIcon, Visual } from './Icons';
 import type { Card } from '../types';
@@ -116,20 +119,37 @@ function CardViewImpl({ id }: { id: string }) {
     if (e.button !== 0 || panState.space || panState.pinching) return;
     e.stopPropagation();
     const st = useStore.getState();
-    if (e.ctrlKey || e.metaKey) {
-      select([id], 'toggle');
+    if (e.shiftKey) return startDepthDrag(e);
+    // Ctrl を押したまま：動かさずに離せば選択の切り替え、引けばこのカードだけを単独で動かす
+    const ctrlAtStart = e.ctrlKey || e.metaKey;
+    if (!ctrlAtStart) {
+      if (!st.selection.includes(id)) select([id]);
+      else set({ primary: id, radialHidden: false, selectedRelation: null });
+    }
+    if (st.readOnly) {
+      if (ctrlAtStart) select([id], 'toggle');
       return;
     }
-    if (e.shiftKey) return startDepthDrag(e);
-    if (!st.selection.includes(id)) select([id]);
-    else set({ primary: id, radialHidden: false, selectedRelation: null });
-    if (st.readOnly) return;
-    let ids = useStore.getState().selection.filter((x) => useStore.getState().cards[x]?.place === 'canvas');
+    let ids = ctrlAtStart ? [id] : useStore.getState().selection.filter((x) => useStore.getState().cards[x]?.place === 'canvas');
     if (!ids.includes(id)) ids = [id];
     const alt = e.altKey;
     let last = { x: e.clientX, y: e.clientY };
     const start = last;
     let started = false;
+    // つかんだカードから生まれたカードも一緒に動く。Ctrl を押している間は置いていく（ドラッグ中に切り替えられる）
+    let followers: string[] = [];
+    const moved = new Set<string>();
+    const origin = new Map<string, { x: number; y: number }>();
+    let solo = ctrlAtStart;
+    const nav = document.querySelector('.sidebar');
+    const setSolo = (next: boolean) => {
+      if (next === solo || !started) return;
+      solo = next;
+      followers.forEach((x) => engine.setLift(x, !solo));
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Control' || ev.key === 'Meta') setSolo(ev.type === 'keydown');
+    };
     const move = (ev: PointerEvent) => {
       if (panState.pinching) return;
       if (!started) {
@@ -142,35 +162,71 @@ function CardViewImpl({ id }: { id: string }) {
             select(dups);
           }
         }
+        followers = alt ? [] : dragFollowers(ids);
+        const cards = useStore.getState().cards;
+        [...ids, ...followers].forEach((x) => cards[x] && origin.set(x, { x: cards[x].x, y: cards[x].y }));
         ids.forEach((x) => engine.setLift(x, true));
+        if (!solo) followers.forEach((x) => engine.setLift(x, true));
         set({ draggingIds: ids });
       }
+      setSolo(ev.ctrlKey || ev.metaKey);
       const z = useStore.getState().camera.zoom;
-      moveCards(ids, (ev.clientX - last.x) / z, (ev.clientY - last.y) / z);
+      const group = solo ? ids : [...ids, ...followers];
+      group.forEach((x) => moved.add(x));
+      moveCards(group, (ev.clientX - last.x) / z, (ev.clientY - last.y) / z);
       last = { x: ev.clientX, y: ev.clientY };
-      const target = findDropTarget(ev.clientX, ev.clientY, ids);
+      // 左のナビへ投げると削除（ダイアログと同じ）
+      nav?.classList.toggle('drop-close', overNav(ev.clientX, ev.clientY));
+      const target = findDropTarget(ev.clientX, ev.clientY, [...ids, ...followers]);
       if (target !== useStore.getState().dropTarget) set({ dropTarget: target });
     };
     const up = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
-      if (!started) return;
-      ids.forEach((x) => engine.setLift(x, false));
-      const target = findDropTarget(ev.clientX, ev.clientY, ids);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKey);
+      nav?.classList.remove('drop-close');
+      if (!started) {
+        if (ctrlAtStart) select([id], 'toggle');
+        return;
+      }
+      [...ids, ...followers].forEach((x) => engine.setLift(x, false));
       set({ draggingIds: [], dropTarget: null });
+      const movedFollowers = followers.filter((x) => moved.has(x));
+      if (ev.type === 'pointerup' && overNav(ev.clientX, ev.clientY)) {
+        // 連れてきたカードは元の場所へ戻し、つかんだカードだけを消す（元に戻すで復活できる）
+        for (const x of movedFollowers) {
+          const o = origin.get(x);
+          const c = useStore.getState().cards[x];
+          if (o && c) moveCards([x], o.x - c.x, o.y - c.y);
+        }
+        for (const x of ids) {
+          const o = origin.get(x);
+          const c = useStore.getState().cards[x];
+          if (o && c) moveCards([x], o.x - c.x, o.y - c.y);
+        }
+        deleteCards(ids);
+        return;
+      }
+      const target = findDropTarget(ev.clientX, ev.clientY, [...ids, ...followers]);
       const handled = target && target !== 'canvas' ? dropCards(target, ids, ev.clientX, ev.clientY) : false;
       // 軸の先端から遠くへ運んだ軸カードは、その軸から外す（軸は「意味なし」になる）
       const detached = handled ? [] : ids.map((x) => ({ id: x, key: axisToDetach(x) })).filter((entry) => entry.key);
       for (const entry of detached) detachAxis(entry.key!);
       // 残りの軸カードは軸の先端へ戻り、それ以外は「置いた場所＝いまの軸での意味」として記録する
       ids.forEach((x) => settleAxisCard(x));
-      if (!handled) overrideFromPosition(ids.filter((x) => !detached.some((entry) => entry.id === x)));
+      const placed = [...(handled ? [] : ids.filter((x) => !detached.some((entry) => entry.id === x))), ...movedFollowers];
+      // 開いているグループの中のカード：外へ運んだらグループから外し、中なら新しい場所として覚える
+      if (!handled) settleGroupMembers(placed);
+      if (placed.length) overrideFromPosition(placed);
       if (detached.length) overrideFromPosition(detached.map((entry) => entry.id));
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKey);
   };
 
   // 右クリック（長押し）で、そのカードにできることを出す

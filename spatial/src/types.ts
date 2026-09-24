@@ -93,6 +93,8 @@ export interface Card {
   members?: string[];
   expanded?: boolean;
   groupId?: string;
+  /** グループの中での置き場所（グループのカードからのずれ）。開くたびに同じ場所へ出る */
+  groupOffset?: { x: number; y: number };
   /** 軸ID → その軸での人による上書き値（0..1） */
   overrides?: Record<string, number>;
   log: MeaningEvent[];

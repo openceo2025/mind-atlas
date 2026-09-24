@@ -1,5 +1,5 @@
 import type { AxisKey, Card, CardKind, RelationType } from '../types';
-import { cardSize, clusterCards, depthScale, fallbackClusterLabel, relax, similarityMatrix } from '../lib/semantic';
+import { cardSize, clusterCards, depthScale, fallbackClusterLabel, freezeCardText, relax, similarityMatrix, thawCardText } from '../lib/semantic';
 import { engine } from '../lib/physics';
 import { t } from '../i18n';
 import type { Draft } from '../lib/ai';
@@ -91,9 +91,32 @@ export function beginCardEdit(id: string) {
 
 /** 編集が終わった：意味の位置へ動かす（手で置いたカードはその場所のまま） */
 export function endCardEdit(id: string) {
+  endTextEdit(id, true);
   if (get().editingCardId !== id) return;
   set({ editingCardId: null });
   relayout({ stagger: false, mode: 'soft' });
+}
+
+// 文字の入力。入力欄にいる間は、打ちかけの文章で意味を計算しない。
+// 入力欄を離れたら書き終わり（タイトル→本文のように欄を移るだけなら続き）。
+const textEditTimers = new Map<string, number>();
+
+export function beginTextEdit(id: string) {
+  window.clearTimeout(textEditTimers.get(id));
+  textEditTimers.delete(id);
+  const c = lookup(id);
+  if (c) freezeCardText(c);
+}
+
+export function endTextEdit(id: string, immediately = false) {
+  window.clearTimeout(textEditTimers.get(id));
+  const finish = () => {
+    textEditTimers.delete(id);
+    const c = lookup(id);
+    if (c && thawCardText(c)) relayout({ stagger: false, mode: 'soft' });
+  };
+  if (immediately) finish();
+  else textEditTimers.set(id, window.setTimeout(finish, 700));
 }
 
 // ── 移動・複製・削除 ───────────────────────────────────────
@@ -107,6 +130,32 @@ export function moveCards(ids: string[], dx: number, dy: number) {
     const c = lookup(id);
     if (c) engine.setTarget(id, c.x, c.y, depthScale(c.depth), 'drag');
   }
+}
+
+/**
+ * ドラッグで一緒に動くカード。人は線を全部たどって見るのではなく、引き連れて動くことで
+ * つながりを感じるので、つかんだカードから生まれたもの（派生の向き）を孫の先までたどる。
+ * 開いているグループの中身も連れていく。軸のカードと、画面に出ていないカードは連れていかない。
+ */
+export function dragFollowers(ids: string[]): string[] {
+  const s = get();
+  const out = new Set<string>();
+  const seen = new Set(ids);
+  const queue = [...ids];
+  while (queue.length) {
+    const from = queue.shift()!;
+    const src = s.cards[from];
+    for (const r of s.relations) {
+      if (r.suggested || r.from !== from || seen.has(r.to)) continue;
+      if (r.type !== 'derived' && !(r.type === 'contains' && src?.kind === 'group' && src.expanded)) continue;
+      const c = s.cards[r.to];
+      seen.add(r.to);
+      if (!c || c.place !== 'canvas' || isAxisCard(r.to)) continue;
+      out.add(r.to);
+      queue.push(r.to);
+    }
+  }
+  return [...out];
 }
 
 /** Shift ドラッグ：奥行きだけを動かす（奥へ行くほど右上へ寄り、小さくなる） */
@@ -147,30 +196,25 @@ export function detachAxis(key: AxisKey) {
 }
 
 /**
- * あるカードから、つながった子カードを生やす。押すたびに親の右へ increment して並ぶ。
- * 中身を書く前に意味配置で飛ばされないよう、置いた場所を「手で置いた」として覚える。
+ * 親のすぐ右から近い順に、他のカードと重ならない場所を探す（子カードの生まれる場所）。
+ * 起点はいつも親の真横。作った数だけ下へずらすと、兄カードを動かした後も下へ下へと離れていく。
+ * 奥にある親ほどカードは小さく描かれるので、間隔もその分だけ詰める。
  */
-export function createChild(parentId: string) {
-  const s = get();
-  const parent = s.cards[parentId];
-  if (!parent || parent.place !== 'canvas' || s.readOnly) return;
-  snapshot();
+function childSpots(parent: Card, kids: Pick<Card, 'kind'>[], cards: Card[]) {
+  const k = depthScale(parent.depth);
   const { w } = cardSize(parent);
-  const kid = cardSize({ kind: 'note' } as Card);
-  const born = s.relations.filter((r) => !r.suggested && r.from === parentId && r.type === 'derived').length;
-  // 他のカードの下に隠れず、遠くへも行かないよう、親のすぐ右から近い順に空いている所を探す
-  const cards = canvasCards(s);
-  const free = (px: number, py: number) =>
-    !cards.some((c) => {
-      const o = cardSize(c);
-      return Math.abs(c.x - px) < (o.w + kid.w) / 2 + 14 && Math.abs(c.y - py) < (o.h + kid.h) / 2 + 14;
-    });
-  const stepX = kid.w + 30;
-  const stepY = kid.h + 28;
-  const home = { x: parent.x + w / 2 + 40 + kid.w / 2, y: parent.y + born * stepY };
+  const taken = cards.map((c) => {
+    const o = cardSize(c);
+    const kc = depthScale(c.depth);
+    return { x: c.x, y: c.y, w: o.w * kc, h: o.h * kc };
+  });
+  const base = cardSize(kids[0] as Card);
+  const stepX = (base.w + 30) * k;
+  const stepY = (base.h + 28) * k;
+  const home = { x: parent.x + ((w + base.w) / 2 + 40) * k, y: parent.y };
   const spots: { x: number; y: number; cost: number }[] = [];
   for (let gx = -3; gx <= 4; gx++) {
-    for (let gy = -4; gy <= 6; gy++) {
+    for (let gy = -5; gy <= 6; gy++) {
       const px = home.x + gx * stepX;
       const py = home.y + gy * stepY;
       // 右と下を少しだけ好む（左や上は遠回り扱い）
@@ -179,8 +223,27 @@ export function createChild(parentId: string) {
     }
   }
   spots.sort((a, b) => a.cost - b.cost);
-  const spot = spots.find((p) => free(p.x, p.y)) ?? home;
-  const { x, y } = spot;
+  return kids.map((kid, i) => {
+    const size = cardSize(kid as Card);
+    const kw = size.w * k;
+    const kh = size.h * k;
+    const free = (px: number, py: number) => !taken.some((o) => Math.abs(o.x - px) < (o.w + kw) / 2 + 14 * k && Math.abs(o.y - py) < (o.h + kh) / 2 + 14 * k);
+    const spot = spots.find((p) => free(p.x, p.y)) ?? { x: home.x + stepX, y: home.y + i * stepY };
+    taken.push({ x: spot.x, y: spot.y, w: kw, h: kh });
+    return { x: spot.x, y: spot.y };
+  });
+}
+
+/**
+ * あるカードから、つながった子カードを生やす。押すたびに親の右へ increment して並ぶ。
+ * 中身を書く前に意味配置で飛ばされないよう、置いた場所を「手で置いた」として覚える。
+ */
+export function createChild(parentId: string) {
+  const s = get();
+  const parent = s.cards[parentId];
+  if (!parent || parent.place !== 'canvas' || s.readOnly) return;
+  snapshot();
+  const [{ x, y }] = childSpots(parent, [{ kind: 'note' }], canvasCards(s));
   const card = makeCard({
     kind: 'note',
     title: t('card.newTitle'),
@@ -232,7 +295,7 @@ export function deleteCards(ids: string[]) {
   const cards = { ...s.cards };
   for (const id of del) {
     const c = cards[id];
-    if (c?.members) for (const m of c.members) if (cards[m]) cards[m] = { ...cards[m], place: 'canvas', groupId: undefined, x: c.x, y: c.y };
+    if (c?.members) for (const m of c.members) if (cards[m]) cards[m] = { ...cards[m], place: 'canvas', groupId: undefined, groupOffset: undefined, x: c.x, y: c.y };
     if (c?.groupId && cards[c.groupId]?.members) {
       const g = cards[c.groupId];
       cards[g.id] = { ...g, members: g.members!.filter((m) => m !== id) };
@@ -285,7 +348,17 @@ export function group(ids: string[], title?: string) {
     log: [{ at: now(), code: 'grouped', params: { n: members.length } }],
   });
   const cards = { ...s.cards, [card.id]: card };
-  for (const m of members) cards[m] = { ...cards[m], place: 'hidden', groupId: card.id, x: cx, y: cy, log: [...cards[m].log, { at: now(), code: 'bundledInto', params: { title: card.title } }] };
+  // 束ねる前の並びを覚えておき、開いたときはその並びのまま出す
+  for (const m of members)
+    cards[m] = {
+      ...cards[m],
+      place: 'hidden',
+      groupId: card.id,
+      groupOffset: { x: cards[m].x - cx, y: cards[m].y - cy },
+      x: cx,
+      y: cy,
+      log: [...cards[m].log, { at: now(), code: 'bundledInto', params: { title: card.title } }],
+    };
   engine.place(card.id, cx, cy, 0.4);
   for (const m of members) engine.setTarget(m, cx, cy, 0.3, 'soft');
   set({
@@ -307,21 +380,23 @@ export function expandGroup(gid: string) {
   snapshot();
   const cards = { ...s.cards };
   const n = g.members.length;
+  // 中のカードは毎回同じ場所へ出す（覚えている場所が無いものだけ、輪の上に空きを作って置く）
   const nodes = g.members
     .filter((m) => cards[m])
     .map((m, i) => {
       const a = (i / n) * Math.PI * 2 - Math.PI / 2;
       const size = cardSize(cards[m]);
-      const x = g.x + Math.cos(a) * 270;
-      const y = g.y + Math.sin(a) * 170;
-      return { id: m, x, y, tx: x, ty: y, w: size.w, h: size.h };
+      const off = cards[m].groupOffset ?? { x: Math.round(Math.cos(a) * 270), y: Math.round(Math.sin(a) * 170) };
+      const x = g.x + off.x;
+      const y = g.y + off.y;
+      return { id: m, x, y, tx: x, ty: y, w: size.w, h: size.h, fixed: true, off };
     });
   const others = layoutCards(s)
-    .filter((c) => c.id !== gid)
+    .filter((c) => c.id !== gid && c.groupId !== gid)
     .map((c) => ({ id: c.id, x: c.x, y: c.y, tx: c.x, ty: c.y, w: cardSize(c).w, h: cardSize(c).h }));
   relax([...nodes, ...others], 50);
   for (const n2 of nodes) {
-    cards[n2.id] = { ...cards[n2.id], place: 'canvas', x: n2.x, y: n2.y, depth: g.depth };
+    cards[n2.id] = { ...cards[n2.id], place: 'canvas', x: n2.x, y: n2.y, depth: g.depth, groupOffset: n2.off };
     engine.place(n2.id, g.x, g.y, 0.3);
   }
   for (const o of others) cards[o.id] = { ...cards[o.id], x: o.x, y: o.y };
@@ -340,7 +415,10 @@ export function collapseGroup(gid: string) {
   const cards = { ...s.cards };
   for (const m of g.members) {
     if (!cards[m]) continue;
-    cards[m] = { ...cards[m], place: 'hidden', x: g.x, y: g.y };
+    // いまの並びを覚えてから畳む（次に開いたとき、同じ並びで出てくる）
+    const c = cards[m];
+    const off = c.place === 'canvas' ? { x: c.x - g.x, y: c.y - g.y } : c.groupOffset;
+    cards[m] = { ...c, place: 'hidden', x: g.x, y: g.y, groupOffset: off };
     engine.setTarget(m, g.x, g.y, 0.3, 'soft');
   }
   cards[gid] = { ...g, expanded: false };
@@ -358,7 +436,14 @@ export function addToGroup(gid: string, ids: string[]) {
   const members = [...g.members, ...add];
   const cards = { ...s.cards };
   for (const id of add) {
-    cards[id] = { ...cards[id], place: g.expanded ? 'canvas' : 'hidden', groupId: gid, log: [...cards[id].log, { at: now(), code: 'bundledInto', params: { title: g.title } }] };
+    cards[id] = {
+      ...cards[id],
+      place: g.expanded ? 'canvas' : 'hidden',
+      groupId: gid,
+      // 開いているグループへ入れたなら、置いた場所をそのまま中での場所にする
+      groupOffset: g.expanded ? { x: cards[id].x - g.x, y: cards[id].y - g.y } : undefined,
+      log: [...cards[id].log, { at: now(), code: 'bundledInto', params: { title: g.title } }],
+    };
     if (!g.expanded) engine.setTarget(id, g.x, g.y, 0.3, 'soft');
   }
   cards[gid] = {
@@ -379,6 +464,81 @@ export function addToGroup(gid: string, ids: string[]) {
   toast(t('toast.addedToGroup', { n: add.length, title: g.title }));
 }
 
+/** グループから外して、独立したカードに戻す（その場所に残る）。空になったグループは消える */
+export function removeFromGroup(ids: string[]) {
+  const s = get();
+  const out = ids.filter((id) => s.cards[id]?.groupId && s.cards[s.cards[id].groupId!]);
+  if (!out.length) return;
+  snapshot();
+  const cards = { ...s.cards };
+  const emptied: string[] = [];
+  const titles = new Set<string>();
+  for (const id of out) {
+    const c = cards[id];
+    const g = cards[c.groupId!];
+    titles.add(g.title);
+    const members = (g.members ?? []).filter((m) => m !== id);
+    cards[g.id] = {
+      ...g,
+      members,
+      subtitle: t('group.count', { n: members.length }),
+      body: members.map((m) => cards[m]?.title ?? '').join('\n'),
+    };
+    if (!members.length) emptied.push(g.id);
+    cards[id] = {
+      ...c,
+      place: 'canvas',
+      groupId: undefined,
+      groupOffset: undefined,
+      x: c.place === 'canvas' ? c.x : g.x + 260,
+      y: c.place === 'canvas' ? c.y : g.y,
+      log: [...c.log, { at: now(), code: 'removedFromGroup', params: { title: g.title } }],
+    };
+  }
+  for (const gid of emptied) {
+    delete cards[gid];
+    engine.remove(gid);
+  }
+  set({
+    cards,
+    relations: s.relations.filter((r) => !(r.type === 'contains' && out.includes(r.to) && s.cards[r.from]?.kind === 'group') && !emptied.includes(r.from) && !emptied.includes(r.to)),
+    selection: out,
+    primary: out[0],
+  });
+  markDirty();
+  overrideFromPosition(out);
+  toast(t('toast.removedFromGroup', { n: out.length, title: [...titles].join('・') }), { action: { label: t('action.undo'), run: () => undo() } });
+}
+
+/**
+ * 開いているグループの中のカードを動かし終えた。グループから十分に離れたらグループから外し、
+ * そうでなければ中での新しい場所として覚える。
+ */
+export function settleGroupMembers(ids: string[]) {
+  const s = get();
+  const leaving: string[] = [];
+  const cards = { ...s.cards };
+  let changed = false;
+  for (const id of ids) {
+    const c = s.cards[id];
+    const g = c?.groupId ? s.cards[c.groupId] : undefined;
+    if (!c || !g?.expanded || c.place !== 'canvas') continue;
+    // 仲間のうち一番遠いものより、さらに一回り外へ出したら「外へ出した」とみなす
+    const reach = Math.max(
+      0,
+      ...(g.members ?? []).filter((m) => m !== id && !ids.includes(m)).map((m) => Math.hypot(s.cards[m]?.groupOffset?.x ?? 0, s.cards[m]?.groupOffset?.y ?? 0)),
+    );
+    const dist = Math.hypot(c.x - g.x, c.y - g.y);
+    if (dist > Math.max(460, reach + 240)) leaving.push(id);
+    else {
+      cards[id] = { ...c, groupOffset: { x: c.x - g.x, y: c.y - g.y } };
+      changed = true;
+    }
+  }
+  if (changed) set({ cards });
+  if (leaving.length) removeFromGroup(leaving);
+}
+
 /** 隠れているカード（束の中）なら束を開いてから、そのカードへ寄る */
 export function revealCard(id: string) {
   const c = lookup(id);
@@ -389,18 +549,20 @@ export function revealCard(id: string) {
 }
 
 // ── AI や抽出で生まれたカードを、元カードの周りに置く ─────────────
-export function spawnDrafts(sourceId: string, drafts: Draft[], radius = 290): string[] {
+/**
+ * AI や抽出で生まれたカードは、親のすぐ横にまとめて置き、その場所から動かさない
+ * （意味の位置へは移さない）。いくつ生まれたかが一目で分かることを優先する。
+ */
+export function spawnDrafts(sourceId: string, drafts: Draft[]): string[] {
   const s = get();
   const src = s.cards[sourceId];
   if (!src || !drafts.length) return [];
   snapshot();
   const cards = { ...s.cards };
   const ids: string[] = [];
-  const baseAngle = Math.atan2(src.y, src.x);
+  const spots = childSpots(src, drafts, canvasCards(s));
   const nodes = drafts.map((d, i) => {
-    const a = baseAngle + (i - (drafts.length - 1) / 2) * 0.75;
-    const x = src.x + Math.cos(a) * radius;
-    const y = src.y + Math.sin(a) * radius * 0.7;
+    const { x, y } = spots[i];
     const card = makeCard({
       kind: d.kind,
       title: d.title,
@@ -423,6 +585,8 @@ export function spawnDrafts(sourceId: string, drafts: Draft[], radius = 290): st
     relations: [...s.relations, ...drafts.map((d, i) => ({ id: newId('r'), from: sourceId, to: nodes[i].id, type: d.relation ?? ('derived' as RelationType) }))],
   });
   markDirty();
+  // 置いた場所を「この軸での位置」として覚える。意味配置はもう動かさない
+  overrideFromPosition(ids, { relayout: false, log: false });
   relayout({ stagger: true, mode: 'soft' });
   return ids;
 }
@@ -432,7 +596,7 @@ export function extractText(sourceId: string, text: string, kind: CardKind = 'qu
   const body = text.trim();
   if (!src || !body) return undefined;
   const title = body.length > 42 ? `${body.slice(0, 42)}…` : body;
-  const [id] = spawnDrafts(sourceId, [{ kind, title, body, tags: [], relation: 'derived' }], 260);
+  const [id] = spawnDrafts(sourceId, [{ kind, title, body, tags: [], relation: 'derived' }]);
   if (id) {
     patchSubtitle(id, t('card.extractedFrom', { title: src.title }));
     addLog(sourceId, 'extracted', { title });
@@ -448,7 +612,7 @@ function patchSubtitle(id: string, subtitle: string) {
 export function saveSummaryCard(sourceIds: string[], title: string, body: string) {
   const first = sourceIds[0];
   if (!first) return;
-  const [id] = spawnDrafts(first, [{ kind: 'summary', title: t('card.summaryTitle', { title }), body, tags: [], relation: 'derived' }], 250);
+  const [id] = spawnDrafts(first, [{ kind: 'summary', title: t('card.summaryTitle', { title }), body, tags: [], relation: 'derived' }]);
   if (!id) return;
   for (const sid of sourceIds.slice(1)) addRelationRaw(sid, id, 'derived');
   toast(t('toast.summarySaved'));

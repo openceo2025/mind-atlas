@@ -7,6 +7,16 @@ export const setCanvasEl = (el: HTMLElement | null) => {
   canvasEl = el;
 };
 
+/** 左ナビが閉じているときに、「ナビへ投げた」とみなす画面左からの幅 */
+const NAV_FALLBACK = 84;
+
+/** ポインタが左ナビの上にあるか（ナビが閉じていれば画面の左端）。ここへ投げたウィンドウは閉じ、カードは消える */
+export function overNav(x: number, y: number) {
+  const r = document.querySelector('.sidebar')?.getBoundingClientRect();
+  if (!r || r.width < 8) return x < NAV_FALLBACK;
+  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
 export function clientToCanvas(cx: number, cy: number) {
   const r = canvasEl?.getBoundingClientRect();
   return { x: cx - (r?.left ?? 0), y: cy - (r?.top ?? 0) };

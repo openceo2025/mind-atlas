@@ -4,8 +4,10 @@ import {
   AXIS_NAME,
   axisKeyOf,
   beginCardEdit,
+  beginTextEdit,
   clearOverrides,
   endCardEdit,
+  endTextEdit,
   deleteCards,
   duplicate,
   get,
@@ -70,9 +72,11 @@ export function DetailWindow({ win }: { win: FloatWin }) {
   const beginEdit = () => {
     if (!editing.current) snapshot();
     editing.current = true;
+    beginTextEdit(id);
   };
   const endEdit = () => {
     editing.current = false;
+    endTextEdit(id);
   };
   const edit = (patch: Partial<Card>) => updateCard(id, patch);
 

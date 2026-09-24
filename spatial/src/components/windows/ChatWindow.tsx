@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { addRelationRaw, createCard, lookup, spawnDrafts, toast, updateWindowData, useStore } from '../../store';
 import { chat, type ChatStep } from '../../lib/ai';
-import { visibleContextCards } from '../../lib/spaceTools';
+import { neighborhood, visibleContextCards } from '../../lib/spaceTools';
 import { RequestCancelled } from '../../lib/cost';
 import type { AiTurnMessage } from '../../lib/service';
 import { t } from '../../i18n';
@@ -37,9 +37,10 @@ export function ChatWindow({ win }: { win: FloatWin }) {
     setBusy(true);
     setSteps([]);
     try {
-      // 選んだカードがあればそれ、無ければ「いま画面で読めているカード」をまとめて渡す
-      const picked = contextIds.map((id) => lookup(id)).filter(Boolean) as NonNullable<ReturnType<typeof lookup>>[];
-      const context = picked.length ? picked : visibleContextCards(60);
+      // 選んだカードがあれば、それとつながっているカード（子・親・関連・グループの仲間）も一緒に、
+      // 無ければ「いま画面で読めているカード」をまとめて渡す。足りなければ AI が道具で読みに行く
+      const picked = contextIds.filter((id) => lookup(id));
+      const context = picked.length ? neighborhood(picked, 2, 50) : visibleContextCards(60);
       const answer = await chat(next.slice(-12), context, title, { onStep: (step) => setSteps((prev) => [...prev, step]) });
       updateWindowData(win.id, { messages: [...next, { role: 'assistant', content: answer }] });
     } catch (e) {
@@ -59,7 +60,7 @@ export function ChatWindow({ win }: { win: FloatWin }) {
     const firstLine = content.split('\n').find((l) => l.trim())?.replace(/^[#>*\-\s]+/, '').trim() ?? '';
     const titleText = firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine;
     if (contextIds[0] && lookup(contextIds[0])?.place === 'canvas') {
-      const [id] = spawnDrafts(contextIds[0], [{ kind: 'note', title: titleText, body: content, tags: [], relation: 'derived' }], 270);
+      const [id] = spawnDrafts(contextIds[0], [{ kind: 'note', title: titleText, body: content, tags: [], relation: 'derived' }]);
       contextIds.slice(1).forEach((cid) => id && addRelationRaw(cid, id, 'derived'));
     } else {
       createCard({ kind: 'note', title: titleText, body: content, createdBy: 'ai' });

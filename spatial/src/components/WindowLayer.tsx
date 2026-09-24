@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useStore, windowScreenPos, closeWindow, focusWindow, moveWindow, togglePin, worldToScreen, lookup } from '../store';
 import { engine } from '../lib/physics';
+import { overNav } from '../lib/drag';
 import { cardSize } from '../lib/semantic';
 import type { FloatWin, WindowType } from '../types';
 import { t, type MessageKey } from '../i18n';
@@ -45,16 +46,6 @@ const META: Record<WindowType, { icon: string }> = {
 };
 
 // 発生源のカードと結ぶ引き出し線を描かないウィンドウ
-/** 左ナビが閉じているときに、閉じる合図とみなす画面左からの幅 */
-const NAV_FALLBACK = 84;
-
-/** ポインタが左ナビの上にあるか（ナビが無ければ画面の左端） */
-function overNav(x: number, y: number) {
-  const r = document.querySelector('.sidebar')?.getBoundingClientRect();
-  if (!r || r.width < 8) return x < NAV_FALLBACK;
-  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-}
-
 const NO_LEADER: WindowType[] = ['axis', 'preview', 'cluster', 'account', 'share', 'spaces', 'help', 'settings', 'voice', 'agent', 'search'];
 
 export function WindowLayer() {
@@ -229,11 +220,28 @@ function Frame({ win, children, setEl }: { win: FloatWin; children: ReactNode; s
       nav?.classList.toggle('drop-close', overNav(ev.clientX, ev.clientY));
       engine.notify();
     };
+    const el = (e.currentTarget as HTMLElement).closest<HTMLElement>('.fwin');
     const up = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       nav?.classList.remove('drop-close');
-      if (overNav(ev.clientX, ev.clientY)) closeWindow(win.id);
+      const box = el?.getBoundingClientRect();
+      const bar = nav?.getBoundingClientRect();
+      // 手を離した所がナビの外でも、ウィンドウの半分以上がナビに潜っていれば閉じる
+      const hidden = box && bar && bar.width >= 8 ? Math.max(0, Math.min(box.right, bar.right) - Math.max(box.left, bar.left)) / Math.max(1, box.width) : 0;
+      if (overNav(ev.clientX, ev.clientY) || hidden >= 0.5) return closeWindow(win.id);
+      if (!box || !el) return;
+      // 閉じなかったときは、ナビの裏や画面の外に残さず、見える所まで跳ね戻す
+      const minX = (bar && bar.width >= 8 ? bar.right : 0) + 12;
+      const dx = box.left < minX ? minX - box.left : box.right > window.innerWidth - 8 ? Math.max(minX - box.left, window.innerWidth - 8 - box.right) : 0;
+      const dy = box.top < 8 ? 8 - box.top : box.top > window.innerHeight - 80 ? window.innerHeight - 80 - box.top : 0;
+      if (!dx && !dy) return;
+      el.style.transition = 'left 0.28s cubic-bezier(.2,1.4,.4,1), top 0.28s cubic-bezier(.2,1.4,.4,1)';
+      moveWindow(win.id, dx, dy);
+      engine.notify();
+      window.setTimeout(() => {
+        el.style.transition = '';
+      }, 320);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);

@@ -10,6 +10,7 @@ import {
   createCard,
   duplicateCurrentSpace,
   focusCard,
+  lookup,
   openSpaceById,
   openWindow,
   redo,
@@ -22,6 +23,7 @@ import {
   useStore,
 } from '../store';
 import { HOSTED } from '../lib/service';
+import { copyImage } from '../lib/clipboard';
 import { embeddingStatus, subscribeEmbeddings } from '../lib/embeddings';
 import { t } from '../i18n';
 import { Icon } from './Icons';
@@ -299,11 +301,24 @@ export function CardMenu() {
     fn();
   };
   const n = menu.ids.length;
+  const image = n === 1 ? lookup(menu.ids[0])?.image : undefined;
   return (
-    <div className="card-context" style={{ left: Math.min(menu.x, window.innerWidth - 190), top: Math.min(menu.y, window.innerHeight - 170) }} onPointerDown={(e) => e.stopPropagation()}>
+    <div className="card-context" style={{ left: Math.min(menu.x, window.innerWidth - 190), top: Math.min(menu.y, window.innerHeight - (image ? 206 : 170)) }} onPointerDown={(e) => e.stopPropagation()}>
       <button onClick={run(() => openWindow('detail', [menu.ids[0]]))}>
         <Icon name="edit" size={13} /> {t('card.details')}
       </button>
+      {image && (
+        <button
+          onClick={run(() =>
+            copyImage(image).then(
+              () => toast(t('toast.imageCopied')),
+              () => toast(t('toast.imageCopyFailed'), { tone: 'error' }),
+            ),
+          )}
+        >
+          <Icon name="copy" size={13} /> {t('card.copyImage')}
+        </button>
+      )}
       <button onClick={run(() => duplicate(menu.ids))}>
         <Icon name="copy" size={13} /> {t('detail.duplicate')}
       </button>

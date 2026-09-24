@@ -54,6 +54,35 @@ assert.equal(/autoFocus/.test(confirm), false, "dialog buttons must not autofocu
 assert.ok(/role="alertdialog"[\s\S]{0,80}aria-modal="true"/.test(confirm), "the dialog should be announced as a modal");
 assert.ok(/before\?\.focus/.test(confirm), "focus should return where it was when the dialog closes");
 
+// ── 「今日やること」の改善（2026-09-24） ───────────────────────
+const cards = read("spatial/src/store/cards.ts");
+const layout = read("spatial/src/store/layout.ts");
+const cardView = read("spatial/src/components/CardView.tsx");
+const windowLayer = read("spatial/src/components/WindowLayer.tsx");
+const semantic = read("spatial/src/lib/semantic.ts");
+const tools = read("spatial/src/lib/spaceTools.ts");
+const ai = read("spatial/src/lib/ai.ts");
+
+// 子カードの起点はいつも親の真横（作った数だけ下へずらさない）
+assert.ok(/const home = \{ x: [^;]+, y: parent\.y \};/.test(cards), "children should start beside the parent, not below the older siblings");
+// AI が作ったカードは親の横に置き、意味の位置へは移さない
+assert.ok(/export function spawnDrafts[\s\S]{0,1600}childSpots\(src[\s\S]{0,1600}overrideFromPosition\(ids/.test(cards), "AI cards should be placed beside the parent and pinned there");
+// 打ちかけの文章では意味を計算しない
+assert.ok(/frozenText\.get\(card\.id\) \?\? liveText\(card\)/.test(semantic), "cardText should use the text from before typing began");
+assert.ok(/onFocus=\{beginEdit\}/.test(read("spatial/src/components/windows/DetailWindow.tsx")) && /beginTextEdit\(id\)/.test(read("spatial/src/components/windows/DetailWindow.tsx")), "detail inputs should freeze the meaning text while typing");
+// ドラッグ：生まれたカードも連れていく／Ctrl で単独／左ナビへ投げると削除
+assert.ok(/dragFollowers\(ids\)/.test(cardView) && /setSolo\(ev\.ctrlKey \|\| ev\.metaKey\)/.test(cardView), "dragging should bring derived cards along, and Ctrl should switch to a solo drag");
+assert.ok(/overNav\(ev\.clientX, ev\.clientY\)\) \{[\s\S]{0,700}deleteCards\(ids\)/.test(cardView), "throwing a card onto the nav should delete it");
+// ダイアログ：半分以上ナビに潜ったら閉じ、閉じなければ見える所へ戻す
+assert.ok(/hidden >= 0\.5\) return closeWindow/.test(windowLayer) && /moveWindow\(win\.id, dx, dy\)/.test(windowLayer), "a window half under the nav should close, otherwise spring back into view");
+// グループ：中での場所を覚え、開いたグループの中身は意味配置で動かさない。外へ出したら外れる
+assert.ok(/groupOffset/.test(cards) && /inOpenGroup/.test(layout), "group members should keep their place inside the group");
+assert.ok(/export function removeFromGroup/.test(cards) && /settleGroupMembers\(placed\)/.test(cardView), "members should be removable from a group");
+// AI：周りのカードとつながりを渡し、空間を読む道具とネット検索を持たせる
+for (const name of ["read_card", "get_related_cards", "list_cards", "web_search"]) assert.ok(tools.includes(`name: '${name}'`), `AI should have the ${name} tool`);
+assert.ok(/neighborhood\(picked, 2/.test(chat), "chat should send the cards around the selected ones");
+assert.ok(/relationsContext\(cards\)/.test(ai) && /\{ web: true \}/.test(ai), "AI requests should carry connections and be able to search the web");
+
 console.log("verify:spatial-ui static checks passed");
 
 // ── 2) ブラウザでの検査 ────────────────────────────────────

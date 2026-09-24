@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   aiBlock,
@@ -12,6 +12,7 @@ import {
   openWindow,
   openWindowAtScreen,
   proposeClusters,
+  removeFromGroup,
   requireAi,
   select,
   set,
@@ -26,6 +27,7 @@ import {
 import { engine } from '../lib/physics';
 import { cardSize } from '../lib/semantic';
 import { expand } from '../lib/ai';
+import { neighborhood } from '../lib/spaceTools';
 import { t } from '../i18n';
 import { Icon } from './Icons';
 
@@ -54,6 +56,11 @@ export function RadialMenu() {
   const busy = useStore((s) => s.busy);
   const ref = useRef<HTMLDivElement>(null);
   const [tip, setTip] = useState<string | null>(null);
+  // 子カードを作った直後は輪を薄くして、生まれたカードと作業の邪魔をしない。
+  // 続けて作るならそのまま押せるし、輪へマウスを戻せば元の濃さに戻る
+  const [faded, setFaded] = useState(false);
+  const [below, setBelow] = useState(false);
+  useEffect(() => setFaded(false), [primary]);
 
   // 線を引いている間は、輪が相手のカードを隠さないように消える
   const visible = !!card && card.place === 'canvas' && selection.length > 0 && !dragging && !linking && !hiddenByWindow && !readOnly;
@@ -66,15 +73,17 @@ export function RadialMenu() {
       const st = get();
       const c = st.cards[primary];
       if (!b || !el || !c) return;
-      const { w } = cardSize(c);
-      const right = worldToScreen(b.x + (w * b.s) / 2, b.y);
-      const left = worldToScreen(b.x - (w * b.s) / 2, b.y);
-      const onRight = right.x + R + 130 < st.viewport.w;
-      const x = onRight ? right.x + R + 34 : left.x - R - 34;
-      const y = Math.max(R + 40, Math.min(st.viewport.h - R - 60, right.y));
+      // 輪はカードの上・中央に出す。右側はつなぐ線のつまみと、子カードの生まれる場所なので空けておく
+      const { h } = cardSize(c);
+      const top = worldToScreen(b.x, b.y - (h * b.s) / 2);
+      const bottom = worldToScreen(b.x, b.y + (h * b.s) / 2);
+      const room = top.y - R - 44 > R + 28;
+      const x = Math.max(R + 40, Math.min(st.viewport.w - R - 40, top.x));
+      const y = room ? top.y - R - 44 : bottom.y + R + 44;
+      if (room === below) setBelow(!room);
       el.style.transform = `translate(${x}px, ${y}px)`;
     });
-  }, [visible, primary]);
+  }, [visible, primary, below]);
 
   if (!card) return null;
   const n = selection.length;
@@ -96,7 +105,10 @@ export function RadialMenu() {
       tip: t('radial.childTip'),
       disabled: card.kind === 'concept' || isAxisCard(card.id),
       // 押すたびに、親につながった空のカードが隣へ増えていく
-      run: () => createChild(card.id),
+      run: () => {
+        createChild(card.id);
+        setFaded(true);
+      },
     },
     {
       key: 'chat',
@@ -105,16 +117,25 @@ export function RadialMenu() {
       tip: t('radial.askTip'),
       run: () => openWindow('chat', selection.slice(0, 12)),
     },
-    {
-      key: 'bundle',
-      label: t('radial.bundle'),
-      icon: 'bundle',
-      // Ctrl+G とまったく同じ処理（store の group）を呼ぶ
-      tip: n < 2 ? t('radial.bundleNeedTwo') : t('radial.bundleTip'),
-      shortcut: 'Ctrl+G',
-      disabled: n < 2,
-      run: () => group(selection),
-    },
+    // グループの中のカードなら、同じ場所が「グループから外す」になる
+    card.groupId
+      ? {
+          key: 'ungroup',
+          label: t('radial.ungroup'),
+          icon: 'bundle',
+          tip: t('radial.ungroupTip'),
+          run: () => removeFromGroup(selection.filter((x) => get().cards[x]?.groupId)),
+        }
+      : {
+          key: 'bundle',
+          label: t('radial.bundle'),
+          icon: 'bundle',
+          // Ctrl+G とまったく同じ処理（store の group）を呼ぶ
+          tip: n < 2 ? t('radial.bundleNeedTwo') : t('radial.bundleTip'),
+          shortcut: 'Ctrl+G',
+          disabled: n < 2,
+          run: () => group(selection),
+        },
     {
       key: 'expand',
       label: isGroup ? (card.expanded ? t('radial.collapse') : t('radial.open')) : t('radial.expand'),
@@ -124,7 +145,9 @@ export function RadialMenu() {
       run: () => {
         if (isGroup) return card.expanded ? collapseGroup(card.id) : expandGroup(card.id);
         if (!requireAi()) return;
-        const neighbors = layoutCards().filter((c) => c.id !== card.id && c.kind !== 'concept').slice(0, 8);
+        // 背景として、つながっているカードを先に渡す（足りなければ画面のカードで埋める）
+        const near = neighborhood([card.id], 2, 12).filter((c) => c.id !== card.id);
+        const neighbors = [...near, ...layoutCards().filter((c) => c.id !== card.id && c.kind !== 'concept' && !near.includes(c))].slice(0, 12);
         setBusy('expand', true);
         void expand(card, neighbors)
           .then((drafts) => {
@@ -177,7 +200,14 @@ export function RadialMenu() {
   return (
     <AnimatePresence>
       {visible && (
-        <div ref={ref} className="radial" role="menu" aria-label={n > 1 ? t('radial.selected', { n }) : card.title} onPointerDown={(e) => e.stopPropagation()}>
+        <div
+          ref={ref}
+          className={`radial${faded ? ' faded' : ''}`}
+          role="menu"
+          aria-label={n > 1 ? t('radial.selected', { n }) : card.title}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerEnter={() => setFaded(false)}
+        >
           <motion.div
             key={primary}
             initial={{ scale: 0.4, opacity: 0, rotate: -40 }}
@@ -234,7 +264,7 @@ export function RadialMenu() {
             >
               <Icon name="sparkle" size={24} />
             </button>
-            <div className="radial-tip" style={{ top: R + 44, opacity: tip ? 1 : 0.85 }}>
+            <div className="radial-tip" style={{ ...(below ? { top: R + 44 } : { top: 'auto', bottom: R + 44 }), opacity: tip ? 1 : 0.85 }}>
               <span className="radial-count">{n > 1 ? t('radial.selected', { n }) : card.title}</span>
               {tip && <span className="radial-hint">{tip}</span>}
             </div>
