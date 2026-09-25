@@ -3,13 +3,15 @@ import react from "@vitejs/plugin-react";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-// MindAtlas の空間UI（新フロントエンド）。既存 src/ とは別の Vite ルートで、
-// ビルド成果物は dist-spatial/ に出す。環境変数はリポジトリ直下の .env を読む。
+// マインドアトラス（カード）。既存 src/ とは別の Vite ルートで、ビルド成果物は dist-spatial/ に出す。
+// 環境変数はリポジトリ直下の .env を読む。公開ビルドは /card/ の下で配信する：
+// mind-atlas.org では宇宙の中に埋め込まれ、card.mind-atlas.org でも同じパスで単独に開く。
 const root = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   root,
+  base: command === "build" ? "/card/" : "/",
   envDir: repoRoot,
   publicDir: "public",
   plugins: [react()],
@@ -23,7 +25,7 @@ export default defineConfig({
     port: 5180,
     https: readHttpsConfig(),
   },
-});
+}));
 
 function readHttpsConfig() {
   const keyPath = process.env.MIND_ATLAS_HTTPS_KEY;

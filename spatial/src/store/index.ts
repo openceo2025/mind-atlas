@@ -4,3 +4,4 @@ export * from './ui';
 export * from './cards';
 export * from './spaces';
 export * from './access';
+export * from './reminders';

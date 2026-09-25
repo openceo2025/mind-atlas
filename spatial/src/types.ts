@@ -116,8 +116,28 @@ export interface Card {
   overrides?: Record<string, number>;
   log: MeaningEvent[];
   createdBy?: 'user' | 'ai';
+  /** リマインダー。発火すると、この空間を内包する惑星（ノード）に波紋が出る */
+  reminder?: CardReminder;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface CardReminder {
+  /** 知らせる時刻（epoch ms） */
+  at: number;
+  /** 知らせた時刻。未発火なら無い */
+  firedAt?: number;
+}
+
+/**
+ * マインドアトラス（スペース）のノードとの結びつき。ノードに入り込むと開く空間には、
+ * そのノードの惑星IDが付く。惑星IDはノードとこの空間の両方に保存され、端末やクラウドを
+ * またいでも同じ空間を指す。取り込みや複製で作った空間には付かない（別の空間になる）。
+ */
+export interface SpaceAnchor {
+  planetId: string;
+  nodeId: string;
+  nodeTitle: string;
 }
 
 export interface Relation {
@@ -168,6 +188,8 @@ export interface Space {
   /** 共有リンクから開いた読み取り専用のスペース */
   readOnly?: boolean;
   shareToken?: string;
+  /** マインドアトラス（スペース）のノードの内側にある空間 */
+  anchor?: SpaceAnchor;
 }
 
 export interface SpaceMeta {
@@ -179,11 +201,13 @@ export interface SpaceMeta {
   cloudUpdatedAt?: number;
   /** クラウドにしか無い（この端末に未ダウンロード） */
   cloudOnly?: boolean;
+  /** ノードの内側にある空間なら、その惑星ID */
+  planetId?: string;
 }
 
 export type WindowType =
   | 'summary'
-  | 'extract'
+  | 'reminder'
   | 'axis'
   | 'preview'
   | 'detail'

@@ -8,7 +8,7 @@ import type { FloatWin, WindowType } from '../types';
 import { t, type MessageKey } from '../i18n';
 import { Icon } from './Icons';
 import { SummaryWindow } from './windows/SummaryWindow';
-import { ExtractWindow } from './windows/ExtractWindow';
+import { ReminderWindow } from './windows/ReminderWindow';
 import { AxisWindow } from './windows/AxisWindow';
 import { PreviewWindow } from './windows/PreviewWindow';
 import { DetailWindow } from './windows/DetailWindow';
@@ -27,7 +27,7 @@ import { AgentWindowSlot } from './windows/AgentWindowSlot';
 
 const META: Record<WindowType, { icon: string }> = {
   summary: { icon: 'sparkle' },
-  extract: { icon: 'extract' },
+  reminder: { icon: 'bell' },
   axis: { icon: 'axis' },
   preview: { icon: 'cube' },
   detail: { icon: 'info' },
@@ -146,8 +146,8 @@ function Content({ win }: { win: FloatWin }) {
   switch (win.type) {
     case 'summary':
       return <SummaryWindow win={win} />;
-    case 'extract':
-      return <ExtractWindow win={win} />;
+    case 'reminder':
+      return <ReminderWindow win={win} />;
     case 'axis':
       return <AxisWindow win={win} />;
     case 'preview':

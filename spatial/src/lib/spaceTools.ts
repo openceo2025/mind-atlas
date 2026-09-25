@@ -9,12 +9,14 @@ import {
   deleteCards,
   ensureConcept,
   focusCard,
+  formatReminderTime,
   get,
   group,
   layoutCards,
   lookup,
   relayout,
   removeRelation,
+  setCardReminder,
   updateCard,
 } from '../store';
 import { CONCEPT_KEYS } from '../data/concepts';
@@ -180,6 +182,17 @@ export const SPACE_TOOLS: SpaceTool[] = [
     name: 'focus_card',
     description: 'Move the view to a card so the user can see it.',
     parameters: obj({ card: { type: 'string' } }, ['card']),
+  },
+  {
+    name: 'get_current_time',
+    description: "The user's current local date, time, weekday and time zone. Call it before set_reminder to turn words like \"tomorrow morning\" into an exact time.",
+    parameters: obj({}),
+  },
+  {
+    name: 'set_reminder',
+    description:
+      'Set or clear the reminder on one card. When it goes off the user is notified (and, inside Mind Atlas (Space), a ripple spreads from the planet this space belongs to). "at" is an absolute ISO 8601 date-time with the UTC offset, e.g. "2026-09-27T09:00:00+09:00"; pass an empty string to clear. When only a day is given use 09:00.',
+    parameters: obj({ card: { type: 'string' }, at: { type: 'string' } }, ['card', 'at']),
   },
 ];
 
@@ -373,11 +386,39 @@ export async function executeSpaceTool(name: string, args: Record<string, unknow
     return { ok: true, text: `Showing "${card.title}".` };
   }
 
+  if (name === 'get_current_time') {
+    const current = new Date();
+    let zone = '';
+    try {
+      zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      zone = '';
+    }
+    const offset = -current.getTimezoneOffset();
+    const pad = (n: number) => String(Math.abs(n)).padStart(2, '0');
+    const local = `${current.getFullYear()}-${pad(current.getMonth() + 1)}-${pad(current.getDate())}T${pad(current.getHours())}:${pad(current.getMinutes())}:00${offset >= 0 ? '+' : '-'}${pad(Math.trunc(offset / 60))}:${pad(offset % 60)}`;
+    return { ok: true, text: `Now: ${local}`, data: { now: local, weekday: current.toLocaleDateString('en-US', { weekday: 'long' }), timeZone: zone } };
+  }
+
+  if (name === 'set_reminder') {
+    const card = resolveCard(str(args, 'card'));
+    if (!card) return { ok: false, text: `No card matches "${str(args, 'card')}".` };
+    const raw = str(args, 'at');
+    if (!raw) {
+      setCardReminder(card.id, null);
+      return { ok: true, text: `Cleared the reminder on "${card.title}".` };
+    }
+    const at = Date.parse(raw);
+    if (!Number.isFinite(at)) return { ok: false, text: `"${raw}" is not an ISO 8601 date-time.` };
+    setCardReminder(card.id, at);
+    return { ok: true, text: `Reminder on "${card.title}" set for ${formatReminderTime(at)}.`, data: { at: new Date(at).toISOString() } };
+  }
+
   return { ok: false, text: `Unknown tool ${name}.` };
 }
 
 /** 空間を読むだけの道具（読み取り専用のスペースでも使える） */
-const READ_TOOLS = ['get_space_overview', 'search_cards', 'read_card', 'get_related_cards', 'list_cards', 'web_search', 'focus_card'];
+const READ_TOOLS = ['get_space_overview', 'search_cards', 'read_card', 'get_related_cards', 'list_cards', 'web_search', 'focus_card', 'get_current_time'];
 
 /** あるカードのつながり（向きと種類、相手のタイトル） */
 function connections(id: string) {

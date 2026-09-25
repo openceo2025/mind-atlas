@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Axes, AxisKey, Camera, Card, Cluster, FloatWin, Relation, RelationType, RelationWord, SpaceMeta, TrailItem } from '../types';
+import type { Axes, AxisKey, Camera, Card, Cluster, FloatWin, Relation, RelationType, RelationWord, SpaceAnchor, SpaceMeta, TrailItem } from '../types';
 import type { VocabularyId } from '../lib/relationCatalog';
 import type { SessionState } from '../lib/service';
 import { HOSTED } from '../lib/service';
@@ -37,6 +37,8 @@ export interface State {
   shareToken?: string;
   cloudId?: string;
   cloudUpdatedAt?: number;
+  /** マインドアトラス（スペース）のノードの内側にある空間なら、その結びつき */
+  anchor?: SpaceAnchor;
   cards: Record<string, Card>;
   relations: Relation[];
   axes: Axes;

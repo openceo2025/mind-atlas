@@ -1,4 +1,4 @@
-import type { Axes, Card, Relation, RelationWord, Space, SpaceMeta } from '../types';
+import type { Axes, Card, CardReminder, Relation, RelationWord, Space, SpaceAnchor, SpaceMeta } from '../types';
 import { CUSTOM_PREFIX, LEGACY_TYPES, isVocabulary, type VocabularyId } from '../lib/relationCatalog';
 import { idbAll, idbDelete, idbGet, idbSet } from '../lib/idb';
 import { engine } from '../lib/physics';
@@ -20,6 +20,8 @@ import { get, newId, now, set, toast, toastError, useStore } from './core';
 import { relayout } from './layout';
 import { fitView } from './ui';
 import { applyAccountAiModel } from '../lib/ai';
+import { forgetSpaceReminders, syncSpaceReminders, withFiredFromIndex } from './reminders';
+import { postToUniverse } from '../lib/embed';
 
 const LAST_KEY = 'lastSpaceId';
 
@@ -40,6 +42,7 @@ export function serializeSpace(): Space {
     updatedAt: now(),
     cloudId: s.cloudId,
     cloudUpdatedAt: s.cloudUpdatedAt,
+    anchor: s.anchor,
   };
 }
 
@@ -51,7 +54,20 @@ function metaOf(space: Space): SpaceMeta {
     cardCount: Object.values(space.cards).filter((c) => c.kind !== 'concept').length,
     cloudId: space.cloudId,
     cloudUpdatedAt: space.cloudUpdatedAt,
+    planetId: space.anchor?.planetId,
   };
+}
+
+function sanitizeAnchor(raw: unknown): SpaceAnchor | undefined {
+  const a = raw as Partial<SpaceAnchor> | null;
+  if (!a || typeof a !== 'object' || typeof a.planetId !== 'string' || !a.planetId || typeof a.nodeId !== 'string') return undefined;
+  return { planetId: a.planetId.slice(0, 120), nodeId: a.nodeId.slice(0, 200), nodeTitle: typeof a.nodeTitle === 'string' ? a.nodeTitle.slice(0, 300) : '' };
+}
+
+function sanitizeReminder(raw: unknown): CardReminder | undefined {
+  const r = raw as Partial<CardReminder> | null;
+  if (!r || typeof r !== 'object' || !Number.isFinite(r.at)) return undefined;
+  return { at: r.at as number, ...(Number.isFinite(r.firedAt) ? { firedAt: r.firedAt as number } : {}) };
 }
 
 /** 保存形式を検証し、足りない項目を補う（取り込みやクラウドからの読み込みに使う） */
@@ -72,6 +88,7 @@ export function sanitizeSpace(raw: unknown, fallbackId = newId('s')): Space {
       depth: Number.isFinite(c.depth) ? c.depth : 0.5,
       place: ['canvas', 'shelf', 'hidden', 'library'].includes(c.place) ? c.place : 'canvas',
       log: Array.isArray(c.log) ? c.log.filter((l) => l && typeof l.code === 'string') : [],
+      reminder: sanitizeReminder(c.reminder),
       createdAt: Number.isFinite(c.createdAt) ? c.createdAt : at,
       updatedAt: Number.isFinite(c.updatedAt) ? c.updatedAt : at,
     };
@@ -103,6 +120,7 @@ export function sanitizeSpace(raw: unknown, fallbackId = newId('s')): Space {
     updatedAt: Number.isFinite(v.updatedAt) ? (v.updatedAt as number) : at,
     cloudId: typeof v.cloudId === 'string' ? v.cloudId : undefined,
     cloudUpdatedAt: typeof v.cloudUpdatedAt === 'number' ? v.cloudUpdatedAt : undefined,
+    anchor: sanitizeAnchor(v.anchor),
   };
 }
 
@@ -125,7 +143,9 @@ function sanitizeWords(raw: unknown): RelationWord[] {
 }
 
 // ── 読み込み ────────────────────────────────────────────
-export function openSpace(space: Space, opts: { readOnly?: boolean; shareToken?: string; fit?: boolean } = {}) {
+export function openSpace(opened: Space, opts: { readOnly?: boolean; shareToken?: string; fit?: boolean } = {}) {
+  // 閉じている間に宇宙側で発火した予定は、カードにも発火の印を付けて開く
+  const space = opts.readOnly ? opened : withFiredFromIndex(opened);
   engine.clear();
   set({
     spaceId: space.id,
@@ -134,6 +154,7 @@ export function openSpace(space: Space, opts: { readOnly?: boolean; shareToken?:
     createdAt: space.createdAt,
     cloudId: space.cloudId,
     cloudUpdatedAt: space.cloudUpdatedAt,
+    anchor: opts.readOnly ? undefined : space.anchor,
     readOnly: Boolean(opts.readOnly),
     shareToken: opts.shareToken,
     cards: space.cards,
@@ -160,7 +181,16 @@ export function openSpace(space: Space, opts: { readOnly?: boolean; shareToken?:
   }
   relayout({ stagger: false, mode: 'soft' });
   if (opts.fit !== false) fitView(undefined, false);
-  if (!opts.readOnly) void idbSet('kv', LAST_KEY, space.id);
+  if (!opts.readOnly) {
+    void idbSet('kv', LAST_KEY, space.id);
+    syncSpaceReminders(space);
+    if (space !== opened) markDirtyAfterOpen();
+  }
+}
+
+/** 開いた時点で変わっていた（発火の印を付けた）ので、保存し直す */
+function markDirtyAfterOpen() {
+  set({ saveState: 'dirty' });
 }
 
 export async function loadSpaceIndex() {
@@ -196,7 +226,7 @@ export async function createDemoSpace() {
   await loadSpaceIndex();
 }
 
-export async function createBlankSpace(title = t('space.untitled'), presetId = 'p-think', vocabulary?: VocabularyId) {
+export async function createBlankSpace(title = t('space.untitled'), presetId = 'p-think', vocabulary?: VocabularyId, anchor?: SpaceAnchor) {
   await flushSave();
   const at = now();
   const cards: Record<string, Card> = {};
@@ -216,11 +246,50 @@ export async function createBlankSpace(title = t('space.untitled'), presetId = '
     vocabulary,
     createdAt: at,
     updatedAt: at,
+    anchor,
   };
   await idbSet('spaces', space.id, space);
   openSpace(space);
   await loadSpaceIndex();
   return space.id;
+}
+
+/**
+ * 惑星（ノード）の内側の空間を開く。この端末にあればそれを、無ければクラウドから、
+ * どこにも無ければノードの名前で新しく作る。1つのノードに空間は1つ。
+ */
+export async function openPlanet(anchor: SpaceAnchor): Promise<string> {
+  await flushSave();
+  const s = get();
+  if (s.ready && !s.readOnly && s.anchor?.planetId === anchor.planetId) {
+    // もう開いている。ノード名の変更だけ受け取る
+    const fresh = withFiredFromIndex(serializeSpace());
+    set({ anchor: { ...anchor }, ...(fresh.cards !== s.cards ? { cards: fresh.cards, saveState: 'dirty' as const } : {}) });
+    return s.spaceId;
+  }
+  const all = await idbAll<Space>('spaces');
+  const local = all.filter((x) => x.anchor?.planetId === anchor.planetId).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  if (local) {
+    const space = sanitizeSpace(local, local.id);
+    space.anchor = { ...anchor };
+    openSpace(space);
+    void pullNewerCloudCopy();
+    await loadSpaceIndex();
+    return space.id;
+  }
+  if (HOSTED && get().session.authenticated) {
+    try {
+      const hit = (await listCloudSpaces()).find((c) => c.planetId === anchor.planetId);
+      if (hit) {
+        await openCloudSpace(hit.id);
+        set({ anchor: { ...anchor }, saveState: 'dirty' });
+        return get().spaceId;
+      }
+    } catch {
+      // クラウドが読めなくても、この端末で新しく始められる
+    }
+  }
+  return createBlankSpace(anchor.nodeTitle.trim() || t('space.untitled'), 'p-think', undefined, { ...anchor });
 }
 
 /** 取り込んだ保存形式を、新しいスペースとして開く */
@@ -230,6 +299,8 @@ export async function importSpace(raw: unknown) {
   space.id = newId('s');
   space.cloudId = undefined;
   space.cloudUpdatedAt = undefined;
+  // 取り込んだものは別の空間。元の惑星には結びつけない
+  space.anchor = undefined;
   await idbSet('spaces', space.id, space);
   openSpace(space);
   await loadSpaceIndex();
@@ -237,7 +308,7 @@ export async function importSpace(raw: unknown) {
 
 export async function duplicateCurrentSpace() {
   const base = serializeSpace();
-  const space: Space = { ...structuredClone(base), id: newId('s'), title: t('space.copyOf', { title: base.title }), cloudId: undefined, cloudUpdatedAt: undefined, readOnly: undefined, shareToken: undefined };
+  const space: Space = { ...structuredClone(base), id: newId('s'), title: t('space.copyOf', { title: base.title }), cloudId: undefined, cloudUpdatedAt: undefined, readOnly: undefined, shareToken: undefined, anchor: undefined };
   await idbSet('spaces', space.id, space);
   openSpace(space);
   await loadSpaceIndex();
@@ -259,6 +330,7 @@ export async function deleteSpace(id: string, alsoCloud: boolean) {
     }
   }
   await idbDelete('spaces', id);
+  forgetSpaceReminders(id);
   const metas = await loadSpaceIndex();
   if (get().spaceId === id) {
     if (metas[0]) await openSpaceById(metas[0].id);
@@ -281,6 +353,7 @@ export async function flushSave() {
     const space = serializeSpace();
     try {
       await idbSet('spaces', space.id, space);
+      syncSpaceReminders(space);
       set({ saveState: get().saveState === 'saving' ? 'saved' : get().saveState });
       set((st) => ({ spaces: [metaOf(space), ...st.spaces.filter((m) => m.id !== space.id)] }));
       scheduleCloudSave();
@@ -426,4 +499,27 @@ export function ensureConcept(key: ConceptKey) {
   const id = `c-${key}`;
   if (!get().cards[id]) set((s) => ({ cards: { ...s.cards, [id]: makeConceptCard(key, now()) } }));
   return id;
+}
+
+/** 旧 β から渡されたスペースを、この端末に加える。同じ ID が既にあれば加えない（何度移しても増えない） */
+export async function importMovedSpace(raw: unknown): Promise<boolean> {
+  const space = sanitizeSpace(raw);
+  if (await idbGet<Space>('spaces', space.id)) return false;
+  space.readOnly = undefined;
+  space.shareToken = undefined;
+  await idbSet('spaces', space.id, space);
+  syncSpaceReminders(space);
+  return true;
+}
+
+/** この端末に保存しているスペースすべて（旧 β から移すときに使う） */
+export async function localSpacesForMove(): Promise<Space[]> {
+  await flushSave();
+  return (await idbAll<Space>('spaces')).filter((s) => !s.readOnly && !String(s.id).startsWith('shared:'));
+}
+
+/** 宇宙（マインドアトラス（スペース））へ上昇する。書きかけを保存してから知らせる */
+export async function ascendToUniverse() {
+  await flushSave();
+  postToUniverse({ type: 'ascend', planetId: get().anchor?.planetId });
 }

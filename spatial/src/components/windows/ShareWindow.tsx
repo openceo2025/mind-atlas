@@ -5,9 +5,10 @@ import { exportJson, exportMarkdown } from '../../lib/importExport';
 import { t } from '../../i18n';
 import type { FloatWin } from '../../types';
 import { Icon } from '../Icons';
+import { APP_BASE } from '../../lib/embed';
 
 export function shareUrl(token: string) {
-  return `${window.location.origin}/s/${encodeURIComponent(token)}`;
+  return `${window.location.origin}${APP_BASE}/s/${encodeURIComponent(token)}`;
 }
 
 export function ShareWindow(_: { win: FloatWin }) {

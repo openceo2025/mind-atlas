@@ -10,8 +10,13 @@ import {
   fitView,
   get,
   group,
+  openPlanet,
+  importMovedSpace,
+  loadSpaceIndex,
   openSharedSpace,
   openWindow,
+  announceFiredReminders,
+  startReminderTicker,
   redo,
   refreshSession,
   saveNow,
@@ -28,9 +33,12 @@ import {
 import { AXIS_PRESETS } from './data/concepts';
 import { SESSION_CHANGED_EVENT } from './lib/service';
 import { idbGet, idbSet } from './lib/idb';
-import { t, useI18n } from './i18n';
+import { normalizeLocale, setLocale, t, useI18n, getLocale } from './i18n';
+import { APP_BASE, EMBEDDED, onUniverseMessage, postToUniverse } from './lib/embed';
+import type { UniverseToCardMessage } from '../../src/planet/cardBridge';
 import { Canvas } from './components/Canvas';
-import { CardMenu, CostConfirm, DragGhost, ReadOnlyBanner, ShareUnavailable, Sidebar, Toasts, TopBar } from './components/Chrome';
+import { CardMenu, CostConfirm, DragGhost, LegacyMoveBanner, ReadOnlyBanner, ShareUnavailable, Sidebar, Toasts, TopBar } from './components/Chrome';
+import { clearMoveParam, isMoveTarget, receiveSpaces } from './lib/legacyMove';
 import { CommandPalette } from './components/CommandPalette';
 import { panState } from './components/panState';
 
@@ -48,14 +56,68 @@ const onCanvas = () => {
 };
 
 function shareTokenFromUrl() {
-  const m = window.location.pathname.match(/^\/s\/([A-Za-z0-9_-]{8,})\/?$/);
+  const path = APP_BASE && window.location.pathname.startsWith(`${APP_BASE}/`) ? window.location.pathname.slice(APP_BASE.length) : window.location.pathname;
+  const m = path.match(/^\/s\/([A-Za-z0-9_-]{8,})\/?$/);
   if (m) return m[1];
   return new URLSearchParams(window.location.search).get('share');
 }
 
+/** 宇宙からの設定（言語・背景）を、この画面に写す */
+function applyUniverseSettings(message: { locale?: string; theme?: 'dark' | 'light' }) {
+  const locale = normalizeLocale(message.locale);
+  if (locale && locale !== getLocale()) void setLocale(locale);
+  if (message.theme === 'dark' || message.theme === 'light') set({ theme: message.theme });
+}
+
+/**
+ * 宇宙の中に埋め込まれたときの起動。スペース一覧から前回の空間を開くのではなく、
+ * 宇宙が「この惑星を開いて」と言うのを待つ。惑星を開き終えたら宇宙に知らせ、
+ * 宇宙はそこでホワイトアウトを晴らす。
+ */
+function useEmbeddedBoot() {
+  useEffect(() => {
+    if (!EMBEDDED) return;
+    let queue = Promise.resolve();
+    const handle = (message: UniverseToCardMessage) => {
+      if (message.type === 'settings') {
+        applyUniverseSettings(message);
+        return;
+      }
+      if (message.type === 'reminders-fired') {
+        announceFiredReminders(message.entries);
+        return;
+      }
+      if (message.type !== 'open-planet') return;
+      applyUniverseSettings(message);
+      const planet = message.planet;
+      // 続けて別の惑星に入ったときも、順番に開く
+      queue = queue.then(async () => {
+        try {
+          const spaceId = await openPlanet(planet);
+          postToUniverse({ type: 'planet-opened', planetId: planet.planetId, spaceId });
+          if (get().session.authenticated && get().cloudId === undefined) void saveToCloud();
+        } catch (error) {
+          postToUniverse({ type: 'planet-failed', planetId: planet.planetId, message: error instanceof Error ? error.message : String(error) });
+          toastError(error);
+        }
+      });
+    };
+    const stop = onUniverseMessage(handle);
+    void refreshSession().finally(() => postToUniverse({ type: 'card-ready' }));
+    const onSession = () => void refreshSession();
+    window.addEventListener(SESSION_CHANGED_EVENT, onSession);
+    return () => {
+      stop();
+      window.removeEventListener(SESSION_CHANGED_EVENT, onSession);
+    };
+  }, []);
+}
+
 function useBoot() {
   useEffect(() => {
+    if (EMBEDDED) return;
     let cancelled = false;
+    const stopTicker = startReminderTicker();
     void (async () => {
       const session = await refreshSession();
       if (cancelled) return;
@@ -67,12 +129,22 @@ function useBoot() {
         } catch (e) {
           // 共有が止められたリンクで、この端末に残っている別のスペースを見せない
           toastError(e);
-          window.history.replaceState(null, '', '/');
+          window.history.replaceState(null, '', `${APP_BASE}/`);
           set({ shareUnavailable: true, ready: true });
           return;
         }
       }
       await bootSpaces();
+      if (isMoveTarget()) {
+        // 旧 β の画面から開かれた：この端末のスペースを受け取る
+        void receiveSpaces(importMovedSpace)
+          .then(async ({ moved }) => {
+            await loadSpaceIndex();
+            toast(t('move.received', { n: moved }));
+          })
+          .catch(() => toast(t('move.failed'), { tone: 'error', ms: 6000 }))
+          .finally(clearMoveParam);
+      }
       const params = new URLSearchParams(window.location.search);
       const billing = params.get('billing');
       if (billing) {
@@ -92,6 +164,7 @@ function useBoot() {
     window.addEventListener('focus', onFocus);
     return () => {
       cancelled = true;
+      stopTicker();
       window.removeEventListener(SESSION_CHANGED_EVENT, onSession);
       window.removeEventListener('focus', onFocus);
     };
@@ -217,6 +290,7 @@ function Shell() {
         <ShareUnavailable />
 
         <ReadOnlyBanner />
+        <LegacyMoveBanner />
         <div className="stage">
           <Canvas />
           {!ready && <div className="boot-veil">{t('common.loading')}</div>}
@@ -233,6 +307,7 @@ function Shell() {
 
 export default function App() {
   useBoot();
+  useEmbeddedBoot();
   useTheme();
   useKeyboard();
   const { locale } = useI18n();

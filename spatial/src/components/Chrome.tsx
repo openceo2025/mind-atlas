@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
+  ascendToUniverse,
+  localSpacesForMove,
   bootSpaces,
   canvasCards,
   createBlankSpace,
@@ -23,6 +25,8 @@ import {
   useStore,
 } from '../store';
 import { HOSTED } from '../lib/service';
+import { EMBEDDED, spaceAppUrl } from '../lib/embed';
+import { isLegacyHost, sendSpacesTo } from '../lib/legacyMove';
 import { copyImage } from '../lib/clipboard';
 import { creditResetText } from './windows/AccountWindow';
 import { embeddingStatus, subscribeEmbeddings } from '../lib/embeddings';
@@ -43,10 +47,9 @@ export function Sidebar() {
       <div className="brand">
         <div className="brand-mark" />
         <div>
-          <b>MindAtlas</b>
+          <b>{t('brand.name')}</b>
           <small>{t('brand.tagline')}</small>
         </div>
-        <span className="beta-pill">β</span>
       </div>
       <div className="nav-section">
         {t('nav.spaces')}
@@ -102,11 +105,15 @@ export function Sidebar() {
           {t('nav.settings')}
         </button>
         <div className="foot-note">
-          {session.mode === 'local' ? t('nav.localMode') : t('nav.beta')}
+          {session.mode === 'local' ? t('nav.localMode') : t('brand.name')}
           <br />
-          <a href="https://mind-atlas.org/" target="_blank" rel="noreferrer noopener">
-            {t('nav.legacy')}
-          </a>
+          {EMBEDDED ? (
+            <button type="button" className="link-btn" onClick={() => void ascendToUniverse()}>
+              {t('nav.ascend')}
+            </button>
+          ) : (
+            <a href={spaceAppUrl()}>{t('nav.openSpace')}</a>
+          )}
         </div>
       </div>
     </aside>
@@ -176,7 +183,13 @@ export function TopBar() {
   };
 
   return (
-    <header className="topbar">
+    <header className={`topbar${EMBEDDED ? ' embedded' : ''}`}>
+      {EMBEDDED && (
+        <button className="ascend-btn" onClick={() => void ascendToUniverse()} title={t('topbar.ascendTip')} aria-label={t('nav.ascend')}>
+          <Icon name="ascend" size={18} />
+          <span className="hide-sm">{t('topbar.ascend')}</span>
+        </button>
+      )}
       <button className="icon-btn menu-btn" onClick={() => set((s) => ({ sidebarOpen: !s.sidebarOpen }))} aria-label={t('nav.menu')}>
         <Icon name="menu" size={18} />
       </button>
@@ -243,9 +256,9 @@ export function TopBar() {
             </button>
           </>
         )}
-        <button className="icon-btn hide-sm" onClick={() => set({ theme: theme === 'dark' ? 'light' : 'dark' })} title={theme === 'dark' ? t('settings.light') : t('settings.dark')} aria-label={t('settings.theme')}>
+        {!EMBEDDED && <button className="icon-btn hide-sm" onClick={() => set({ theme: theme === 'dark' ? 'light' : 'dark' })} title={theme === 'dark' ? t('settings.light') : t('settings.dark')} aria-label={t('settings.theme')}>
           <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
-        </button>
+        </button>}
         {readOnly ? (
           <button className="btn primary" onClick={() => void duplicateCurrentSpace()}>
             <Icon name="copy" size={15} /> {t('share.remix')}
@@ -271,6 +284,36 @@ export function TopBar() {
         </button>
       </div>
     </header>
+  );
+}
+
+/** 旧 β のドメインで開いたときだけ：この端末のスペースを新しい場所へ移す案内 */
+export function LegacyMoveBanner() {
+  const [busy, setBusy] = useState(false);
+  const [moved, setMoved] = useState<number | null>(null);
+  if (EMBEDDED || !isLegacyHost()) return null;
+  const move = (target: 'space' | 'card') => {
+    setBusy(true);
+    void localSpacesForMove()
+      .then((spaces) => sendSpacesTo(target, spaces))
+      .then((r) => {
+        setMoved(r.moved + r.skipped);
+        toast(t('move.done', { n: r.moved }));
+      })
+      .catch((error: unknown) => toast(error instanceof Error && error.message === 'popup-blocked' ? t('move.popupBlocked') : t('move.failed'), { tone: 'error', ms: 6000 }))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="readonly-banner legacy-move-banner">
+      <Icon name="info" size={14} />
+      <span>{moved === null ? t('move.banner') : t('move.after')}</span>
+      <button className="btn small primary" disabled={busy} onClick={() => move('space')}>
+        {t('move.toSpace')}
+      </button>
+      <button className="btn small" disabled={busy} onClick={() => move('card')}>
+        {t('move.toCard')}
+      </button>
+    </div>
   );
 }
 

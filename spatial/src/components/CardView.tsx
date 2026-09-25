@@ -1,5 +1,7 @@
 import { memo, useEffect, useRef } from 'react';
 import {
+  formatReminderShort,
+  formatReminderTime,
   AXIS_KEYS,
   axisKeyOf,
   collapseGroup,
@@ -304,6 +306,15 @@ function CardViewImpl({ id }: { id: string }) {
         </div>
       )}
       <Body card={card} visual={Boolean(visual)} />
+      {card.reminder && (
+        <span
+          className={`card-reminder${card.reminder.firedAt ? ' fired' : ''}`}
+          title={card.reminder.firedAt ? t('reminder.badgeFired', { time: formatReminderTime(card.reminder.at) }) : t('reminder.badge', { time: formatReminderTime(card.reminder.at) })}
+        >
+          <Icon name="bell" size={11} />
+          {formatReminderShort(card.reminder.at)}
+        </span>
+      )}
       {humanPlaced && !axisKey && (
         <span className="human-mark" title={t('card.humanPlaced')}>
           <Icon name="hand" size={12} />

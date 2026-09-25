@@ -24,6 +24,19 @@ const P: Record<string, ReactNode> = {
       <path d="M12 7.5V12l3 2" />
     </>
   ),
+  bell: (
+    <>
+      <path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15Z" />
+      <path d="M10 20.5a2 2 0 0 0 4 0" />
+    </>
+  ),
+  ascend: (
+    <>
+      <path d="M3.5 20.5h17" />
+      <path d="M6 20.5a6 6 0 0 1 3.2-5.3M18 20.5a6 6 0 0 0-3.2-5.3" />
+      <path d="M12 16.5V3.5M8 7.5l4-4 4 4" />
+    </>
+  ),
   target: (
     <>
       <circle cx="12" cy="12" r="8.5" />
@@ -78,12 +91,6 @@ const P: Record<string, ReactNode> = {
       <rect x="2.5" y="4" width="9" height="7" rx="1.6" />
       <rect x="12.5" y="13" width="9" height="7" rx="1.6" />
       <path d="M7 11v3.5A2 2 0 0 0 9 16.5h3.5" />
-    </>
-  ),
-  extract: (
-    <>
-      <path d="M8 3.5H5.5a2 2 0 0 0-2 2V8M16 3.5h2.5a2 2 0 0 1 2 2V8M8 20.5H5.5a2 2 0 0 1-2-2V16M16 20.5h2.5a2 2 0 0 0 2-2V16" />
-      <path d="M8 10h8M8 14h5" />
     </>
   ),
   expand: <path d="M12 12 5 5M12 12l7-7M12 12l-7 7M12 12l7 7M5 9V5h4M15 5h4v4M19 15v4h-4M9 19H5v-4" />,

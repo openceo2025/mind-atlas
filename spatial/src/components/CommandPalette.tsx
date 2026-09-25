@@ -74,7 +74,7 @@ export function CommandPalette() {
       { id: 'voice', label: t('cmd.voice'), hint: 'AI', run: () => toggleToolWindow('voice') },
       { id: 'grp', label: t('cmd.group'), hint: 'Ctrl+G', enabled: edit && n >= 2, run: () => group(selection) },
       { id: 'del', label: n > 1 ? t('cmd.deleteMany', { n }) : t('common.delete'), hint: 'Delete', enabled: edit && n >= 1, run: () => deleteCards(selection) },
-      { id: 'ext', label: t('cmd.extract'), hint: '', enabled: n > 0, run: () => openWindow('extract', [p]) },
+      { id: 'rem', label: t('cmd.reminder'), hint: '', enabled: edit && n === 1, run: () => openWindow('reminder', [p]) },
       { id: 'rel', label: t('cmd.relations'), hint: '✦', enabled: edit, run: () => (openWindow('relations', selection), void suggestRelations(n ? selection : undefined, !aiBlock())) },
       { id: 'cl', label: t('cmd.clusters'), hint: '', run: () => (void proposeClusters(!aiBlock()), toggleToolWindow('cluster')) },
       { id: 'axis', label: t('cmd.axes'), hint: '', run: () => toggleToolWindow('axis') },

@@ -119,10 +119,11 @@ const INTENTS: Record<string, string> = {
   link: 'the user asks to connect two existing cards to each other',
   group: 'the user asks to bundle several existing cards into one lump',
   focus: 'the user asks to show, find or move to one existing card',
+  remind: 'the user asks to be reminded about a card at some time, or to change or cancel such a reminder',
   change: 'the user asks to create new cards, rewrite a card, or change an axis',
 };
 
-const INTENT_TOOL: Record<string, string> = { delete: 'delete_cards', link: 'link_cards', group: 'group_cards', focus: 'focus_card' };
+const INTENT_TOOL: Record<string, string> = { delete: 'delete_cards', link: 'link_cards', group: 'group_cards', focus: 'focus_card', remind: 'set_reminder' };
 
 /**
  * ユーザーの一言を、まず判断モデルに読ませる。既にあるカードを消す・つなぐ・束ねる・
@@ -143,6 +144,8 @@ export async function routeSpaceRequest(message: string, cards: Card[]): Promise
   if (!intent || intent.value === 'answer') return {};
   const tool = INTENT_TOOL[intent.value];
   if (!tool) return { tool: undefined };
+  // 時刻の読み取りはチャットモデルに任せる（今の時刻を調べてから set_reminder を呼ぶ）
+  if (intent.value === 'remind') return { tool };
 
   // 対象のカードは「これは対象か」を1枚ずつ聞く（数を数えさせると当てにならない）
   const targetQuestions: Record<string, ReturnType<typeof noul>> = {};

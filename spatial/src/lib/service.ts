@@ -2,6 +2,7 @@
 // 公開ビルドでは VITE_MIND_ATLAS_PUBLIC_SERVICE=true で固定され、ブリッジには一切つながない。
 import { t, type MessageKey } from '../i18n';
 import type { Space } from '../types';
+import { EMBEDDED } from './embed';
 
 export const HOSTED = import.meta.env.VITE_MIND_ATLAS_PUBLIC_SERVICE === 'true';
 
@@ -183,12 +184,25 @@ export async function saveAiPreference(preference: Pick<AiPreference, 'provider'
   return data.preference;
 }
 
+/**
+ * 宇宙の中に埋め込まれているときは、ログインや支払いの画面を宇宙の窓で開く
+ * （Google や Stripe は iframe の中では開けない）。戻り先も宇宙になる。
+ */
+function topWindow(): Window {
+  return EMBEDDED ? window.parent : window;
+}
+
+function navigateTop(url: string) {
+  topWindow().location.assign(url);
+}
+
 export function startLogin() {
-  const returnTo = `${window.location.pathname}${window.location.search}`;
+  const here = topWindow().location;
+  const returnTo = `${here.pathname}${here.search}`;
   const url = new URL(`${serviceBaseUrl()}/api/auth/google/start`);
   url.searchParams.set('returnTo', returnTo || '/');
   url.searchParams.set('trigger', 'account');
-  window.location.assign(url.toString());
+  navigateTop(url.toString());
 }
 
 export async function logout() {
@@ -198,12 +212,12 @@ export async function logout() {
 
 export async function startCheckout() {
   const data = await json<{ url: string }>(await api('/api/billing/checkout', { method: 'POST' }));
-  if (data.url) window.location.assign(data.url);
+  if (data.url) navigateTop(data.url);
 }
 
 export async function openBillingPortal() {
   const data = await json<{ url: string }>(await api('/api/billing/portal', { method: 'POST' }));
-  if (data.url) window.location.assign(data.url);
+  if (data.url) navigateTop(data.url);
 }
 
 // ── AI ───────────────────────────────────────────────
@@ -377,6 +391,8 @@ export interface CloudSpaceEntry {
   cardCount: number;
   updatedAt: string;
   shareToken?: string | null;
+  /** ノードの内側にある空間なら、その惑星ID */
+  planetId?: string | null;
 }
 
 export async function listCloudSpaces() {

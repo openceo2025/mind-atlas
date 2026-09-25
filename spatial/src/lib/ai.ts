@@ -299,17 +299,44 @@ export async function expand(card: Card, neighbors: Card[]): Promise<Draft[]> {
   return cleanDrafts(r.items);
 }
 
-export async function extractIdeas(card: Card): Promise<Draft[]> {
-  const r = await runJson<{ items: unknown }>(
+// ── リマインダー ─────────────────────────────────────
+export interface ReminderParse {
+  /** 知らせる時刻（epoch ms）。決められなければ null */
+  at: number | null;
+  /** 確認や聞き返しのひとこと */
+  reply: string;
+}
+
+function localIsoWithOffset(d: Date) {
+  const pad = (n: number) => String(Math.abs(n)).padStart(2, '0');
+  const offset = -d.getTimezoneOffset();
+  const sign = offset >= 0 ? '+' : '-';
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00${sign}${pad(Math.trunc(offset / 60))}:${pad(offset % 60)}`;
+}
+
+/** 「明日の朝」「金曜の締切の前日」などの言い方から、知らせる時刻を決めてもらう */
+export async function parseReminder(request: string, card: Card): Promise<ReminderParse> {
+  const current = new Date();
+  let zone = '';
+  try {
+    zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    zone = '';
+  }
+  const weekday = current.toLocaleDateString('en-US', { weekday: 'long' });
+  const r = await runJson<{ at?: unknown; reply?: unknown }>(
     [
-      `Extract the 3-5 most important standalone points from the card [${card.id}] "${card.title}".`,
-      'Each point becomes a new card: classify it as "quote" (a fact or statement worth keeping), "issue" (a problem or risk), "hypothesis" (a claim) or "idea" (an action).',
-      'Return {"items": [{"kind": ..., "title": short title, "body": the point in 1-2 sentences, "tags": [1-2 short tags]}]}.',
+      `The user wants to be reminded about the card [${card.id}] "${card.title}".`,
+      `It is now ${localIsoWithOffset(current)} (${weekday})${zone ? `, time zone ${zone}` : ''}.`,
+      `Their request, in their own words: """${request.slice(0, 500)}"""`,
+      'Work out the single moment they mean, in their local time. Resolve relative wording ("tomorrow morning", "in 3 hours", "next Monday", "the day before the deadline in this card") against the current time and the card text.',
+      'When only a day is given use 09:00. Morning is 09:00, noon 12:00, evening 18:00, tonight 20:00. If a clock time has already passed today and no day is named, take the next day.',
+      'Return {"at": an ISO 8601 date-time with the UTC offset such as "2026-09-27T09:00:00+09:00", or null if no moment can be determined; "reply": one short sentence that confirms the moment, or asks what they meant}.',
     ].join('\n'),
     cardsContext([card]),
-    { web: true },
   );
-  return cleanDrafts(r.items).map((d) => ({ ...d, relation: 'derived' }));
+  const at = typeof r.at === 'string' ? Date.parse(r.at) : Number.NaN;
+  return { at: Number.isFinite(at) ? at : null, reply: String(r.reply ?? '') };
 }
 
 // ── 関係の分類 ─────────────────────────────────────────
@@ -402,7 +429,7 @@ export async function chat(
     opts.memory ? `Summary of the earlier conversation with this user in this space (older turns were compacted; treat it as your memory):\n${opts.memory}` : '',
     'You can read anything in this space yourself: search_cards, read_card (whole body and connections), get_related_cards (walk children/parents/relations) and list_cards. Look things up as many times as you need before answering instead of saying you cannot see something.',
     'Use web_search for current or outside facts the cards do not contain.',
-    'You can change the space with the tools: create, update, delete, link, bundle cards, set an axis or focus a card. Change things only when the user asks for a change; never guess a card id — search or use the ids in the context.',
+    'You can change the space with the tools: create, update, delete, link, bundle cards, set an axis, focus a card or set a reminder on a card (call get_current_time first to resolve words like "tomorrow"). Change things only when the user asks for a change; never guess a card id — search or use the ids in the context.',
     'After the tools have run, tell the user briefly what you changed.',
     `Answer in ${language()} unless the user writes in another language. Use Markdown lists when helpful.`,
   ]
@@ -413,7 +440,7 @@ export async function chat(
   const messages: AiTurnMessage[] = history.slice(Math.max(0, start)).map((m, i) => (i === 0 ? { role: 'user', content: `${intro}\n\n${m.content}` } : m));
   // 道具が絞れているなら、その道具だけを渡す（毎ターンの入力が 3〜4 割減る）
   // 読む道具とネット検索は、道具を絞ったときも必ず渡す
-  const needed = routed.tool ? new Set([routed.tool, 'get_space_overview', 'search_cards', 'read_card', 'get_related_cards', 'list_cards', 'web_search']) : null;
+  const needed = routed.tool ? new Set([routed.tool, 'get_space_overview', 'search_cards', 'read_card', 'get_related_cards', 'list_cards', 'web_search', 'get_current_time']) : null;
   const tools = SPACE_TOOLS.filter((tool) => !needed || needed.has(tool.name)).map((tool) => ({
     type: 'function' as const,
     name: tool.name,
