@@ -1,11 +1,11 @@
 [Unit]
-Description=MindAtlas beta (spatial UI) hosted service
+Description=Mind Atlas (Cards) hosted service
 After=network.target postgresql.service
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/mind-atlas-beta
-EnvironmentFile=/opt/mind-atlas-beta/.env.service
+WorkingDirectory=/opt/mind-atlas-card
+EnvironmentFile=/opt/mind-atlas-card/.env.service
 ExecStart=/usr/bin/npm run service:start
 Restart=always
 RestartSec=5
@@ -16,7 +16,7 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectHome=true
 ProtectSystem=full
-ReadWritePaths=/opt/mind-atlas-beta
+ReadWritePaths=/opt/mind-atlas-card
 ProtectControlGroups=true
 ProtectKernelModules=true
 ProtectKernelTunables=true

@@ -11,7 +11,7 @@
 //   POST   /api/spaces/:id/share       共有リンクの発行・停止 { enabled }
 //   GET    /api/public/spaces/:token   共有スペース（読み取り専用）
 //   POST   /api/embeddings             文章 → 埋め込みベクトル（未ログインでも回数制限つきで利用可）
-//   GET    /s/:token                   共有リンクのページ（SPA の index.html を返す）
+//   GET    /s/:token                   旧い共有リンク。/card/s/:token（マインドアトラス（カード））へ転送する
 import crypto from "node:crypto";
 import { pool } from "./service-db.mjs";
 import { getEnv, readIntEnv } from "./service-config.mjs";
@@ -88,13 +88,15 @@ export function createSpatialRoutes(deps) {
     const { pathname } = url;
     const method = request.method;
 
-    if (method === "GET" && /^\/s\/[A-Za-z0-9_-]{8,}\/?$/.test(pathname)) {
-      await serveStatic(response, method, "/index.html");
+    if (method === "POST" && pathname === "/api/embeddings") {
+      await handleEmbeddings(request, response);
       return true;
     }
 
-    if (method === "POST" && pathname === "/api/embeddings") {
-      await handleEmbeddings(request, response);
+    // 旧 β の共有リンク（/s/:token）は、カードアプリの配信パスへ転送する
+    if ((method === "GET" || method === "HEAD") && /^\/s\/[A-Za-z0-9_-]{8,}\/?$/.test(pathname)) {
+      response.writeHead(301, { Location: `/card${pathname}` });
+      response.end();
       return true;
     }
 
@@ -103,7 +105,9 @@ export function createSpatialRoutes(deps) {
       if (!/^[A-Za-z0-9_-]{16,80}$/.test(token)) throw new ServiceError(404, "not_found", "Not found");
       const { rows } = await pool.query("select title, data from spatial_spaces where share_token = $1", [token]);
       if (!rows[0]) throw new ServiceError(404, "not_found", "Not found");
-      sendJson(response, 200, { title: rows[0].title, space: rows[0].data });
+      // どのノードの内側か（ノード名）は、共有を見る人には渡さない
+      const { anchor: _anchor, ...space } = rows[0].data ?? {};
+      sendJson(response, 200, { title: rows[0].title, space });
       return true;
     }
 
@@ -117,7 +121,7 @@ export function createSpatialRoutes(deps) {
     if (!id) {
       if (method === "GET") {
         const { rows } = await pool.query(
-          "select id, title, card_count, size_bytes, share_token, updated_at from spatial_spaces where user_id = $1 order by updated_at desc",
+          "select id, title, card_count, size_bytes, share_token, updated_at, data->'anchor'->>'planetId' as planet_id from spatial_spaces where user_id = $1 order by updated_at desc",
           [user.id],
         );
         const used = rows.reduce((s, r) => s + Number(r.size_bytes), 0);
@@ -158,7 +162,7 @@ export function createSpatialRoutes(deps) {
       );
       if (!rows[0]) throw new ServiceError(404, "not_found", "Not found");
       const shareToken = rows[0].share_token;
-      sendJson(response, 200, { shareToken, url: shareToken ? `${publicOrigin}/s/${shareToken}` : null });
+      sendJson(response, 200, { shareToken, url: shareToken ? `${publicOrigin}/card/s/${shareToken}` : null });
       return true;
     }
 
@@ -251,6 +255,16 @@ export function createSpatialRoutes(deps) {
               })),
           }
         : {}),
+      // マインドアトラス（スペース）のノードとの結びつき（惑星ID）
+      ...(raw.anchor && typeof raw.anchor === "object" && typeof raw.anchor.planetId === "string" && raw.anchor.planetId
+        ? {
+            anchor: {
+              planetId: raw.anchor.planetId.slice(0, 120),
+              nodeId: typeof raw.anchor.nodeId === "string" ? raw.anchor.nodeId.slice(0, 200) : "",
+              nodeTitle: typeof raw.anchor.nodeTitle === "string" ? raw.anchor.nodeTitle.slice(0, 300) : "",
+            },
+          }
+        : {}),
       createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),
       updatedAt: Date.now(),
     };
@@ -332,6 +346,7 @@ function entryOf(row) {
     cardCount: Number(row.card_count ?? 0),
     sizeBytes: Number(row.size_bytes ?? 0),
     shareToken: row.share_token ?? null,
+    ...(row.planet_id ? { planetId: row.planet_id } : {}),
     updatedAt: row.updated_at?.toISOString?.() ?? String(row.updated_at),
   };
 }

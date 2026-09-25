@@ -74,4 +74,11 @@ assert.ok(fs.readFileSync(path.join(distDir, "ja", "about.html"), "utf8").includ
 assert.ok(fs.readFileSync(path.join(distDir, "es", "about.html"), "utf8").includes("aboutDemo=research&amp;aboutView=atlas&amp;locale=es"), "Spanish introduction does not pass its locale to the embedded demo");
 assert.ok(fs.readFileSync(path.join(distDir, "ar", "about.html"), "utf8").includes("aboutDemo=app&amp;aboutView=atlas&amp;locale=ar"), "Arabic introduction does not pass its locale to the embedded demo");
 
+// Mind Atlas (Cards), embedded in the universe under /card/.
+const cardDir = path.join(rootDir, "dist-spatial");
+assert.equal(fs.existsSync(path.join(cardDir, "index.html")), true, "dist-spatial/index.html is missing: build:hosted must also build the card app");
+const cardMarker = JSON.parse(fs.readFileSync(path.join(cardDir, ".mind-atlas-build.json"), "utf8"));
+assert.equal(cardMarker.publicService, true, "the card app was not built in hosted-public mode");
+assert.ok(fs.readFileSync(path.join(cardDir, "index.html"), "utf8").includes('src="/card/assets/'), "the card app must be built for the /card/ base path");
+
 console.log("Hosted public dist verification passed");

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# MindAtlas β を beta.mind-atlas.org（ConoHa VPS）へデプロイする。Git Bash から実行する:
-#   bash deploy/beta/deploy-beta.sh
+# マインドアトラス（カード）単独版を card.mind-atlas.org（ConoHa VPS）へデプロイする。Git Bash から実行する:
+#   bash deploy/card/deploy-card.sh
 #
-# 単位は push 済みコミットの git archive。VPS 側の手順は deploy/beta/remote-deploy.sh。
+# 単位は push 済みコミットの git archive。VPS 側の手順は deploy/card/remote-deploy.sh。
 # スクリプトは ssh の標準入力に流さず、scp で送ってからパスで実行する（改行や BOM が壊れないように）。
 set -euo pipefail
 
@@ -31,11 +31,11 @@ echo "deploying $BRANCH @ $SHA to $HOST"
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 git archive --format=tar.gz -o "$STAGE/$SHA.tar.gz" HEAD
-git show "HEAD:deploy/beta/remote-deploy.sh" > "$STAGE/remote-deploy.sh"
+git show "HEAD:deploy/card/remote-deploy.sh" > "$STAGE/remote-deploy.sh"
 echo "archive: $(du -h "$STAGE/$SHA.tar.gz" | cut -f1)"
 
-ssh "${SSH_OPTS[@]}" "$USER_AT" "mkdir -p /opt/mind-atlas-beta-backups && chmod 700 /opt/mind-atlas-beta-backups"
-scp "${SSH_OPTS[@]}" "$STAGE/$SHA.tar.gz" "$USER_AT:/opt/mind-atlas-beta-backups/$SHA.tar.gz"
-scp "${SSH_OPTS[@]}" "$STAGE/remote-deploy.sh" "$USER_AT:/tmp/mind-atlas-beta-deploy.sh"
-ssh "${SSH_OPTS[@]}" "$USER_AT" "bash /tmp/mind-atlas-beta-deploy.sh $SHA && rm -f /tmp/mind-atlas-beta-deploy.sh"
+ssh "${SSH_OPTS[@]}" "$USER_AT" "mkdir -p /opt/mind-atlas-card-backups && chmod 700 /opt/mind-atlas-card-backups"
+scp "${SSH_OPTS[@]}" "$STAGE/$SHA.tar.gz" "$USER_AT:/opt/mind-atlas-card-backups/$SHA.tar.gz"
+scp "${SSH_OPTS[@]}" "$STAGE/remote-deploy.sh" "$USER_AT:/tmp/mind-atlas-card-deploy.sh"
+ssh "${SSH_OPTS[@]}" "$USER_AT" "bash /tmp/mind-atlas-card-deploy.sh $SHA && rm -f /tmp/mind-atlas-card-deploy.sh"
 echo "deploy finished: $SHA"

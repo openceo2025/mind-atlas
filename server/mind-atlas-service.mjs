@@ -62,6 +62,10 @@ const serviceHost = getEnv("MIND_ATLAS_SERVICE_HOST", "127.0.0.1");
 const servicePort = readIntEnv("MIND_ATLAS_SERVICE_PORT", 8788);
 const publicOrigin = getEnv("MIND_ATLAS_PUBLIC_ORIGIN", "https://mind-atlas.org").replace(/\/+$/, "");
 const distDir = path.resolve(serviceRootDir, getEnv("MIND_ATLAS_DIST_DIR", "dist"));
+// Mind Atlas (Cards) is served under /card/ on every host: embedded in the universe
+// on mind-atlas.org, and on its own at card.mind-atlas.org (whose DIST_DIR is this one).
+const CARD_BASE_PATH = "/card";
+const cardDistDir = path.resolve(serviceRootDir, getEnv("MIND_ATLAS_CARD_DIST_DIR", "dist-spatial"));
 const sessionCookieName = "ma_session";
 const oauthStateCookieName = "ma_oauth_state";
 const oauthReturnCookieName = "ma_oauth_return";
@@ -388,6 +392,18 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" || request.method === "HEAD") {
+      if (url.pathname === CARD_BASE_PATH) {
+        response.writeHead(301, { Location: `${CARD_BASE_PATH}/${url.search}` });
+        response.end();
+        return;
+      }
+      if (url.pathname.startsWith(`${CARD_BASE_PATH}/`)) {
+        const cardPath = url.pathname.slice(CARD_BASE_PATH.length);
+        // A shared card space is a page of the card app, not a missing file.
+        const sharePage = /^\/s\/[A-Za-z0-9_-]{8,}\/?$/.test(cardPath);
+        await serveStatic(response, request.method, sharePage ? "/index.html" : cardPath, cardDistDir);
+        return;
+      }
       await serveStatic(response, request.method, url.pathname);
       return;
     }
@@ -405,6 +421,7 @@ server.listen(servicePort, serviceHost, () => {
   console.log(`Mind Atlas service listening on http://${serviceHost}:${servicePort}`);
   console.log(`Public origin: ${publicOrigin}`);
   console.log(`Static dist: ${distDir}`);
+  console.log(`Card app dist: ${cardDistDir} (served under ${CARD_BASE_PATH}/)`);
 });
 scheduleProviderModelRefresh();
 scheduleServiceMaintenance();
@@ -2989,9 +3006,10 @@ async function readUpstreamJson(response) {
   return data;
 }
 
-async function serveStatic(response, method, pathname) {
+async function serveStatic(response, method, pathname, root = distDir) {
   const safePath = pathname === "/" ? "/index.html" : pathname;
-  const distRoot = await fsp.realpath(path.resolve(distDir));
+  if (!fs.existsSync(root)) throw new ServiceError(404, "not_found", "Not found");
+  const distRoot = await fsp.realpath(path.resolve(root));
   const normalized = path.normalize(decodePathname(safePath).replace(/^[/\\]+/, ""));
   if (normalized === ".." || normalized.startsWith(`..${path.sep}`) || path.isAbsolute(normalized)) {
     throw new ServiceError(403, "Forbidden");
@@ -3414,6 +3432,7 @@ function normalizeCloudAtlasNode(value, depth, state) {
     position: isVec3(value.position) ? value.position : undefined,
     reminderAt: typeof value.reminderAt === "string" && value.reminderAt ? value.reminderAt.slice(0, 120) : undefined,
     reminderFiredAt: typeof value.reminderFiredAt === "string" && value.reminderFiredAt ? value.reminderFiredAt.slice(0, 120) : undefined,
+    cardPlanetId: typeof value.cardPlanetId === "string" && value.cardPlanetId ? value.cardPlanetId.slice(0, 120) : undefined,
     notebookMode: isRoot ? normalizeCloudNotebookMode(value.notebookMode) : undefined,
     structuredContent: normalizeCloudStructuredContent(value.structuredContent),
     children,

@@ -33,6 +33,17 @@ const marker = {
   builtAt: new Date().toISOString(),
 };
 
+// Mind Atlas (Cards) is served from the same host under /card/ and embedded in the
+// universe, so the hosted deploy ships it too. It talks to its own origin.
+const cardArgs = process.platform === "win32" ? ["/d", "/s", "/c", "npm run spatial:build:hosted"] : ["run", "spatial:build:hosted"];
+const cardResult = spawnSync(command, cardArgs, {
+  cwd: rootDir,
+  env: { ...process.env, VITE_MIND_ATLAS_SERVICE_URL: "" },
+  stdio: "inherit",
+});
+if (cardResult.error) console.error(cardResult.error.message);
+if (cardResult.status !== 0) process.exit(cardResult.status ?? 1);
+
 const markerPath = path.join(rootDir, "dist", ".mind-atlas-build.json");
 fs.writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
 console.log(`Hosted public build marker written: ${path.relative(rootDir, markerPath)}`);
