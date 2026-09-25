@@ -56,8 +56,17 @@ function resolveCard(ref: string): Card | undefined {
   );
 }
 
+/** 一覧用の短い形。本文は冒頭だけなので、そうと分かる名前にしておく（全文は read_card） */
 function brief(card: Card) {
-  return { id: card.id, title: card.title, kind: card.kind, tags: card.tags, body: card.body.slice(0, 200) };
+  return {
+    id: card.id,
+    title: card.title,
+    kind: card.kind,
+    tags: card.tags,
+    bodyPreview: card.body.slice(0, 200),
+    bodyChars: card.body.length,
+    ...(card.body.length > 200 ? { bodyIsPreviewOnly: true } : {}),
+  };
 }
 
 export const SPACE_TOOLS: SpaceTool[] = [
@@ -190,7 +199,9 @@ export async function executeSpaceTool(name: string, args: Record<string, unknow
         subtitle: card.subtitle,
         tags: card.tags,
         url: card.url,
-        body: card.body.slice(0, 6000),
+        body: card.body.slice(0, 20000),
+        bodyChars: card.body.length,
+        bodyComplete: card.body.length <= 20000,
         hasImage: Boolean(card.image),
         group: group ? { id: group.id, title: group.title } : undefined,
         members: card.members?.map((m) => lookup(m)).filter(Boolean).map((m) => ({ id: m!.id, title: m!.title })),
@@ -218,7 +229,7 @@ export async function executeSpaceTool(name: string, args: Record<string, unknow
     return {
       ok: true,
       text: `Cards ${offset + 1}-${Math.min(all.length, offset + limit)} of ${all.length}.`,
-      data: all.slice(offset, offset + limit).map((c) => ({ id: c.id, title: c.title, kind: c.kind, body: c.body.slice(0, 80) })),
+      data: all.slice(offset, offset + limit).map((c) => ({ id: c.id, title: c.title, kind: c.kind, bodyPreview: c.body.slice(0, 80), bodyChars: c.body.length })),
     };
   }
 

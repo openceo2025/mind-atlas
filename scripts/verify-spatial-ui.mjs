@@ -83,6 +83,18 @@ for (const name of ["read_card", "get_related_cards", "list_cards", "web_search"
 assert.ok(/neighborhood\(picked, 2/.test(chat), "chat should send the cards around the selected ones");
 assert.ok(/relationsContext\(cards\)/.test(ai) && /\{ web: true \}/.test(ai), "AI requests should carry connections and be able to search the web");
 
+// ── 「AIに質問」と「AIアシスタント」（2026-09-25） ─────────────────
+// カードはタイトルと本文を別の欄で渡し、本文が全文か途中までかを書く
+assert.ok(/`title: \$\{c\.title\}`/.test(ai) && /body \(complete, /.test(ai) && /body \(truncated: /.test(ai), "card context should label title and body separately and say whether the body is complete");
+assert.ok(/never use the title in place of the body/.test(ai) && /wantsExactText\(said\)/.test(ai), "the AI should be told to copy card text exactly when asked to join/quote it");
+// 左ナビは「AIアシスタント」（スペースごとに会話を覚える）、サークルメニューは毎回まっさら
+assert.ok(/onClick=\{tool\('assistant'\)\}/.test(chrome), "the nav should open the AI assistant");
+assert.ok(/const assistant = win\.type === 'assistant'/.test(chat) && /memory: assistant \? logRef\.current\.summary : undefined/.test(chat), "only the assistant carries the space's conversation");
+assert.ok(/\/\^\\\/compact\\b\/i/.test(chat) && /AUTO_COMPACT_CHARS/.test(chat), "the assistant should compact on /compact and automatically");
+// 開いたら質問欄へ焦点。日本語入力中のキーは空間の操作にしない
+assert.ok(/inputRef\.current\?\.focus/.test(chat), "the chat input should take focus when the window opens");
+assert.ok(/e\.isComposing \|\| e\.key === 'Process'/.test(app), "space shortcuts should ignore keys while composing text");
+
 console.log("verify:spatial-ui static checks passed");
 
 // ── 2) ブラウザでの検査 ────────────────────────────────────
@@ -229,7 +241,7 @@ try {
   // 6) チャット：改行と送信
   await page.evaluate(() => localStorage.setItem("mindatlas-spatial-cost-notice", "1"));
   await boot();
-  await page.evaluate(() => [...document.querySelectorAll(".sidebar .nav-item")].find((b) => /AIに質問/.test(b.textContent))?.click());
+  await page.evaluate(() => [...document.querySelectorAll(".sidebar .nav-item")].find((b) => /AIアシスタント/.test(b.textContent))?.click());
   await wait(1000);
   const input = page.locator(".fwin textarea.chat-input").last();
   await input.click();
@@ -294,6 +306,59 @@ try {
   await page.locator(".ask-box .btn.primary").click();
   await wait(2500);
   check(turns === turns2 + 1, "the send button sends");
+
+  // 10) AIアシスタントはスペースごとに会話を覚える（閉じても、読み込み直しても残る）
+  const userMsgs = () => page.locator(".fwin .msg.user").count();
+  const kept = await userMsgs();
+  await closeWindows();
+  await wait(400);
+  await page.evaluate(() => localStorage.removeItem("mindatlas-spatial-cost-notice"));
+  await boot();
+  await page.evaluate(() => [...document.querySelectorAll(".sidebar .nav-item")].find((b) => /AIアシスタント/.test(b.textContent))?.click());
+  await wait(1200);
+  check(kept >= 2 && (await userMsgs()) === kept, "the assistant remembers the conversation after a reload", `${kept} -> ${await userMsgs()}`);
+  check((await page.evaluate(() => document.activeElement?.classList.contains("chat-input"))) === true, "the assistant's input has focus when it opens");
+
+  // 11) /compact で要約に畳み、/clear で最初から
+  const assistantInput = page.locator(".fwin textarea.chat-input").last();
+  const turns3 = turns;
+  await assistantInput.fill("/compact");
+  await page.keyboard.press("Enter");
+  await wait(3000);
+  check(turns === turns3 + 1 && (await page.locator(".fwin .compact-divider").count()) === 1, "/compact summarizes the conversation into one request", `${turns - turns3} request(s)`);
+  check((await page.locator(".fwin .msg.compacted").count()) >= 2, "summarized turns stay visible, dimmed");
+  await assistantInput.fill("/clear");
+  await page.keyboard.press("Enter");
+  await wait(600);
+  check((await userMsgs()) === 0 && turns === turns3 + 1, "/clear starts over without calling the AI");
+  await page.locator(".toast button").filter({ hasText: "元に戻す" }).first().click();
+  await wait(400);
+  check((await userMsgs()) === kept, "undo brings the cleared conversation back");
+
+  // 12) サークルメニューの「AIに質問」：開いたらすぐ質問欄。打った文字でカードは増えない。過去の会話は持ち込まない
+  await closeWindows();
+  await wait(400);
+  await page.locator(".card").first().click();
+  await wait(500);
+  const cardsBeforeAsk = await cards();
+  await page.locator(".radial-item").filter({ hasText: "質問" }).first().click();
+  await wait(900);
+  const focused = await page.evaluate(() => document.activeElement?.classList.contains("chat-input"));
+  await page.keyboard.type("nando");
+  await wait(400);
+  const ask = page.locator(".fwin textarea.chat-input").last();
+  check(focused === true, "the ring's ask window focuses its input when it opens");
+  check((await cards()) === cardsBeforeAsk && (await ask.inputValue()) === "nando", "typing right away goes into the question, not into new cards", `cards ${cardsBeforeAsk} -> ${await cards()}`);
+  check((await page.locator(".fwin .msg").count()) === 0, "the ring's ask starts without the assistant's history");
+
+  // 13) 日本語入力の途中のキーは空間の操作にしない（N で新しいカードができない）
+  await closeWindows();
+  await wait(400);
+  await page.mouse.click(40, 400);
+  const cardsBeforeIme = await cards();
+  await page.evaluate(() => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "n", keyCode: 229, isComposing: true, bubbles: true })));
+  await wait(400);
+  check((await cards()) === cardsBeforeIme, "keys while composing Japanese do not create cards");
 
   check(!errors.length, "no page errors", errors.slice(0, 2).join(" | "));
 } finally {

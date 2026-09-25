@@ -100,14 +100,39 @@ const SYSTEM = [
   'Be concrete and faithful to the given cards; do not invent facts that are not implied by them unless asked to brainstorm.',
 ].join(' ');
 
-export function cardsContext(cards: Card[], maxChars = 24000) {
+/**
+ * カードの中身を扱うときの約束。タイトルと本文は別の欄で、本文が全文か途中までかは明示してある。
+ * 「連結して」「そのまま」「引用して」のような依頼では、1文字も変えずに扱う。
+ */
+const FIDELITY = [
+  'Each card in the context has separate fields: "title" and "body". The title is often a short label that repeats the start of the body — never use the title in place of the body.',
+  'When the user says 本文 / body, use only the body field. A body marked "(complete)" is the whole text; a body marked "(truncated …)" is not — call read_card to get the full text before quoting, joining or converting it.',
+  'If the user asks to join, concatenate, copy, quote, list, transcribe, or convert card contents (連結, 結合, そのまま, 全文, 転記, 引用, コピー, 一覧, JSON化), do it mechanically: reproduce every character of the requested fields in the requested order, and do not summarize, shorten, paraphrase, fix or add anything. Before answering, check that nothing from any source field is missing.',
+].join('\n');
+
+/** 依頼が「中身をそのまま扱う」ものか（連結・転記・引用など）。そのときは選んだカードの本文を省かずに渡す */
+export function wantsExactText(text: string) {
+  return /連結|結合|つなげ|繋げ|そのまま|全文|原文|転記|引用|コピー|書き写|一覧に|JSON|concat|join|verbatim|as[- ]is|exact|copy|quote|transcrib|full text/i.test(text);
+}
+
+export function cardsContext(cards: Card[], maxChars = 24000, opts: { fullBodies?: string[] } = {}) {
   let out = '';
   for (const c of cards) {
+    // 選んだカード（fullBodies）は、長くても本文を省かない
+    const limit = opts.fullBodies?.includes(c.id) ? 12000 : 2400;
+    const body = c.body ?? '';
+    const bodyHead = !body
+      ? 'body: (empty)'
+      : body.length <= limit
+        ? `body (complete, ${body.length} chars):`
+        : `body (truncated: first ${limit} of ${body.length} chars — call read_card for the rest):`;
     const block = [
-      `### [${c.id}] ${c.title}`,
+      `### card [${c.id}]`,
+      `title: ${c.title}`,
       `kind: ${c.kind}${c.tags.length ? ` | tags: ${c.tags.join(', ')}` : ''}${c.url ? ` | url: ${c.url}` : ''}`,
-      c.subtitle ? c.subtitle : '',
-      c.body ? c.body.slice(0, 2400) : '',
+      c.subtitle ? `subtitle: ${c.subtitle}` : '',
+      bodyHead,
+      body ? `<<<\n${body.slice(0, limit)}\n>>>` : '',
       c.facts?.length ? c.facts.map((f) => `- ${f.label}: ${f.value}`).join('\n') : '',
     ]
       .filter(Boolean)
@@ -169,7 +194,7 @@ async function runToolCalls(messages: AiTurnMessage[], text: string, calls: NonN
       content: [outcome.text, 'data' in outcome && outcome.data !== undefined ? JSON.stringify(outcome.data) : '']
         .filter(Boolean)
         .join('\n')
-        .slice(0, 6000),
+        .slice(0, 24000), // read_card の全文が途中で切れないように
     });
   }
 }
@@ -344,7 +369,13 @@ export async function chat(
   history: AiTurnMessage[],
   cards: Card[],
   spaceTitle: string,
-  opts: { onStep?: (step: ChatStep) => void } = {},
+  opts: {
+    onStep?: (step: ChatStep) => void;
+    /** 選んだカード（本文を省かずに渡す） */
+    selectedIds?: string[];
+    /** AIアシスタント：このスペースでのこれまでの会話を要約したもの */
+    memory?: string;
+  } = {},
 ) {
   // まず判断モデルに読ませる。既にあるカードを消す・つなぐ・束ねる・寄るだけなら
   // ここで終わり、チャットモデルは一度も呼ばれない（往復ぶんの費用がまるごと消える）。
@@ -355,17 +386,28 @@ export async function chat(
     return routed.action.done;
   }
 
+  const exact = wantsExactText(said);
   const intro = [
     SYSTEM,
     `The user is working in the space "${spaceTitle}". The cards below are what the user can see right now.`,
-    'The first cards in the context are the ones the user selected; the rest are cards connected to them. "Connections" lists the relations (derived = the second card was born from the first; contains = group membership).',
+    opts.selectedIds?.length
+      ? `The user selected these cards: ${opts.selectedIds.map((id) => `[${id}]`).join(', ')}; they come first in the context. The rest are cards connected to them.`
+      : 'No card is selected; the context holds the cards around the user.',
+    '"Connections" lists the relations (derived = the second card was born from the first; contains = group membership).',
+    FIDELITY,
+    exact ? 'This request asks for card text as-is. Work only from complete bodies (read_card when a body is truncated) and output the text exactly, with no commentary unless asked.' : '',
+    opts.memory ? `Summary of the earlier conversation with this user in this space (older turns were compacted; treat it as your memory):\n${opts.memory}` : '',
     'You can read anything in this space yourself: search_cards, read_card (whole body and connections), get_related_cards (walk children/parents/relations) and list_cards. Look things up as many times as you need before answering instead of saying you cannot see something.',
     'Use web_search for current or outside facts the cards do not contain.',
     'You can change the space with the tools: create, update, delete, link, bundle cards, set an axis or focus a card. Change things only when the user asks for a change; never guess a card id — search or use the ids in the context.',
     'After the tools have run, tell the user briefly what you changed.',
     `Answer in ${language()} unless the user writes in another language. Use Markdown lists when helpful.`,
-  ].join('\n');
-  const messages: AiTurnMessage[] = history.map((m, i) => (i === 0 && m.role === 'user' ? { role: 'user', content: `${intro}\n\n${m.content}` } : m));
+  ]
+    .filter(Boolean)
+    .join('\n');
+  // 会話は必ず利用者の発言から始める（要約で古いやり取りを落としたあとも、前置きが最初に来るように）
+  const start = history.findIndex((m) => m.role === 'user');
+  const messages: AiTurnMessage[] = history.slice(Math.max(0, start)).map((m, i) => (i === 0 ? { role: 'user', content: `${intro}\n\n${m.content}` } : m));
   // 道具が絞れているなら、その道具だけを渡す（毎ターンの入力が 3〜4 割減る）
   // 読む道具とネット検索は、道具を絞ったときも必ず渡す
   const needed = routed.tool ? new Set([routed.tool, 'get_space_overview', 'search_cards', 'read_card', 'get_related_cards', 'list_cards', 'web_search']) : null;
@@ -375,7 +417,7 @@ export async function chat(
     description: tool.description,
     parameters: tool.parameters,
   }));
-  const contextText = [cardsContext(cards, 30000), relationsContext(cards)].filter(Boolean).join('\n\n');
+  const contextText = [cardsContext(cards, 36000, { fullBodies: opts.selectedIds }), relationsContext(cards)].filter(Boolean).join('\n\n');
 
   for (let i = 0; i < MAX_TOOL_TURNS; i += 1) {
     const result = await turn({ messages, contextText, tools });
@@ -385,4 +427,25 @@ export async function chat(
   }
   const last = await turn({ messages, contextText });
   return last.text;
+}
+
+// ── AIアシスタントの会話の圧縮 ─────────────────────────────────
+/**
+ * これまでの会話（と前回の要約）を、AI 自身が後で読み返すための要約にまとめる。
+ * 決めたこと・分かった事実・残っている問い・話題にしたカード（id とタイトル）は落とさない。
+ */
+export async function compactConversation(previous: string, turns: { role: 'user' | 'assistant'; content: string }[], instruction = '') {
+  const transcript = turns.map((m) => `${m.role === 'user' ? 'USER' : 'ASSISTANT'}: ${m.content}`).join('\n\n');
+  const prompt = [
+    'You are compacting the conversation history of the MindAtlas AI assistant so it fits in future requests.',
+    'Write a concise summary that you will read later as your memory of this conversation. Keep: what the user wants and prefers, decisions and conclusions, facts that were established, open questions and pending tasks, and every card mentioned (id and title). Drop greetings and repetition.',
+    instruction ? `The user asked the summary to focus on: ${instruction}` : '',
+    `Write it in ${language()}, as short Markdown bullet points under a few headings. Do not add anything that was not in the conversation.`,
+    previous ? `Earlier summary to merge in:\n${previous}` : '',
+    `Conversation to compact:\n${transcript}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  const result = await turn({ messages: [{ role: 'user', content: prompt }] });
+  return result.text.trim();
 }

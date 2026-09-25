@@ -37,6 +37,7 @@ export const WINDOW_WIDTH: Record<WindowType, number> = {
   cluster: 340,
   relations: 380,
   chat: 420,
+  assistant: 440,
   search: 420,
   voice: 360,
   agent: 460,
@@ -108,7 +109,7 @@ export function openWindowAtScreen(type: WindowType, cardIds: string[], at: { x:
 
 /** 同じ種類の道具ウィンドウがあれば前面に、無ければ開く */
 /** 左ナビから開く道具は、選択ではなく空間全体を相手にする */
-const WHOLE_SPACE_TOOLS: WindowType[] = ['chat', 'search', 'voice', 'spaces', 'help', 'settings', 'account', 'share', 'axis'];
+const WHOLE_SPACE_TOOLS: WindowType[] = ['chat', 'assistant', 'search', 'voice', 'spaces', 'help', 'settings', 'account', 'share', 'axis'];
 
 export function toggleToolWindow(type: WindowType, at?: { x: number; y: number }, data?: Record<string, unknown>) {
   const s = get();

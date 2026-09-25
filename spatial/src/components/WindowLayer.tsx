@@ -35,6 +35,7 @@ const META: Record<WindowType, { icon: string }> = {
   relations: { icon: 'link' },
   relation: { icon: 'link' },
   chat: { icon: 'chat' },
+  assistant: { icon: 'chat' },
   search: { icon: 'globe' },
   voice: { icon: 'mic' },
   agent: { icon: 'terminal' },
@@ -46,7 +47,7 @@ const META: Record<WindowType, { icon: string }> = {
 };
 
 // 発生源のカードと結ぶ引き出し線を描かないウィンドウ
-const NO_LEADER: WindowType[] = ['axis', 'preview', 'cluster', 'account', 'share', 'spaces', 'help', 'settings', 'voice', 'agent', 'search'];
+const NO_LEADER: WindowType[] = ['axis', 'preview', 'cluster', 'account', 'share', 'spaces', 'help', 'settings', 'voice', 'agent', 'search', 'assistant'];
 
 export function WindowLayer() {
   const windows = useStore((s) => s.windows);
@@ -160,6 +161,7 @@ function Content({ win }: { win: FloatWin }) {
     case 'relation':
       return <RelationWindow win={win} />;
     case 'chat':
+    case 'assistant':
       return <ChatWindow win={win} />;
     case 'search':
       return <SearchWindow win={win} />;
@@ -196,6 +198,7 @@ function subtitleOf(win: FloatWin) {
     voice: 'win.voice.sub',
     agent: 'win.agent.sub',
     search: 'win.search.sub',
+    assistant: 'win.assistant.sub',
   };
   if (fixed[win.type]) return t(fixed[win.type]!);
   if (!titles.length) return '';

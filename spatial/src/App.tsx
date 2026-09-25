@@ -135,6 +135,8 @@ function useKeyboard() {
         return;
       }
       if (typing(e) || s.paletteOpen) return;
+      // 日本語入力の途中（変換前の文字）は、空間の操作にしない（N で新しいカードができてしまう）
+      if (e.isComposing || e.key === 'Process' || e.keyCode === 229) return;
       const edit = !s.readOnly;
       if (e.code === 'Space') {
         e.preventDefault();

@@ -69,7 +69,7 @@ export function CommandPalette() {
       },
       { id: 'sum', label: t('cmd.summary'), hint: 'AI', enabled: n > 0, run: () => openWindow('summary', selection) },
       { id: 'child', label: t('cmd.child'), hint: '', enabled: edit && n >= 1, run: () => createChild(p) },
-      { id: 'chat', label: t('cmd.chat'), hint: 'AI', run: () => (n ? openWindow('chat', selection.slice(0, 12)) : toggleToolWindow('chat')) },
+      { id: 'chat', label: t('cmd.chat'), hint: 'AI', run: () => (n ? openWindow('chat', selection.slice(0, 12)) : toggleToolWindow('assistant')) },
       { id: 'web', label: t('cmd.search'), hint: 'Web', run: () => toggleToolWindow('search') },
       { id: 'voice', label: t('cmd.voice'), hint: 'AI', run: () => toggleToolWindow('voice') },
       { id: 'grp', label: t('cmd.group'), hint: 'Ctrl+G', enabled: edit && n >= 2, run: () => group(selection) },

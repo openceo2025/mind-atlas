@@ -2,9 +2,17 @@ import { useState } from 'react';
 import { refreshSession, saveToCloud, toastError, useStore } from '../../store';
 import { HOSTED, logout, openBillingPortal, startCheckout, startLogin } from '../../lib/service';
 import { embeddingStatus } from '../../lib/embeddings';
-import { t } from '../../i18n';
+import { formatDateTime, t } from '../../i18n';
 import type { FloatWin } from '../../types';
 import { Icon } from '../Icons';
+
+/** AIの残りは契約の期間ごとに満タンへ戻る。次に戻る日時と、あと何日か */
+export function creditResetText(periodEnd: string) {
+  const at = new Date(periodEnd).getTime();
+  if (!Number.isFinite(at)) return '';
+  const days = Math.max(0, Math.ceil((at - Date.now()) / 86_400_000));
+  return t('account.creditResetsAt', { date: formatDateTime(at), n: days });
+}
 
 export function AccountWindow(_: { win: FloatWin }) {
   const session = useStore((s) => s.session);
@@ -93,9 +101,16 @@ export function AccountWindow(_: { win: FloatWin }) {
                 </div>
                 <span className="small">{percent === null ? '—' : `${Math.round(percent)}%`}</span>
               </dd>
+              {session.subscription?.currentPeriodEnd && (
+                <>
+                  <dt>{t('account.creditResets')}</dt>
+                  <dd>{creditResetText(session.subscription.currentPeriodEnd)}</dd>
+                </>
+              )}
             </>
           )}
-          {session.subscription?.currentPeriodEnd && (
+          {/* 購読中は「次のリセット」が同じ日を示すので、更新日は重ねて出さない */}
+          {session.subscription?.currentPeriodEnd && !session.subscriptionActive && (
             <>
               <dt>{t('account.renews')}</dt>
               <dd>{new Date(session.subscription.currentPeriodEnd).toLocaleDateString()}</dd>

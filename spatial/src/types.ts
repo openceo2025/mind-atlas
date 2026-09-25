@@ -167,6 +167,7 @@ export type WindowType =
   | 'cluster'
   | 'relations'
   | 'chat'
+  | 'assistant'
   | 'search'
   | 'voice'
   | 'agent'

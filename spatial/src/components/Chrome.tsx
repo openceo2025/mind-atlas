@@ -24,6 +24,7 @@ import {
 } from '../store';
 import { HOSTED } from '../lib/service';
 import { copyImage } from '../lib/clipboard';
+import { creditResetText } from './windows/AccountWindow';
 import { embeddingStatus, subscribeEmbeddings } from '../lib/embeddings';
 import { t } from '../i18n';
 import { Icon } from './Icons';
@@ -69,7 +70,7 @@ export function Sidebar() {
         {t('nav.allSpaces')}
       </button>
       <div className="nav-section">{t('nav.tools')}</div>
-      <button className="nav-item" onClick={tool('chat')}>
+      <button className="nav-item" onClick={tool('assistant')}>
         <Icon name="chat" size={17} />
         {t('nav.chat')}
       </button>
@@ -255,7 +256,11 @@ export function TopBar() {
           </button>
         )}
         {session.mode === 'hosted' && session.creditPercent !== null && (
-          <button className="credit-pill" onClick={() => toggleToolWindow('account')} title={t('topbar.credit')}>
+          <button
+            className="credit-pill"
+            onClick={() => toggleToolWindow('account')}
+            title={session.subscription?.currentPeriodEnd ? `${t('topbar.credit')} — ${t('account.creditResets')}: ${creditResetText(session.subscription.currentPeriodEnd)}` : t('topbar.credit')}
+          >
             <Icon name="sparkle" size={12} />
             {Math.round(session.creditPercent)}%
           </button>
