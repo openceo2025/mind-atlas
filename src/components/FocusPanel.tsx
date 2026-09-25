@@ -9,6 +9,7 @@ import {
   FileText,
   FileType,
   Image as ImageIcon,
+  LayoutGrid,
   Mic,
   Paintbrush,
   PanelRightOpen,
@@ -26,6 +27,7 @@ import type { AtlasTheme } from "../theme";
 import type { AtlasNode, AttachmentKind, NodeAttachment } from "../types";
 import { I18nText, useMindAtlasLocale } from "../i18n/I18nProvider";
 import { formatAppMessage } from "../i18n/format";
+import { requestPlanetEntry } from "../planet/planetHold";
 
 const ShogiViewer = lazy(() => import("../features/shogi/ShogiViewer").then((module) => ({ default: module.ShogiViewer })));
 const ChessViewer = lazy(() => import("../features/chess/ChessViewer").then((module) => ({ default: module.ChessViewer })));
@@ -37,10 +39,13 @@ export function FocusPanel({
   theme = "dark",
   attachmentsEnabled = true,
   boardGameMode = false,
+  planetEntryEnabled = false,
 }: {
   theme?: AtlasTheme;
   attachmentsEnabled?: boolean;
   boardGameMode?: boolean;
+  /** Hosted only: offer the way into this node's Mind Atlas (Cards) space. */
+  planetEntryEnabled?: boolean;
 }) {
   const { locale } = useMindAtlasLocale();
   const atlasRoot = useAtlasStore((state) => state.atlasRoot);
@@ -269,6 +274,18 @@ export function FocusPanel({
               title="Open agent run"
             >
               <PanelRightOpen size={17} />
+            </button>
+          ) : null}
+          {planetEntryEnabled && !isRoot && !isBoardGameMode ? (
+            <button
+              className="icon-button panel-tool-button planet-entry-button"
+              type="button"
+              onClick={() => requestPlanetEntry(selectedNode.id)}
+              aria-label={formatAppMessage("planet.enter")}
+              title={formatAppMessage("planet.enter")}
+            >
+              <LayoutGrid size={17} />
+              <span>{formatAppMessage("planet.enterShort")}</span>
             </button>
           ) : null}
           {isBoardGameMode ? null : (

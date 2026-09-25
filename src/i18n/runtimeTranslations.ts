@@ -649,7 +649,13 @@ export const RUNTIME_TRANSLATIONS: Record<string, Record<string, string>> = {
     "workspace.mobile": "Espacio de trabajo móvil",
     "workspace.operation": "Operación",
     "workspace.outline": "Esquema",
-    "workspace.panel": "Panel del espacio de trabajo"
+    "workspace.panel": "Panel del espacio de trabajo",
+    "planet.enter": "Entrar en Mind Atlas (Tarjetas)",
+    "planet.enterShort": "Tarjetas",
+    "planet.holdHint": "Mantén pulsado para entrar en este planeta",
+    "planet.landing": "Aterrizando…",
+    "planet.failed": "No se pudo abrir el espacio de tarjetas. Inténtalo de nuevo.",
+    "planet.frameTitle": "Mind Atlas (Tarjetas)"
   },
   "pt-BR": {
     "analytics.consent.accept": "Permitir análise",
@@ -1300,7 +1306,13 @@ export const RUNTIME_TRANSLATIONS: Record<string, Record<string, string>> = {
     "workspace.mobile": "Espaço de trabalho móvel",
     "workspace.operation": "Operação",
     "workspace.outline": "Estrutura",
-    "workspace.panel": "Painel do espaço de trabalho"
+    "workspace.panel": "Painel do espaço de trabalho",
+    "planet.enter": "Entrar no Mind Atlas (Cartões)",
+    "planet.enterShort": "Cartões",
+    "planet.holdHint": "Continue segurando para entrar neste planeta",
+    "planet.landing": "Pousando…",
+    "planet.failed": "Não foi possível abrir o espaço de cartões. Tente novamente.",
+    "planet.frameTitle": "Mind Atlas (Cartões)"
   },
   "fr": {
     "analytics.consent.accept": "Autoriser l’analyse",
@@ -1951,7 +1963,13 @@ export const RUNTIME_TRANSLATIONS: Record<string, Record<string, string>> = {
     "workspace.mobile": "Espace de travail mobile",
     "workspace.operation": "Opération",
     "workspace.outline": "Plan",
-    "workspace.panel": "Panneau de l’espace de travail"
+    "workspace.panel": "Panneau de l’espace de travail",
+    "planet.enter": "Plonger dans Mind Atlas (Cartes)",
+    "planet.enterShort": "Cartes",
+    "planet.holdHint": "Maintenez pour plonger dans cette planète",
+    "planet.landing": "Atterrissage…",
+    "planet.failed": "Impossible d'ouvrir l'espace de cartes. Réessayez.",
+    "planet.frameTitle": "Mind Atlas (Cartes)"
   },
   "de": {
     "analytics.consent.accept": "Analyse erlauben",
@@ -2602,7 +2620,13 @@ export const RUNTIME_TRANSLATIONS: Record<string, Record<string, string>> = {
     "workspace.mobile": "Mobiler Arbeitsbereich",
     "workspace.operation": "Bedienung",
     "workspace.outline": "Gliederung",
-    "workspace.panel": "Arbeitsbereich-Panel"
+    "workspace.panel": "Arbeitsbereich-Panel",
+    "planet.enter": "In Mind Atlas (Karten) eintauchen",
+    "planet.enterShort": "Karten",
+    "planet.holdHint": "Gedrückt halten, um in diesen Planeten einzutauchen",
+    "planet.landing": "Landung…",
+    "planet.failed": "Der Kartenraum konnte nicht geöffnet werden. Bitte erneut versuchen.",
+    "planet.frameTitle": "Mind Atlas (Karten)"
   },
   "ko": {
     "analytics.consent.accept": "분석 허용",
@@ -3253,7 +3277,13 @@ export const RUNTIME_TRANSLATIONS: Record<string, Record<string, string>> = {
     "workspace.mobile": "모바일 작업 공간",
     "workspace.operation": "작업",
     "workspace.outline": "개요",
-    "workspace.panel": "작업 공간 패널"
+    "workspace.panel": "작업 공간 패널",
+    "planet.enter": "마인드 아틀라스 (카드)로 진입",
+    "planet.enterShort": "카드",
+    "planet.holdHint": "계속 누르면 이 행성으로 진입합니다",
+    "planet.landing": "착륙 중…",
+    "planet.failed": "카드 공간을 열 수 없습니다. 다시 시도해 주세요.",
+    "planet.frameTitle": "마인드 아틀라스 (카드)"
   },
   "zh-Hans": {
     "analytics.consent.accept": "允许分析",
@@ -3904,7 +3934,13 @@ export const RUNTIME_TRANSLATIONS: Record<string, Record<string, string>> = {
     "workspace.mobile": "移动工作区",
     "workspace.operation": "操作",
     "workspace.outline": "大纲",
-    "workspace.panel": "工作区面板"
+    "workspace.panel": "工作区面板",
+    "planet.enter": "进入 Mind Atlas（卡片）",
+    "planet.enterShort": "卡片",
+    "planet.holdHint": "继续按住即可进入这颗星球",
+    "planet.landing": "着陆中…",
+    "planet.failed": "无法打开卡片空间，请重试。",
+    "planet.frameTitle": "Mind Atlas（卡片）"
   },
   "zh-Hant": {
     "analytics.consent.accept": "允許分析",
@@ -4555,7 +4591,13 @@ export const RUNTIME_TRANSLATIONS: Record<string, Record<string, string>> = {
     "workspace.mobile": "行動工作區",
     "workspace.operation": "操作",
     "workspace.outline": "大綱",
-    "workspace.panel": "工作區面板"
+    "workspace.panel": "工作區面板",
+    "planet.enter": "進入 Mind Atlas（卡片）",
+    "planet.enterShort": "卡片",
+    "planet.holdHint": "繼續按住即可進入這顆星球",
+    "planet.landing": "著陸中…",
+    "planet.failed": "無法開啟卡片空間，請再試一次。",
+    "planet.frameTitle": "Mind Atlas（卡片）"
   },
   "id": {
     "analytics.consent.accept": "Izinkan analitik",
@@ -5206,7 +5248,13 @@ export const RUNTIME_TRANSLATIONS: Record<string, Record<string, string>> = {
     "workspace.mobile": "Ruang kerja seluler",
     "workspace.operation": "Operasi",
     "workspace.outline": "Kerangka",
-    "workspace.panel": "Panel ruang kerja"
+    "workspace.panel": "Panel ruang kerja",
+    "planet.enter": "Masuk ke Mind Atlas (Kartu)",
+    "planet.enterShort": "Kartu",
+    "planet.holdHint": "Tahan terus untuk masuk ke planet ini",
+    "planet.landing": "Mendarat…",
+    "planet.failed": "Ruang kartu tidak dapat dibuka. Coba lagi.",
+    "planet.frameTitle": "Mind Atlas (Kartu)"
   },
   "hi": {
     "analytics.consent.accept": "विश्लेषण की अनुमति दें",
@@ -5857,7 +5905,13 @@ export const RUNTIME_TRANSLATIONS: Record<string, Record<string, string>> = {
     "workspace.mobile": "मोबाइल वर्कस्पेस",
     "workspace.operation": "ऑपरेशन",
     "workspace.outline": "आउटलाइन",
-    "workspace.panel": "वर्कस्पेस पैनल"
+    "workspace.panel": "वर्कस्पेस पैनल",
+    "planet.enter": "Mind Atlas (कार्ड) में प्रवेश करें",
+    "planet.enterShort": "कार्ड",
+    "planet.holdHint": "इस ग्रह में उतरने के लिए दबाए रखें",
+    "planet.landing": "उतर रहे हैं…",
+    "planet.failed": "कार्ड स्पेस नहीं खुल सका। कृपया फिर से कोशिश करें।",
+    "planet.frameTitle": "Mind Atlas (कार्ड)"
   },
   "ar": {
     "analytics.consent.accept": "السماح بالتحليلات",
@@ -6508,6 +6562,12 @@ export const RUNTIME_TRANSLATIONS: Record<string, Record<string, string>> = {
     "workspace.mobile": "مساحة العمل على الهاتف",
     "workspace.operation": "التشغيل",
     "workspace.outline": "المخطط",
-    "workspace.panel": "لوحة مساحة العمل"
+    "workspace.panel": "لوحة مساحة العمل",
+    "planet.enter": "ادخل إلى Mind Atlas (البطاقات)",
+    "planet.enterShort": "البطاقات",
+    "planet.holdHint": "استمر في الضغط للدخول إلى هذا الكوكب",
+    "planet.landing": "جارٍ الهبوط…",
+    "planet.failed": "تعذّر فتح مساحة البطاقات. حاول مرة أخرى.",
+    "planet.frameTitle": "Mind Atlas (البطاقات)"
   }
 };

@@ -41,6 +41,7 @@ function toTextOnlyNode(node: AtlasNode, isRoot: boolean): AtlasNode {
     ...boardStructuredContent(node.structuredContent),
     ...(typeof node.reminderAt === "string" && node.reminderAt ? { reminderAt: node.reminderAt.slice(0, 120) } : {}),
     ...(typeof node.reminderFiredAt === "string" && node.reminderFiredAt ? { reminderFiredAt: node.reminderFiredAt.slice(0, 120) } : {}),
+    ...(typeof node.cardPlanetId === "string" && node.cardPlanetId ? { cardPlanetId: node.cardPlanetId.slice(0, 120) } : {}),
     children: Array.isArray(node.children) ? node.children.map((child) => toTextOnlyNode(child, false)) : [],
   };
 }

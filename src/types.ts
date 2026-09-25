@@ -1032,6 +1032,11 @@ export interface AtlasNode {
   structuredContent?: AtlasStructuredContent;
   reminderAt?: string;
   reminderFiredAt?: string;
+  /**
+   * The planet id of the Mind Atlas (Cards) space inside this node. Assigned the
+   * first time someone dives into the node; the card space stores the same id.
+   */
+  cardPlanetId?: string;
   children: AtlasNode[];
 }
 

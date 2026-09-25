@@ -780,5 +780,11 @@
   "workspace.mobile": "Espaço de trabalho móvel",
   "workspace.operation": "Operação",
   "workspace.outline": "Estrutura",
-  "workspace.panel": "Painel do espaço de trabalho"
+  "workspace.panel": "Painel do espaço de trabalho",
+  "planet.enter": "Entrar no Mind Atlas (Cartões)",
+  "planet.enterShort": "Cartões",
+  "planet.holdHint": "Continue segurando para entrar neste planeta",
+  "planet.landing": "Pousando…",
+  "planet.failed": "Não foi possível abrir o espaço de cartões. Tente novamente.",
+  "planet.frameTitle": "Mind Atlas (Cartões)"
 }

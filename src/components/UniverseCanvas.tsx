@@ -46,6 +46,7 @@ import {
   getBoardMobileTargetNodeDiameterPx,
   getProjectedDiameterPx,
 } from "../layout/boardCamera";
+import { beginPlanetHold, consumePlanetHoldRelease, isPlanetHoldActive } from "../planet/planetHold";
 import { BOARD_NAVIGATION_EVENT, MINIMAP_NAVIGATE_EVENT, MINIMAP_ZOOM_EVENT, UNIVERSE_BACKGROUND_BIRTH_UNAVAILABLE_EVENT, UNIVERSE_BACKGROUND_CLICK_EVENT, UNIVERSE_BACKGROUND_INTERACTION_EVENT } from "../events";
 import { buildContextCopy, CONTEXT_COPY_PRESETS, copyContextMarkdown, type ContextCopyPreset } from "../context/contextCopy";
 import { nodeTreeHasAttachments, readNodeClipboard, writeNodeClipboard } from "../nodeClipboard";
@@ -3745,6 +3746,14 @@ function HierarchyNode({
     } catch {
       // A resumed mobile page can deliver a retargeted pointer before capture is available.
     }
+    // Hosted only: holding still on a node for a second dives into its card space.
+    beginPlanetHold({
+      nodeId: node.id,
+      pointerId: event.pointerId,
+      pointerType: event.nativeEvent.pointerType || "mouse",
+      x: event.clientX,
+      y: event.clientY,
+    });
     if (dragFallsThroughToSpace) {
       passThroughPanRef.current = {
         pointerId: event.pointerId,
@@ -3929,13 +3938,15 @@ function HierarchyNode({
   };
 
   const handlePointerUp = (event: ThreeEvent<PointerEvent>) => {
+    // A press spent on diving into the planet is not a click, and its jitter is not a move.
+    const spentOnPlanetDive = consumePlanetHoldRelease(event.pointerId);
     const passThroughPan = passThroughPanRef.current;
     if (passThroughPan?.pointerId === event.pointerId) {
       event.stopPropagation();
       const screenDistance = Math.hypot(event.clientX - passThroughPan.startScreen.x, event.clientY - passThroughPan.startScreen.y);
       passThroughPanRef.current = null;
       releaseUniversePointerSession(pointerSessionOwnerRef.current);
-      if (!passThroughPan.hasPanned && screenDistance <= 6) {
+      if (!spentOnPlanetDive && !passThroughPan.hasPanned && screenDistance <= 6) {
         if (passThroughPan.shiftKey || event.nativeEvent.shiftKey) {
           toggleMultiSelectedNode(node.id);
         } else {
@@ -3949,7 +3960,7 @@ function HierarchyNode({
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.stopPropagation();
     const screenDistance = Math.hypot(event.clientX - drag.startScreen.x, event.clientY - drag.startScreen.y);
-    if (!drag.torn && screenDistance <= 3) {
+    if (!spentOnPlanetDive && !drag.torn && screenDistance <= 3) {
       if (drag.shiftKey || event.nativeEvent.shiftKey) {
         toggleMultiSelectedNode(node.id);
       } else {
@@ -3959,7 +3970,9 @@ function HierarchyNode({
     dragRef.current = null;
     releaseUniversePointerSession(pointerSessionOwnerRef.current);
     setMobileRaycastMode({ kind: "idle" });
-    if (drag.hasMoved || drag.torn) {
+    if (spentOnPlanetDive && !drag.torn) {
+      applyVisualWorldPosition(drag.startWorld);
+    } else if (drag.hasMoved || drag.torn) {
       moveNode(node.id, drag.currentWorld);
     }
     if (drag.handoffChildId && drag.handoffChildWorld) {
@@ -4036,6 +4049,8 @@ function HierarchyNode({
           event.stopPropagation();
           event.nativeEvent.preventDefault();
           if (embedInteractionLocked) return;
+          // A touch long-press fires contextmenu; while it may still dive, it is not a menu request.
+          if (isPlanetHoldActive()) return;
           if (node.id === "atlas-root") return;
           if (!isSelected) selectNodeInPlace(node.id);
           onOpenNodeContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });

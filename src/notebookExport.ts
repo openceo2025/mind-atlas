@@ -95,6 +95,7 @@ export function sanitizeNotebookForExport(node: AtlasNode, options: NotebookExpo
   assignOptionalString(sanitized, "claudeSessionId", source.claudeSessionId);
   assignOptionalString(sanitized, "reminderAt", source.reminderAt);
   assignOptionalString(sanitized, "reminderFiredAt", source.reminderFiredAt);
+  assignOptionalString(sanitized, "cardPlanetId", source.cardPlanetId);
 
   if (isVec3(source.position)) sanitized.position = source.position;
   if (isNotebookMode(source.notebookMode)) sanitized.notebookMode = source.notebookMode;
@@ -379,7 +380,8 @@ function assignOptionalString(
     | "openClawLogPath"
     | "claudeLogPath"
     | "reminderAt"
-    | "reminderFiredAt",
+    | "reminderFiredAt"
+    | "cardPlanetId",
   value: unknown,
 ) {
   if (typeof value === "string" && value.trim()) {

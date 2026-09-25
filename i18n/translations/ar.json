@@ -780,5 +780,11 @@
   "workspace.mobile": "مساحة العمل على الهاتف",
   "workspace.operation": "التشغيل",
   "workspace.outline": "المخطط",
-  "workspace.panel": "لوحة مساحة العمل"
+  "workspace.panel": "لوحة مساحة العمل",
+  "planet.enter": "ادخل إلى Mind Atlas (البطاقات)",
+  "planet.enterShort": "البطاقات",
+  "planet.holdHint": "استمر في الضغط للدخول إلى هذا الكوكب",
+  "planet.landing": "جارٍ الهبوط…",
+  "planet.failed": "تعذّر فتح مساحة البطاقات. حاول مرة أخرى.",
+  "planet.frameTitle": "Mind Atlas (البطاقات)"
 }

@@ -780,5 +780,11 @@
   "workspace.mobile": "Ruang kerja seluler",
   "workspace.operation": "Operasi",
   "workspace.outline": "Kerangka",
-  "workspace.panel": "Panel ruang kerja"
+  "workspace.panel": "Panel ruang kerja",
+  "planet.enter": "Masuk ke Mind Atlas (Kartu)",
+  "planet.enterShort": "Kartu",
+  "planet.holdHint": "Tahan terus untuk masuk ke planet ini",
+  "planet.landing": "Mendarat…",
+  "planet.failed": "Ruang kartu tidak dapat dibuka. Coba lagi.",
+  "planet.frameTitle": "Mind Atlas (Kartu)"
 }

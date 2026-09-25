@@ -3201,6 +3201,27 @@ h1 {
   white-space: nowrap;
 }
 
+/* Hosted only: dive into this node's Mind Atlas (Cards) space. */
+.panel-tool-button.planet-entry-button {
+  display: inline-flex;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  padding: 0 10px;
+  color: #cfeaff;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.planet-entry-button span {
+  white-space: nowrap;
+}
+
+.app-shell[data-theme="light"] .panel-tool-button.planet-entry-button {
+  color: #173553;
+}
+
 .panel-menu-anchor {
   position: relative;
 }

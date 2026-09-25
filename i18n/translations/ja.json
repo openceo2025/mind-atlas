@@ -780,5 +780,11 @@
   "workspace.mobile": "モバイルワークスペース",
   "workspace.operation": "操作",
   "workspace.outline": "アウトライン",
-  "workspace.panel": "ワークスペースパネル"
+  "workspace.panel": "ワークスペースパネル",
+  "planet.enter": "マインドアトラス（カード）へ突入",
+  "planet.enterShort": "カード",
+  "planet.holdHint": "押し続けると、この惑星に突入します",
+  "planet.landing": "着陸中…",
+  "planet.failed": "カード空間を開けませんでした。もう一度お試しください。",
+  "planet.frameTitle": "マインドアトラス（カード）"
 }

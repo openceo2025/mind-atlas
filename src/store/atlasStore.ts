@@ -11,6 +11,7 @@ import { atlasRoot, initialWorkAreas } from "../data/atlas";
 import { acknowledgeAgentRuns, getAgentRunInbox, getBridgeUrl, getBridgeUrlCandidates, recoverCodexRun, requestAiResponse, requestGitPush } from "../ai/bridgeClient";
 import { inspectAgentWorkspace, isAgentRuntimeAvailable, resolveAgentApproval } from "../agentRuntime/runtimeClient";
 import type { AgentApprovalRequest } from "../agentRuntime/types";
+import { cardReminderSignature, createPlanetId, type ReminderIndexEntry } from "../planet/cardBridge";
 import { materializeEvidence } from "../agentRuntime/evidence";
 import { accountAtlasInjection, type AtlasInjectionAccounting } from "../agentRuntime/contextAccounting";
 import {
@@ -357,6 +358,10 @@ interface AtlasStore {
   clearNodeReminder: (id: string) => void;
   showNotificationSnoozePrompt: (id: string) => void;
   acknowledgeNodeNotification: (id: string) => void;
+  /** Give a node its Mind Atlas (Cards) planet id (once) and return it. */
+  assignCardPlanet: (id: string) => string | null;
+  /** Card reminders fired: ripple from the node that holds each card space. */
+  receiveCardReminders: (entries: ReminderIndexEntry[]) => void;
   dismissNotificationSnoozePrompt: (id?: string) => void;
   snoozeNodeNotification: (id: string, delayMs: number) => void;
   setNodeStatus: (id: string, status: WorkStatus, nextDecision?: string) => void;
@@ -1216,6 +1221,36 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
       notificationPulses: state.notificationPulses.filter((pulse) => pulse.nodeId !== id),
       notificationSnoozePrompt: state.notificationSnoozePrompt?.nodeId === id ? null : state.notificationSnoozePrompt,
     }));
+  },
+
+  assignCardPlanet: (id) => {
+    const node = findNode(get().atlasRoot, id);
+    if (!node) return null;
+    if (node.cardPlanetId) return node.cardPlanetId;
+    const planetId = createPlanetId();
+    set((state) => {
+      const atlasRoot = updateNodeById(state.atlasRoot, id, (item) => ({ ...item, cardPlanetId: planetId }));
+      void persistNotebook(atlasRoot);
+      return { atlasRoot };
+    });
+    return planetId;
+  },
+
+  receiveCardReminders: (entries) => {
+    if (!entries.length) return;
+    set((state) => {
+      let unreadNotifications = state.unreadNotifications;
+      const notificationPulses = [...state.notificationPulses];
+      for (const entry of entries) {
+        if (!entry.planetId) continue;
+        const node = findNodeByCardPlanet(state.atlasRoot, entry.planetId);
+        if (!node || !canCreateNotificationPulse(state.atlasRoot, node.id)) continue;
+        const title = `Reminder: ${entry.title || "Untitled card"}`;
+        notificationPulses.push(createNotificationPulse(node.id, "needs_review", title));
+        unreadNotifications = markUnreadNotification(unreadNotifications, node.id, "needs_review", title, cardReminderSignature(entry));
+      }
+      return { notificationPulses, unreadNotifications };
+    });
   },
 
   dismissNotificationSnoozePrompt: (id) => {
@@ -3808,7 +3843,8 @@ function restoreUnreadNotifications(
   const next: Record<string, UnreadNotification> = {};
   for (const unread of Object.values(current)) {
     if (!findNode(root, unread.nodeId)) continue;
-    if (unread.signature && !unread.signature.startsWith("transient:") && !sourceSignatures.has(unread.signature)) continue;
+    // Card reminders live in the card space, not in this tree, so they have no source here.
+    if (unread.signature && !unread.signature.startsWith("transient:") && !unread.signature.startsWith("card-reminder:") && !sourceSignatures.has(unread.signature)) continue;
     if (unread.signature && isNotificationRead(readState, unread.nodeId, unread.signature)) continue;
     next[unread.nodeId] = unread;
   }
@@ -4473,6 +4509,8 @@ function cloneNodeSubtreeForPaste(
     codexLogPath: _codexLogPath,
     openClawSessionKey: _openClawSessionKey,
     openClawLogPath: _openClawLogPath,
+    // A pasted copy is a new planet; it must not open the original's card space.
+    cardPlanetId: _cardPlanetId,
     attachments,
     children,
     position: _position,
@@ -5365,6 +5403,15 @@ function notificationReadKey(nodeId: string, signature: string) {
 
 function isNotificationRead(readState: Record<string, string>, nodeId: string, signature: string) {
   return readState[notificationReadKey(nodeId, signature)] === "read" || readState[nodeId] === signature;
+}
+
+export function findNodeByCardPlanet(root: AtlasNode, planetId: string): AtlasNode | null {
+  if (root.cardPlanetId === planetId) return root;
+  for (const child of root.children) {
+    const hit = findNodeByCardPlanet(child, planetId);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 function collectDueReminderNodes(root: AtlasNode, nowMs: number) {

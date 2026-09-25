@@ -780,5 +780,11 @@
   "workspace.mobile": "모바일 작업 공간",
   "workspace.operation": "작업",
   "workspace.outline": "개요",
-  "workspace.panel": "작업 공간 패널"
+  "workspace.panel": "작업 공간 패널",
+  "planet.enter": "마인드 아틀라스 (카드)로 진입",
+  "planet.enterShort": "카드",
+  "planet.holdHint": "계속 누르면 이 행성으로 진입합니다",
+  "planet.landing": "착륙 중…",
+  "planet.failed": "카드 공간을 열 수 없습니다. 다시 시도해 주세요.",
+  "planet.frameTitle": "마인드 아틀라스 (카드)"
 }

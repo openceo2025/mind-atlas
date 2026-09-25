@@ -780,5 +780,11 @@
   "workspace.mobile": "मोबाइल वर्कस्पेस",
   "workspace.operation": "ऑपरेशन",
   "workspace.outline": "आउटलाइन",
-  "workspace.panel": "वर्कस्पेस पैनल"
+  "workspace.panel": "वर्कस्पेस पैनल",
+  "planet.enter": "Mind Atlas (कार्ड) में प्रवेश करें",
+  "planet.enterShort": "कार्ड",
+  "planet.holdHint": "इस ग्रह में उतरने के लिए दबाए रखें",
+  "planet.landing": "उतर रहे हैं…",
+  "planet.failed": "कार्ड स्पेस नहीं खुल सका। कृपया फिर से कोशिश करें।",
+  "planet.frameTitle": "Mind Atlas (कार्ड)"
 }

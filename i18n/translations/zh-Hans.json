@@ -780,5 +780,11 @@
   "workspace.mobile": "移动工作区",
   "workspace.operation": "操作",
   "workspace.outline": "大纲",
-  "workspace.panel": "工作区面板"
+  "workspace.panel": "工作区面板",
+  "planet.enter": "进入 Mind Atlas（卡片）",
+  "planet.enterShort": "卡片",
+  "planet.holdHint": "继续按住即可进入这颗星球",
+  "planet.landing": "着陆中…",
+  "planet.failed": "无法打开卡片空间，请重试。",
+  "planet.frameTitle": "Mind Atlas（卡片）"
 }

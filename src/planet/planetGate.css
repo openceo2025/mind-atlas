@@ -1,0 +1,190 @@
+/* PlanetGate: diving into a node's Mind Atlas (Cards) space and rising back. */
+
+.planet-hold {
+  position: fixed;
+  z-index: 60;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.planet-hold-ring {
+  position: absolute;
+  left: -34px;
+  top: -34px;
+  width: 68px;
+  height: 68px;
+  transform: rotate(-90deg);
+  opacity: 0;
+  animation: planet-hold-appear 160ms ease-out 220ms forwards;
+  filter: drop-shadow(0 0 6px rgba(143, 208, 255, 0.55));
+}
+
+.planet-hold-track,
+.planet-hold-fill {
+  fill: none;
+  stroke-width: 3;
+}
+
+.planet-hold-track {
+  stroke: rgba(143, 208, 255, 0.18);
+}
+
+.planet-hold-fill {
+  stroke: #bfe6ff;
+  stroke-linecap: round;
+  stroke-dasharray: 170;
+  stroke-dashoffset: 170;
+  animation-name: planet-hold-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.planet-hold-hint {
+  position: absolute;
+  top: 42px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(4, 12, 28, 0.78);
+  color: #dff1ff;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  animation: planet-hold-appear 200ms ease-out 380ms forwards;
+}
+
+[data-theme="light"] .planet-hold-hint {
+  background: rgba(255, 255, 255, 0.92);
+  color: #173058;
+  box-shadow: 0 2px 10px rgba(20, 40, 80, 0.14);
+}
+
+@keyframes planet-hold-appear {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes planet-hold-fill {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The effect layers. Values are driven per frame through CSS variables. */
+.planet-gate-overlay {
+  --planet-x: 50vw;
+  --planet-y: 50vh;
+  --planet-e: 0;
+  --planet-r: 40px;
+  --planet-streak: 0;
+  --planet-white: 0;
+  position: fixed;
+  inset: 0;
+  z-index: 1190;
+  pointer-events: none;
+  display: none;
+}
+
+.planet-gate-overlay.is-active {
+  display: block;
+}
+
+.planet-gate-overlay > div {
+  position: absolute;
+  inset: 0;
+}
+
+.planet-gate-glow {
+  opacity: var(--planet-e);
+  background: radial-gradient(
+    circle at var(--planet-x) var(--planet-y),
+    rgba(255, 255, 255, 0.96) 0,
+    rgba(196, 228, 255, 0.72) calc(var(--planet-r) * 0.32),
+    rgba(92, 150, 255, 0.28) calc(var(--planet-r) * 0.7),
+    rgba(40, 80, 180, 0) var(--planet-r)
+  );
+}
+
+.planet-gate-streaks {
+  opacity: var(--planet-streak);
+  background: repeating-conic-gradient(
+    from 0deg at var(--planet-x) var(--planet-y),
+    rgba(220, 238, 255, 0) 0deg 2.6deg,
+    rgba(220, 238, 255, 0.55) 2.6deg 3deg
+  );
+  -webkit-mask-image: radial-gradient(circle at var(--planet-x) var(--planet-y), transparent calc(var(--planet-r) * 0.18), #000 calc(var(--planet-r) * 0.55), transparent calc(var(--planet-r) * 1.4));
+  mask-image: radial-gradient(circle at var(--planet-x) var(--planet-y), transparent calc(var(--planet-r) * 0.18), #000 calc(var(--planet-r) * 0.55), transparent calc(var(--planet-r) * 1.4));
+}
+
+.planet-gate-white {
+  opacity: var(--planet-white);
+  background: #fff;
+}
+
+.planet-gate-landing {
+  position: fixed;
+  z-index: 1195;
+  left: 50%;
+  bottom: 18vh;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  color: #3a5a86;
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  animation: planet-hold-appear 240ms ease-out forwards;
+}
+
+.planet-gate-landing.is-plain {
+  color: #dff1ff;
+  background: rgba(4, 12, 28, 0.82);
+}
+
+.planet-gate-failure {
+  position: fixed;
+  z-index: 1196;
+  left: 50%;
+  top: 18px;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  padding: 9px 16px;
+  border-radius: 10px;
+  color: #fff;
+  background: rgba(150, 30, 48, 0.92);
+  font-size: 13px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* The card app. Parked = loaded but not laid out; staged = laid out, invisible,
+   so the card space can measure the screen while the white hides it. */
+.planet-gate-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 1180;
+  background: #040a17;
+}
+
+.planet-gate-frame[data-theme="light"] {
+  background: #eef4fc;
+}
+
+.planet-gate-frame.is-parked {
+  display: none;
+}
+
+.planet-gate-frame.is-staged {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.planet-gate-frame iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}

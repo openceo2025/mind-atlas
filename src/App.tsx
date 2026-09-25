@@ -44,6 +44,7 @@ import {
   updateHostedCloudNotebook,
 } from "./hosted/serviceClient";
 import { syncAccountAiPreference } from "./hosted/aiPreference";
+import { PlanetGate } from "./planet/PlanetGate";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
 import type { AtlasNode, CloudNotebookEntry, CloudNotebookListResult, HostedServiceSession, NotebookMode, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
@@ -338,6 +339,12 @@ export default function App() {
   }, [currentCloudNotebook, hostedSession, notebookPersistenceStatus, publicServiceMode]);
   const notebookMode: NotebookMode = atlasRoot.notebookMode ?? "standard";
   const isBoardGameMode = notebookMode !== "standard";
+  /**
+   * Hosted-only: long-press a node to dive into its Mind Atlas (Cards) space.
+   * Local developer mode, board records and the About demo never get one.
+   */
+  const planetEntryEnabled = publicServiceMode && !isBoardGameMode && !aboutDemoConfig;
+  const [planetViewActive, setPlanetViewActive] = useState(false);
   const boardRecordFormat = isBoardNotebookMode(notebookMode) ? BOARD_RECORD_FORMATS[notebookMode] : null;
   const boardGameLabel = t(
     notebookMode === "chess" ? "board.game.chess" : notebookMode === "go" ? "board.game.go" : "board.game.shogi",
@@ -2312,7 +2319,7 @@ export default function App() {
         vrPanEnabled={vrModeEnabled}
         renderQuality={renderQuality}
         layoutMode={layoutMode}
-        pageActive={pageActive}
+        pageActive={pageActive && !planetViewActive}
         initialCameraPose={persistedUiState?.cameraPose ?? null}
         shareTargetRef={universeShareTargetRef}
         tutorialRootBirthUnlocked={onboarding.showRootPulse}
@@ -2320,6 +2327,13 @@ export default function App() {
         attachmentsEnabled={attachmentsEnabled}
         boardGameMode={isBoardGameMode}
         onRuntimeResume={handleCanvasRuntimeResume}
+      />
+      <PlanetGate
+        enabled={planetEntryEnabled}
+        highQuality={renderQuality === "high"}
+        theme={theme}
+        locale={locale}
+        onCardViewChange={setPlanetViewActive}
       />
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
       {onboarding.message ? (
@@ -2856,7 +2870,7 @@ export default function App() {
             </div>
           ) : null}
           <div className="mobile-panel-slot mobile-editor-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "editor"}>
-            <FocusPanel theme={theme} attachmentsEnabled={attachmentsEnabled} boardGameMode={isBoardGameMode} />
+            <FocusPanel theme={theme} attachmentsEnabled={attachmentsEnabled} boardGameMode={isBoardGameMode} planetEntryEnabled={planetEntryEnabled} />
           </div>
           {mobileOperationPanelTabAvailable ? (
             <div className="mobile-panel-slot mobile-operation-slot" role="tabpanel" aria-hidden={effectiveMobilePanelTab !== "operation"}>
