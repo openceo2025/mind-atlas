@@ -2,6 +2,8 @@
 // カードの意味上の位置は埋め込みベクトルから計算し、人がドラッグした軸の値は
 // card.overrides に「その軸での正規化済みの値（0..1）」として保存して優先する。
 
+import type { VocabularyId } from './lib/relationCatalog';
+
 export type CardKind =
   | 'note'
   | 'document'
@@ -37,18 +39,33 @@ export const CARD_KINDS: CardKind[] = [
   'topic',
 ];
 
-export type RelationType =
+/** アプリが自分で引く線。related は「まだ言葉を選んでいない線」 */
+export type SystemRelationType =
   | 'related'
   | 'source'
   | 'derived'
   | 'contains'
-  | 'supports'
-  | 'contradicts'
   | 'axis-of'
   // 以前の「比較」機能の名残。すでにある空間のために残してある
   | 'compared-with';
 
-export const USER_RELATION_TYPES: RelationType[] = ['related', 'supports', 'contradicts', 'derived', 'source'];
+/**
+ * 線の種類。アプリの線か、言葉の ID（lib/relationCatalog.ts の WORDS）か、
+ * ユーザーが作った言葉の ID（"u:" で始まる）。
+ */
+export type RelationType = SystemRelationType | (string & {});
+
+/** ユーザーが空間に足した、自分の言葉。土台がないので推論には使わない */
+export interface RelationWord {
+  id: string;
+  label: string;
+  /** 逆から読んだときの言葉（向きのある言葉だけ。無ければ label のまま） */
+  back?: string;
+  /** どういうつながりか（判断モデルへの説明にも使う） */
+  meaning: string;
+  directed: boolean;
+  color: string;
+}
 
 export interface Fact {
   label: string;
@@ -111,6 +128,8 @@ export interface Relation {
   label?: string;
   /** AI の提案（未承認） */
   suggested?: boolean;
+  /** 判断モデルが言葉を選んだときの確信度（0..1）。人が選び直したら消える */
+  judged?: number;
 }
 
 export type AxisKey = 'x' | 'y' | 'z';
@@ -137,6 +156,10 @@ export interface Space {
   relations: Relation[];
   axes: Axes;
   trail: TrailItem[];
+  /** 線に使う言葉のセット（無ければ「考える」） */
+  vocabulary?: VocabularyId;
+  /** この空間でユーザーが作った言葉 */
+  relationWords?: RelationWord[];
   createdAt: number;
   updatedAt: number;
   /** クラウド保存先（ログイン時） */

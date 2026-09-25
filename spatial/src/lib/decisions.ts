@@ -1,8 +1,9 @@
 // 判断モデルに投げる「この製品ならではの問い」をまとめた場所。
 // ここに置くのは、文章を書く必要がなく、選ぶ・是か非かで答えが出るものだけ。
-import { CARD_KINDS, USER_RELATION_TYPES, type Card, type CardKind, type RelationType } from '../types';
+import { CARD_KINDS, type Card, type CardKind, type RelationType } from '../types';
 import { askDecisions, choice, decideEnabled, noul, pickChoice, pickNoul } from './decide';
 import { t } from '../i18n';
+import { activeWords, type WordView } from './relStyle';
 import {
   addRelation,
   deleteCards,
@@ -12,30 +13,49 @@ import {
   isAxisCard,
   lookup,
   relayout,
+  setBusy,
   updateCard,
+  updateRelation,
 } from '../store';
 
 const NONE = '__none__';
 const brief = (card: Card, n: number) => ({ card: n, title: card.title, text: [card.subtitle, card.body].filter(Boolean).join(' ').slice(0, 220), tags: card.tags });
 
 // ── 1) 関係の判定 ─────────────────────────────────────────
-const RELATION_MEANING: Record<string, string> = {
-  related: 'the two cards are about the same thing, with no stronger link',
-  supports: 'the first card is evidence or an argument for the second',
-  contradicts: 'the two cards disagree or cannot both hold',
-  derived: 'the second card came out of the first',
-  source: 'the first card is where the second one came from',
-};
+// 選択肢は、いまの空間で使える言葉（セットの言葉＋自分の言葉）。向きのある言葉は
+// 「a → b」と「b → a」を別の選択肢にして、向きもいっしょに選ばせる。
+function wordOptions(words: WordView[], a: string, b: string) {
+  const fill = (text: string, x: string, y: string) => text.replaceAll('{a}', x).replaceAll('{b}', y);
+  const options: Record<string, string> = {};
+  for (const w of words) {
+    if (w.directed) {
+      options[`${w.id}>`] = fill(w.meaning, a, b);
+      options[`${w.id}<`] = fill(w.meaning, b, a);
+    } else {
+      options[w.id] = fill(w.meaning, a, b);
+    }
+  }
+  options[NONE] = 'none of these fits; they are not meaningfully connected in these ways';
+  return options;
+}
+
+/** 選択肢の答えを「言葉」と「向き」に戻す。reversed なら b → a の向き */
+function parsePick(value: string, words: WordView[]) {
+  const reversed = value.endsWith('<');
+  const id = value.replace(/[<>]$/, '');
+  return words.some((w) => w.id === id) ? { type: id as RelationType, reversed } : null;
+}
 
 export interface JudgedRelation {
   from: string;
   to: string;
   type: RelationType;
   label: string;
+  judged: number;
 }
 
 /**
- * 近いと見立てた組について、関係の種類を選ばせる。「どれでもない」を選べるので、
+ * 組ごとに、いまの言葉のどれで結ぶか（と向き）を選ばせる。「どれでもない」を選べるので、
  * 近いだけで意味のない組はここで落ちる。確信度はそのまま札に出す。
  */
 export async function judgeRelations(pairs: [string, string][], minConfidence = 0.45): Promise<JudgedRelation[]> {
@@ -43,23 +63,47 @@ export async function judgeRelations(pairs: [string, string][], minConfidence = 
   const ids = [...new Set(pairs.flat())];
   const cards = ids.map((id) => lookup(id)).filter(Boolean) as Card[];
   if (cards.length < 2) return [];
+  const words = activeWords();
   const index = new Map(cards.map((c, i) => [c.id, i + 1]));
-  const options: Record<string, string> = { ...RELATION_MEANING, [NONE]: 'there is no meaningful link between them' };
   const questions = Object.fromEntries(
-    pairs.map(([a, b], i) => [
-      `p${i}`,
-      choice(`How does card ${index.get(a)} relate to card ${index.get(b)}? Judge this pair only.`, options),
-    ]),
+    pairs.map(([a, b], i) => {
+      const x = `card ${index.get(a)}`;
+      const y = `card ${index.get(b)}`;
+      return [`p${i}`, choice(`Which statement describes how ${x} and ${y} are connected? Judge this pair only, from what the cards say.`, wordOptions(words, x, y))];
+    }),
   );
   const answers = await askDecisions('relations', { cards: cards.map((c, i) => brief(c, i + 1)) }, questions);
   const out: JudgedRelation[] = [];
   pairs.forEach(([a, b], i) => {
     const picked = pickChoice(answers[`p${i}`], minConfidence);
     if (!picked || picked.value === NONE) return;
-    if (!USER_RELATION_TYPES.includes(picked.value as RelationType)) return;
-    out.push({ from: a, to: b, type: picked.value as RelationType, label: t('relation.judged', { n: Math.round(picked.confidence * 100) }) });
+    const word = parsePick(picked.value, words);
+    if (!word) return;
+    const [from, to] = word.reversed ? [b, a] : [a, b];
+    out.push({ from, to, type: word.type, judged: picked.confidence, label: t('relation.judged', { n: Math.round(picked.confidence * 100) }) });
   });
   return out;
+}
+
+/**
+ * 人が引いたばかりの線に、言葉を選ばせる。待っている間に人が言葉を選んだら、そちらを優先する。
+ * 判定できなかったときは「言葉なし」のまま残す。
+ */
+export async function judgeDrawnRelation(relationId: string) {
+  const rel = get().relations.find((r) => r.id === relationId);
+  if (!rel || !decideEnabled()) return;
+  const key = `judge:${relationId}`;
+  setBusy(key, true);
+  try {
+    const [judged] = await judgeRelations([[rel.from, rel.to]], 0.35);
+    const now = get().relations.find((r) => r.id === relationId);
+    if (!judged || !now || now.type !== 'related') return;
+    updateRelation(relationId, { type: judged.type, from: judged.from, to: judged.to, judged: judged.judged }, { undoable: false });
+  } catch {
+    // 判断モデルが使えなければ、言葉なしの線のまま人が選ぶ
+  } finally {
+    setBusy(key, false);
+  }
 }
 
 // ── 2) チャットの道具選び ──────────────────────────────────
@@ -105,8 +149,12 @@ export async function routeSpaceRequest(message: string, cards: Card[]): Promise
   list.forEach((_, i) => {
     targetQuestions[`t${i}`] = noul(`Card ${i + 1} is one of the cards the user is pointing at in "${text}".`);
   });
+  const words = activeWords();
   if (intent.value === 'link') {
-    targetQuestions.kind = choice('What kind of link does the user want between them?', RELATION_MEANING);
+    targetQuestions.kind = choice(
+      'Which word does the user want for the link between them?',
+      { ...Object.fromEntries(words.map((w) => [w.id, `${w.label}: ${w.meaning.replaceAll('{a}', 'the first card').replaceAll('{b}', 'the second card')}`])), [NONE]: 'the user did not say' },
+    );
   }
   const picked = await askDecisions('chat-targets', state, targetQuestions);
   const targets = list
@@ -136,8 +184,8 @@ export async function routeSpaceRequest(message: string, cards: Card[]): Promise
   }
   if (intent.value === 'link') {
     if (targets.length < 2) return { tool };
-    const kind = pickChoice(picked.kind, 0.4)?.value as RelationType | undefined;
-    addRelation(targets[0].card.id, targets[1].card.id, kind && USER_RELATION_TYPES.includes(kind) ? kind : 'related');
+    const kind = pickChoice(picked.kind, 0.4)?.value;
+    addRelation(targets[0].card.id, targets[1].card.id, kind && words.some((w) => w.id === kind) ? kind : 'related');
     return { action: { tool, done: t('chat.done.linked', { a: titles[0], b: titles[1] }) } };
   }
   return { tool };

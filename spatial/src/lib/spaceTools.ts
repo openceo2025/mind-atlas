@@ -19,7 +19,9 @@ import {
 } from '../store';
 import { CONCEPT_KEYS } from '../data/concepts';
 import { AXIS_KEYS } from '../store/core';
-import { USER_RELATION_TYPES, type AxisKey, type Card, type CardKind, type RelationType } from '../types';
+import type { AxisKey, Card, CardKind } from '../types';
+import { WORDS } from './relationCatalog';
+import { activeWords, legacyWord } from './relStyle';
 import { webSearch } from './service';
 import { reportUsage } from './cost';
 
@@ -143,11 +145,13 @@ export const SPACE_TOOLS: SpaceTool[] = [
   },
   {
     name: 'link_cards',
-    description: 'Connect two cards with a relation.',
-    parameters: obj(
-      { from: { type: 'string' }, to: { type: 'string' }, type: { type: 'string', enum: USER_RELATION_TYPES } },
-      ['from', 'to'],
-    ),
+    description:
+      'Connect two cards with a word, read from "from" to "to". Words: ' +
+      Object.values(WORDS)
+        .map((w) => `${w.id} (${w.meaning.replaceAll('{a}', 'from').replaceAll('{b}', 'to')})`)
+        .join('; ') +
+      '. Prefer the words of the space listed in the context; the user may also have words of their own (ids starting with "u:").',
+    parameters: obj({ from: { type: 'string' }, to: { type: 'string' }, type: { type: 'string' } }, ['from', 'to']),
   },
   {
     name: 'unlink_cards',
@@ -329,7 +333,8 @@ export async function executeSpaceTool(name: string, args: Record<string, unknow
       gone.forEach((r) => removeRelation(r.id));
       return { ok: gone.length > 0, text: `Removed ${gone.length} relations between "${from.title}" and "${to.title}".` };
     }
-    const type = (USER_RELATION_TYPES as readonly string[]).includes(str(args, 'type')) ? (str(args, 'type') as RelationType) : 'related';
+    const asked = legacyWord(str(args, 'type'));
+    const type = WORDS[asked] || activeWords().some((w) => w.id === asked) ? asked : 'related';
     addRelationRaw(from.id, to.id, type);
     return { ok: true, text: `Connected "${from.title}" and "${to.title}" (${type}).` };
   }
@@ -422,7 +427,11 @@ export function relationsContext(cards: Card[]) {
   const lines = get()
     .relations.filter((r) => !r.suggested && ids.has(r.from) && ids.has(r.to))
     .map((r) => `- [${r.from}] --${r.type}--> [${r.to}]${r.label ? ` (${r.label})` : ''}`);
-  return lines.length ? `## Connections between these cards\n${lines.slice(0, 120).join('\n')}` : '';
+  if (!lines.length) return '';
+  const words = activeWords()
+    .map((w) => `- ${w.id} = "${w.label}": ${w.meaning.replaceAll('{a}', '[from]').replaceAll('{b}', '[to]')}`)
+    .join('\n');
+  return `## Connections between these cards\n${lines.slice(0, 120).join('\n')}\n\n## Words used on the connections in this space\n${words}`;
 }
 
 /** 画面で読めているカードを優先して、AI に渡すカードを選ぶ */

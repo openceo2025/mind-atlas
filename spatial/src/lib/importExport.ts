@@ -1,5 +1,5 @@
 import type { Card, Space } from '../types';
-import { relLabel } from './relStyle';
+import { relSentence } from './relStyle';
 
 export function download(name: string, text: string, type = 'application/json') {
   const blob = new Blob([text], { type });
@@ -33,7 +33,7 @@ export function exportMarkdown(space: Space) {
     const rels = space.relations.filter((r) => r.from === c.id && byId[r.to]);
     if (rels.length) {
       lines.push('');
-      for (const r of rels) lines.push(`- ${relLabel(r.type)} → ${byId[r.to].title}${r.label ? ` (${r.label})` : ''}`);
+      for (const r of rels) lines.push(`- ${relSentence(r, { from: c.title, to: byId[r.to].title })}${r.label ? ` (${r.label})` : ''}`);
     }
     lines.push('');
   }

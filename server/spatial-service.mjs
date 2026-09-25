@@ -234,6 +234,23 @@ export function createSpatialRoutes(deps) {
       relations: Array.isArray(raw.relations) ? raw.relations.filter((r) => r && cards[r.from] && cards[r.to]).slice(0, 20000) : [],
       axes: raw.axes && typeof raw.axes === "object" ? { x: String(raw.axes.x ?? ""), y: String(raw.axes.y ?? ""), z: String(raw.axes.z ?? "") } : { x: "", y: "", z: "" },
       trail: Array.isArray(raw.trail) ? raw.trail.slice(-16) : [],
+      // 線に使う言葉のセットと、ユーザーが作った言葉（文字だけ。表示は textContent で行う）
+      ...(["think", "cause", "logic"].includes(raw.vocabulary) ? { vocabulary: raw.vocabulary } : {}),
+      ...(Array.isArray(raw.relationWords)
+        ? {
+            relationWords: raw.relationWords
+              .filter((w) => w && typeof w.id === "string" && w.id.startsWith("u:") && typeof w.label === "string")
+              .slice(0, 12)
+              .map((w) => ({
+                id: w.id.slice(0, 40),
+                label: w.label.slice(0, 24),
+                ...(typeof w.back === "string" ? { back: w.back.slice(0, 24) } : {}),
+                meaning: typeof w.meaning === "string" ? w.meaning.slice(0, 200) : "",
+                directed: Boolean(w.directed),
+                color: typeof w.color === "string" && /^#[0-9a-f]{6}$/i.test(w.color) ? w.color : "#9fb4d8",
+              })),
+          }
+        : {}),
       createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),
       updatedAt: Date.now(),
     };

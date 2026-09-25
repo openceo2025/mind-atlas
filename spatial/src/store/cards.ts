@@ -1,4 +1,5 @@
-import type { AxisKey, Card, CardKind, RelationType } from '../types';
+import type { AxisKey, Card, CardKind, Relation, RelationType, RelationWord } from '../types';
+import { CUSTOM_PREFIX, type VocabularyId } from '../lib/relationCatalog';
 import { cardSize, clusterCards, depthScale, fallbackClusterLabel, freezeCardText, relax, similarityMatrix, thawCardText } from '../lib/semantic';
 import { engine } from '../lib/physics';
 import { t } from '../i18n';
@@ -637,9 +638,45 @@ export function addRelation(from: string, to: string, type: RelationType) {
   return id;
 }
 
-export function updateRelation(id: string, patch: { type?: RelationType; label?: string }) {
-  snapshot();
+export function updateRelation(id: string, patch: Partial<Pick<Relation, 'type' | 'label' | 'from' | 'to' | 'judged'>>, opts: { undoable?: boolean } = {}) {
+  if (opts.undoable !== false) snapshot();
   set((s) => ({ relations: s.relations.map((r) => (r.id === id ? { ...r, ...patch } : r)) }));
+  markDirty();
+}
+
+/** 人が言葉を選ぶ。判断モデルの確信度はもう当てはまらないので消す */
+export function chooseRelationWord(id: string, type: RelationType) {
+  updateRelation(id, { type, judged: undefined });
+}
+
+/** 向きを入れ替える（「A だから B」を「B だから A」に） */
+export function flipRelation(id: string) {
+  const r = get().relations.find((x) => x.id === id);
+  if (r) updateRelation(id, { from: r.to, to: r.from, judged: undefined });
+}
+
+// ── 言葉のセットと自分の言葉 ─────────────────────────────
+export function setVocabulary(vocabulary: VocabularyId) {
+  if (get().readOnly) return;
+  set({ vocabulary });
+  markDirty();
+}
+
+export function addRelationWord(word: Omit<RelationWord, 'id'>) {
+  if (get().readOnly || !word.label.trim()) return undefined;
+  const id = `${CUSTOM_PREFIX}${newId('w')}`;
+  set((s) => ({ relationWords: [...s.relationWords, { ...word, id, label: word.label.trim(), back: word.back?.trim() || undefined, meaning: word.meaning.trim() }].slice(-12) }));
+  markDirty();
+  return id;
+}
+
+/** 自分の言葉を消す。その言葉で引いた線は「言葉なし」に戻す */
+export function removeRelationWord(id: string) {
+  snapshot();
+  set((s) => ({
+    relationWords: s.relationWords.filter((w) => w.id !== id),
+    relations: s.relations.map((r) => (r.type === id ? { ...r, type: 'related', judged: undefined } : r)),
+  }));
   markDirty();
 }
 

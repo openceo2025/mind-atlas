@@ -26,13 +26,15 @@ import {
   useStore,
 } from '../../store';
 import { axisSlotKey, computeScores } from '../../lib/semantic';
-import { REL_STYLE, relLabel } from '../../lib/relStyle';
+import { relLabel, relReading, relStyle } from '../../lib/relStyle';
 import { shrinkImage, useDictation } from '../../lib/dictation';
 import { formatTime, t, type MessageKey } from '../../i18n';
 import { CARD_KINDS, type AxisKey, type Card, type FloatWin } from '../../types';
 import { Icon } from '../Icons';
 
 export function logText(code: string, params?: Record<string, string | number>) {
+  // 線の種類は ID で残っているので、いまの言葉に直して見せる
+  if (code === 'related' && typeof params?.type === 'string') params = { ...params, type: relLabel(params.type) };
   return t(`log.${code}` as MessageKey, params);
 }
 
@@ -293,11 +295,13 @@ export function DetailWindow({ win }: { win: FloatWin }) {
         {relations.map((r) => {
           const other = cards[r.from === id ? r.to : r.from];
           if (!other) return null;
+          // このカードから読む（「だから」の線は、結論のカードでは「なぜなら」）
+          const reading = relReading(r, id);
           return (
             <div key={r.id} className="rel-row">
-              <span className="rel-type" style={{ color: REL_STYLE[r.type].color }}>
-                {relLabel(r.type)}
-                {r.from === id ? ' →' : ' ←'}
+              <span className="rel-type" style={{ color: relStyle(r.type).color }}>
+                {reading.text}
+                {reading.word || r.from === id ? ' →' : ' ←'}
               </span>
               <button className="ellipsis" style={{ flex: 1, textAlign: 'start' }} onClick={() => revealCard(other.id)}>
                 {other.title}

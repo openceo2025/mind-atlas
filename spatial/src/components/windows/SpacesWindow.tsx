@@ -16,6 +16,8 @@ import {
   useStore,
 } from '../../store';
 import { AXIS_PRESETS } from '../../data/concepts';
+import { DEFAULT_VOCABULARY, VOCABULARY_IDS, type VocabularyId } from '../../lib/relationCatalog';
+import { vocabularyHint, vocabularyName } from '../../lib/relStyle';
 import { parseText } from '../../lib/importExport';
 import { formatDateTime, t } from '../../i18n';
 import type { FloatWin } from '../../types';
@@ -28,6 +30,7 @@ export function SpacesWindow({ win }: { win: FloatWin }) {
   const authenticated = useStore((s) => s.session.authenticated);
   const [newTitle, setNewTitle] = useState('');
   const [preset, setPreset] = useState(AXIS_PRESETS[0].id);
+  const [vocabulary, setVocabularyChoice] = useState<VocabularyId>(DEFAULT_VOCABULARY);
   const [editing, setEditing] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -143,10 +146,17 @@ export function SpacesWindow({ win }: { win: FloatWin }) {
                 </option>
               ))}
             </select>
+            <select className="input" value={vocabulary} onChange={(e) => setVocabularyChoice(e.target.value as VocabularyId)} aria-label={t('vocab.title')} title={vocabularyHint(vocabulary)}>
+              {VOCABULARY_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {t('spaces.wordsWith', { name: vocabularyName(id) })}
+                </option>
+              ))}
+            </select>
             <button
               className="btn small primary"
               onClick={() => {
-                void createBlankSpace(newTitle.trim() || t('space.untitled'), preset).then(() => closeWindow(win.id));
+                void createBlankSpace(newTitle.trim() || t('space.untitled'), preset, vocabulary).then(() => closeWindow(win.id));
               }}
             >
               <Icon name="plus" size={12} /> {t('spaces.create')}

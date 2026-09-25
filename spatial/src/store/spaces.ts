@@ -1,4 +1,5 @@
-import type { Axes, Card, Space, SpaceMeta } from '../types';
+import type { Axes, Card, Relation, RelationWord, Space, SpaceMeta } from '../types';
+import { CUSTOM_PREFIX, LEGACY_TYPES, isVocabulary, type VocabularyId } from '../lib/relationCatalog';
 import { idbAll, idbDelete, idbGet, idbSet } from '../lib/idb';
 import { engine } from '../lib/physics';
 import { depthScale } from '../lib/semantic';
@@ -33,6 +34,8 @@ export function serializeSpace(): Space {
     relations: s.relations.filter((r) => !r.suggested),
     axes: s.axes,
     trail: s.trail,
+    vocabulary: s.vocabulary,
+    relationWords: s.relationWords.length ? s.relationWords : undefined,
     createdAt: s.createdAt,
     updatedAt: now(),
     cloudId: s.cloudId,
@@ -80,7 +83,11 @@ export function sanitizeSpace(raw: unknown, fallbackId = newId('s')): Space {
     axes = { x: 'c-abstraction', y: 'c-sentiment', z: 'c-horizon' };
   }
   for (const k of ['x', 'y', 'z'] as const) cards[axes[k]] = { ...cards[axes[k]], place: 'canvas' };
-  const relations = (Array.isArray(v.relations) ? v.relations : []).filter((r) => r && cards[r.from] && cards[r.to]);
+  const relationWords = sanitizeWords(v.relationWords);
+  const relations = (Array.isArray(v.relations) ? v.relations : [])
+    .filter((r) => r && cards[r.from] && cards[r.to] && typeof r.type === 'string')
+    // 以前の「支持」「反証」は今の言葉へ。消えた自分の言葉の線は「言葉なし」に戻す
+    .map((r): Relation => ({ ...r, type: LEGACY_TYPES[r.type] ?? (r.type.startsWith(CUSTOM_PREFIX) && !relationWords.some((w) => w.id === r.type) ? 'related' : r.type) }));
   return {
     schema: 'mindatlas.space/1',
     id: typeof v.id === 'string' && v.id ? v.id : fallbackId,
@@ -90,11 +97,31 @@ export function sanitizeSpace(raw: unknown, fallbackId = newId('s')): Space {
     relations,
     axes,
     trail: Array.isArray(v.trail) && v.trail.length ? v.trail : [{ id: 't0', axes, at }],
+    vocabulary: isVocabulary(v.vocabulary) ? v.vocabulary : undefined,
+    relationWords: relationWords.length ? relationWords : undefined,
     createdAt: Number.isFinite(v.createdAt) ? (v.createdAt as number) : at,
     updatedAt: Number.isFinite(v.updatedAt) ? (v.updatedAt as number) : at,
     cloudId: typeof v.cloudId === 'string' ? v.cloudId : undefined,
     cloudUpdatedAt: typeof v.cloudUpdatedAt === 'number' ? v.cloudUpdatedAt : undefined,
   };
+}
+
+function sanitizeWords(raw: unknown): RelationWord[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RelationWord[] = [];
+  for (const w of raw as Partial<RelationWord>[]) {
+    if (!w || typeof w.id !== 'string' || !w.id.startsWith(CUSTOM_PREFIX) || typeof w.label !== 'string' || !w.label.trim()) continue;
+    if (out.some((x) => x.id === w.id)) continue;
+    out.push({
+      id: w.id,
+      label: w.label.trim().slice(0, 24),
+      back: typeof w.back === 'string' && w.back.trim() ? w.back.trim().slice(0, 24) : undefined,
+      meaning: typeof w.meaning === 'string' ? w.meaning.slice(0, 200) : '',
+      directed: Boolean(w.directed),
+      color: typeof w.color === 'string' && /^#[0-9a-f]{6}$/i.test(w.color) ? w.color : '#9fb4d8',
+    });
+  }
+  return out.slice(0, 12);
 }
 
 // ── 読み込み ────────────────────────────────────────────
@@ -113,6 +140,8 @@ export function openSpace(space: Space, opts: { readOnly?: boolean; shareToken?:
     relations: space.relations,
     axes: space.axes,
     trail: space.trail,
+    vocabulary: space.vocabulary,
+    relationWords: space.relationWords ?? [],
     selection: [],
     primary: null,
     selectedRelation: null,
@@ -167,7 +196,7 @@ export async function createDemoSpace() {
   await loadSpaceIndex();
 }
 
-export async function createBlankSpace(title = t('space.untitled'), presetId = 'p-think') {
+export async function createBlankSpace(title = t('space.untitled'), presetId = 'p-think', vocabulary?: VocabularyId) {
   await flushSave();
   const at = now();
   const cards: Record<string, Card> = {};
@@ -184,6 +213,7 @@ export async function createBlankSpace(title = t('space.untitled'), presetId = '
     relations: [],
     axes,
     trail: [{ id: 't0', axes, at }],
+    vocabulary,
     createdAt: at,
     updatedAt: at,
   };

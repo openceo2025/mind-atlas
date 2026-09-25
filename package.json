@@ -32,6 +32,7 @@
     "verify:spatial-i18n": "node scripts/verify-spatial-i18n.mjs",
     "verify:spatial-dist": "node scripts/verify-spatial-dist.mjs",
     "verify:spatial-ui": "node scripts/verify-spatial-ui.mjs",
+    "verify:spatial-relations": "node scripts/verify-spatial-relations.mjs",
     "build:hosted": "node scripts/build-hosted-public.mjs",
     "preview": "vite preview --configLoader runner",
     "site:shogi:dev": "npm --prefix sites/shogi-landing run dev",

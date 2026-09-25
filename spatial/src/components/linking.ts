@@ -1,9 +1,11 @@
 import { addRelation, get, openWindow, set } from '../store';
 import { clientToCanvas } from '../lib/drag';
+import { judgeDrawnRelation } from '../lib/decisions';
 
 /**
  * 選択中カードの「関係ハンドル」から別のカードへ線を引く。
- * 離した先がカードなら「関連」で結び、種類を選べる小窓をその場に開く。
+ * 離した先がカードなら「言葉なし」で結び、言葉を選べる小窓をその場に開く。
+ * 判断モデルが使えれば、裏で言葉と向きを選ばせる（人が先に選べばそちらが勝つ）。
  */
 export function startLinkDrag(e: React.PointerEvent, from: string) {
   const p = clientToCanvas(e.clientX, e.clientY);
@@ -26,7 +28,9 @@ export function startLinkDrag(e: React.PointerEvent, from: string) {
     }
     if (!target) return;
     const rel = addRelation(from, target, 'related');
-    if (rel) openWindow('relation', [target], { relationId: rel });
+    if (!rel) return;
+    openWindow('relation', [target], { relationId: rel });
+    void judgeDrawnRelation(rel);
   };
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);

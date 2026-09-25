@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { Axes, AxisKey, Camera, Card, Cluster, FloatWin, Relation, RelationType, SpaceMeta, TrailItem } from '../types';
+import type { Axes, AxisKey, Camera, Card, Cluster, FloatWin, Relation, RelationType, RelationWord, SpaceMeta, TrailItem } from '../types';
+import type { VocabularyId } from '../lib/relationCatalog';
 import type { SessionState } from '../lib/service';
 import { HOSTED } from '../lib/service';
 import { engine } from '../lib/physics';
@@ -40,6 +41,9 @@ export interface State {
   relations: Relation[];
   axes: Axes;
   trail: TrailItem[];
+  /** 線に使う言葉のセット（未設定なら「考える」） */
+  vocabulary?: VocabularyId;
+  relationWords: RelationWord[];
   spaces: SpaceMeta[];
   saveState: 'saved' | 'dirty' | 'saving' | 'error';
   cloudState: 'off' | 'synced' | 'syncing' | 'error';
@@ -109,6 +113,7 @@ export const useStore = create<State>(() => ({
   relations: [],
   axes: { x: '', y: '', z: '' },
   trail: [],
+  relationWords: [],
   spaces: [],
   saveState: 'saved',
   cloudState: 'off',
@@ -248,9 +253,9 @@ export function setBusy(key: string, on: boolean) {
   set((s) => ({ busy: { ...s.busy, [key]: on } }));
 }
 
-export function addRelationRaw(from: string, to: string, type: RelationType, label?: string, suggested?: boolean) {
+export function addRelationRaw(from: string, to: string, type: RelationType, label?: string, suggested?: boolean, judged?: number) {
   const id = newId('r');
-  set((s) => ({ relations: [...s.relations, { id, from, to, type, label, suggested }] }));
+  set((s) => ({ relations: [...s.relations, { id, from, to, type, label, suggested, judged }] }));
   markDirty();
   return id;
 }

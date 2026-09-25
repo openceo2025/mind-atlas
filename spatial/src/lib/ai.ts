@@ -6,6 +6,7 @@ import { aiTurn, saveAiPreference, ServiceError, type AiPreference, type AiTurnM
 import { confirmRequestCost, reportUsage } from './cost';
 import { SPACE_TOOLS, executeSpaceTool, relationsContext } from './spaceTools';
 import { routeSpaceRequest } from './decisions';
+import { activeWords, legacyWord } from './relStyle';
 
 const LANGUAGE: Record<Locale, string> = {
   en: 'English',
@@ -278,7 +279,7 @@ function cleanDrafts(items: unknown): Draft[] {
       title: String(d.title ?? '').slice(0, 120),
       body: String(d.body ?? '').slice(0, 1200),
       tags: Array.isArray(d.tags) ? d.tags.map((x) => String(x).replace(/^#/, '')).slice(0, 3) : [],
-      relation: (['derived', 'supports', 'contradicts', 'related'] as RelationType[]).includes(d.relation as RelationType) ? (d.relation as RelationType) : 'derived',
+      relation: ['supports', 'contradicts'].includes(String(d.relation)) ? legacyWord(String(d.relation)) : 'derived',
     }))
     .filter((d) => d.title);
 }
@@ -290,7 +291,7 @@ export async function expand(card: Card, neighbors: Card[]): Promise<Draft[]> {
       'If the card lists things (dates, days, steps, places, people, options, sections), make one card per item, in the same order, keeping each item\'s own label as the title. Do not merge or drop items, and do not add commentary items.',
       'Only when the card has no such list, branch the thinking instead: one idea (a concrete action), one issue (a risk or open question), one hypothesis (a testable claim).',
       'Use the neighboring cards only as background. Do not repeat what the cards already say. Produce at most 12 cards.',
-      'Return {"items": [{"kind": "note"|"idea"|"issue"|"hypothesis"|"quote", "title": short title, "body": 1-2 sentences, "tags": [1-2 short tags], "relation": "derived"|"supports"|"contradicts"}]}.',
+      'Return {"items": [{"kind": "note"|"idea"|"issue"|"hypothesis"|"quote", "title": short title, "body": 1-2 sentences, "tags": [1-2 short tags], "relation": "derived" (it grows out of the card) | "supports" (it is a reason for the card) | "contradicts" (it pulls against the card)}]}.',
     ].join('\n'),
     [cardsContext([card, ...neighbors.slice(0, 12)]), relationsContext([card, ...neighbors.slice(0, 12)])].filter(Boolean).join('\n\n'),
     { web: true },
@@ -320,19 +321,21 @@ export interface RelationSuggestion {
 }
 
 export async function classifyRelations(cards: Card[], pairs: [string, string][]): Promise<RelationSuggestion[]> {
+  const words = activeWords();
   const r = await runJson<{ relations: unknown }>(
     [
-      'For each candidate pair of cards, decide the relation type from the first card to the second.',
-      'Types: "supports" (evidence for), "contradicts" (conflicts with or is a risk to), "derived" (the second follows from the first), "related" (same theme), or "none".',
+      'For each candidate pair of cards, choose the word that connects them, reading from the first card (A) to the second (B).',
+      `Words: ${words.map((w) => `"${w.id}" (${w.meaning.replaceAll('{a}', 'A').replaceAll('{b}', 'B')})`).join('; ')}; or "none".`,
+      'A word with a direction may also be returned for the pair the other way round: then put the cards in "from" and "to" in that order.',
       `Candidate pairs: ${pairs.map(([a, b]) => `[${a}]→[${b}]`).join(', ')}.`,
-      'Return {"relations": [{"from": id, "to": id, "type": type, "reason": one short sentence}]} and omit pairs typed "none".',
+      'Return {"relations": [{"from": id, "to": id, "type": word, "reason": one short sentence}]} and omit pairs typed "none".',
     ].join('\n'),
     cardsContext(cards),
   );
-  const ok: RelationType[] = ['supports', 'contradicts', 'derived', 'related'];
+  const ok = new Set(words.map((w) => w.id));
   return (Array.isArray(r.relations) ? r.relations : [])
-    .map((x: Record<string, unknown>) => ({ from: String(x.from), to: String(x.to), type: x.type as RelationType, reason: String(x.reason ?? '') }))
-    .filter((x) => ok.includes(x.type) && pairs.some(([a, b]) => (a === x.from && b === x.to) || (a === x.to && b === x.from)));
+    .map((x: Record<string, unknown>) => ({ from: String(x.from), to: String(x.to), type: String(x.type) as RelationType, reason: String(x.reason ?? '') }))
+    .filter((x) => ok.has(x.type) && pairs.some(([a, b]) => (a === x.from && b === x.to) || (a === x.to && b === x.from)));
 }
 
 export async function nameClusters(groups: Card[][]): Promise<string[]> {

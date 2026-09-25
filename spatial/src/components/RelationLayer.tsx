@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { openWindow, set, useStore } from '../store';
 import { engine } from '../lib/physics';
 import { cardSize } from '../lib/semantic';
-import { REL_STYLE, relLabel } from '../lib/relStyle';
+import { relLabel, relReading, relStyle } from '../lib/relStyle';
 import type { Card, Relation } from '../types';
 
 /** 矩形の中心から方向 (dx,dy) に伸ばした線が辺と交わる点 */
@@ -25,6 +25,11 @@ export function RelationLayer() {
   const selection = useStore((s) => s.selection);
   const selectedRelation = useStore((s) => s.selectedRelation);
   const readOnly = useStore((s) => s.readOnly);
+  const primary = useStore((s) => s.primary);
+  const busy = useStore((s) => s.busy);
+  // 言葉のセットや自分の言葉が変わったら描き直す
+  useStore((s) => s.vocabulary);
+  useStore((s) => s.relationWords);
   const refs = useRef(new Map<string, Refs>());
 
   const visible = useMemo(
@@ -81,6 +86,10 @@ export function RelationLayer() {
   useEffect(() => engine.notify(), [visible]);
 
   const focus = new Set(selection);
+  // 見ているカード（選んでいるカード）。向きのある言葉はこのカードから読む
+  const viewer = selection.length === 1 ? primary ?? selection[0] : null;
+  const colors = [...new Set(visible.map((r) => relStyle(r.type).color))];
+  const markerId = (color: string) => `rel-arrow-${color.replace('#', '')}`;
   return (
     <svg className="world-svg" style={{ zIndex: 0 }}>
       <defs>
@@ -91,14 +100,23 @@ export function RelationLayer() {
             <feMergeNode in="SourceGraphic" />
           </feMerge>
         </filter>
+        {colors.map((color) => (
+          <marker key={color} id={markerId(color)} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill={color} />
+          </marker>
+        ))}
       </defs>
       {visible.map((r) => {
-        const st = REL_STYLE[r.type];
+        const st = relStyle(r.type);
+        const reading = relReading(r, viewer);
         const chosen = selectedRelation === r.id;
         const on = chosen || focus.has(r.from) || focus.has(r.to);
         const faded = focus.size > 0 && !on;
-        const showLabel = chosen || r.suggested || ((r.type === 'contradicts' || r.type === 'supports' || r.type === 'compared-with') && !faded);
-        const text = r.suggested ? `? ${relLabel(r.type)}` : relLabel(r.type);
+        const judging = Boolean(busy[`judge:${r.id}`]);
+        const showLabel = chosen || r.suggested || judging || (Boolean(reading.word) && !faded) || (r.type === 'compared-with' && !faded);
+        const text = judging ? '…' : r.suggested ? `? ${reading.text}` : reading.text;
+        // 矢印は読む向き：見ているカードが矢印の先なら、根元側に付け替える
+        const arrow = reading.directed ? `url(#${markerId(st.color)})` : undefined;
         const setRef = (k: keyof Refs) => (el: SVGElement | null) => {
           const cur = refs.current.get(r.id) ?? {};
           (cur as Record<string, unknown>)[k] = el;
@@ -113,6 +131,8 @@ export function RelationLayer() {
               strokeWidth={chosen ? 3.4 : on ? 2.6 : 1.6}
               strokeDasharray={r.suggested ? '5 6' : st.dash}
               strokeLinecap="round"
+              markerEnd={reading.reversed ? undefined : arrow}
+              markerStart={reading.reversed ? arrow : undefined}
               filter={on || r.suggested ? 'url(#rel-glow)' : undefined}
               className={r.suggested ? 'rel-suggested' : undefined}
             />
@@ -131,8 +151,9 @@ export function RelationLayer() {
             >
               <title>{r.label ? `${relLabel(r.type)} — ${r.label}` : relLabel(r.type)}</title>
             </path>
-            <circle ref={setRef('a')} r={on ? 4 : 3} fill={st.color} />
-            <circle ref={setRef('b')} r={on ? 4 : 3} fill={st.color} />
+            {/* 矢印の付いた端には点を打たない */}
+            <circle ref={setRef('a')} r={reading.directed && reading.reversed ? 0 : on ? 4 : 3} fill={st.color} />
+            <circle ref={setRef('b')} r={reading.directed && !reading.reversed ? 0 : on ? 4 : 3} fill={st.color} />
             {showLabel && (
               <g ref={setRef('label')} style={{ pointerEvents: 'none' }}>
                 <rect x={-text.length * 6 - 10} y={-10} width={text.length * 12 + 20} height={20} rx={10} fill="var(--panel-strong)" stroke={st.color} strokeWidth={1} />
