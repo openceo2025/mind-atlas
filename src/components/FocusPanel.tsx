@@ -26,6 +26,7 @@ import { findNode, useAtlasStore } from "../store/atlasStore";
 import type { AtlasTheme } from "../theme";
 import type { AtlasNode, AttachmentKind, NodeAttachment } from "../types";
 import { I18nText, useMindAtlasLocale } from "../i18n/I18nProvider";
+import { NodeLedgerSection } from "./galaxy/NodeLedgerSection";
 import { formatAppMessage } from "../i18n/format";
 import { requestPlanetEntry } from "../planet/planetHold";
 
@@ -387,6 +388,7 @@ export function FocusPanel({
           placeholder={isRoot ? formatAppMessage("ui.focusPanel.atlasMemo.b78ca47") : formatAppMessage("ui.focusPanel.memoDetailsOrContext.0f619ba")}
           aria-label={formatAppMessage("ui.focusPanel.nodeBody.eeba394")}
         />
+        {!boardGameMode ? <NodeLedgerSection nodeId={selectedNode.id} /> : null}
         <button
           className="return-button"
           type="button"

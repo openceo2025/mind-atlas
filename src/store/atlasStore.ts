@@ -3982,6 +3982,17 @@ function createInitialNotebook() {
   };
 }
 
+/** A fresh notebook root for a new galaxy space. */
+export function createBlankNotebookRoot(title: string): AtlasNode {
+  const now = new Date().toISOString();
+  return { ...createInitialNotebook(), title, subtitle: title, createdAt: now, updatedAt: now };
+}
+
+/** Resolves once every queued notebook save has reached IndexedDB. */
+export function waitForNotebookSavesToSettle() {
+  return waitForNotebookSaveIdle();
+}
+
 function persistNotebook(root: AtlasNode): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
   if (isAboutDemoMode()) {

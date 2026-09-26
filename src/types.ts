@@ -292,6 +292,32 @@ export interface HostedServiceSession {
   entitlement: HostedServiceEntitlement;
   chatOptions: ChatOptionsResult;
   aiPreference?: HostedAiPreference | null;
+  /** The decision model (Jev) behind `/api/ai/decide`. */
+  decide?: { configured: boolean; model: string; maxQuestions: number; maxChars: number };
+}
+
+/** A typed question for a decision model: choose, score on levels, or yes/no. */
+export interface DecisionQuestion {
+  type: "choice" | "score" | "noul";
+  instructions: string;
+  /** choice: {option: description}; score: levels from low to high. */
+  criteria?: Record<string, string | null> | string[];
+}
+
+export interface DecisionAnswer {
+  type?: "choice" | "score" | "noul";
+  choice?: string;
+  score?: number;
+  noul?: number;
+  probabilities?: Record<string, number>;
+  legend?: Record<string, string>;
+  confidence?: number;
+}
+
+export interface DecisionResult {
+  answers: Record<string, DecisionAnswer>;
+  model: string;
+  usage?: AiUsage;
 }
 
 /** The AI model a signed-in user last chose, stored on their account. */
@@ -1039,6 +1065,12 @@ export interface AtlasNode {
    * first time someone dives into the node; the card space stores the same id.
    */
   cardPlanetId?: string;
+  /**
+   * Root only: the galaxy space this tree belongs to. Stamped when a space is
+   * loaded, so startup can tell which space the current notebook is even if
+   * the browser stopped halfway through a space switch.
+   */
+  galaxySpaceId?: string;
   children: AtlasNode[];
 }
 

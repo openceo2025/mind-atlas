@@ -1,0 +1,25 @@
+.node-ledger-section {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.node-ledger-title {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.node-ledger-section input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid rgba(211, 230, 203, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.panel-text-section:has(> .node-ledger-section) {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}

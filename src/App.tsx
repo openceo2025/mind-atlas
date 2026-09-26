@@ -1,6 +1,6 @@
 import { FocusPanel } from "./components/FocusPanel";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellOff, CalendarDays, CloudDownload, CloudUpload, CreditCard, Crown, Download, FileText, GitBranch, Github, GraduationCap, History, Info, Languages, ListTree, LogIn, LogOut, Maximize2, MessageSquareText, Moon, MoreHorizontal, Network, Orbit, PenLine, Plus, Radio, Redo2, RefreshCw, RotateCcw, Search, Settings2, Share2, Smartphone, Sparkles, Sun, Trash2, Undo2, Upload, UserCircle, Volume2, X } from "lucide-react";
-import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadCloudNotebookPackage, importBridgeShogiSource, listCloudNotebookPackages, saveCloudNotebookPackage } from "./ai/bridgeClient";
 import { createAboutDemoNotebook, getAboutDemoAttachmentPreviewUrls, getAboutDemoLayoutMode, getAboutDemoNotification, getAboutDemoOverviewFocusRequest, getAboutDemoSelectedNodeId, readAboutDemoConfig } from "./aboutDemo";
 import { replaceStoredAttachmentBlobs } from "./attachmentStorage";
@@ -45,6 +45,9 @@ import {
 } from "./hosted/serviceClient";
 import { syncAccountAiPreference } from "./hosted/aiPreference";
 import { PlanetGate } from "./planet/PlanetGate";
+import { useGalaxyJudgeRunner } from "./galaxy/galaxyJudgeRunner";
+import { useGalaxyStore } from "./galaxy/galaxyStore";
+import { Telescope } from "lucide-react";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
 import type { AtlasNode, CloudNotebookEntry, CloudNotebookListResult, HostedServiceSession, NotebookMode, NotificationPulse, ViewportState, VoiceLogEntry, VoicePartnerSettings } from "./types";
@@ -66,6 +69,8 @@ import { createNewShogiRecord } from "./features/shogi/shogiRecord";
 import { createNewChessRecord } from "./features/chess/chessRecord";
 import { createNewGoRecord } from "./features/go/goRecord";
 import { extractSupportedShogiSourceUrl } from "./features/shogi/shogiSource";
+
+const GalaxyView = lazy(() => import("./components/galaxy/GalaxyView").then((module) => ({ default: module.GalaxyView })));
 
 const VOICE_OPTION_IDS = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const WORKSPACE_PANEL_EXIT_MS = 960;
@@ -250,6 +255,12 @@ export default function App() {
   const [hostedSession, setHostedSession] = useState<HostedServiceSession | null>(null);
   const [hostedSessionLoading, setHostedSessionLoading] = useState(false);
   const [hostedSessionError, setHostedSessionError] = useState("");
+  const [galaxyOpen, setGalaxyOpen] = useState(false);
+  const galaxyEnabled = !aboutDemoConfig;
+  useEffect(() => {
+    if (galaxyEnabled) void useGalaxyStore.getState().init();
+  }, [galaxyEnabled]);
+  useGalaxyJudgeRunner(hostedSession);
   const [mobileNotificationsEnabled, setMobileNotificationsEnabled] = useState(() => loadMobileNotificationPreference());
   const [mobileNotificationPermission, setMobileNotificationPermission] = useState<MobileNotificationPermission>(() => getMobileNotificationPermission());
   const [mobileNotificationMessage, setMobileNotificationMessage] = useState("");
@@ -2319,7 +2330,7 @@ export default function App() {
         vrPanEnabled={vrModeEnabled}
         renderQuality={renderQuality}
         layoutMode={layoutMode}
-        pageActive={pageActive && !planetViewActive}
+        pageActive={pageActive && !planetViewActive && !galaxyOpen}
         initialCameraPose={persistedUiState?.cameraPose ?? null}
         shareTargetRef={universeShareTargetRef}
         tutorialRootBirthUnlocked={onboarding.showRootPulse}
@@ -2335,6 +2346,11 @@ export default function App() {
         locale={locale}
         onCardViewChange={setPlanetViewActive}
       />
+      {galaxyOpen ? (
+        <Suspense fallback={null}>
+          <GalaxyView theme={theme} lowQuality={renderQuality !== "high"} hostedSession={hostedSession} onClose={() => setGalaxyOpen(false)} />
+        </Suspense>
+      ) : null}
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}
       {onboarding.message ? (
         <div className="onboarding-message" role="status" aria-live="polite">
@@ -2428,6 +2444,11 @@ export default function App() {
             }
           >
             <span aria-hidden="true">{t("shogi.analysis.action")}</span>
+          </button>
+        ) : null}
+        {galaxyEnabled && !isBoardGameMode ? (
+          <button className="icon-button galaxy-open-button" type="button" onClick={() => setGalaxyOpen(true)} aria-label={t("galaxy.open.detail")} title={t("galaxy.open.detail")}>
+            <Telescope size={18} />
           </button>
         ) : null}
         <button

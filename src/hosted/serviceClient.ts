@@ -5,6 +5,8 @@ import type {
   CloudNotebookLoadResult,
   CloudNotebookSaveResult,
   CloudNotebookShareResult,
+  DecisionQuestion,
+  DecisionResult,
   HostedAiPreference,
   HostedServiceSession,
   NativeBoardRecordPayload,
@@ -164,6 +166,16 @@ export async function requestHostedShogiAnalysis(sfen: string): Promise<ShogiAna
     signal: AbortSignal.timeout(HOSTED_SHOGI_ANALYSIS_TIMEOUT_MS),
   });
   return await readHostedJson<ShogiAnalysisResult>(response);
+}
+
+/** Hosted decision model (Jev). The server reserves and meters the user's own credit. */
+export async function requestHostedDecision(payload: { purpose: string; state: string; questions: Record<string, DecisionQuestion> }): Promise<DecisionResult> {
+  const response = await hostedFetch("/api/ai/decide", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(45_000),
+  });
+  return await readHostedJson<DecisionResult>(response);
 }
 
 export function notifyHostedServiceSessionChanged() {

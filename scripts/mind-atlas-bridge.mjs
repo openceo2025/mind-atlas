@@ -31,8 +31,10 @@ import { createHandoffCoordinator } from "./agent-runtime/handoff-coordinator.mj
 import { createAgentRunStore } from "./agent-runtime/run-journal.mjs";
 import { createAgentRuntimeManager } from "./agent-runtime/runtime-manager.mjs";
 import { fetchSupportedShogiSource } from "../server/shogi-source.mjs";
+import { createGalaxyJudge } from "./galaxy-judge.mjs";
 
 loadLocalEnvFiles();
+const galaxyJudge = createGalaxyJudge();
 
 const port = Number(process.env.MIND_ATLAS_BRIDGE_PORT ?? process.env.PORT ?? 8787);
 const host = process.env.MIND_ATLAS_BRIDGE_HOST ?? "127.0.0.1";
@@ -526,6 +528,21 @@ const server = createBridgeServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/provider-usage") {
       const result = await createProviderUsageResponse(url.searchParams.get("refresh") === "1");
       sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/galaxy/judge/status") {
+      sendJson(response, 200, await galaxyJudge.status(url.searchParams.get("llamaUrl") || "http://127.0.0.1:8089"));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/galaxy/judge") {
+      const payload = await readJson(request);
+      try {
+        sendJson(response, 200, await galaxyJudge.judge(payload));
+      } catch (error) {
+        throw new BridgeError(error?.status || 502, error instanceof Error ? error.message : String(error));
+      }
       return;
     }
 

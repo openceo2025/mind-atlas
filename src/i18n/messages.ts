@@ -1,5 +1,6 @@
 import { generatedUiJapaneseMessages, generatedUiSourceMessages } from "./generatedUiMessages.ts";
 import { generatedExpressionJapaneseMessages, generatedExpressionSourceMessages } from "./generatedExpressionMessages.ts";
+import { galaxyJapaneseMessages, galaxySourceMessages } from "./galaxyMessages.ts";
 
 const coreSourceMessages = {
   "common.auto": "Use device language",
@@ -847,11 +848,12 @@ const searchJapaneseMessages: Partial<Record<keyof typeof coreSourceMessages, st
   "search.field.metadata": "メタデータ",
 };
 
-export const sourceMessages = { ...coreSourceMessages, ...generatedUiSourceMessages, ...generatedExpressionSourceMessages } as const;
+export const sourceMessages = { ...coreSourceMessages, ...generatedUiSourceMessages, ...generatedExpressionSourceMessages, ...galaxySourceMessages } as const;
 export type MessageId = keyof typeof sourceMessages;
 export const japaneseMessages: Partial<Record<MessageId, string>> = {
   ...coreJapaneseMessages,
   ...searchJapaneseMessages,
   ...generatedUiJapaneseMessages,
   ...generatedExpressionJapaneseMessages,
+  ...galaxyJapaneseMessages,
 };

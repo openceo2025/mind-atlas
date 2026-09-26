@@ -51,6 +51,7 @@
     "verify:title-maintenance": "node --experimental-strip-types scripts/verify-title-maintenance.ts",
     "verify:templates": "node --experimental-strip-types scripts/verify-notebook-templates.ts",
     "verify:layout": "node --experimental-strip-types scripts/verify-layout.ts",
+    "verify:galaxy": "node --experimental-strip-types scripts/verify-galaxy.ts && node scripts/verify-galaxy-judge.mjs",
     "verify:node-search": "node --experimental-strip-types scripts/verify-node-search.ts",
     "verify:shogi": "node --experimental-strip-types scripts/verify-shogi-record.ts",
     "verify:shogi-analysis": "node --experimental-strip-types scripts/verify-shogi-analysis.ts",
