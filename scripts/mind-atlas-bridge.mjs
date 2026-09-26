@@ -1478,8 +1478,8 @@ async function callResponsesToolTurn(baseUrl, apiKey, model, context, messages, 
       contextText,
     }),
     input: buildTextPartnerInput(messages),
-    tools: normalizeRealtimeTools(tools),
-    tool_choice: "auto",
+    // An empty tool list (the final "answer now" turn) must be omitted: OpenAI rejects it.
+    ...(tools.length ? { tools: normalizeRealtimeTools(tools), tool_choice: "auto" } : {}),
     max_output_tokens: openAiMaxOutputTokens,
   };
   applyOpenAiReasoning(body, reasoningEffort);
@@ -1517,8 +1517,8 @@ async function callChatToolTurn(baseUrl, apiKey, model, provider, context, messa
       },
       ...buildChatPartnerMessages(local ? compactPartnerMessagesForLocal(messages) : messages),
     ],
-    tools: normalizeChatTools(tools, { compact: local }),
-    tool_choice: "auto",
+    // An empty tool list (the final "answer now" turn) must be omitted: OpenAI rejects it.
+    ...(tools.length ? { tools: normalizeChatTools(tools, { compact: local }), tool_choice: "auto" } : {}),
     max_tokens: provider === "local" ? localMaxOutputTokens : openAiMaxOutputTokens,
   };
   if (model) body.model = model;

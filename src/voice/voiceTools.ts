@@ -5,6 +5,7 @@ import {
   useAtlasStore,
 } from "../store/atlasStore";
 import { rankAtlasNodes, searchAtlasNodes } from "../search/nodeSearch";
+import { buildAtlasOutline, readAtlasNodes } from "./atlasReading";
 import type { AiContextScope, AiExecutionMode, AtlasNode, RealtimeToolDefinition, WebSearchResult, WorkStatus } from "../types";
 
 export interface VoiceToolCall {
@@ -87,8 +88,54 @@ const toolSpecs: VoiceToolSpec[] = [
   },
   {
     type: "function",
+    name: "get_atlas_outline",
+    description: "Read the whole notebook tree (or the subtree under node_id) in one call: every node's title and id, indented by level, as deep as fits. Use this first for anything about the whole space or a whole branch — overviews, sorting or re-filing an inbox, finding where things belong, comparing categories — instead of many searches. Then call read_nodes for the few nodes whose full text you need.",
+    parameters: objectSchema({
+      node_id: { type: "string", description: "Start from this node id instead of the root. Omit it for the whole notebook; \"active\" starts from the active node." },
+      max_depth: { type: "number", description: "Stop after this many levels below the start. Default: as deep as fits." },
+      with_snippets: { type: "boolean", description: "Add a one-line excerpt of each node's text. Default false." },
+    }),
+    handler: (args) => {
+      const state = useAtlasStore.getState();
+      // Models reach for names rather than ids here; accept the obvious ones.
+      const requested = stringArg(args, "node_id");
+      const alias = requested.toLowerCase();
+      const nodeId = ["root", "whole", "all", "notebook", "space"].includes(alias)
+        ? ""
+        : ["active", "current", "selected", "focused"].includes(alias)
+          ? state.selectedNodeId
+          : requested;
+      const outline = buildAtlasOutline(state.atlasRoot, {
+        nodeId: nodeId || undefined,
+        maxDepth: args.max_depth === undefined ? undefined : clampNumber(numberArg(args, "max_depth", 12), 0, 64),
+        withSnippets: booleanArg(args, "with_snippets"),
+      });
+      if (!outline) return fail(`No node with id ${nodeId}. Omit node_id to read the whole notebook.`);
+      const cut = outline.truncated
+        ? ` Showing ${outline.shownNodes} of ${outline.totalNodes} nodes (${outline.shownDepth} of ${outline.maxDepth} levels); call get_atlas_outline with node_id on a branch marked "+N below" to see deeper.`
+        : ` All ${outline.totalNodes} nodes shown.`;
+      return ok(`Outline of ${outline.rootId === state.atlasRoot.id ? "the whole notebook" : "the branch"}.${cut}\n${outline.outline}`);
+    },
+  },
+  {
+    type: "function",
+    name: "read_nodes",
+    description: "Read the full text of specific nodes by id (up to 20): title, path from the root, body, and direct children. Use after get_atlas_outline or a search, when titles are not enough.",
+    parameters: objectSchema({
+      ids: { type: "array", items: { type: "string" }, maxItems: 20, description: "Node ids to read." },
+    }, ["ids"]),
+    handler: (args) => {
+      const ids = stringArrayArg(args, "ids") ?? [];
+      if (!ids.length) return fail("ids is required.");
+      const result = readAtlasNodes(useAtlasStore.getState().atlasRoot, ids);
+      const missing = result.missing.length ? ` Not found: ${result.missing.join(", ")}.` : "";
+      return ok(`Read ${result.nodes.length} node(s).${missing}`, { nodes: result.nodes });
+    },
+  },
+  {
+    type: "function",
     name: "search_nodes",
-    description: "Search all notebook nodes with exact text or a safe regular expression. Use this when wording, names, ids, tags, or patterns must match precisely.",
+    description: "Search all notebook nodes with exact text or a safe regular expression. Use this when wording, names, ids, tags, or patterns must match precisely. For questions about the whole space or a whole branch, use get_atlas_outline instead of repeated searches.",
     parameters: objectSchema({
       query: { type: "string", description: "Search text." },
       regex: { type: "boolean", description: "Treat query as a regular expression. Default false." },

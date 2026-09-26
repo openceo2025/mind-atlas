@@ -5,7 +5,9 @@ import { useAtlasStore } from "../store/atlasStore";
 import type { ChatSettings, TextPartnerMessage } from "../types";
 import { executeVoiceTool, getVoiceToolDefinitions } from "../voice/voiceTools";
 
-const MAX_TEXT_PARTNER_TOOL_TURNS = 6;
+const MAX_TEXT_PARTNER_TOOL_TURNS = 10;
+/** What the model looked up, handed back as plain text when the tool turns run out. */
+const FINAL_FINDINGS_CHAR_BUDGET = 40_000;
 
 export async function runTextPartnerTurn(prompt: string, settings: ChatSettings) {
   const state = useAtlasStore.getState();
@@ -37,11 +39,36 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings)
     },
   });
 
-  const messages: TextPartnerMessage[] = [
-    ...plan.conversation.map((turn) => ({ role: turn.role, content: turn.content }) satisfies TextPartnerMessage),
-    { role: "user", content: prompt },
-  ];
+  const history: TextPartnerMessage[] = plan.conversation.map((turn) => ({ role: turn.role, content: turn.content }) satisfies TextPartnerMessage);
+  const messages: TextPartnerMessage[] = [...history, { role: "user", content: prompt }];
   const tools = getVoiceToolDefinitions();
+  const findings: string[] = [];
+
+  const finish = (result: Awaited<ReturnType<typeof requestTextPartnerTurn>>) => {
+    const responseText = result.text.trim() || "(No text response.)";
+    const archived = useAtlasStore.getState().archivePartnerTurn({
+      parentNodeId: state.selectedNodeId,
+      prompt,
+      response: responseText,
+      mode: partnerArchiveMode(settings.service),
+      provider: result.provider,
+      model: result.model,
+      usage: result.usage,
+      status: "done",
+    });
+    useAtlasStore.getState().appendVoiceLogEntry({
+      role: "assistant",
+      title: `AI Partner (${label})`,
+      text: archived ? "Response archived as notebook nodes." : responseText,
+      sessionId,
+      metadata: {
+        provider: result.provider,
+        model: result.model,
+        usage: result.usage,
+        archived,
+      },
+    });
+  };
 
   try {
     for (let turn = 0; turn < MAX_TEXT_PARTNER_TOOL_TURNS; turn += 1) {
@@ -63,55 +90,41 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings)
       }
 
       if (!result.toolCalls.length) {
-        const responseText = result.text.trim() || "(No text response.)";
-        const archived = useAtlasStore.getState().archivePartnerTurn({
-          parentNodeId: state.selectedNodeId,
-          prompt,
-          response: responseText,
-          mode: partnerArchiveMode(settings.service),
-          provider: result.provider,
-          model: result.model,
-          usage: result.usage,
-          status: "done",
-        });
-        useAtlasStore.getState().appendVoiceLogEntry({
-          role: "assistant",
-          title: `AI Partner (${label})`,
-          text: archived ? "Response archived as notebook nodes." : responseText,
-          sessionId,
-          metadata: {
-            provider: result.provider,
-            model: result.model,
-            usage: result.usage,
-            archived,
-          },
-        });
+        finish(result);
         return;
       }
 
       for (const toolCall of result.toolCalls) {
         const toolResult = await executeVoiceTool(toolCall);
-        messages.push({
-          role: "tool",
-          name: toolCall.name,
-          toolCallId: toolCall.callId,
-          content: [
-            `Tool result for ${toolCall.name}:`,
-            toolResult.text,
-            toolResult.data === undefined ? "" : JSON.stringify(toolResult.data, null, 2),
-          ].filter(Boolean).join("\n"),
-        });
+        const content = [
+          `Tool result for ${toolCall.name}:`,
+          toolResult.text,
+          toolResult.data === undefined ? "" : JSON.stringify(toolResult.data, null, 2),
+        ].filter(Boolean).join("\n");
+        messages.push({ role: "tool", name: toolCall.name, toolCallId: toolCall.callId, content });
+        const args = typeof toolCall.arguments === "string" ? toolCall.arguments : JSON.stringify(toolCall.arguments);
+        findings.push(`${toolCall.name}(${args})\n${content}`);
       }
     }
 
-    const message = "Stopped after too many tool turns. Ask again with a narrower request.";
-    useAtlasStore.getState().appendVoiceLogEntry({
-      role: "error",
-      title: `AI Partner error (${label})`,
-      text: message,
-      sessionId,
-      status: "error",
+    // Out of tool turns. A broad but ordinary request ("based on the whole
+    // space…") must still get an answer, so ask once more without tools and
+    // hand over everything already looked up. The lookups travel as text, not
+    // as tool messages: some providers reject tool results in a request that
+    // declares no tools.
+    const latest = useAtlasStore.getState();
+    const final = await requestTextPartnerTurn({
+      provider: settings.service,
+      context,
+      contextText: plan.contextText,
+      messages: [...history, { role: "user", content: finalAnswerPrompt(prompt, findings) }],
+      tools: [],
+      model: settings.model,
+      reasoningEffort: settings.reasoningEffort,
+      summary: latest.voiceSessionSummary,
+      voiceLogContext,
     });
+    finish(final);
   } catch (error) {
     const message = error instanceof Error ? error.message : "AI Partner request failed.";
     useAtlasStore.getState().appendVoiceLogEntry({
@@ -122,6 +135,28 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings)
       status: "error",
     });
   }
+}
+
+/** The request again, with the lookups so far, and no more tools. */
+function finalAnswerPrompt(prompt: string, findings: string[]) {
+  // Keep the latest lookups when they do not all fit: they build on the earlier ones.
+  const kept: string[] = [];
+  let used = 0;
+  for (const finding of [...findings].reverse()) {
+    const piece = finding.length > FINAL_FINDINGS_CHAR_BUDGET / 2 ? `${finding.slice(0, FINAL_FINDINGS_CHAR_BUDGET / 2)}…` : finding;
+    if (used + piece.length > FINAL_FINDINGS_CHAR_BUDGET) break;
+    kept.unshift(piece);
+    used += piece.length;
+  }
+  return [
+    prompt,
+    "",
+    "---",
+    "You already looked these up in the notebook with tools:",
+    kept.join("\n\n"),
+    "",
+    "No more lookups are available. Answer the request above now, from the notebook context and these results. If something could not be checked, say so in one short line instead of stopping.",
+  ].join("\n");
 }
 
 function chatSettingsLabel(settings: ChatSettings) {
