@@ -8,6 +8,8 @@ import { executeVoiceTool, getVoiceToolDefinitions } from "../voice/voiceTools";
 const MAX_TEXT_PARTNER_TOOL_TURNS = 10;
 /** What the model looked up, handed back as plain text when the tool turns run out. */
 const FINAL_FINDINGS_CHAR_BUDGET = 40_000;
+const EMPTY_REPLY_NUDGE =
+  "You stopped without replying. If the request asks you to change the notebook (move, sort, file, add, update), do it now with the tools — use move_nodes to move existing nodes — then say briefly what you changed. Otherwise answer the request.";
 
 export async function runTextPartnerTurn(prompt: string, settings: ChatSettings) {
   const state = useAtlasStore.getState();
@@ -45,7 +47,18 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings)
   const findings: string[] = [];
 
   const finish = (result: Awaited<ReturnType<typeof requestTextPartnerTurn>>) => {
-    const responseText = result.text.trim() || "(No text response.)";
+    const responseText = result.text.trim();
+    if (!responseText) {
+      // An empty reply is not an answer: never archive "(No text response.)" as a node.
+      useAtlasStore.getState().appendVoiceLogEntry({
+        role: "error",
+        title: `AI Partner error (${label})`,
+        text: "The AI returned an empty reply. Any changes it made are listed above; try asking again or switch the model.",
+        sessionId,
+        status: "error",
+      });
+      return;
+    }
     const archived = useAtlasStore.getState().archivePartnerTurn({
       parentNodeId: state.selectedNodeId,
       prompt,
@@ -71,6 +84,7 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings)
   };
 
   try {
+    let nudged = false;
     for (let turn = 0; turn < MAX_TEXT_PARTNER_TOOL_TURNS; turn += 1) {
       const latest = useAtlasStore.getState();
       const result = await requestTextPartnerTurn({
@@ -90,8 +104,17 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings)
       }
 
       if (!result.toolCalls.length) {
-        finish(result);
-        return;
+        if (result.text.trim()) {
+          finish(result);
+          return;
+        }
+        // Stopped without a word, typically right after reading what it needed.
+        // Push once to finish the job; the placeholder keeps roles alternating.
+        if (nudged) break;
+        nudged = true;
+        messages.push({ role: "assistant", content: "(stopped without replying)" });
+        messages.push({ role: "user", content: EMPTY_REPLY_NUDGE });
+        continue;
       }
 
       for (const toolCall of result.toolCalls) {
@@ -107,9 +130,9 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings)
       }
     }
 
-    // Out of tool turns. A broad but ordinary request ("based on the whole
-    // space…") must still get an answer, so ask once more without tools and
-    // hand over everything already looked up. The lookups travel as text, not
+    // Out of tool turns (or silent twice). A broad but ordinary request must
+    // still get an answer, so ask once more without tools and hand over
+    // everything already looked up or changed. The lookups travel as text, not
     // as tool messages: some providers reject tool results in a request that
     // declares no tools.
     const latest = useAtlasStore.getState();
@@ -155,7 +178,7 @@ function finalAnswerPrompt(prompt: string, findings: string[]) {
     "You already looked these up in the notebook with tools:",
     kept.join("\n\n"),
     "",
-    "No more lookups are available. Answer the request above now, from the notebook context and these results. If something could not be checked, say so in one short line instead of stopping.",
+    "No more tool calls are available. Answer the request above now, from the notebook context and these results. If you already changed the notebook, say briefly what you changed; if something could not be done or checked, say so in one short line instead of stopping.",
   ].join("\n");
 }
 

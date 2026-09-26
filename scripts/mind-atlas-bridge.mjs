@@ -5045,8 +5045,9 @@ function extractAnthropicText(data) {
   if (!Array.isArray(data?.content)) return "";
   const values = [];
   for (const item of data.content) {
+    // Each text block once: a "text" block also has .text, so the second rule must skip it.
     if (item?.type === "text" && typeof item.text === "string") values.push(item.text);
-    if (typeof item?.text === "string" && item?.type !== "tool_use") values.push(item.text);
+    else if (typeof item?.text === "string" && item?.type !== "tool_use") values.push(item.text);
   }
   return values.join("\n");
 }

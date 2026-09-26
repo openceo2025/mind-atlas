@@ -550,6 +550,50 @@ const toolSpecs: VoiceToolSpec[] = [
   },
   {
     type: "function",
+    name: "move_nodes",
+    description: "Move existing nodes, with everything under them, to a different parent node. Use this whenever the user asks to move, sort, file, re-file, distribute, organize or tidy existing nodes (for example emptying an inbox into the right categories) — do not re-create nodes with add_child_nodes and delete the originals. Take ids from get_atlas_outline or a search; you may create missing destination nodes with add_child_nodes first. All moves in one call are undone together.",
+    parameters: objectSchema({
+      moves: {
+        type: "array",
+        minItems: 1,
+        maxItems: 100,
+        items: {
+          type: "object",
+          properties: {
+            node_id: { type: "string", description: "The node to move." },
+            parent_id: { type: "string", description: "Its new parent." },
+            index: { type: "number", description: "Position among the new parent's children (0 = first). Default: last." },
+          },
+          required: ["node_id", "parent_id"],
+          additionalProperties: false,
+        },
+      },
+    }, ["moves"]),
+    handler: (args) => {
+      const raw = Array.isArray(args.moves) ? args.moves : [];
+      const moves = raw
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+        .map((item) => ({
+          nodeId: stringArg(item, "node_id"),
+          parentId: stringArg(item, "parent_id"),
+          index: typeof item.index === "number" && Number.isFinite(item.index) ? item.index : undefined,
+        }))
+        .filter((move) => move.nodeId && move.parentId)
+        .slice(0, 100);
+      if (!moves.length) return fail("moves must list node_id and parent_id.");
+      const result = useAtlasStore.getState().moveNodesToParents(moves);
+      const root = useAtlasStore.getState().atlasRoot;
+      const title = (id: string) => findNode(root, id)?.title || id;
+      const done = moves
+        .filter((move) => result.moved.includes(move.nodeId))
+        .map((move) => ({ id: move.nodeId, title: title(move.nodeId), newParent: title(move.parentId) }));
+      if (!done.length) return fail(`No node was moved. ${result.failed.map((item) => `${item.nodeId}: ${item.reason}`).join(" ")}`);
+      const failedText = result.failed.length ? ` ${result.failed.length} could not be moved.` : "";
+      return ok(`Moved ${done.length} node(s).${failedText} The user can undo this in one step.`, { moved: done, failed: result.failed });
+    },
+  },
+  {
+    type: "function",
     name: "run_codex_full_access",
     description: "Explain that Codex full-access retries cannot be started from hosted AI tools.",
     parameters: objectSchema({

@@ -261,6 +261,12 @@ type NodeReminderUpdateResult = {
   failed: Array<{ nodeId: string; reason: string }>;
 };
 
+export type NodeParentMove = { nodeId: string; parentId: string; index?: number };
+export type NodeParentMoveResult = {
+  moved: string[];
+  failed: Array<{ nodeId: string; reason: string }>;
+};
+
 const initialAtlasRoot = atlasRoot;
 const initialVoiceLogEntries = loadStoredVoiceLog();
 const initialVoiceLogLastSeenAt = loadStoredVoiceLogLastSeenAt(initialVoiceLogEntries);
@@ -395,6 +401,8 @@ interface AtlasStore {
   addSiblingNode: (id: string) => string | undefined;
   promoteNodeOneLevel: (id: string) => void;
   deleteNode: (id: string) => void;
+  /** Re-file existing nodes (with their subtrees) under new parents, as one undoable step. */
+  moveNodesToParents: (moves: NodeParentMove[]) => NodeParentMoveResult;
   moveNode: (id: string, worldPosition: [number, number, number]) => void;
   addAttachment: (nodeId: string, attachment: NodeAttachment, previewUrl?: string) => void;
   removeAttachment: (nodeId: string, attachmentId: string) => void;
@@ -1845,6 +1853,64 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         nodeId: nextSelectedNode.id,
       },
     }));
+  },
+
+  moveNodesToParents: (moves) => {
+    const state = get();
+    const failed: NodeParentMoveResult["failed"] = [];
+    const moved: string[] = [];
+    if (isBoardGameNotebookMode(state.atlasRoot.notebookMode)) {
+      return { moved, failed: moves.map((move) => ({ nodeId: move.nodeId, reason: "Board records cannot be rearranged." })) };
+    }
+    // Pin everyone else's layout first, as deleteNode does, so only the moved nodes travel.
+    let root = stabilizePhyllotaxisPositions(state.atlasRoot);
+    const updatedAt = new Date().toISOString();
+    for (const move of moves) {
+      if (move.nodeId === root.id) {
+        failed.push({ nodeId: move.nodeId, reason: "The root cannot be moved." });
+        continue;
+      }
+      const path = findNodePath(root, move.nodeId);
+      const node = path?.at(-1);
+      if (!path || !node) {
+        failed.push({ nodeId: move.nodeId, reason: "No node with this id." });
+        continue;
+      }
+      const parent = findNode(root, move.parentId);
+      if (!parent) {
+        failed.push({ nodeId: move.nodeId, reason: `No parent node with id ${move.parentId}.` });
+        continue;
+      }
+      if (findNode(node, move.parentId)) {
+        failed.push({ nodeId: move.nodeId, reason: "A node cannot be moved inside itself." });
+        continue;
+      }
+      const currentParentId = path.at(-2)?.id;
+      if (currentParentId === move.parentId && move.index === undefined) {
+        moved.push(move.nodeId);
+        continue;
+      }
+      // Stored positions are directions for the old depth; let the layout place the moved branch again.
+      const detached = clearStoredPositions(node);
+      root = removeNodeById(root, move.nodeId, updatedAt);
+      root = updateNodeById(root, move.parentId, (target) => {
+        const children = [...target.children];
+        const index = move.index === undefined ? children.length : Math.max(0, Math.min(children.length, Math.trunc(move.index)));
+        children.splice(index, 0, { ...detached, updatedAt });
+        return { ...target, children, updatedAt };
+      });
+      moved.push(move.nodeId);
+    }
+    if (!moved.length || root === state.atlasRoot) return { moved, failed };
+    const stableRoot = stabilizePhyllotaxisPositions(root);
+    persistNotebook(stableRoot);
+    set((current) => ({
+      ...pushHistory(current),
+      atlasRoot: stableRoot,
+      historyFuture: [],
+      unreadNotifications: restoreUnreadNotifications(stableRoot, current.unreadNotifications),
+    }));
+    return { moved, failed };
   },
 
   moveNode: (id, worldPosition) => {
@@ -4320,6 +4386,11 @@ function updateNodeTree(root: AtlasNode, updater: (node: AtlasNode) => AtlasNode
   const updated = updater(root);
   const children = updated.children.map((child) => updateNodeTree(child, updater));
   return children === updated.children ? updated : { ...updated, children };
+}
+
+function clearStoredPositions(node: AtlasNode): AtlasNode {
+  const { position: _position, ...rest } = node;
+  return { ...rest, children: node.children.map(clearStoredPositions) };
 }
 
 function removeNodeById(root: AtlasNode, id: string, updatedAt = new Date().toISOString()): AtlasNode {
