@@ -85,6 +85,10 @@ const realtimeVoice = getEnv("MIND_ATLAS_REALTIME_VOICE", "marin");
 const realtimeTranscriptionModel = getEnv("MIND_ATLAS_REALTIME_TRANSCRIPTION_MODEL", "gpt-4o-transcribe");
 const transcriptionModel = getEnv("MIND_ATLAS_TRANSCRIPTION_MODEL", "gpt-4o-transcribe");
 const maxOutputTokens = readIntEnv("MIND_ATLAS_SERVICE_MAX_OUTPUT_TOKENS", 4096);
+// Models that think before they answer spend output tokens on the thinking.
+// DeepSeek V4 Pro used ~4k tokens just deciding how to file 11 notes, hit the
+// 4096 cap, and came back with neither text nor a tool call.
+const reasoningMaxOutputTokens = readIntEnv("MIND_ATLAS_SERVICE_REASONING_MAX_OUTPUT_TOKENS", 16384);
 const realtimeMaxOutputTokens = readIntEnv("MIND_ATLAS_REALTIME_MAX_OUTPUT_TOKENS", 512);
 const realtimeMaxSessionSeconds = readIntEnv("MIND_ATLAS_REALTIME_MAX_SESSION_SECONDS", 300);
 // Voice is billed for the time it actually ran. The session reservation is only a hold;
@@ -1116,7 +1120,7 @@ async function handleTextPartnerTurn(request, response) {
   if (!provider) throw new ServiceError(400, "Unknown chat provider");
   if (!provider.configured) throw new ServiceError(503, `${provider.label} is not configured`);
   const model = await resolveProviderModel(provider, payload.model);
-  const outputTokenLimit = maxOutputTokensForModel(provider.id, model);
+  const outputTokenLimit = fitOutputTokensToRequestCap(provider.id, model, payload, maxOutputTokensForModel(provider.id, model));
   const requestEstimate = enforceChatRequestLimits({ credit, provider, model, payload, outputTokenLimit });
   const startedAt = Date.now();
   const requestId = `req_${crypto.randomUUID()}`;
@@ -1167,6 +1171,7 @@ async function handleTextPartnerTurn(request, response) {
     toolCalls: result.toolCalls,
     provider: provider.id,
     model: result.model,
+    ...(result.finishReason ? { finishReason: result.finishReason } : {}),
     usage: {
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
@@ -1753,6 +1758,7 @@ async function callOpenAiCompatibleToolTurn(provider, payload) {
     text: extractAssistantText(raw),
     toolCalls: extractChatToolCalls(raw),
     model: stringValue(raw.model) || model,
+    finishReason: stringValue(raw?.choices?.[0]?.finish_reason),
     raw,
   };
 }
@@ -1782,6 +1788,8 @@ async function callAnthropicToolTurn(provider, payload) {
     text: extractAnthropicText(raw),
     toolCalls: extractAnthropicToolCalls(raw),
     model: stringValue(raw.model) || model,
+    // Anthropic says "max_tokens"; report it the way chat completions does.
+    finishReason: stringValue(raw?.stop_reason) === "max_tokens" ? "length" : stringValue(raw?.stop_reason),
     raw,
   };
 }
@@ -2592,15 +2600,39 @@ function enforceChatRequestLimits({ credit, provider, model, payload, outputToke
 
 function readPayloadMaxOutputTokens(payload) {
   const requested = Number(payload?.maxOutputTokens);
-  if (Number.isFinite(requested) && requested > 0) return Math.min(maxOutputTokens, Math.trunc(requested));
+  if (Number.isFinite(requested) && requested > 0) return Math.min(Math.max(maxOutputTokens, reasoningMaxOutputTokens), Math.trunc(requested));
   return maxOutputTokens;
 }
 
+/**
+ * A thinking model's larger budget must not push an ordinary request over the
+ * per-request safety limit (at $30/1M output, 16k tokens alone is ~$0.49). Keep
+ * as much of the extra budget as fits, never less than the normal budget.
+ */
+function fitOutputTokensToRequestCap(providerId, model, payload, limit) {
+  if (limit <= maxOutputTokens || !(maxRequestEstimateMicroUsd > 0)) return limit;
+  const inputTokens = Math.max(1, Math.ceil(estimateChatInputChars(payload) / chatReserveCharsPerToken));
+  const inputCost = estimateCostMicroUsd(providerId, model, inputTokens, 0);
+  const perMillionOutput = estimateCostMicroUsd(providerId, model, 0, 1_000_000);
+  if (!(perMillionOutput > 0)) return limit;
+  const affordable = Math.floor(((maxRequestEstimateMicroUsd - inputCost) / perMillionOutput) * 1_000_000);
+  return Math.max(maxOutputTokens, Math.min(limit, affordable));
+}
+
+/** Models whose output tokens include hidden reasoning, so a plain answer-sized budget starves them. */
+function thinksBeforeAnswering(providerId, model) {
+  const normalized = stringValue(model).toLowerCase();
+  if (providerId === "deepseek") return normalized.startsWith("deepseek-v4") || normalized.includes("reasoner");
+  if (providerId === "openai") return supportsReasoningEffort(normalized);
+  return false;
+}
+
 function maxOutputTokensForModel(providerId, model) {
-  if (!Number.isFinite(highCostOutputUsdPer1m) || highCostOutputUsdPer1m <= 0) return maxOutputTokens;
+  const budget = thinksBeforeAnswering(providerId, model) ? Math.max(maxOutputTokens, reasoningMaxOutputTokens) : maxOutputTokens;
+  if (!Number.isFinite(highCostOutputUsdPer1m) || highCostOutputUsdPer1m <= 0) return budget;
   const price = resolveModelPrice(providerId, model);
   const outputRate = Number(price.outputUsdPer1M);
-  if (!Number.isFinite(outputRate) || outputRate < highCostOutputUsdPer1m) return maxOutputTokens;
+  if (!Number.isFinite(outputRate) || outputRate < highCostOutputUsdPer1m) return budget;
   return Math.max(1, Math.min(maxOutputTokens, highCostMaxOutputTokens));
 }
 

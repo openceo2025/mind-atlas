@@ -50,10 +50,13 @@ export async function runTextPartnerTurn(prompt: string, settings: ChatSettings)
     const responseText = result.text.trim();
     if (!responseText) {
       // An empty reply is not an answer: never archive "(No text response.)" as a node.
+      const ranOut = result.finishReason === "length";
       useAtlasStore.getState().appendVoiceLogEntry({
         role: "error",
         title: `AI Partner error (${label})`,
-        text: "The AI returned an empty reply. Any changes it made are listed above; try asking again or switch the model.",
+        text: ranOut
+          ? "The AI ran out of output while thinking and could not reply. Any changes it made are listed above; ask for a smaller part at a time or switch to a lighter model."
+          : "The AI returned an empty reply. Any changes it made are listed above; try asking again or switch the model.",
         sessionId,
         status: "error",
       });

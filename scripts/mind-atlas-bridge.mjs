@@ -121,7 +121,9 @@ const deepSeekChatBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_DEEPSEEK_ANT
 const deepSeekChatAuthToken = process.env.MIND_ATLAS_DEEPSEEK_AUTH_TOKEN ?? claudeDeepSeekAuthToken;
 const deepSeekChatDefaultModel = process.env.MIND_ATLAS_DEEPSEEK_MODEL ?? "deepseek-v4-pro[1m]";
 const deepSeekChatModels = parseStringList(process.env.MIND_ATLAS_DEEPSEEK_MODELS, [deepSeekChatDefaultModel, "deepseek-v4-pro[1m]", "deepseek-v4-flash"]);
-const deepSeekChatMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_DEEPSEEK_MAX_OUTPUT_TOKENS", openAiMaxOutputTokens);
+// DeepSeek V4 thinks before answering and the thinking counts as output; a
+// smaller budget can end a turn with neither text nor a tool call.
+const deepSeekChatMaxOutputTokens = readPositiveIntEnv("MIND_ATLAS_DEEPSEEK_MAX_OUTPUT_TOKENS", Math.max(openAiMaxOutputTokens, 16384));
 const deepSeekBalanceBaseUrl = normalizeBaseUrl(process.env.MIND_ATLAS_DEEPSEEK_BALANCE_BASE_URL ?? "https://api.deepseek.com");
 const deepSeekChatReasoningEfforts = parseReasoningEffortList(process.env.MIND_ATLAS_DEEPSEEK_REASONING_EFFORTS, ["default", "low", "medium", "high", "max"]);
 

@@ -982,6 +982,8 @@ export interface TextPartnerTurnResult {
   provider: AiProvider;
   model: string;
   usage?: AiUsage;
+  /** Why the provider stopped. "length" means it ran out of output tokens. */
+  finishReason?: string;
   raw?: unknown;
 }
 
