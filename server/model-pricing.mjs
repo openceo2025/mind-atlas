@@ -2,7 +2,7 @@
 // A model the provider lists is offered only when it has a price here or in
 // MIND_ATLAS_MODEL_PRICES_JSON (which overrides these entries).
 //
-// Sources, checked 2026-09-23:
+// Sources, checked 2026-09-30:
 //   OpenAI    https://developers.openai.com/api/docs/pricing
 //   Anthropic https://platform.claude.com/docs/en/about-claude/pricing
 //   DeepSeek  https://api-docs.deepseek.com/quick_start/pricing (peak-hour rates, the higher of the two)
@@ -17,6 +17,7 @@ export function mergeModelPrices(overrides = {}, now = new Date()) {
 export function createBuiltinModelPrices(_now = new Date()) {
   return {
     "openai:gpt-6-astra": price(10, 50),
+    "openai:gpt-6.1-sol": price(2, 10),
     "openai:gpt-6-sol": price(2, 10),
     "openai:gpt-6-luna": price(0.1, 0.5),
     "openai:gpt-5.6-sol": price(4, 20),
