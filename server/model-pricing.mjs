@@ -70,6 +70,9 @@ export function createBuiltinModelPrices(_now = new Date()) {
     "anthropic:claude-haiku-3-5": price(0.8, 4),
 
     "deepseek:deepseek-flash": price(0.3, 1.2),
+    // Legacy DeepSeek IDs route to V4.1-Flash and are billed at the Flash rate.
+    "deepseek:deepseek-v4-flash": price(0.3, 1.2),
+    "deepseek:deepseek-v4-flash-vision-exp": price(0.3, 1.2),
     "deepseek:deepseek-v4-pro": price(1.32, 3.96),
 
     // Decision model (System One): input only, output is free.
