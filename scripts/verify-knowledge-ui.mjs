@@ -1,0 +1,115 @@
+import { chromium, expect } from '@playwright/test';
+import { mkdir, writeFile } from 'node:fs/promises';
+const browser = await chromium.launch({ channel: 'msedge', headless: true });
+const dir = 'artifacts/screenshots/knowledge';
+await mkdir(dir, { recursive: true });
+const now = new Date().toISOString();
+let serial = 0;
+const base = { kind: 'thread', nodeType: 'note', author: 'human', status: 'waiting', texture: 'speckled', attachments: [], createdAt: now, updatedAt: now, nextDecision: '', tags: ['research', 'design'], radius: 28, subtitle: '', summary: '', color: '#83c9b9' };
+function node(title, children=[], status='waiting', color='#83c9b9') { return { ...base, id: `sample-${serial++}`, title, body: `${title}\n研究の根拠とプロダクトの判断をつなげる。design research evidence`, children, status, color }; }
+function project(title, color, headings) { return { ...node(title, headings.map((h, i) => node(h, Array.from({length: 5}, (_, j) => node(`${h} / ${['仮説', '根拠', '実験', '判断', '次の行動'][j]}`, [], j === 2 ? 'blocked' : j < 2 ? 'done' : 'waiting', color)), i === 2 ? 'blocked' : 'waiting', color)), 'waiting', color), kind: 'root', galaxySpaceId: title }; }
+const roots = [project('研究と学び', '#8faee8', ['知識の整理', '意味グラフ', '自動メンテナンス', '因果と根拠', '連続ズーム', '実験と検証']), project('プロダクト', '#ddba79', ['体験の設計', 'UIの改善', '利用者の声', '公開への準備']), project('暮らしと計画', '#b38fda', ['旅の計画', '学習の記録', '今週の選択', '未来のアイデア'])];
+const results=[];
+for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{width:390,height:844}]]) {
+ const context=await browser.newContext({viewport}); const page=await context.newPage(); const errors=[];
+ page.on('pageerror', e=>errors.push(e.message));
+ let classifiedBatches = 0;
+ await page.route('**/api/galaxy/judge/status**', route => route.fulfill({contentType:'application/json',body:JSON.stringify({jev:{configured:true,model:'fixture-classifier'},llama:{available:false,model:'',detail:'fixture'}})}));
+ await page.route(/\/api\/galaxy\/judge(?:\?.*)?$/, async route => {
+  classifiedBatches++;
+  const body=route.request().postDataJSON();
+  expect(Object.keys(body.questions).length).toBeLessThanOrEqual(12);
+  await route.fulfill({contentType:'application/json',body:JSON.stringify({model:'fixture-classifier',answers:Object.fromEntries(Object.keys(body.questions).map(k=>[k,{type:'choice',choice:'supports',confidence:.88}]))})});
+ });
+ await page.addInitScript(({root,now})=>{
+ localStorage.setItem('mind-atlas-notebook-v2', JSON.stringify(root));
+ localStorage.setItem('mind-atlas-ui-state-v1',JSON.stringify({version:1,savedAt:now,selectedNodeId:root.id,viewport:{x:0,y:0,zoom:.92},renderQuality:'high',layoutMode:'phyllotaxis',mobilePanelTab:'command'}));
+ localStorage.setItem('mind-atlas-onboarding-v1',JSON.stringify({version:1,firstRun:false,rootNodeCreated:true,nodeEditorOpened:true,nodeEditCompleted:true,nodeCountReached:true,pan:true,zoom:true,nodeDrag:true,childNodeCreated:true,spaceBasicsCompleted:true,basicCompleted:true,aiUnlocked:true,titlePromptApplied:true,startedAt:now,completedAt:now}));
+ },{root:roots[0],now});
+ await page.route('**/knowledge-fixture-seed', route => route.fulfill({ contentType: 'text/html', body: '<html><body>Fixture seed</body></html>' }));
+ await page.goto('http://127.0.0.1:5173/knowledge-fixture-seed');
+ await page.evaluate(async ({roots,now}) => {
+  const db = await new Promise((resolve,reject) => { const req = indexedDB.open('mind-atlas-galaxy',1); req.onupgradeneeded=()=>{ const db=req.result; db.createObjectStore('meta',{keyPath:'key'}); db.createObjectStore('spaces',{keyPath:'spaceId'}); db.createObjectStore('history',{keyPath:'id'}); }; req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error); });
+  const spaces=roots.map((r,i)=>({id:r.title,title:r.title,color:r.color,decision:'undecided',dependsOn:i===1?[roots[0].title]:[],createdAt:now,updatedAt:now}));
+  const galaxy={schemaVersion:1,philosophy:'Sample notebook for verification',philosophyHistory:[],resources:[],spaces,activeSpaceId:roots[0].title,ledger:[],judgments:{},judge:{auto:false,backend:'jev-local',llamaUrl:'http://127.0.0.1:8089'},displayCurrency:'JPY',jpyPerUsd:150,updatedAt:now};
+  const tx=db.transaction(['meta','spaces'],'readwrite'); tx.objectStore('meta').put({key:'state',state:galaxy,generation:1});
+  for(const r of roots.slice(1)) tx.objectStore('spaces').put({spaceId:r.title,root:r,updatedAt:now});
+  await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);}); db.close();
+ }, {roots,now});
+ await page.goto('http://127.0.0.1:5173/?locale=ja');
+ await page.waitForSelector('.galaxy-open-button');
+ await page.waitForTimeout(900);
+ const count=await page.locator('canvas').count();
+ await page.locator('.galaxy-open-button').click();
+ await expect(page.locator('.knowledge-overlay')).toBeVisible();
+ await expect(page.locator('.knowledge-spaces button')).toHaveCount(3);
+ await page.waitForTimeout(400);
+ const blend=await page.locator('.universe-shell').getAttribute('data-knowledge-blend');
+ expect(Number(blend)).toBeGreaterThan(0);expect(Number(blend)).toBeLessThan(1);
+ await page.screenshot({path:`${dir}/${name}-transition.png`});
+ await page.waitForTimeout(1900);
+ const front=await page.locator('.universe-shell').getAttribute('data-knowledge-direction');
+ const direction=front.split(',').map(Number);
+ expect(Math.abs(direction[0])).toBeLessThan(.002);expect(Math.abs(direction[1])).toBeLessThan(.002);expect(direction[2]).toBeCloseTo(-1,2);
+ expect(await page.locator('canvas').count()).toBe(count);
+ await expect(page.locator('.knowledge-map-label').first()).toBeVisible();
+ await page.screenshot({path:`${dir}/${name}-overview.png`});
+ if(name==='desktop') {
+  const label=page.locator('.knowledge-map-label').first();const before=await label.boundingBox();
+  await page.mouse.move(850,760);await page.mouse.down();await page.mouse.move(950,800,{steps:12});await page.mouse.up();await page.waitForTimeout(500);
+  const after=await label.boundingBox();expect(Math.hypot(after.x-before.x,after.y-before.y)).toBeGreaterThan(15);
+  const orientation=(await page.locator('.universe-shell').getAttribute('data-knowledge-direction')).split(',').map(Number);
+  expect(Math.abs(orientation[0])+Math.abs(orientation[1])).toBeLessThan(.004);
+ }
+ await page.getByLabel('状態リング', {exact:false}).uncheck();
+ await page.getByLabel('状態リング', {exact:false}).check();
+ await page.locator('.knowledge-spaces button').first().click();
+ await page.waitForTimeout(1500);
+ await expect(page.locator('.knowledge-detail h2')).toHaveText(roots[0].title);
+ await expect(page.locator('.knowledge-cascade [role="tree"]')).toBeVisible();
+ const trace=page.locator('.knowledge-cascade-node').nth(1);
+ const traceTitle=(await trace.locator('span').innerText()).trim();
+ await trace.click();
+ await expect(page.locator('.knowledge-detail h2')).toHaveText(traceTitle);
+ await page.locator('.knowledge-cascade-info').first().click();
+ await expect(page.locator('.knowledge-relation-detail')).toBeVisible();
+ await page.screenshot({path:`${dir}/${name}-region.png`});
+ await page.getByPlaceholder('何を探りたいですか？').fill('意味グラフ');
+ await expect(page.locator('.knowledge-projection')).toBeVisible();
+ await page.locator('.knowledge-projection > button').click();
+ await expect(page.locator('.knowledge-projection > div')).toBeVisible();
+ await page.screenshot({path:`${dir}/${name}-question.png`});
+ await page.getByPlaceholder('何を探りたいですか？').fill('');
+ await page.locator('.knowledge-maintenance input').check();
+ await page.locator('.knowledge-overlay .galaxy-top > button').click();
+ await expect(page.locator('.knowledge-overlay')).toHaveCount(0,{timeout:10000});
+ expect(await page.locator('canvas').count()).toBe(count);
+ await expect.poll(async () => page.evaluate(async () => {
+  const db = await new Promise(resolve => {const req=indexedDB.open('mind-atlas-galaxy',1);req.onsuccess=()=>resolve(req.result);});
+  const result=await new Promise(resolve=>{const tx=db.transaction('meta','readonly');const req=tx.objectStore('meta').get('state');req.onsuccess=()=>resolve(req.result?.state?.knowledgeRelations?.length??0);});db.close();return result>0;
+ }), {timeout:20000}).toBe(true);
+ expect(classifiedBatches).toBe(1);
+ await page.waitForTimeout(300);
+ await page.locator('.galaxy-open-button').click();
+ await page.waitForTimeout(1500);
+ await page.locator('.knowledge-spaces button').nth(1).click();
+ await page.waitForTimeout(1500);
+ await page.getByRole('button',{name:'宇宙で開く',exact:true}).click();
+ await expect(page.locator('.knowledge-overlay')).toHaveCount(0,{timeout:10000});
+ await expect(page.locator('.top-bar input').first()).toHaveValue('プロダクト');
+ results.push({name,canvases:count,spaces:3,materialDissolve:blend,frontFacing:front,cascadeNavigation:true,relationEvidence:true,statusRings:true,remoteEntry:true,backgroundClassifier:'fixture only',classifiedBatches,errors});
+ if(errors.length) throw new Error(errors.join('\n'));
+ await context.close();
+}
+await writeFile(`${dir}/verification.json`,JSON.stringify(results,null,2));
+const previewContext=await browser.newContext({viewport:{width:1440,height:960}});
+const preview=await previewContext.newPage();
+let sampleAiCalls=0;
+await preview.route(/\/api\/(galaxy\/judge|ai\/decide)(?:\?.*)?$/,route=>{sampleAiCalls++;return route.abort();});
+await preview.goto('http://127.0.0.1:5173/?aboutDemo=research&knowledgeDemo=1&locale=ja');
+await expect(preview.locator('.knowledge-spaces button')).toHaveCount(3);
+await preview.waitForTimeout(2500);
+await preview.screenshot({path:`${dir}/local-preview.png`});
+expect(sampleAiCalls).toBe(0);
+await previewContext.close();
+console.log(JSON.stringify(results)); await browser.close();

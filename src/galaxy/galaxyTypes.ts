@@ -8,6 +8,7 @@
  * backends are chosen at call time (see galaxyJudge.ts).
  */
 import type { AtlasNode } from "../types";
+import type { KnowledgeRelation } from './knowledgeGraph';
 
 export const GALAXY_SCHEMA_VERSION = 1;
 export const GALAXY_FILE_KIND = "mind-atlas-galaxy";
@@ -124,6 +125,8 @@ export interface JudgeSettings {
 }
 
 export interface GalaxyState {
+  knowledgeRelations?: KnowledgeRelation[];
+  knowledgeAuto?: boolean;
   schemaVersion: number;
   philosophy: string;
   philosophyHistory: { text: string; replacedAt: string }[];

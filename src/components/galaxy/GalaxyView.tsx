@@ -4,17 +4,18 @@ import type { HostedServiceSession } from "../../types";
 import { useMessage, useMindAtlasLocale } from "../../i18n/I18nProvider";
 import type { MessageId } from "../../i18n/messages";
 import { useAtlasStore } from "../../store/atlasStore";
-import { judgeHash } from "../../galaxy/galaxyJudge";
 import { useJudgeRuntime } from "../../galaxy/galaxyJudgeRunner";
-import { formatMoney, galaxyTotals, resourceFlows, todayIso, unallocatedEntries } from "../../galaxy/galaxyRollup";
+import { formatMoney, galaxyTotals, todayIso, unallocatedEntries } from "../../galaxy/galaxyRollup";
 import { useGalaxyStore } from "../../galaxy/galaxyStore";
-import { buildSpaceViews, type SpaceView } from "../../galaxy/galaxySummary";
+import { useSpaceViews } from "../../galaxy/useKnowledgeIndex";
 import type { GalaxyFile } from "../../galaxy/galaxyTypes";
-import { DECISION_COLORS, GalaxyScene } from "./GalaxyScene";
+import { KnowledgePanel } from './KnowledgePanel';
+import { useKnowledgeRuntime, closeKnowledge } from '../../galaxy/knowledgeRuntime';
 import { GalaxySettingsPanel } from "./GalaxySettingsPanel";
 import { LedgerPanel } from "./LedgerPanel";
 import { SpaceDetailPanel } from "./SpaceDetailPanel";
 import "./galaxy.css";
+import './knowledge.css';
 
 interface GalaxyViewProps {
   theme: "dark" | "light";
@@ -25,18 +26,12 @@ interface GalaxyViewProps {
 
 export const CONSTRAINT_ICONS = { human: User, physical: Hammer, external: Link2, ai: Bot, none: CircleCheck } as const;
 
-export function useSpaceViews() {
-  const galaxy = useGalaxyStore((state) => state.galaxy);
-  const inactiveRoots = useGalaxyStore((state) => state.inactiveRoots);
-  const atlasRoot = useAtlasStore((state) => state.atlasRoot);
-  return useMemo(() => {
-    if (!galaxy) return [];
-    const rootOf = (spaceId: string) => (spaceId === galaxy.activeSpaceId ? atlasRoot : inactiveRoots[spaceId] ?? null);
-    return buildSpaceViews(galaxy, rootOf, todayIso(), (space, root) => judgeHash(galaxy, space, root));
-  }, [atlasRoot, galaxy, inactiveRoots]);
-}
-
-export function GalaxyView({ theme, lowQuality, hostedSession, onClose }: GalaxyViewProps) {
+export function GalaxyView({ theme, onClose: finishClose }: GalaxyViewProps) {
+  const onClose = () => closeKnowledge(finishClose);
+  useEffect(() => {
+    useKnowledgeRuntime.setState({ open: true, exiting: false, selected: null, anchor: null, hovered: null, relation: null, enterKey: null });
+    return () => { useKnowledgeRuntime.setState({ open: false, exiting: false, exit: null }); };
+  }, []);
   const t = useMessage();
   const { locale } = useMindAtlasLocale();
   const status = useGalaxyStore((state) => state.status);
@@ -63,6 +58,8 @@ export function GalaxyView({ theme, lowQuality, hostedSession, onClose }: Galaxy
       if (event.key !== "Escape") return;
       if (panel) setPanel(null);
       else if (selectedId) setSelectedId(null);
+      else if (useKnowledgeRuntime.getState().selected) useKnowledgeRuntime.setState({selected:null,anchor:null,relation:null});
+      else if (useKnowledgeRuntime.getState().query) useKnowledgeRuntime.setState({query:''});
       else onClose();
     };
     window.addEventListener("keydown", handleKey);
@@ -75,7 +72,6 @@ export function GalaxyView({ theme, lowQuality, hostedSession, onClose }: Galaxy
     const roots = Object.fromEntries(views.map((view) => [view.space.id, view.root]));
     return galaxyTotals(galaxy, roots, today);
   }, [galaxy, today, views]);
-  const flows = useMemo(() => (galaxy ? resourceFlows(galaxy, today).map((flow) => ({ ...flow, value: flow.month > 0 ? flow.month : flow.total })) : []), [galaxy, today]);
   const unallocated = useMemo(() => (galaxy ? unallocatedEntries(galaxy) : []), [galaxy]);
 
   if (status !== "ready" || !galaxy || !totals) {
@@ -92,10 +88,15 @@ export function GalaxyView({ theme, lowQuality, hostedSession, onClose }: Galaxy
   const money = (value: number) => formatMoney(value, galaxy.displayCurrency, locale);
   const selectedView = views.find((view) => view.space.id === selectedId) ?? null;
 
-  const enterSpace = async (spaceId: string) => {
+  const enterSpace = async (spaceId: string, nodeId?: string) => {
     try {
       if (spaceId !== galaxy.activeSpaceId) await useGalaxyStore.getState().switchSpace(spaceId);
-      onClose();
+      const target = useKnowledgeRuntime.getState().graph.nodes.find(n => n.spaceId === spaceId && (nodeId ? n.node.id === nodeId : n.depth === 0));
+      useKnowledgeRuntime.setState({ enterKey: target?.key ?? null });
+      closeKnowledge(() => {
+        finishClose();
+        if (nodeId) window.setTimeout(() => useAtlasStore.getState().focusNode(nodeId), 50);
+      });
     } catch (switchError) {
       setNotice(t("galaxy.switchFailed", { error: switchError instanceof Error ? switchError.message : String(switchError) }));
     }
@@ -141,39 +142,9 @@ export function GalaxyView({ theme, lowQuality, hostedSession, onClose }: Galaxy
         : t("galaxy.judge.ready", { model: availability.model })
       : t(`galaxy.settings.status.${availability.reason}` as MessageId);
 
-  const renderLabel = (view: SpaceView) => (
-    <SpaceLabel
-      t={t}
-      view={view}
-      theme={theme}
-      selected={view.space.id === selectedId}
-      money={money}
-      onSelect={() => setSelectedId(view.space.id)}
-      onEnter={() => void enterSpace(view.space.id)}
-    />
-  );
-
-  const coreLabel = (
-    <button type="button" className={`galaxy-core-label ${theme}`} onClick={() => setEditingPhilosophy(true)} title={t("galaxy.philosophy.edit")}>
-      <small>{t("galaxy.philosophy")}</small>
-      <span>{galaxy.philosophy.trim() ? shorten(galaxy.philosophy, 64) : t("galaxy.philosophy.empty")}</span>
-    </button>
-  );
-
   return (
-    <div className="galaxy-overlay" data-theme={theme} role="dialog" aria-modal="true" aria-label={t("galaxy.open")}>
-      <GalaxyScene
-        views={views}
-        resources={galaxy.resources}
-        flows={flows}
-        selectedId={selectedId}
-        theme={theme}
-        lowQuality={lowQuality}
-        onSelect={setSelectedId}
-        onEnter={(spaceId) => void enterSpace(spaceId)}
-        renderLabel={renderLabel}
-        coreLabel={coreLabel}
-      />
+    <div className="galaxy-overlay knowledge-overlay" data-theme="dark" role="dialog" aria-modal="true" aria-label={t("galaxy.open")}>
+      <KnowledgePanel views={views} onEnter={(spaceId, nodeId) => void enterSpace(spaceId, nodeId)} onManagement={setSelectedId} />
 
       <header className="galaxy-top">
         <button type="button" className="galaxy-button" onClick={onClose}>
@@ -207,6 +178,7 @@ export function GalaxyView({ theme, lowQuality, hostedSession, onClose }: Galaxy
           ) : null}
         </div>
         <div className="galaxy-actions">
+          <button type="button" className="galaxy-chip-button" onClick={() => setEditingPhilosophy(true)}>{t('galaxy.philosophy')}</button>
           <button type="button" className="galaxy-chip-button" onClick={() => setPanel(panel === "settings" ? null : "settings")} title={t("galaxy.settings")}>
             <Clock size={14} /> {judgeLabel}
           </button>
@@ -286,70 +258,6 @@ export function GalaxyView({ theme, lowQuality, hostedSession, onClose }: Galaxy
         </div>
       ) : null}
     </div>
-  );
-}
-
-// Rendered inside the 3D canvas through drei's Html, which mounts a separate
-// React root: the react-intl context is not available there, so the caller
-// passes its translate function in.
-function SpaceLabel({
-  t,
-  view,
-  theme,
-  selected,
-  money,
-  onSelect,
-  onEnter,
-}: {
-  t: ReturnType<typeof useMessage>;
-  view: SpaceView;
-  theme: "dark" | "light";
-  selected: boolean;
-  money: (value: number) => string;
-  onSelect: () => void;
-  onEnter: () => void;
-}) {
-  const demandLevels = 4;
-  const ConstraintIcon = view.constraint && view.constraint in CONSTRAINT_ICONS ? CONSTRAINT_ICONS[view.constraint as keyof typeof CONSTRAINT_ICONS] : null;
-  const net = view.money.net;
-  const decision = view.shownDecision;
-  return (
-    <button
-      type="button"
-      className={`galaxy-space-label ${theme} ${selected ? "is-selected" : ""} ${view.active ? "is-active" : ""}`}
-      onClick={(event) => {
-        event.stopPropagation();
-        onSelect();
-      }}
-      onDoubleClick={(event) => {
-        event.stopPropagation();
-        onEnter();
-      }}
-    >
-      <strong>{view.space.title || "—"}</strong>
-      <span className="galaxy-signals">
-        <span className="galaxy-signal demand" title={`${t("galaxy.signal.demand")}: ${view.demand === null ? t("galaxy.signal.unjudged") : t(`galaxy.demand.${view.demand}` as MessageId)}`}>
-          {view.demand === null
-            ? "?"
-            : Array.from({ length: demandLevels - 1 }, (_, index) => <i key={index} className={index < (view.demand ?? 0) ? "on" : ""} />)}
-        </span>
-        <span className={`galaxy-signal money ${net < 0 ? "is-negative" : net > 0 ? "is-positive" : ""}`} title={t("galaxy.signal.money")}>
-          {net === 0 ? "±0" : signed(money, net)}
-        </span>
-        <span className="galaxy-signal constraint" title={`${t("galaxy.signal.constraint")}: ${view.constraint ? t(`galaxy.constraint.${view.constraint}` as MessageId) : t("galaxy.signal.unjudged")}`}>
-          {ConstraintIcon ? <ConstraintIcon size={12} /> : "?"}
-          {view.signals.staleDays >= 14 ? <em>{t("galaxy.signal.stale", { days: view.signals.staleDays })}</em> : null}
-        </span>
-        <span
-          className={`galaxy-signal decision ${decision.proposed ? "is-proposed" : ""}`}
-          style={{ borderColor: DECISION_COLORS[decision.value], color: DECISION_COLORS[decision.value] }}
-          title={t("galaxy.signal.decision")}
-        >
-          {decision.proposed ? `${t("galaxy.signal.proposed")}: ` : ""}
-          {t(`galaxy.decision.${decision.value}` as MessageId)}
-        </span>
-      </span>
-    </button>
   );
 }
 

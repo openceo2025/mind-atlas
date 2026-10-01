@@ -46,7 +46,10 @@ import {
 import { syncAccountAiPreference } from "./hosted/aiPreference";
 import { PlanetGate } from "./planet/PlanetGate";
 import { useGalaxyJudgeRunner } from "./galaxy/galaxyJudgeRunner";
+
 import { useGalaxyStore } from "./galaxy/galaxyStore";
+import { useKnowledgeIndex } from './galaxy/useKnowledgeIndex';
+import { isKnowledgeDemo, knowledgeDemoState } from './galaxy/knowledgeDemo';
 import { Telescope } from "lucide-react";
 import { loadStoredTheme, persistTheme, type AtlasTheme } from "./theme";
 import { loadPersistedUiState, persistUiStatePatch, type PersistedUiState } from "./uiPersistence";
@@ -256,11 +259,13 @@ export default function App() {
   const [hostedSessionLoading, setHostedSessionLoading] = useState(false);
   const [hostedSessionError, setHostedSessionError] = useState("");
   const [galaxyOpen, setGalaxyOpen] = useState(false);
-  const galaxyEnabled = !aboutDemoConfig;
+  const knowledgeDemo = isKnowledgeDemo() && !publicServiceMode;
+  const galaxyEnabled = !aboutDemoConfig || knowledgeDemo;
   useEffect(() => {
     if (galaxyEnabled) void useGalaxyStore.getState().init();
   }, [galaxyEnabled]);
   useGalaxyJudgeRunner(hostedSession);
+  useKnowledgeIndex();
   const [mobileNotificationsEnabled, setMobileNotificationsEnabled] = useState(() => loadMobileNotificationPreference());
   const [mobileNotificationPermission, setMobileNotificationPermission] = useState<MobileNotificationPermission>(() => getMobileNotificationPermission());
   const [mobileNotificationMessage, setMobileNotificationMessage] = useState("");
@@ -551,8 +556,13 @@ export default function App() {
     aboutDemoAppliedRef.current = key;
 
     const demoRoot = createAboutDemoNotebook(aboutDemoConfig.kind, locale);
+    if (knowledgeDemo) demoRoot.galaxySpaceId = 'demo-research';
     const selectedDemoNodeId = getAboutDemoSelectedNodeId(aboutDemoConfig);
     importNotebook(demoRoot, demoRoot.title, getAboutDemoAttachmentPreviewUrls(aboutDemoConfig));
+    if (knowledgeDemo) {
+      useGalaxyStore.setState({ ...knowledgeDemoState(demoRoot, locale), status: 'ready' });
+      setGalaxyOpen(true);
+    }
     setLayoutMode(getAboutDemoLayoutMode(aboutDemoConfig));
     setRenderQuality("high");
     setTheme("dark");
@@ -2318,6 +2328,7 @@ export default function App() {
       className={appClassName}
       data-theme={theme}
       data-focus-panel={focusPanelOpen ? "open" : "closed"}
+      data-galaxy-open={galaxyOpen ? 'true' : undefined}
       data-notebook-mode={notebookMode}
       data-about-demo={aboutDemoConfig?.kind}
       onDragEnter={handleImportDragEnter}

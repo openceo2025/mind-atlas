@@ -1,6 +1,8 @@
-import { chromium } from "@playwright/test";
+import { chromium, expect } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 
+// Durable agent SSE streams never become network-idle. Tests wait for their
+// explicit UI surfaces after DOM readiness instead of waiting for SSE to close.
 const baseUrl = process.env.MIND_ATLAS_URL ?? "http://127.0.0.1:5173";
 const outputDir = "artifacts/screenshots";
 
@@ -27,7 +29,7 @@ async function verifyViewport(browser, name, viewport) {
   const page = await browser.newPage({ viewport, ignoreHTTPSErrors: true });
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.waitForTimeout(900);
 
@@ -82,7 +84,7 @@ async function verifyViewport(browser, name, viewport) {
 async function verifyLayoutModeSwitch(browser) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
   await seedCompletedOnboarding(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   for (const label of ["Tree", "Mind map", "Calendar", "Mind Atlas"]) {
     await page.getByLabel("Open atlas menu").click();
@@ -105,7 +107,7 @@ async function verifyNodeSearch(browser) {
   const page = await browser.newPage({ viewport: { width: 1040, height: 760 }, ignoreHTTPSErrors: true });
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
 
   await page.keyboard.press("Control+f");
@@ -114,12 +116,12 @@ async function verifyNodeSearch(browser) {
   const input = dialog.locator('input[type="search"]');
   await input.fill("mobile tap");
   const plainResults = dialog.locator(".node-search-result");
-  if (await plainResults.count() !== 1) throw new Error("Ctrl+F node search should find matching body text.");
+  await expect(plainResults).toHaveCount(1);
 
   await dialog.getByText("Regular expression", { exact: true }).click();
   await input.fill("^Verify Child$");
   const regexResults = dialog.locator(".node-search-result");
-  if (await regexResults.count() !== 1) throw new Error("Regular-expression node search should find the exact title.");
+  await expect(regexResults).toHaveCount(1);
   await regexResults.first().click();
   await dialog.waitFor({ state: "detached" });
   const selectedTitle = await page.locator(".node-title-input").inputValue();
@@ -149,7 +151,7 @@ async function verifyCalendarLayout(browser) {
     const page = await context.newPage();
     await seedCompletedOnboarding(page);
     await seedCalendarNotebook(page);
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("canvas");
     await page.waitForSelector(".spatial-guide-label-weekday");
     await page.waitForTimeout(1500);
@@ -202,7 +204,7 @@ async function verifyLocaleSwitching(browser) {
   const context = await browser.newContext({ viewport: { width: 1100, height: 760 }, ignoreHTTPSErrors: true, locale: "en-US" });
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Open atlas menu").click();
   await page.getByLabel("Interface language").selectOption("ja");
   await page.getByRole("button", { name: "新しく始める" }).waitFor();
@@ -214,11 +216,11 @@ async function verifyLocaleSwitching(browser) {
   if (japaneseDocument.lang !== "ja" || japaneseDocument.dir !== "ltr" || japaneseDocument.stored !== "ja") {
     throw new Error(`Japanese locale did not apply and persist: ${JSON.stringify(japaneseDocument)}`);
   }
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByLabel("Mind Atlasメニューを開く").click();
   await page.getByRole("button", { name: "新しく始める" }).waitFor();
 
-  await page.goto(`${baseUrl}?locale=ar-XB`, { waitUntil: "networkidle" });
+  await page.goto(`${baseUrl}?locale=ar-XB`, { waitUntil: "domcontentloaded" });
   const pseudoDocument = await page.evaluate(() => ({ lang: document.documentElement.lang, dir: document.documentElement.dir }));
   if (pseudoDocument.lang !== "ar-XB" || pseudoDocument.dir !== "rtl") {
     throw new Error(`RTL pseudo locale did not apply: ${JSON.stringify(pseudoDocument)}`);
@@ -235,7 +237,7 @@ async function verifyLocalDeveloperModeSurface(browser) {
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.locator(".mode-switch").waitFor();
 
@@ -515,7 +517,7 @@ async function verifyAgentRunNodeSynchronization(browser) {
     });
   });
 
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   const launcher = page.getByRole("button", { name: "Open Agent runs" });
   await launcher.click();
@@ -593,7 +595,7 @@ async function verifyNotificationSnoozeActions(browser) {
   const reminderAt = new Date(Date.now() - 120_000).toISOString();
   const reminderFiredAt = new Date(Date.now() - 60_000).toISOString();
   await seedSingleChildNotebook(page, "phyllotaxis", { reminderAt, reminderFiredAt });
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.waitForFunction(
     () =>
@@ -686,7 +688,7 @@ async function verifyGeneratedLayoutBlocksBackgroundBirth(browser) {
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.evaluate(() => {
     window.__mindAtlasVerifyBackgroundInteractions = 0;
@@ -725,7 +727,7 @@ async function verifyGeneratedLayoutBlocksBackgroundBirth(browser) {
 async function verifyStablePhyllotaxisPositions(browser) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
   const page = await context.newPage();
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   const result = await page.evaluate(async () => {
     const { deriveAtlasLayout, stabilizePhyllotaxisPositions } = await import("/src/layout/atlasLayout.ts");
     const now = new Date().toISOString();
@@ -783,7 +785,7 @@ async function verifyBackgroundReturnsOneParent(browser) {
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
   await seedGeneratedLayoutNotebook(page, "phyllotaxis");
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   const parentTitle = page.locator('textarea.space-title-editor[data-node-id="layout-alpha"]');
   try {
@@ -834,7 +836,7 @@ async function verifyBirthReleaseKeepsNewNodeFocused(browser) {
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.locator('textarea.space-title-editor[data-node-id="verify-child"]').waitFor();
   await page.waitForTimeout(1100);
@@ -886,7 +888,7 @@ async function verifyKonamiDoesNotUnlock(browser) {
     ignoreHTTPSErrors: true,
   });
   const page = await context.newPage();
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
 
   await enterKonamiSequence(page);
@@ -914,7 +916,7 @@ async function verifyTutorialSkipButton(browser) {
     hasTouch: true,
   });
   const page = await context.newPage();
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
 
   const skipButton = page.getByRole("button", { name: "Skip tutorial" });
@@ -976,7 +978,7 @@ async function verifyStartupMissingTitleMaintenance(browser) {
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
   await seedMissingTitleNotebook(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.waitForFunction(
     () => document.querySelector('textarea.space-title-editor[data-node-id="missing-title-child"]')?.value === "本文だけで作られた過去ノードです。起動時にタイト...",
@@ -989,7 +991,9 @@ async function verifyStartupMissingTitleMaintenance(browser) {
 async function verifyIndexedDbCurrentBeatsStaleLegacyCache(browser) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 820 }, ignoreHTTPSErrors: true });
   const page = await context.newPage();
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  // Seed before mounting React: a live notebook can persist over the probe.
+  await page.route('**/persistence-fixture-seed', route => route.fulfill({contentType:'text/html',body:'<html><body>Persistence fixture</body></html>'}));
+  await page.goto(new URL('/persistence-fixture-seed', baseUrl).href, { waitUntil: "domcontentloaded" });
   await page.evaluate(async () => {
     const now = new Date().toISOString();
     const staleRoot = createPersistenceProbeRoot("stale-child", "Stale Child", "Stale body", now);
@@ -1099,7 +1103,7 @@ async function verifyIndexedDbCurrentBeatsStaleLegacyCache(browser) {
     }
   });
 
-  await page.reload({ waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.waitForSelector('textarea.space-title-editor[data-node-id="fresh-child"]', { state: "visible" });
   const state = await page.evaluate(() => {
@@ -1124,7 +1128,7 @@ async function verifyOutlineAndContextCopy(browser) {
   });
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
 
   await page.getByLabel("Open atlas menu").click();
@@ -1196,7 +1200,7 @@ async function verifyOutlineCollapseAndDeletionSafety(browser) {
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
   await seedNestedNotebook(page, { selectedNodeId: "atlas-root", renderQuality: "low" });
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector('textarea.space-title-editor[data-node-id="nested-parent"]', { state: "visible" });
   const rootLabel = await page.locator('textarea.space-title-editor[data-node-id="nested-parent"]').inputValue();
   if (rootLabel !== "Nested Parent") {
@@ -1293,7 +1297,7 @@ async function verifyOutlineThemeAndSubtreeCollapse(browser) {
   await darkPage.addInitScript(() => {
     window.localStorage.setItem("mind-atlas-theme", "dark");
   });
-  await darkPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await darkPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await darkPage.waitForSelector("canvas");
   await darkPage.getByLabel("Open atlas menu").click();
   await darkPage.locator(".global-context-menu").getByTitle("Text editor").click();
@@ -1344,7 +1348,7 @@ async function verifyOutlineThemeAndSubtreeCollapse(browser) {
   await lightPage.addInitScript(() => {
     window.localStorage.setItem("mind-atlas-theme", "light");
   });
-  await lightPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await lightPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await lightPage.waitForSelector("canvas");
   await lightPage.getByLabel("Open atlas menu").click();
   await lightPage.locator(".global-context-menu").getByTitle("Text editor").click();
@@ -1377,7 +1381,7 @@ async function verifyMobileOutlinePanel(browser) {
     });
     const page = await context.newPage();
     await seedCompletedOnboarding(page);
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("canvas");
 
     await page.getByLabel("Open atlas menu").click();
@@ -1431,7 +1435,7 @@ async function verifyMobileGlobalMenuScroll(browser) {
   });
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
 
   await page.getByLabel("Open atlas menu").click();
@@ -1485,7 +1489,7 @@ async function verifyMobileCanvasPinchZoom(browser) {
   });
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.waitForTimeout(1100);
 
@@ -1556,7 +1560,7 @@ async function verifyMobileCanvasInterruptionRecovery(browser) {
   });
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.waitForTimeout(1150);
 
@@ -1630,7 +1634,7 @@ async function verifyMobileTutorialRootBirth(browser) {
     hasTouch: true,
   });
   const page = await context.newPage();
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.locator(".onboarding-center-pulse").waitFor();
   await page.waitForTimeout(420);
@@ -1696,8 +1700,9 @@ async function verifyMobileGeneratedLayoutVisibility(browser) {
       const page = await context.newPage();
       await seedCompletedOnboarding(page);
       await seedGeneratedLayoutNotebook(page, layoutMode);
-      await page.goto(baseUrl, { waitUntil: "networkidle" });
+      await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
       await page.waitForSelector("canvas");
+      await page.waitForSelector('textarea.space-title-editor[data-node-id="layout-alpha"]');
       await page.keyboard.press("ArrowDown");
       await page.waitForTimeout(1800);
       const coverage = await readGeneratedLayoutCoverage(page, viewportCase.name, layoutMode);
@@ -1730,7 +1735,7 @@ async function verifyPhyllotaxisFocusOffset(browser) {
     const page = await context.newPage();
     await seedCompletedOnboarding(page);
     await seedGeneratedLayoutNotebook(page, "phyllotaxis");
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("canvas");
     await page.keyboard.press("ArrowUp");
     await page.waitForTimeout(1800);
@@ -1755,7 +1760,7 @@ async function verifyTreeWheelZoomDoesNotAutoFocus(browser) {
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page, "tree");
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.waitForSelector('textarea.space-title-editor[data-node-id="verify-child"]', { state: "visible" });
   await page.waitForTimeout(900);
@@ -1793,7 +1798,7 @@ async function verifyOperationControls(browser) {
   const page = await mobileContext.newPage();
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.getByRole("tab", { name: "AI" }).waitFor();
   const portraitOperationTabCount = await page.getByRole("tab", { name: "Operation" }).count();
@@ -1842,7 +1847,7 @@ async function verifyOperationControls(browser) {
   const mobileLandscapePage = await mobileLandscapeContext.newPage();
   await seedCompletedOnboarding(mobileLandscapePage);
   await seedSingleChildNotebook(mobileLandscapePage);
-  await mobileLandscapePage.goto(baseUrl, { waitUntil: "networkidle" });
+  await mobileLandscapePage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await mobileLandscapePage.waitForSelector("canvas");
   await mobileLandscapePage.getByRole("tab", { name: "AI" }).waitFor();
   await mobileLandscapePage.getByRole("tab", { name: "Operation" }).evaluate((button) => button.click());
@@ -1916,7 +1921,7 @@ async function verifyOperationControls(browser) {
   const desktopPage = await desktopContext.newPage();
   await seedCompletedOnboarding(desktopPage);
   await seedSingleChildNotebook(desktopPage);
-  await desktopPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await desktopPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await desktopPage.waitForSelector("canvas");
   const desktopToolbar = desktopPage.locator(".operation-panel-desktop");
   await desktopToolbar.waitFor();
@@ -1953,7 +1958,7 @@ async function verifyOperationControls(browser) {
   const lockedDesktopPage = await lockedDesktopContext.newPage();
   await seedCompletedOnboarding(lockedDesktopPage, { aiUnlocked: false });
   await seedSingleChildNotebook(lockedDesktopPage);
-  await lockedDesktopPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await lockedDesktopPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await lockedDesktopPage.waitForSelector("canvas");
   const lockedDesktopToolbar = lockedDesktopPage.locator(".operation-panel-desktop");
   await lockedDesktopToolbar.waitFor();
@@ -1972,7 +1977,7 @@ async function verifyOperationControls(browser) {
   const lockedMobilePage = await lockedMobileContext.newPage();
   await seedCompletedOnboarding(lockedMobilePage, { aiUnlocked: false });
   await seedSingleChildNotebook(lockedMobilePage);
-  await lockedMobilePage.goto(baseUrl, { waitUntil: "networkidle" });
+  await lockedMobilePage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await lockedMobilePage.waitForSelector("canvas");
   const lockedMobileToolbar = lockedMobilePage.locator(".operation-panel-desktop");
   await lockedMobileToolbar.waitFor();
@@ -1995,7 +2000,7 @@ async function verifyOperationControls(browser) {
   const lockedMobileLandscapePage = await lockedMobileLandscapeContext.newPage();
   await seedCompletedOnboarding(lockedMobileLandscapePage, { aiUnlocked: false });
   await seedSingleChildNotebook(lockedMobileLandscapePage);
-  await lockedMobileLandscapePage.goto(baseUrl, { waitUntil: "networkidle" });
+  await lockedMobileLandscapePage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await lockedMobileLandscapePage.waitForSelector("canvas");
   await lockedMobileLandscapePage.locator("canvas").tap({ position: { x: 24, y: 180 } });
   await lockedMobileLandscapePage.getByRole("tab", { name: "Operation" }).waitFor();
@@ -2026,7 +2031,7 @@ async function verifyEditorTitleAndKeyboardCreateFocus(browser) {
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   const desktopToolbar = page.locator(".operation-panel-desktop");
   await desktopToolbar.waitFor();
@@ -2080,7 +2085,7 @@ async function verifyCommandDockAndMobileTextTap(browser) {
   const page = await mobileContext.newPage();
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.waitForSelector('.space-title-preview[data-node-id="verify-child"]', { state: "visible" });
   await page.waitForTimeout(700);
@@ -2147,7 +2152,7 @@ async function verifyCommandDockAndMobileTextTap(browser) {
   const desktopPage = await desktopContext.newPage();
   await seedCompletedOnboarding(desktopPage);
   await seedSingleChildNotebook(desktopPage);
-  await desktopPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await desktopPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await desktopPage.waitForSelector('textarea.space-title-editor[data-node-id="verify-child"]', { state: "visible" });
   await desktopPage.keyboard.press("ArrowDown");
   await desktopPage.waitForTimeout(700);
@@ -2249,7 +2254,7 @@ async function verifyProviderUsagePanel(browser) {
       }),
     });
   });
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   const panel = page.getByLabel("AI provider usage");
   await panel.waitFor();
@@ -2280,7 +2285,7 @@ async function verifyProviderUsagePanel(browser) {
   const filteredMetricCount = await page.locator(".provider-usage-metric").count();
   if (filteredMetricCount !== 3) throw new Error(`Provider usage metric selection did not filter rows: ${filteredMetricCount}`);
 
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByLabel("AI provider usage").waitFor();
   await page.getByRole("button", { name: "All", exact: true }).click();
   const persistedMetricCount = await page.locator(".provider-usage-metric").count();
@@ -2310,7 +2315,7 @@ async function verifyIosTouchSuppression(browser) {
       "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
   });
   const page = await context.newPage();
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.locator(".tutorial-skip-button").waitFor();
   const styles = await page.evaluate(() => {
@@ -2354,7 +2359,7 @@ async function verifyMobileEditorKeyboardOverlay(browser) {
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.waitForSelector('.space-title-preview[data-node-id="verify-child"]', { state: "visible" });
   await page.tap('.space-title-preview[data-node-id="verify-child"]');
@@ -2552,7 +2557,7 @@ async function verifyCameraScopedRendering(browser) {
   await seedCompletedOnboarding(page);
   const priorityNodeId = "bulk-child-19-17";
   await seedLargeNotebook(page, childCount, "phyllotaxis", priorityNodeId);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.waitForTimeout(1600);
   const desktopCounts = await readBulkLabelCounts(page);
@@ -2574,7 +2579,7 @@ async function verifyCameraScopedRendering(browser) {
   const rootPriorityPage = await rootPriorityContext.newPage();
   await seedCompletedOnboarding(rootPriorityPage);
   const rootSiblingIds = await seedRootPriorityNotebook(rootPriorityPage);
-  await rootPriorityPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await rootPriorityPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await rootPriorityPage.waitForSelector("canvas");
   await rootPriorityPage.waitForTimeout(1600);
   const rootPriorityCounts = await rootPriorityPage.evaluate((expectedRootSiblingIds) => ({
@@ -2597,7 +2602,7 @@ async function verifyCameraScopedRendering(browser) {
   const mobilePage = await mobileContext.newPage();
   await seedCompletedOnboarding(mobilePage);
   await seedLargeNotebook(mobilePage, childCount, "phyllotaxis");
-  await mobilePage.goto(baseUrl, { waitUntil: "networkidle" });
+  await mobilePage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await mobilePage.waitForSelector("canvas");
   await mobilePage.waitForTimeout(1600);
   const mobileCounts = await readBulkLabelCounts(mobilePage);
@@ -2622,7 +2627,7 @@ async function verifyExternalImports(browser) {
   });
   const page = await context.newPage();
   await seedCompletedOnboarding(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
 
   const samples = [
@@ -2772,7 +2777,7 @@ async function verifyVoiceLogDialog(browser) {
     );
     window.localStorage.setItem("mind-atlas-voice-log-last-seen-v1", "2000-01-01T00:00:00.000Z");
   });
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   const openClawNotification = page.locator(".unread-notification-link.is-voice-log");
   await openClawNotification.waitFor();
@@ -2874,7 +2879,7 @@ async function verifyAgentRecoveryNotification(browser) {
     if (payload?.ids?.includes("verify-agent-recovery")) acknowledged = true;
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ acknowledged: 1 }) });
   });
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   const notification = page.locator(".unread-notification-link.is-voice-log");
   await notification.waitFor();
@@ -2938,7 +2943,7 @@ async function verifyShareFlows(browser) {
   });
   await seedCompletedOnboarding(page);
   await seedSingleChildNotebook(page);
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
   await page.getByLabel("Share atlas image").click();
   await page.waitForFunction(() => Boolean(window.__mindAtlasImageShare));
@@ -2980,7 +2985,7 @@ async function verifyShareFlows(browser) {
 
   const receiver = await context.newPage();
   await seedCompletedOnboarding(receiver);
-  await receiver.goto(sharedUrl, { waitUntil: "networkidle" });
+  await receiver.goto(sharedUrl, { waitUntil: "domcontentloaded" });
   await receiver.getByRole("dialog", { name: "Shared Mind Atlas" }).waitFor();
   await receiver.getByRole("button", { name: "Import shared atlas" }).click();
   await receiver.waitForSelector("textarea.space-title-editor", { state: "visible" });
@@ -3026,7 +3031,7 @@ async function verifyLockedModeGlobalMenu(browser) {
   });
   const page = await context.newPage();
   await seedCompletedOnboarding(page, { aiUnlocked: false });
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("canvas");
 
   await page.getByLabel("Open atlas menu").click();
@@ -3070,7 +3075,7 @@ async function verifyTutorialModeMenuActions(browser) {
   });
   const clickPage = await clickContext.newPage();
   await seedCompletedOnboarding(clickPage, { aiUnlocked: true });
-  await clickPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await clickPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await clickPage.waitForSelector("canvas");
   const originalCount = await addTutorialVerificationChild(clickPage);
   let menu;

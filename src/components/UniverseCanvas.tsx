@@ -60,6 +60,9 @@ import { formatAppMessage } from "../i18n/format";
 import { currentAppLocale } from "../i18n/locales";
 import { isIntrinsicErrorNode } from "../nodeErrorState";
 import { SpatialLayoutOverlay } from "./SpatialLayoutOverlay";
+import { KnowledgeScene } from './galaxy/KnowledgeScene';
+import { KnowledgeNativeGroup, KnowledgeDarkness, knowledgePresence } from './galaxy/knowledgePresence';
+import { KNOWLEDGE_CAMERA_HANDOFF, useKnowledgeRuntime } from '../galaxy/knowledgeRuntime';
 
 const FOCUS_DURATION_SECONDS = 1.05;
 const FOCUS_PITCH_LIMIT = Math.PI / 2 - 0.04;
@@ -460,6 +463,7 @@ export function UniverseCanvas({
   onRuntimeResume?: () => void;
 }) {
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeContextMenuState | null>(null);
+  const knowledgeOpen = useKnowledgeRuntime(state => state.open);
   const mobilePerformanceMode = useMobilePerformanceMode();
   const lowQuality = renderQuality === "low";
   const canvasDpr = lowQuality ? LOW_QUALITY_CANVAS_DPR : mobilePerformanceMode ? MOBILE_CANVAS_DPR : DESKTOP_CANVAS_DPR;
@@ -475,6 +479,7 @@ export function UniverseCanvas({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (useKnowledgeRuntime.getState().open) return;
       if (event.defaultPrevented || isKeyboardComposing(event) || event.altKey || event.ctrlKey || event.metaKey) return;
 
       if (isSpaceEditorShortcutTarget(event.target)) return;
@@ -586,7 +591,7 @@ export function UniverseCanvas({
         camera={{ position: [0, 0, INITIAL_CAMERA_OFFSET], fov: CAMERA_FOV, near: 0.1, far: 120000 }}
         dpr={canvasDpr}
         gl={canvasGl}
-        frameloop={pageActive ? "always" : "demand"}
+        frameloop={pageActive || knowledgeOpen ? "always" : "demand"}
       >
         <CanvasClearColor theme={theme} />
         <CanvasInteractionRecovery onRuntimeResume={onRuntimeResume} />
@@ -609,8 +614,8 @@ export function UniverseCanvas({
           embedInteractionLocked={embedInteractionLocked}
           boardGameMode={boardGameMode}
         />
-        <SpatialOverlayLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} boardGameMode={boardGameMode} />
-        <NotebookNodes
+        {!knowledgeOpen && <SpatialOverlayLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} boardGameMode={boardGameMode} />}
+        <KnowledgeNativeGroup><NotebookNodes
           theme={theme}
           renderQuality={renderQuality}
           layoutMode={layoutMode}
@@ -619,8 +624,10 @@ export function UniverseCanvas({
           attachmentsEnabled={attachmentsEnabled}
           boardGameMode={boardGameMode}
           onOpenNodeContextMenu={setNodeContextMenu}
-        />
-        <NotificationPulseLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} pageActive={pageActive} boardGameMode={boardGameMode} />
+        /></KnowledgeNativeGroup>
+        {!knowledgeOpen && <NotificationPulseLayer theme={theme} renderQuality={renderQuality} layoutMode={layoutMode} pageActive={pageActive} boardGameMode={boardGameMode} />}
+        <KnowledgeScene layoutMode={layoutMode} theme={theme} lowQuality={lowQuality} />
+        <KnowledgeDarkness theme={theme} />
       </Canvas>
       <NodeContextMenu menu={nodeContextMenu} onClose={() => setNodeContextMenu(null)} />
     </section>
@@ -1061,6 +1068,18 @@ function NavigationController({
   const cameraPosePersistedAtRef = useRef(0);
   const initialCameraPoseRef = useRef(initialCameraPose);
   const spaceRaycast = useMemo(() => createConditionalMeshRaycast(shouldSkipSpaceRaycast), []);
+  useEffect(() => {
+    const adopt = (event: Event) => {
+      const detail = (event as CustomEvent<{ position: number[]; direction: number[] }>).detail;
+      if (!Array.isArray(detail?.position) || !Array.isArray(detail.direction) || detail.position.length !== 3 || detail.direction.length !== 3 || ![...detail.position, ...detail.direction].every(Number.isFinite)) return;
+      const angles = directionToYawPitch(new Vector3(...detail.direction));
+      yawPitchRef.current = { yaw: angles.yaw, pitch: angles.pitch, offset: 0, panX: detail.position[0], panY: detail.position[1], panZ: detail.position[2] };
+      transitionRef.current = null;
+      lastFocusPlanRef.current = null;
+    };
+    window.addEventListener(KNOWLEDGE_CAMERA_HANDOFF, adopt);
+    return () => window.removeEventListener(KNOWLEDGE_CAMERA_HANDOFF, adopt);
+  }, []);
   const transitionRef = useRef<{
     startYaw: number;
     startPitch: number;
@@ -1142,6 +1161,7 @@ function NavigationController({
   }, [gl.domElement]);
 
   useEffect(() => {
+    if (!pageActive) return;
     const element = gl.domElement;
     const handleDomWheel = (event: WheelEvent) => {
       if (event.target instanceof HTMLElement && event.target.closest("textarea, input, select")) return;
@@ -1258,7 +1278,7 @@ function NavigationController({
   });
 
   useEffect(() => {
-    if (!focusRequest) return;
+    if (!focusRequest || !pageActive) return;
     const layoutViewport = getGeneratedLayoutViewport(layoutMode, stableLayoutMetrics.width, stableLayoutMetrics.height, keyboardPortraitLock);
     const generatedLayoutActive = layoutMode !== "phyllotaxis";
     const mobileGeneratedLayout = generatedLayoutActive && layoutViewport !== "desktop";
@@ -1383,6 +1403,7 @@ function NavigationController({
     atlasRoot,
     boardGameMode,
     focusRequest,
+    pageActive,
     gl,
     keyboardPortraitLock,
     layoutMode,
@@ -1961,7 +1982,7 @@ function NavigationController({
 
   return (
     <>
-      <mesh
+      {pageActive && <mesh
         raycast={spaceRaycast}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -1970,7 +1991,7 @@ function NavigationController({
       >
         <sphereGeometry args={[INPUT_EVENT_SPHERE_RADIUS, inputSphereSegments[0], inputSphereSegments[1]]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} side={BackSide} />
-      </mesh>
+      </mesh>}
       {birthEffect ? <WhiteHoleEffect key={birthEffect.id} effect={birthEffect} theme={theme} /> : null}
     </>
   );
@@ -5546,6 +5567,8 @@ function BackgroundStarLayer({ theme }: { theme: AtlasTheme }) {
   const backgroundScene = useMemo(() => new Scene(), []);
   const backgroundCamera = useMemo(() => new OrthographicCamera(), []);
   const backgroundColor = useMemo(() => new Color(getUniverseThemeColors(theme).background), [theme]);
+  const galaxyBackgroundColor = useMemo(() => new Color('#030609'), []);
+  const blendedBackgroundColor = useRef(new Color());
   const { gl, scene, camera, size } = useThree();
 
   useEffect(() => {
@@ -5562,7 +5585,7 @@ function BackgroundStarLayer({ theme }: { theme: AtlasTheme }) {
 
   useFrame(() => {
     gl.autoClear = true;
-    gl.setClearColor(backgroundColor, 1);
+    gl.setClearColor(blendedBackgroundColor.current.copy(backgroundColor).lerp(galaxyBackgroundColor, knowledgePresence.blend), 1);
     gl.render(backgroundScene, backgroundCamera);
     gl.autoClear = false;
     gl.clearDepth();

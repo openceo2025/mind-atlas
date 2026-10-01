@@ -10,6 +10,8 @@
 import { create } from "zustand";
 import { formatAppMessage } from "../i18n/format";
 import type { AtlasNode } from "../types";
+import type { KnowledgeRelation } from './knowledgeGraph';
+import { remapKnowledgeRelations } from './knowledgeGraph';
 import { createBlankNotebookRoot, useAtlasStore, waitForNotebookSavesToSettle } from "../store/atlasStore";
 import type { LedgerDraft } from "./galaxyQuickEntry";
 import {
@@ -36,6 +38,8 @@ import {
 export type GalaxyStatus = "idle" | "loading" | "ready" | "error" | "unavailable";
 
 interface GalaxyStore {
+  setKnowledgeRelations: (relations: KnowledgeRelation[]) => void;
+  setKnowledgeAuto: (auto: boolean) => void;
   status: GalaxyStatus;
   error: string;
   galaxy: GalaxyState | null;
@@ -165,6 +169,8 @@ export const useGalaxyStore = create<GalaxyStore>((set, get) => {
 
   return {
     status: "idle",
+    setKnowledgeRelations: (relations) => mutate(current => ({ ...current, knowledgeRelations: relations })),
+    setKnowledgeAuto: (auto) => mutate(current => ({ ...current, knowledgeAuto: auto })),
     error: "",
     galaxy: null,
     inactiveRoots: {},
@@ -405,6 +411,7 @@ export const useGalaxyStore = create<GalaxyStore>((set, get) => {
           ...addedSpaces.map((space) => ({ ...space, dependsOn: space.dependsOn.map(remap) })),
         ],
         ledger: [...current.ledger, ...addedEntries],
+        knowledgeRelations: [...(current.knowledgeRelations ?? []), ...remapKnowledgeRelations(file.galaxy.knowledgeRelations, remap)],
       }));
       return { spaces: addedSpaces.length, entries: addedEntries.length };
     },

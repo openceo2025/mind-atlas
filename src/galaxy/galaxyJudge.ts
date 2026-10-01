@@ -77,7 +77,7 @@ export function localJudgeAvailability(status: LocalJudgeStatus | null, backend:
   return status.jev.configured ? { available: true, backend: "jev-local", model: status.jev.model } : { available: false, reason: "jev_key_missing" };
 }
 
-async function requestLocalDecision(backend: JudgeBackend, llamaUrl: string, payload: { purpose: string; state: string; questions: Record<string, DecisionQuestion> }) {
+export async function requestLocalDecision(backend: JudgeBackend, llamaUrl: string, payload: { purpose: string; state: string; questions: Record<string, DecisionQuestion> }) {
   const response = await fetch(`${getBridgeUrl()}/api/galaxy/judge`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
