@@ -93,6 +93,12 @@ trees and does not replace browser notebooks or call an AI provider.
 - The broad UI harness waits for DOM and explicit UI readiness, rather than
   `networkidle`: durable agent SSE streams legitimately remain connected.
   Persistence fixtures seed a blank same-origin page before mounting React.
+- The full `verify:ui` suite passed on the isolated release checkout against
+  the running local bridge, including native focus, persistence, touch, agent
+  supervision and camera-scoped rendering. Layout and i18n checks passed.
+- The hosted production build also passed desktop/mobile galaxy interaction
+  checks with fresh, private fixture notebooks. Signed-out AI maintenance was
+  disabled and no classification requests were sent.
 
 Release uses the ConoHa workflow: the exact pushed commit is built on the VPS,
 with backup/rollback, service health and deployed/public asset hash checks.
