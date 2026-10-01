@@ -1737,6 +1737,7 @@ async function verifyPhyllotaxisFocusOffset(browser) {
     await seedGeneratedLayoutNotebook(page, "phyllotaxis");
     await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("canvas");
+    await page.waitForSelector('[data-node-id="layout-alpha"]');
     await page.keyboard.press("ArrowUp");
     await page.waitForTimeout(1800);
     const coverage = await readGeneratedLayoutCoverage(page, viewportCase.name, "phyllotaxis");
