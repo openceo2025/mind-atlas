@@ -1,5 +1,6 @@
 import { chromium, expect } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
+const baseUrl=process.env.MIND_ATLAS_URL??'http://127.0.0.1:5173';
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const dir = 'artifacts/screenshots/knowledge';
 await mkdir(dir, { recursive: true });
@@ -27,7 +28,7 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
  localStorage.setItem('mind-atlas-onboarding-v1',JSON.stringify({version:1,firstRun:false,rootNodeCreated:true,nodeEditorOpened:true,nodeEditCompleted:true,nodeCountReached:true,pan:true,zoom:true,nodeDrag:true,childNodeCreated:true,spaceBasicsCompleted:true,basicCompleted:true,aiUnlocked:true,titlePromptApplied:true,startedAt:now,completedAt:now}));
  },{root:roots[0],now});
  await page.route('**/knowledge-fixture-seed', route => route.fulfill({ contentType: 'text/html', body: '<html><body>Fixture seed</body></html>' }));
- await page.goto('http://127.0.0.1:5173/knowledge-fixture-seed');
+ await page.goto(`${baseUrl}/knowledge-fixture-seed`);
  await page.evaluate(async ({roots,now}) => {
   const db = await new Promise((resolve,reject) => { const req = indexedDB.open('mind-atlas-galaxy',1); req.onupgradeneeded=()=>{ const db=req.result; db.createObjectStore('meta',{keyPath:'key'}); db.createObjectStore('spaces',{keyPath:'spaceId'}); db.createObjectStore('history',{keyPath:'id'}); }; req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error); });
   const spaces=roots.map((r,i)=>({id:r.title,title:r.title,color:r.color,decision:'undecided',dependsOn:i===1?[roots[0].title]:[],createdAt:now,updatedAt:now}));
@@ -36,7 +37,7 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
   for(const r of roots.slice(1)) tx.objectStore('spaces').put({spaceId:r.title,root:r,updatedAt:now});
   await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);}); db.close();
  }, {roots,now});
- await page.goto('http://127.0.0.1:5173/?locale=ja');
+ await page.goto(`${baseUrl}/?locale=ja`);
  await page.waitForSelector('.galaxy-open-button');
  await page.waitForTimeout(900);
  const count=await page.locator('canvas').count();
@@ -106,7 +107,7 @@ const previewContext=await browser.newContext({viewport:{width:1440,height:960}}
 const preview=await previewContext.newPage();
 let sampleAiCalls=0;
 await preview.route(/\/api\/(galaxy\/judge|ai\/decide)(?:\?.*)?$/,route=>{sampleAiCalls++;return route.abort();});
-await preview.goto('http://127.0.0.1:5173/?aboutDemo=research&knowledgeDemo=1&locale=ja');
+await preview.goto(`${baseUrl}/?aboutDemo=research&knowledgeDemo=1&locale=ja`);
 await expect(preview.locator('.knowledge-spaces button')).toHaveCount(3);
 await preview.waitForTimeout(2500);
 await preview.screenshot({path:`${dir}/local-preview.png`});
