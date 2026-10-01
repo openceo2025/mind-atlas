@@ -1702,7 +1702,7 @@ async function verifyMobileGeneratedLayoutVisibility(browser) {
       await seedGeneratedLayoutNotebook(page, layoutMode);
       await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
       await page.waitForSelector("canvas");
-      await page.waitForSelector('textarea.space-title-editor[data-node-id="layout-alpha"]');
+      await page.waitForSelector('[data-node-id="layout-alpha"]');
       await page.keyboard.press("ArrowDown");
       await page.waitForTimeout(1800);
       const coverage = await readGeneratedLayoutCoverage(page, viewportCase.name, layoutMode);
