@@ -28,7 +28,7 @@ export function KnowledgePanel({ views, onEnter, onManagement }: { views: SpaceV
   const level = useKnowledgeRuntime(s => s.level);
   const map = useKnowledgeRuntime(s => s.map);
   const [showProjection, setShowProjection] = useState(false);
-  const mobile = typeof window !== 'undefined' && window.innerWidth < 700;
+  const compact = typeof window !== 'undefined' && (window.innerWidth < 700 || window.innerHeight < 520);
   const projection = useMemo(() => projectKnowledge(graph, query, lens), [graph, query, lens]);
   const byKey = useMemo(() => new Map(graph.nodes.map(n => [n.key, n])), [graph]);
   const selected = selectedKey ? byKey.get(selectedKey) : undefined;
@@ -123,7 +123,7 @@ export function KnowledgePanel({ views, onEnter, onManagement }: { views: SpaceV
       <span className="knowledge-gesture-hint">{m.zoom}</span>
     </footer>
     <div className="knowledge-navigator" data-kg-chrome>
-      <KnowledgeMinimap label={m.minimap} width={mobile ? 120 : 196} height={mobile ? 80 : 128} />
+      <KnowledgeMinimap label={m.minimap} width={compact ? 120 : 196} height={compact ? 80 : 128} />
       <div className="knowledge-zoom">
         <button type="button" aria-label={m.closer} title={m.closer} onClick={() => sendKnowledgeCamera({ kind: 'zoom', factor: .6 })}><Plus size={16} /></button>
         <button type="button" aria-label={m.farther} title={m.farther} onClick={() => sendKnowledgeCamera({ kind: 'zoom', factor: 1.65 })}><Minus size={16} /></button>

@@ -66,11 +66,13 @@ export function knowledgeInsets(width: number, height: number, panelOpen: boolea
     return { left: 14, right: 14, top: 196, bottom: panelOpen ? Math.round(height * .44) : 96 };
   }
   const narrow = width < 1100;
+  // A phone on its side: the compact chrome leaves the bottom of the screen free.
+  const short = height < 520;
   return {
     left: narrow ? 190 : 236,
     right: panelOpen ? (narrow ? 330 : 386) : 36,
-    top: 128,
-    bottom: 96,
+    top: short ? 112 : 128,
+    bottom: short ? 22 : 96,
   };
 }
 

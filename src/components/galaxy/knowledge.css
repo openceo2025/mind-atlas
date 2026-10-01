@@ -208,6 +208,7 @@
   padding: 2px 4px; border: 0; border-radius: 5px; background: transparent; color: #d3e1ec; white-space: nowrap;
   font: 500 11.5px/1.3 Inter, "Noto Sans JP", "Hiragino Sans", "Segoe UI", system-ui, sans-serif;
   text-shadow: 0 1px 3px #02050a, 0 0 10px #02050a, 0 0 18px #02050a; transition: opacity .26s ease; will-change: transform, opacity;
+  touch-action: none; -webkit-tap-highlight-color: transparent;
 }
 .kg-label:hover, .kg-label.is-hovered { color: #fff; background: rgba(8, 18, 30, .7); }
 .kg-label.is-selected { color: #fff; background: rgba(10, 26, 40, .82); box-shadow: 0 0 0 1px rgba(181, 220, 247, .4); }
@@ -246,6 +247,26 @@
   .knowledge-spaces, .knowledge-ladder { width: 152px; }
   .knowledge-lenses, .knowledge-projection { left: 190px; }
   .knowledge-detail { width: 292px; }
+  .knowledge-bottom { display: none; }
+}
+
+/* A phone on its side: keep the header, shrink everything that eats height. */
+@media (min-width: 700px) and (max-height: 519px) {
+  .knowledge-overlay .galaxy-top { height: 52px; padding: 7px 14px; }
+  .knowledge-heading { top: 6px; }
+  .knowledge-search { height: 38px; }
+  .knowledge-lenses { top: 62px; }
+  .knowledge-lenses button { padding: 5px 10px; font-size: 10.5px; }
+  .knowledge-spaces { top: 62px; max-height: calc(100vh - 62px - 64px); }
+  .knowledge-spaces button { padding: 7px 8px; }
+  .knowledge-spaces small, .knowledge-space-progress { display: none; }
+  .knowledge-ladder { bottom: 10px; padding: 7px 10px; }
+  .knowledge-ladder ol, .knowledge-ring-legend { display: none; }
+  .knowledge-ring-control { padding-top: 0; border-top: 0; }
+  .knowledge-navigator { bottom: 10px; right: 12px; }
+  .knowledge-zoom { flex-direction: row; }
+  .knowledge-zoom button + button { border-top: 0; border-left: 1px solid var(--k-line); }
+  .knowledge-detail { top: 62px; max-height: calc(100vh - 62px - 106px); }
   .knowledge-bottom { display: none; }
 }
 

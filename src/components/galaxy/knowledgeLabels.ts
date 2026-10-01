@@ -77,12 +77,19 @@ export class KnowledgeLabels {
   private onPick: (key: string, double: boolean) => void;
   private onHover: (key: string | null) => void;
   private forwardWheel: (event: WheelEvent) => void;
+  private forwardPointer: (event: PointerEvent) => void;
 
-  constructor(container: HTMLElement, onPick: (key: string, double: boolean) => void, onHover: (key: string | null) => void, forwardWheel: (event: WheelEvent) => void) {
+  /**
+   * Labels sit above the canvas, so the map's own gestures never see them:
+   * wheel and pointer-down are handed to the map, which lets a drag that starts
+   * on a name pan the map while a plain tap still selects the note.
+   */
+  constructor(container: HTMLElement, onPick: (key: string, double: boolean) => void, onHover: (key: string | null) => void, forwardWheel: (event: WheelEvent) => void, forwardPointer: (event: PointerEvent) => void) {
     this.container = container;
     this.onPick = onPick;
     this.onHover = onHover;
     this.forwardWheel = forwardWheel;
+    this.forwardPointer = forwardPointer;
   }
 
   private width(text: string, tier: number) {
@@ -110,6 +117,7 @@ export class KnowledgeLabels {
       element.addEventListener('pointerenter', () => this.onHover(key));
       element.addEventListener('pointerleave', () => this.onHover(null));
       element.addEventListener('wheel', event => { event.preventDefault(); this.forwardWheel(event); }, { passive: false });
+      element.addEventListener('pointerdown', event => this.forwardPointer(event));
       this.container.appendChild(element);
       pooled = { element, signature: '', visible: false, hideAt: 0 };
       this.pool.set(key, pooled);

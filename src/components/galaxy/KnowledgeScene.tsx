@@ -177,11 +177,39 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
 
   const view = () => ({ width: size.width, height: size.height, fov: perspective.fov });
   const panelOpen = () => Boolean(live.current.selected || live.current.projectionActive);
+  /**
+   * The free part of the screen. On a phone the controls above and below the
+   * map change height with fonts, safe areas and wrapping, so they are measured;
+   * the desktop layout is fixed and uses the numbers from knowledge.css.
+   */
+  const insetsNow = (panel: boolean) => {
+    const base = knowledgeInsets(size.width, size.height, panel);
+    if (size.width >= 700 || typeof document === 'undefined') return base;
+    const canvasRect = gl.domElement.getBoundingClientRect();
+    const rects = (selectors: string[]) => selectors
+      .map(selector => document.querySelector<HTMLElement>(selector)?.getBoundingClientRect())
+      .filter((rect): rect is DOMRect => Boolean(rect && rect.width && rect.height));
+    const above = rects(['.knowledge-overlay .galaxy-top', '.knowledge-heading', '.knowledge-lenses', '.knowledge-spaces']);
+    const below = rects(panel ? ['.knowledge-detail'] : ['.knowledge-navigator', '.knowledge-ladder']);
+    return {
+      ...base,
+      top: above.length ? Math.max(...above.map(rect => rect.bottom - canvasRect.top)) + 14 : base.top,
+      bottom: below.length ? Math.max(60, canvasRect.bottom - Math.min(...below.map(rect => rect.top)) + 12) : base.bottom,
+    };
+  };
   const homePose = () => {
     const current = live.current.map;
     if (!current) return { target: [0, 0] as Vec2, distance: 5000 };
-    return frameBounds(current.bounds, view(), knowledgeInsets(size.width, size.height, panelOpen()), size.width < 700 ? 1.06 : 1.1);
+    return frameBounds(current.bounds, view(), insetsNow(panelOpen()), size.width < 700 ? 1.14 : 1.1);
   };
+  /**
+   * Until the person moves the map, the camera keeps the whole galaxy framed:
+   * the notes index and the inactive spaces can still be arriving when the
+   * telescope is tapped (typical right after a phone loads the page), and the
+   * screen can change size or orientation.
+   */
+  const autoFit = useRef(true);
+  const fitCheckedAt = useRef(0);
   const distanceLimits = () => {
     const current = live.current.map;
     const unit = current?.unit ?? 200;
@@ -190,7 +218,7 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
   const worldPerPixel = (distance: number) => (2 * distance * Math.tan((perspective.fov * Math.PI) / 360)) / Math.max(1, size.height);
   /** Shift a target so the subject sits in the middle of the free part of the screen. */
   const centred = (subject: Vec2, distance: number, avoidPanel: boolean): Vec2 => {
-    const insets = knowledgeInsets(size.width, size.height, avoidPanel && panelOpen());
+    const insets = insetsNow(avoidPanel && panelOpen());
     const wpp = worldPerPixel(distance);
     const offsetX = (insets.left - insets.right) / 2, offsetY = (insets.top - insets.bottom) / 2;
     return [subject[0] - offsetX * wpp, subject[1] + offsetY * wpp];
@@ -238,7 +266,7 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
     if (!current || !p) return;
     const node = live.current.data?.nodes[live.current.data.index.get(key) ?? -1];
     const resolved = level === 'keep' ? 'keep' : level;
-    const insets = knowledgeInsets(size.width, size.height, true);
+    const insets = insetsNow(true);
     if (resolved === 'space' || resolved === 'branch') {
       const cluster = node && resolved === 'space' ? current.clusters.get(node.spaceId) : null;
       const bounds = cluster
@@ -271,6 +299,7 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
       if (along > 40) pivot = along;
     }
     saved.current = { position: camera.position.clone(), quaternion: camera.quaternion.clone(), pivot };
+    autoFit.current = true;
     knowledgeFrame.flatten = 0;
     knowledgePresence.blend = 0;
     const home = homePose();
@@ -298,8 +327,12 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exiting]);
 
+  // Selecting a note opens the panel; the view stays where the person put it.
+  useEffect(() => { if (selected) autoFit.current = false; }, [selected]);
+
   useEffect(() => {
     if (!open || !focusRequest || motion.current?.kind === 'enter' || motion.current?.kind === 'exit') return;
+    autoFit.current = false;
     focusOn(focusRequest.key, focusRequest.level);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest]);
@@ -330,7 +363,9 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
     }
     return best;
   };
+  const draggedAt = useRef(0);
   const select = (key: string, zoom: boolean) => {
+    if (performance.now() - draggedAt.current < 300) return;
     const depth = live.current.data?.nodes[live.current.data.index.get(key) ?? -1]?.depth ?? 2;
     if (zoom) focusKnowledge(key, depth === 0 ? 'space' : depth === 1 ? 'branch' : 'note');
     else useKnowledgeRuntime.setState({ selected: key, anchor: key, relation: null });
@@ -338,6 +373,7 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
 
   // ── Input ───────────────────────────────────────────────────────────────
   const wheelRef = useRef<(event: WheelEvent) => void>(() => undefined);
+  const pointerDownRef = useRef<(event: PointerEvent, capture?: boolean) => void>(() => undefined);
   useEffect(() => {
     if (!open) return;
     // Listen on the shell, not the canvas: the universe's HTML overlays (hidden
@@ -375,6 +411,7 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       if (busy()) return;
+      autoFit.current = false;
       let delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1);
       if (event.ctrlKey) delta *= 2.4; // trackpad pinch
       delta = Math.max(-240, Math.min(240, delta));
@@ -384,9 +421,11 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
     wheelRef.current = onWheel;
     let hoverFrame = 0;
     let hoverEvent: PointerEvent | null = null;
-    const onPointerDown = (event: PointerEvent) => {
+    const onPointerDown = (event: PointerEvent, capture = true) => {
       if (busy()) return;
-      element.setPointerCapture?.(event.pointerId);
+      autoFit.current = false;
+      // A press handed over from a label is not captured, so a tap still clicks it.
+      if (capture) element.setPointerCapture?.(event.pointerId);
       s.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (motion.current?.kind === 'fly') { s.goal = { target: [s.target[0], s.target[1]], distance: s.distance }; motion.current = null; }
       s.velocity = [0, 0];
@@ -445,7 +484,8 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
       if (!drag || drag.id !== event.pointerId) return;
       s.drag = null;
       if (performance.now() - drag.time > 90) s.velocity = [0, 0];
-      if (drag.moved) return;
+      if (drag.moved) { draggedAt.current = performance.now(); return; }
+      if (event.target instanceof Element && event.target.closest('.kg-label')) return; // the label's click selects
       s.velocity = [0, 0];
       if (event.button !== 0 && event.pointerType === 'mouse') return;
       const p = local(event.clientX, event.clientY);
@@ -455,6 +495,7 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
     };
     const onDoubleClick = (event: MouseEvent) => {
       if (busy()) return;
+      autoFit.current = false;
       const p = local(event.clientX, event.clientY);
       const hit = pick(p.x, p.y);
       if (hit >= 0) { select(live.current.data!.nodes[hit].key, true); return; }
@@ -463,7 +504,9 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
     const onContextMenu = (event: MouseEvent) => event.preventDefault();
     const onLeave = () => { if (useKnowledgeRuntime.getState().hovered) useKnowledgeRuntime.setState({ hovered: null }); };
     element.addEventListener('wheel', onWheel, { passive: false });
-    element.addEventListener('pointerdown', onPointerDown);
+    pointerDownRef.current = onPointerDown;
+    const onShellPointerDown = (event: PointerEvent) => onPointerDown(event);
+    element.addEventListener('pointerdown', onShellPointerDown);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
@@ -475,7 +518,7 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
     element.style.cursor = 'grab';
     return () => {
       element.removeEventListener('wheel', onWheel);
-      element.removeEventListener('pointerdown', onPointerDown);
+      element.removeEventListener('pointerdown', onShellPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerUp);
@@ -496,7 +539,7 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
     if (!labelLayer || !open) return;
     labels.current = new KnowledgeLabels(labelLayer, (key, double) => select(key, double), key => {
       if (useKnowledgeRuntime.getState().hovered !== key) useKnowledgeRuntime.setState({ hovered: key });
-    }, event => wheelRef.current(event));
+    }, event => wheelRef.current(event), event => pointerDownRef.current(event, false));
     return () => { labels.current?.dispose(); labels.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labelLayer, open]);
@@ -513,6 +556,7 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
     const now = performance.now();
     for (const command of takeKnowledgeCameraCommands()) {
       if (motion.current && motion.current.kind !== 'fly') continue;
+      autoFit.current = command.kind === 'home';
       if (command.kind === 'fly') flyTo(command.target, command.distance, command.avoidPanel ?? false, command.duration);
       if (command.kind === 'zoom') {
         motion.current = null;
@@ -520,6 +564,10 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
         s.goal.distance = Math.min(max, Math.max(min, s.goal.distance * command.factor));
       }
       if (command.kind === 'home') { const home = homePose(); flyTo(home.target, home.distance, false, 1100); rig.current.goal.target = [...home.target]; }
+    }
+    if (autoFit.current && !useKnowledgeRuntime.getState().exiting && now - fitCheckedAt.current > 160) {
+      fitCheckedAt.current = now;
+      keepFitted(now);
     }
     const m = motion.current;
     if (m) {
@@ -610,6 +658,31 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
       marked, relationMarks, chrome: chrome.current.rects, fade: smooth(.35, .9, knowledgePresence.blend), now,
     });
   });
+
+  /** Re-frame the whole galaxy if the map or the screen changed. */
+  const keepFitted = (now: number) => {
+    const s = rig.current;
+    const home = homePose();
+    const m = motion.current;
+    const differs = (target: { x: number; y: number }, distance: number) =>
+      Math.abs(Math.log(distance / home.distance)) > .01 || Math.hypot(target.x - home.target[0], target.y - home.target[1]) > home.distance * .01;
+    if (!m) {
+      if (differs({ x: s.goal.target[0], y: s.goal.target[1] }, s.goal.distance)) s.goal = { target: [...home.target], distance: home.distance };
+      return;
+    }
+    if (m.kind !== 'enter' || !differs(m.to.target, m.to.distance)) return;
+    // Retarget the entry flight without a jump: keep the current pose and solve
+    // for the start that leads from it to the new destination.
+    const e = easeHandoff(Math.min(1, (now - m.start) / m.duration));
+    if (e > .8) return; // close to landing: the free glide below finishes the job
+    const target = new Vector3().lerpVectors(m.from.target, m.to.target, e);
+    const logDistance = Math.log(m.from.distance) + (Math.log(m.to.distance) - Math.log(m.from.distance)) * e;
+    const nextTarget = new Vector3(home.target[0], home.target[1], 0);
+    m.from.target = target.clone().addScaledVector(nextTarget, -e).multiplyScalar(1 / (1 - e));
+    m.from.distance = Math.exp((logDistance - e * Math.log(home.distance)) / (1 - e));
+    m.to.target = nextTarget;
+    m.to.distance = home.distance;
+  };
 
   const finishExit = (m: Motion) => {
     const callback = useKnowledgeRuntime.getState().exit;

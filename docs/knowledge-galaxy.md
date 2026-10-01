@@ -26,7 +26,17 @@ The map camera always faces the galaxy plane (no inherited tilt). Drag glides
 with inertia, the wheel and pinch zoom toward the pointer, double-click zooms
 to a note (or into empty space). Input is taken on the universe shell rather
 than the canvas, because the universe's HTML overlays still sit above the
-canvas while the galaxy is open.
+canvas while the galaxy is open; map labels hand their pointer-down to the map,
+so a drag that starts on a name pans while a tap still selects.
+
+Until the person touches the map, the camera keeps the whole galaxy framed. On
+a phone the telescope is usually tapped before the notes index (750 ms
+debounce) and the inactive spaces have arrived, so the entry flight is
+retargeted without a jump and later changes glide to the new frame; rotating
+the screen re-frames too. Any drag, wheel, pinch, selection or focus request
+hands control to the person, and the overview button hands it back. On phones
+the free area is measured from the real controls above and below the map; a
+phone on its side gets a compact layout.
 
 ## The map
 
@@ -110,6 +120,7 @@ http://127.0.0.1:5173/?aboutDemo=research&knowledgeDemo=1&locale=ja
   overview fits the free area).
 - `node scripts/verify-knowledge-ui.mjs`: desktop and phone, single universe
   canvas, in-place dissolve, head-on camera, wheel zoom toward the pointer,
+  the phone overview framed even when the telescope is tapped right after load,
   map labels with progress bars, minimap, level ladder, ring toggle, cascade
   navigation, relation evidence, question projection, return, cross-space entry
   and background classification with a mocked judge.

@@ -39,7 +39,9 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
  }, {roots,now});
  await page.goto(`${baseUrl}/?locale=ja`);
  await page.waitForSelector('.galaxy-open-button');
- await page.waitForTimeout(900);
+ // Phones tap the telescope before the notes index has finished building; the
+ // overview must still end up framed.
+ await page.waitForTimeout(name==='mobile'?150:900);
  const count=await page.locator('.universe-shell canvas').count();
  await page.locator('.galaxy-open-button').click();
  await expect(page.locator('.knowledge-overlay')).toBeVisible();
@@ -57,6 +59,9 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
  await expect(page.locator('.kg-label .kg-bars').first()).toBeVisible();
  await expect(page.locator('.knowledge-minimap')).toBeVisible();
  await expect(page.locator('.knowledge-ladder [aria-current="step"]')).toHaveCount(1);
+ const fit=await page.evaluate(()=>{const b=[...document.querySelectorAll('.kg-label.t0')].filter(e=>getComputedStyle(e).display!=='none'&&Number(e.style.opacity)>.1).map(e=>e.getBoundingClientRect());return {count:b.length,left:Math.min(...b.map(r=>r.left)),right:Math.max(...b.map(r=>r.right)),bottom:Math.max(...b.map(r=>r.bottom)),width:innerWidth,height:innerHeight};});
+ expect(fit.count).toBe(3);
+ expect(fit.left).toBeGreaterThanOrEqual(0);expect(fit.right).toBeLessThanOrEqual(fit.width);expect(fit.bottom).toBeLessThanOrEqual(fit.height);
  await page.screenshot({path:`${dir}/${name}-overview.png`});
  if(name==='desktop') {
   const far=Number(await page.locator('.universe-shell').getAttribute('data-knowledge-distance'));
