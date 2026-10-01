@@ -125,7 +125,7 @@
 .knowledge-ring-control span { flex-basis: 100%; font-size: 9px; color: #798c9e; margin-left: 21px; line-height: 1.5; }
 .knowledge-node-metrics { display: flex; gap: 14px; margin-top: 14px; font-size: 10px; color: #8aa0b4; }
 .knowledge-node-metrics b { display: block; margin-top: 4px; color: #dce8f4; font-size: 13px; font-weight: 500; }
-.knowledge-cascade { padding-bottom: 18px; border-bottom: 1px solid #9bbacf26; margin-bottom: 18px; }
+.knowledge-cascade { padding-bottom: 18px; border-bottom: 1px solid #9bbacf26; margin-bottom: 18px; max-height: 42vh; overflow: auto; scrollbar-width: thin; }
 .knowledge-cascade h3 { font-size: 13px; margin: 0 0 10px; color: #d5e7f4; }
 .knowledge-cascade p { font-size: 10px; color: #7f97ab; line-height: 1.7; }
 .knowledge-cascade ol { list-style: none; padding: 0; margin: 0; }

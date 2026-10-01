@@ -118,7 +118,7 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
     const m = motion.current;
     if (m) {
       m.elapsed += Math.min(delta, 0.06);
-      const t = Math.min(1, m.elapsed / (lowQuality || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0.1 : 1.55));
+      const t = Math.min(1, m.elapsed / (window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0.1 : lowQuality ? 1.1 : 1.55));
       const eased = t * t * (3 - 2 * t);
       camera.position.lerpVectors(m.from, m.to, eased);
       const target = new Vector3().lerpVectors(m.targetFrom, m.targetTo, eased);

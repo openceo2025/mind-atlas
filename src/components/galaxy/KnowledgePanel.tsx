@@ -55,11 +55,11 @@ export function KnowledgePanel({ views, onEnter, onManagement }: { views: SpaceV
       })}
     </aside>
     <section className="knowledge-detail" aria-label={m.related}>
-      {(selected || projection.active) && <KnowledgeCascade graph={graph} roots={projection.active?[...projection.seeds]:[runtime.anchor??selected!.key]} edges={projection.active?projection.edges:undefined} onFocus={key=>focus(key,950,true)} locale={locale}/>}
       {inspected&&<article className="knowledge-relation-detail"><header><small>{m.relationDetail}</small><button type="button" aria-label={m.close} onClick={()=>useKnowledgeRuntime.setState({relation:null})}><X size={14}/></button></header>
         <strong>{graph.nodes.find(n=>n.key===inspected.from)?.node.title} → {relationLabel(inspected.type,locale)} → {graph.nodes.find(n=>n.key===inspected.to)?.node.title}</strong>
         <small>{m[inspected.source]}{inspected.source==='ai'?` · ${inspected.model} · ${Math.round(inspected.confidence*100)}%`:''}</small><blockquote>{sourceExcerpt(inspected.evidence)}</blockquote>
       </article>}
+      {(selected || projection.active) && <KnowledgeCascade graph={graph} roots={projection.active?[...projection.seeds]:[runtime.anchor??selected!.key]} edges={projection.active?projection.edges:undefined} onFocus={key=>focus(key,950,true)} locale={locale}/>}
       {selected ? <>
         <header><small>{view?.space.title} / {selected.node.nodeType}</small><button type="button" aria-label={m.close} onClick={() => useKnowledgeRuntime.setState({ selected: null })}><X size={17} /></button></header>
         <h2>{selected.node.title}</h2><span className="knowledge-status">{selected.node.status}</span>
