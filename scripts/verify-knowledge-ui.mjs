@@ -40,7 +40,7 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
  await page.goto(`${baseUrl}/?locale=ja`);
  await page.waitForSelector('.galaxy-open-button');
  await page.waitForTimeout(900);
- const count=await page.locator('canvas').count();
+ const count=await page.locator('.universe-shell canvas').count();
  await page.locator('.galaxy-open-button').click();
  await expect(page.locator('.knowledge-overlay')).toBeVisible();
  await expect(page.locator('.knowledge-spaces button')).toHaveCount(3);
@@ -52,18 +52,28 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
  const front=await page.locator('.universe-shell').getAttribute('data-knowledge-direction');
  const direction=front.split(',').map(Number);
  expect(Math.abs(direction[0])).toBeLessThan(.002);expect(Math.abs(direction[1])).toBeLessThan(.002);expect(direction[2]).toBeCloseTo(-1,2);
- expect(await page.locator('canvas').count()).toBe(count);
- await expect(page.locator('.knowledge-map-label').first()).toBeVisible();
+ expect(await page.locator('.universe-shell canvas').count()).toBe(count);
+ await expect(page.locator('.kg-label').first()).toBeVisible();
+ await expect(page.locator('.kg-label .kg-bars').first()).toBeVisible();
+ await expect(page.locator('.knowledge-minimap')).toBeVisible();
+ await expect(page.locator('.knowledge-ladder [aria-current="step"]')).toHaveCount(1);
  await page.screenshot({path:`${dir}/${name}-overview.png`});
  if(name==='desktop') {
-  const label=page.locator('.knowledge-map-label').first();const before=await label.boundingBox();
+  const far=Number(await page.locator('.universe-shell').getAttribute('data-knowledge-distance'));
+  await page.mouse.move(900,500);for(let i=0;i<4;i++){await page.mouse.wheel(0,-240);await page.waitForTimeout(60);}
+  await page.waitForTimeout(900);
+  const near=Number(await page.locator('.universe-shell').getAttribute('data-knowledge-distance'));
+  expect(near).toBeLessThan(far*.6);
+  await page.locator('.knowledge-zoom button').nth(2).click();await page.waitForTimeout(1400);
+  const label=page.locator('.kg-label').first();const before=await label.boundingBox();
   await page.mouse.move(850,760);await page.mouse.down();await page.mouse.move(950,800,{steps:12});await page.mouse.up();await page.waitForTimeout(500);
   const after=await label.boundingBox();expect(Math.hypot(after.x-before.x,after.y-before.y)).toBeGreaterThan(15);
   const orientation=(await page.locator('.universe-shell').getAttribute('data-knowledge-direction')).split(',').map(Number);
   expect(Math.abs(orientation[0])+Math.abs(orientation[1])).toBeLessThan(.004);
  }
- await page.getByLabel('状態リング', {exact:false}).uncheck();
- await page.getByLabel('状態リング', {exact:false}).check();
+ await page.getByLabel('進捗リング', {exact:false}).uncheck();
+ await expect(page.locator('.kg-label .kg-bars:visible')).toHaveCount(0);
+ await page.getByLabel('進捗リング', {exact:false}).check();
  await page.locator('.knowledge-spaces button').first().click();
  await page.waitForTimeout(1500);
  await expect(page.locator('.knowledge-detail h2')).toHaveText(roots[0].title);
@@ -84,7 +94,7 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
  await page.locator('.knowledge-maintenance input').check();
  await page.locator('.knowledge-overlay .galaxy-top > button').click();
  await expect(page.locator('.knowledge-overlay')).toHaveCount(0,{timeout:10000});
- expect(await page.locator('canvas').count()).toBe(count);
+ expect(await page.locator('.universe-shell canvas').count()).toBe(count);
  await expect.poll(async () => page.evaluate(async () => {
   const db = await new Promise(resolve => {const req=indexedDB.open('mind-atlas-galaxy',1);req.onsuccess=()=>resolve(req.result);});
   const result=await new Promise(resolve=>{const tx=db.transaction('meta','readonly');const req=tx.objectStore('meta').get('state');req.onsuccess=()=>resolve(req.result?.state?.knowledgeRelations?.length??0);});db.close();return result>0;
@@ -98,7 +108,7 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
  await page.getByRole('button',{name:'宇宙で開く',exact:true}).click();
  await expect(page.locator('.knowledge-overlay')).toHaveCount(0,{timeout:10000});
  await expect(page.locator('.top-bar input').first()).toHaveValue('プロダクト');
- results.push({name,canvases:count,spaces:3,materialDissolve:blend,frontFacing:front,cascadeNavigation:true,relationEvidence:true,statusRings:true,remoteEntry:true,backgroundClassifier:'fixture only',classifiedBatches,errors});
+ results.push({name,canvases:count,spaces:3,materialDissolve:blend,frontFacing:front,cascadeNavigation:true,relationEvidence:true,progressRings:true,minimap:true,levelLadder:true,remoteEntry:true,backgroundClassifier:'fixture only',classifiedBatches,errors});
  if(errors.length) throw new Error(errors.join('\n'));
  await context.close();
 }

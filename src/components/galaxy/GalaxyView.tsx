@@ -29,11 +29,12 @@ export const CONSTRAINT_ICONS = { human: User, physical: Hammer, external: Link2
 export function GalaxyView({ theme, onClose: finishClose }: GalaxyViewProps) {
   const onClose = () => closeKnowledge(finishClose);
   useEffect(() => {
-    useKnowledgeRuntime.setState({ open: true, exiting: false, selected: null, anchor: null, hovered: null, relation: null, enterKey: null });
-    return () => { useKnowledgeRuntime.setState({ open: false, exiting: false, exit: null }); };
+    useKnowledgeRuntime.setState({ open: true, exiting: false, selected: null, anchor: null, hovered: null, hoveredRelation: null, relation: null, enterKey: null, focus: null });
+    return () => { useKnowledgeRuntime.setState({ open: false, exiting: false, exit: null, labelLayer: null, hovered: null, hoveredRelation: null }); };
   }, []);
   const t = useMessage();
   const { locale } = useMindAtlasLocale();
+  const exiting = useKnowledgeRuntime((state) => state.exiting);
   const status = useGalaxyStore((state) => state.status);
   const error = useGalaxyStore((state) => state.error);
   const galaxy = useGalaxyStore((state) => state.galaxy);
@@ -143,10 +144,11 @@ export function GalaxyView({ theme, onClose: finishClose }: GalaxyViewProps) {
       : t(`galaxy.settings.status.${availability.reason}` as MessageId);
 
   return (
-    <div className="galaxy-overlay knowledge-overlay" data-theme="dark" role="dialog" aria-modal="true" aria-label={t("galaxy.open")}>
+    <div className={`galaxy-overlay knowledge-overlay${exiting ? " is-exiting" : ""}`} data-theme="dark" role="dialog" aria-modal="true" aria-label={t("galaxy.open")}>
+      <div className="knowledge-label-layer" ref={(element) => { if (useKnowledgeRuntime.getState().labelLayer !== element) useKnowledgeRuntime.setState({ labelLayer: element }); }} />
       <KnowledgePanel views={views} onEnter={(spaceId, nodeId) => void enterSpace(spaceId, nodeId)} onManagement={setSelectedId} />
 
-      <header className="galaxy-top">
+      <header className="galaxy-top" data-kg-chrome>
         <button type="button" className="galaxy-button" onClick={onClose}>
           <ArrowLeft size={16} /> {t("galaxy.back")}
         </button>
