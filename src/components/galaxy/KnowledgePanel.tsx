@@ -1,6 +1,7 @@
 import { ArrowDownRight, ChevronRight, Crosshair, Minus, Plus, Search, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { useMindAtlasLocale } from '../../i18n/I18nProvider';
+import { useMindAtlasLocale, useMessage } from '../../i18n/I18nProvider';
+import { getStatusLabel } from '../../utils/status';
 import { knowledgeMessages, relationLabel } from '../../i18n/knowledgeMessages';
 import { isKnowledgeDemo } from '../../galaxy/knowledgeDemo';
 import { projectKnowledge } from '../../galaxy/knowledgeGraph';
@@ -12,6 +13,7 @@ import { knowledgeMetrics } from '../../galaxy/knowledgePresentation';
 
 export function KnowledgePanel({ views, onEnter, onManagement }: { views: SpaceView[]; onEnter: (spaceId: string, nodeId?: string) => void; onManagement: (spaceId: string) => void }) {
   const { locale } = useMindAtlasLocale();
+  const t=useMessage();
   const m = knowledgeMessages[locale.startsWith('ja') ? 'ja' : 'en'];
   const galaxy = useGalaxyStore(s => s.galaxy);
   const runtime = useKnowledgeRuntime();
@@ -62,8 +64,8 @@ export function KnowledgePanel({ views, onEnter, onManagement }: { views: SpaceV
       {(selected || projection.active) && <KnowledgeCascade graph={graph} roots={projection.active?[...projection.seeds]:[runtime.anchor??selected!.key]} edges={projection.active?projection.edges:undefined} onFocus={key=>focus(key,950,true)} locale={locale}/>}
       {selected ? <>
         <header><small>{view?.space.title} / {selected.node.nodeType}</small><button type="button" aria-label={m.close} onClick={() => useKnowledgeRuntime.setState({ selected: null })}><X size={17} /></button></header>
-        <h2>{selected.node.title}</h2><span className="knowledge-status">{selected.node.status}</span>
-        {metric&&<div className="knowledge-node-metrics"><span>{m.done}<b>{metric.done}/{metric.count}</b></span><span>{m.waiting}<b>{metric.blocked}</b></span><span>{m.nodes}<b>{metric.count}</b></span></div>}
+        <h2>{selected.node.title}</h2><span className="knowledge-status">{getStatusLabel(selected.node.status)}</span>
+        {metric&&<div className="knowledge-node-metrics"><span>{m.done}<b>{metric.done}/{metric.count}</b></span><span>{t('label.status.blocked')} / {t('label.status.error')}<b>{metric.blocked}</b></span><span>{m.nodes}<b>{metric.count}</b></span></div>}
         <p className="knowledge-body">{selected.node.summary || selected.node.body || '—'}</p>
         <div className="knowledge-detail-actions"><button type="button" onClick={() => focus(selected.key, 650)}><Crosshair size={15} />{m.explore}</button><button type="button" onClick={() => onEnter(selected.spaceId, selected.node.id)}><ArrowDownRight size={15} />{m.open}</button></div>
         {view && <button type="button" className="knowledge-management" onClick={() => onManagement(view.space.id)}>
