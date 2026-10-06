@@ -83,7 +83,7 @@ export function KnowledgePanel({ views, onEnter, onManagement }: { views: SpaceV
           const current = file.key === cloudCurrent;
           // The current file is the active space; selecting it goes there.
           const key = current ? rootKeys.get(galaxy?.activeSpaceId ?? '') : rootKeys.get(file.spaceId);
-          const state = current ? m.cloudCurrent : file.status === 'ready' ? `${nodeCount(file.spaceId)} ${m.nodes}` : file.status === 'too-large' ? m.cloudTooLarge : file.status === 'error' ? m.cloudError : m.cloudFetching;
+          const state = current ? m.cloudCurrent : file.status === 'ready' ? `${nodeCount(file.spaceId)} ${m.nodes}` : file.status === 'too-large' ? m.cloudTooLarge : file.status === 'omitted' ? m.cloudOmitted : file.status === 'error' ? m.cloudError : m.cloudFetching;
           return <button key={file.key} type="button" className={`is-cloud${selected?.spaceId === file.spaceId ? ' is-selected' : ''}${key ? '' : ' is-waiting'}`} disabled={!key} onClick={() => key && focusKnowledge(key, 'space')}>
             <i style={{ background: file.color }} />
             <span>{file.title}<small>{state}</small></span>

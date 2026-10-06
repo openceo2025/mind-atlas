@@ -79,7 +79,7 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
   const cloudFiles = useCloudGalaxy(s => s.files);
   const cloudCurrent = useCloudGalaxy(s => s.currentKey);
   /** Cloud files on the map: fetched, or too large to fetch (then a single named star). */
-  const cloudShown = useMemo(() => cloudFiles.filter(file => file.key !== cloudCurrent && (file.status === 'ready' || file.status === 'too-large')), [cloudFiles, cloudCurrent]);
+  const cloudShown = useMemo(() => cloudFiles.filter(file => file.key !== cloudCurrent && (file.status === 'ready' || file.status === 'too-large' || file.status === 'omitted')), [cloudFiles, cloudCurrent]);
   const { camera, size, gl } = useThree();
   const perspective = camera as PerspectiveCamera;
   const reducedMotion = useMemo(() => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches, []);

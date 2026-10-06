@@ -28,7 +28,7 @@ export function useCloudViews() {
   const currentKey = useCloudGalaxy(s => s.currentKey);
   return useMemo(() => {
     if (!galaxy) return [];
-    const shown = files.filter(file => file.key !== currentKey && (file.status === 'ready' || file.status === 'too-large'));
+    const shown = files.filter(file => file.key !== currentKey && (file.status === 'ready' || file.status === 'too-large' || file.status === 'omitted'));
     if (!shown.length) return [];
     const spaces: GalaxySpace[] = shown.map(file => ({
       id: file.spaceId, title: file.title, color: file.color, decision: 'undecided', dependsOn: [],

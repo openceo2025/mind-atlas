@@ -24,9 +24,11 @@ export const CLOUD_SPACE_PREFIX = 'cloud:';
 /** Files larger than this stay on the map as a single named star. */
 const MAX_GALAXY_BYTES = 6 * 1024 * 1024;
 const CONCURRENCY = 3;
+/** Contents are fetched for the most recent files only; older ones stay single named stars. */
+const MAX_FETCHED = 60;
 const PALETTE = ['#7fb7ff', '#f2b56b', '#b59cf0', '#6fd8b0', '#f08fb3', '#9fd36b', '#6fc7e8', '#e8c36f', '#d494e8', '#8fa8ff'];
 
-export type CloudFileStatus = 'pending' | 'loading' | 'ready' | 'error' | 'too-large';
+export type CloudFileStatus = 'pending' | 'loading' | 'ready' | 'error' | 'too-large' | 'omitted';
 
 export interface CloudGalaxyFile {
   key: string;
@@ -137,7 +139,7 @@ export async function refreshCloudGalaxy(options: { hosted: boolean; signedIn: b
   const files: CloudGalaxyFile[] = entries
     .slice()
     .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
-    .map(entry => {
+    .map((entry, index) => {
       const key = cloudFileKey(entry);
       const cached = sessionCache.get(`${key}@${entry.updatedAt}`);
       const kept = previous.get(key);
@@ -145,7 +147,7 @@ export async function refreshCloudGalaxy(options: { hosted: boolean; signedIn: b
       const tooLarge = entry.size > MAX_GALAXY_BYTES;
       return {
         key, spaceId: cloudSpaceId(key), entry, title, color: (cached && ownColor(cached)) ?? colorFor(key),
-        status: cached ? 'ready' : tooLarge ? 'too-large' : kept?.status === 'ready' && kept.entry.updatedAt === entry.updatedAt ? 'ready' : 'pending',
+        status: cached ? 'ready' : tooLarge ? 'too-large' : kept?.status === 'ready' && kept.entry.updatedAt === entry.updatedAt ? 'ready' : index >= MAX_FETCHED ? 'omitted' : 'pending',
         root: cached ?? (kept?.entry.updatedAt === entry.updatedAt ? kept.root : null),
       } satisfies CloudGalaxyFile;
     });
