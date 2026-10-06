@@ -27,6 +27,17 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
  localStorage.setItem('mind-atlas-ui-state-v1',JSON.stringify({version:1,savedAt:now,selectedNodeId:root.id,viewport:{x:0,y:0,zoom:.92},renderQuality:'high',layoutMode:'phyllotaxis',mobilePanelTab:'command'}));
  localStorage.setItem('mind-atlas-onboarding-v1',JSON.stringify({version:1,firstRun:false,rootNodeCreated:true,nodeEditorOpened:true,nodeEditCompleted:true,nodeCountReached:true,pan:true,zoom:true,nodeDrag:true,childNodeCreated:true,spaceBasicsCompleted:true,basicCompleted:true,aiUnlocked:true,titlePromptApplied:true,startedAt:now,completedAt:now}));
  },{root:roots[0],now});
+ // Local mode reads its "cloud" through the bridge: serve two fixture files so
+ // the check never touches real notebooks and every file is known.
+ const cloudFiles={'reading.mindatlas':project('読書メモ', '#c49cf0', ['経営の本', '設計の本']),'travel.mindatlas':project('旅の計画', '#7fd6b0', ['行程', '予算'])};
+ const cloudRequests=[];
+ await page.route(/\/api\/cloud\/notebooks(\/[^?]*)?(\?.*)?$/, route => {
+  const name=decodeURIComponent(new URL(route.request().url()).pathname.split('/api/cloud/notebooks')[1]?.replace(/^\//,'') ?? '');
+  cloudRequests.push(name||'list');
+  if(!name) return route.fulfill({contentType:'application/json',body:JSON.stringify({directory:'fixture',notebooks:Object.entries(cloudFiles).map(([file,root])=>({name:file,size:2000,updatedAt:now}))})});
+  const root=cloudFiles[name];
+  return root?route.fulfill({contentType:'application/json',body:JSON.stringify({format:'mindatlaspkg',version:1,exportedAt:now,notebook:root,assets:[]})}):route.fulfill({status:404,body:'{}'});
+ });
  await page.route('**/knowledge-fixture-seed', route => route.fulfill({ contentType: 'text/html', body: '<html><body>Fixture seed</body></html>' }));
  await page.goto(`${baseUrl}/knowledge-fixture-seed`);
  await page.evaluate(async ({roots,now}) => {
@@ -45,7 +56,7 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
  const count=await page.locator('.universe-shell canvas').count();
  await page.locator('.galaxy-open-button').click();
  await expect(page.locator('.knowledge-overlay')).toBeVisible();
- await expect(page.locator('.knowledge-spaces button')).toHaveCount(3);
+ await expect(page.locator('.knowledge-spaces button:not(.is-cloud)')).toHaveCount(3);
  await page.waitForTimeout(400);
  const blend=await page.locator('.universe-shell').getAttribute('data-knowledge-blend');
  expect(Number(blend)).toBeGreaterThan(0);expect(Number(blend)).toBeLessThan(1);
@@ -55,12 +66,15 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
  const direction=front.split(',').map(Number);
  expect(Math.abs(direction[0])).toBeLessThan(.002);expect(Math.abs(direction[1])).toBeLessThan(.002);expect(direction[2]).toBeCloseTo(-1,2);
  expect(await page.locator('.universe-shell canvas').count()).toBe(count);
+ // Every cloud file becomes its own galaxy and can be selected from the list.
+ await expect(page.locator('.knowledge-spaces button.is-cloud:not([disabled])')).toHaveCount(2,{timeout:15000});
+ await expect(page.locator('.kg-label .kg-file').first()).toBeVisible({timeout:10000});
  await expect(page.locator('.kg-label').first()).toBeVisible();
  await expect(page.locator('.kg-label .kg-bars').first()).toBeVisible();
  await expect(page.locator('.knowledge-minimap')).toBeVisible();
  await expect(page.locator('.knowledge-ladder [aria-current="step"]')).toHaveCount(1);
  const fit=await page.evaluate(()=>{const b=[...document.querySelectorAll('.kg-label.t0')].filter(e=>getComputedStyle(e).display!=='none'&&Number(e.style.opacity)>.1).map(e=>e.getBoundingClientRect());return {count:b.length,left:Math.min(...b.map(r=>r.left)),right:Math.max(...b.map(r=>r.right)),bottom:Math.max(...b.map(r=>r.bottom)),width:innerWidth,height:innerHeight};});
- expect(fit.count).toBe(3);
+ expect(fit.count).toBeGreaterThanOrEqual(3);
  expect(fit.left).toBeGreaterThanOrEqual(0);expect(fit.right).toBeLessThanOrEqual(fit.width);expect(fit.bottom).toBeLessThanOrEqual(fit.height);
  await page.screenshot({path:`${dir}/${name}-overview.png`});
  if(name==='desktop') {
@@ -79,7 +93,7 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
  await page.getByLabel('進捗リング', {exact:false}).uncheck();
  await expect(page.locator('.kg-label .kg-bars:visible')).toHaveCount(0);
  await page.getByLabel('進捗リング', {exact:false}).check();
- await page.locator('.knowledge-spaces button').first().click();
+ await page.locator('.knowledge-spaces button:not(.is-cloud)').first().click();
  await page.waitForTimeout(1500);
  await expect(page.locator('.knowledge-detail h2')).toHaveText(roots[0].title);
  await expect(page.locator('.knowledge-cascade [role="tree"]')).toBeVisible();
@@ -108,12 +122,12 @@ for (const [name, viewport] of [['desktop',{width:1440,height:960}], ['mobile',{
  await page.waitForTimeout(300);
  await page.locator('.galaxy-open-button').click();
  await page.waitForTimeout(1500);
- await page.locator('.knowledge-spaces button').nth(1).click();
+ await page.locator('.knowledge-spaces button:not(.is-cloud)').nth(1).click();
  await page.waitForTimeout(1500);
  await page.getByRole('button',{name:'宇宙で開く',exact:true}).click();
  await expect(page.locator('.knowledge-overlay')).toHaveCount(0,{timeout:10000});
  await expect(page.locator('.top-bar input').first()).toHaveValue('プロダクト');
- results.push({name,canvases:count,spaces:3,materialDissolve:blend,frontFacing:front,cascadeNavigation:true,relationEvidence:true,progressRings:true,minimap:true,levelLadder:true,remoteEntry:true,backgroundClassifier:'fixture only',classifiedBatches,errors});
+ results.push({name,canvases:count,spaces:3,materialDissolve:blend,frontFacing:front,cascadeNavigation:true,relationEvidence:true,progressRings:true,minimap:true,levelLadder:true,cloudGalaxies:cloudRequests.filter(r=>r!=='list').length,remoteEntry:true,backgroundClassifier:'fixture only',classifiedBatches,errors});
  if(errors.length) throw new Error(errors.join('\n'));
  await context.close();
 }
@@ -123,7 +137,7 @@ const preview=await previewContext.newPage();
 let sampleAiCalls=0;
 await preview.route(/\/api\/(galaxy\/judge|ai\/decide)(?:\?.*)?$/,route=>{sampleAiCalls++;return route.abort();});
 await preview.goto(`${baseUrl}/?aboutDemo=research&knowledgeDemo=1&locale=ja`);
-await expect(preview.locator('.knowledge-spaces button')).toHaveCount(3);
+await expect(preview.locator('.knowledge-spaces button:not(.is-cloud)')).toHaveCount(3);
 await preview.waitForTimeout(2500);
 await preview.screenshot({path:`${dir}/local-preview.png`});
 expect(sampleAiCalls).toBe(0);

@@ -31,6 +31,7 @@ import {
   type UniverseToCardMessage,
 } from "./cardBridge";
 import { endPlanetHold, markPlanetHoldSpent, onPlanetHold, setPlanetEntryEnabled, type PlanetHoldStart } from "./planetHold";
+import { refreshCardPresence } from "./cardPresence";
 import "./planetGate.css";
 
 /** Hold this long on a node before the dive starts. */
@@ -439,6 +440,8 @@ export function PlanetGate({
       const store = useAtlasStore.getState();
       const node = findNodeByCardPlanet(store.atlasRoot, planetId ?? g.planet?.planetId ?? "");
       settings.current.onCardViewChange(false);
+      // The card app may still be saving: count the cards again once it has.
+      for (const delay of [600, 3500]) window.setTimeout(() => void refreshCardPresence({ cloud: true }), delay);
       if (node) store.focusNode(node.id);
       g.x = window.innerWidth / 2;
       g.y = window.innerHeight / 2;
@@ -523,6 +526,22 @@ export function PlanetGate({
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, [ascend]);
+
+  // Planets with a card space show it in the universe; counts follow this device and the cloud.
+  useEffect(() => {
+    if (!enabled) return;
+    const refresh = () => void refreshCardPresence({ cloud: true });
+    refresh();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [enabled]);
 
   // Language and background follow the universe.
   useEffect(() => {

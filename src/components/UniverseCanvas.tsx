@@ -60,6 +60,7 @@ import { formatAppMessage } from "../i18n/format";
 import { currentAppLocale } from "../i18n/locales";
 import { isIntrinsicErrorNode } from "../nodeErrorState";
 import { SpatialLayoutOverlay } from "./SpatialLayoutOverlay";
+import { CardMoon } from "../planet/CardMoon";
 import { KnowledgeScene } from './galaxy/KnowledgeScene';
 import { KnowledgeNativeGroup, KnowledgeDarkness, knowledgePresence } from './galaxy/knowledgePresence';
 import { KNOWLEDGE_CAMERA_HANDOFF, useKnowledgeRuntime } from '../galaxy/knowledgeRuntime';
@@ -4102,6 +4103,16 @@ function HierarchyNode({
           <sphereGeometry args={[Math.max(1.8, radius * 0.18), 16, 10]} />
           <meshBasicMaterial color={themeColors.specular} transparent opacity={(theme === "light" ? 0.56 : 0.7) * depthFade.opacity} />
         </mesh>
+      ) : null}
+      {node.cardPlanetId && !boardGameMode ? (
+        <CardMoon
+          planetId={node.cardPlanetId}
+          radius={radius}
+          color={node.color}
+          opacity={depthFade.opacity}
+          animate={!lowQuality}
+          showBadge={labelVisible || isSelected}
+        />
       ) : null}
 
       {node.action && node.id === selectedNodeId ? (

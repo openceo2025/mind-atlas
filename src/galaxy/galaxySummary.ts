@@ -30,6 +30,10 @@ export interface SpaceView {
   /** True when the tree changed after the last judgment. */
   judgmentStale: boolean;
   purpose: string;
+  /** Set when this view is a cloud file shown as its own galaxy (cloudGalaxy.ts). */
+  cloudKey?: string;
+  /** How many of its notes the knowledge index may take; cloud files get a smaller share. */
+  nodeBudget?: number;
 }
 
 const DEFAULT_ROOT_BODY = "The root of this local notebook.";

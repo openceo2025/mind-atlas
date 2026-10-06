@@ -48,12 +48,16 @@ function terms(node: AtlasNode) {
 export function buildKnowledgeGraph(views: SpaceView[], judgments: KnowledgeRelation[] = []): KnowledgeGraph {
   const nodes: KnowledgeNode[] = [], relations: KnowledgeRelation[] = [];
   let omitted = 0;
-  // Round-robin limits leave room for every space, including a large active notebook.
+  // Round-robin limits leave room for every space, including a large active
+  // notebook; cloud files carry their own, smaller budget.
+  const budgeted = views.filter(view => view.nodeBudget === undefined).length;
+  // Board-game records are move trees: their words would tie every game to every other.
+  const boardSpaces = new Set(views.filter(view => view.root?.notebookMode && view.root.notebookMode !== 'standard').map(view => view.space.id));
   for (const view of views) {
     if (!view.root) continue;
     const queue: { node: AtlasNode; parentKey: string | null; depth: number }[] = [{ node: view.root, parentKey: null, depth: 0 }];
     const seen = new Set<string>();
-    const limit = Math.max(40, Math.floor(1800 / Math.max(1, views.length)));
+    const limit = view.nodeBudget ?? Math.max(40, Math.floor(1800 / Math.max(1, budgeted)));
     let count = 0;
     for (let cursor = 0; cursor < queue.length; cursor++) {
       const entry = queue[cursor];
@@ -87,6 +91,7 @@ export function buildKnowledgeGraph(views: SpaceView[], judgments: KnowledgeRela
   }).map(r => [r.id, r]));
   for (const r of judged.values()) if (r.basis === 'tree' && r.type !== 'none') relations.push(r);
   for (const node of nodes) {
+    if (boardSpaces.has(node.spaceId)) continue;
     const overlaps = new Map<string, { node: KnowledgeNode; terms: string[] }>();
     for (const term of terms(node.node)) {
       const list = postings.get(term) ?? [];

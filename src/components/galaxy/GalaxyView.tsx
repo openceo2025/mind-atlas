@@ -1,6 +1,8 @@
 import { ArrowLeft, Bot, CircleCheck, Clock, Download, Hammer, Link2, Plus, Settings, TriangleAlert, Upload, User, Wallet } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import type { HostedServiceSession } from "../../types";
+import type { CloudNotebookEntry, HostedServiceSession } from "../../types";
+import { isHostedServiceMode } from "../../hosted/serviceClient";
+import { isCloudSpaceId, refreshCloudGalaxy, useCloudGalaxy } from "../../galaxy/cloudGalaxy";
 import { useMessage, useMindAtlasLocale } from "../../i18n/I18nProvider";
 import type { MessageId } from "../../i18n/messages";
 import { useAtlasStore } from "../../store/atlasStore";
@@ -22,11 +24,15 @@ interface GalaxyViewProps {
   lowQuality: boolean;
   hostedSession: HostedServiceSession | null;
   onClose: () => void;
+  /** Open a cloud file the way "Cloud load" does (with the unsaved-changes check). */
+  onOpenCloudFile?: (entry: CloudNotebookEntry) => void;
+  /** The cloud file the current notebook came from, if any (`id` or `name`). */
+  currentCloudKey?: string | null;
 }
 
 export const CONSTRAINT_ICONS = { human: User, physical: Hammer, external: Link2, ai: Bot, none: CircleCheck } as const;
 
-export function GalaxyView({ theme, onClose: finishClose }: GalaxyViewProps) {
+export function GalaxyView({ theme, hostedSession, onClose: finishClose, onOpenCloudFile, currentCloudKey = null }: GalaxyViewProps) {
   const onClose = () => closeKnowledge(finishClose);
   useEffect(() => {
     useKnowledgeRuntime.setState({ open: true, exiting: false, selected: null, anchor: null, hovered: null, hoveredRelation: null, relation: null, enterKey: null, focus: null });
@@ -53,6 +59,17 @@ export function GalaxyView({ theme, onClose: finishClose }: GalaxyViewProps) {
   useEffect(() => {
     void init();
   }, [init]);
+
+  // Every cloud file becomes a galaxy of its own; fetched while the galaxy is open.
+  // (App passes a fresh handler on every render: depend on whether there is one, not on which.)
+  const hostedUserId = hostedSession?.user?.id ?? null;
+  const signedIn = Boolean(hostedSession?.authenticated && hostedSession.user);
+  const cloudAvailable = Boolean(onOpenCloudFile);
+  useEffect(() => {
+    if (!cloudAvailable) return;
+    const hosted = isHostedServiceMode();
+    void refreshCloudGalaxy({ hosted, signedIn, accountId: hosted ? hostedUserId : "local", currentKey: currentCloudKey });
+  }, [cloudAvailable, currentCloudKey, hostedUserId, signedIn]);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -90,6 +107,18 @@ export function GalaxyView({ theme, onClose: finishClose }: GalaxyViewProps) {
   const selectedView = views.find((view) => view.space.id === selectedId) ?? null;
 
   const enterSpace = async (spaceId: string, nodeId?: string) => {
+    if (isCloudSpaceId(spaceId)) {
+      const file = useCloudGalaxy.getState().files.find((item) => item.spaceId === spaceId);
+      if (!file || !onOpenCloudFile) return;
+      const target = useKnowledgeRuntime.getState().graph.nodes.find((n) => n.spaceId === spaceId && (nodeId ? n.node.id === nodeId : n.depth === 0));
+      useKnowledgeRuntime.setState({ enterKey: target?.key ?? null });
+      closeKnowledge(() => {
+        finishClose();
+        onOpenCloudFile(file.entry);
+        if (nodeId) focusWhenLoaded(nodeId);
+      });
+      return;
+    }
     try {
       if (spaceId !== galaxy.activeSpaceId) await useGalaxyStore.getState().switchSpace(spaceId);
       const target = useKnowledgeRuntime.getState().graph.nodes.find(n => n.spaceId === spaceId && (nodeId ? n.node.id === nodeId : n.depth === 0));
@@ -283,6 +312,23 @@ function PhilosophyEditor({ text, historyCount, onSave, onCancel }: { text: stri
       </div>
     </div>
   );
+}
+
+/** After a cloud file loads, move to the note that was chosen in the galaxy. */
+function focusWhenLoaded(nodeId: string) {
+  const startedAt = Date.now();
+  const unsubscribe = useAtlasStore.subscribe((state) => {
+    if (Date.now() - startedAt > 20_000) { unsubscribe(); return; }
+    if (!containsNode(state.atlasRoot, nodeId)) return;
+    unsubscribe();
+    window.setTimeout(() => useAtlasStore.getState().focusNode(nodeId), 80);
+  });
+  window.setTimeout(unsubscribe, 20_000);
+}
+
+function containsNode(root: { id: string; children: { id: string; children: unknown[] }[] }, id: string): boolean {
+  if (root.id === id) return true;
+  return root.children.some((child) => containsNode(child as typeof root, id));
 }
 
 export function signed(money: (value: number) => string, value: number) {

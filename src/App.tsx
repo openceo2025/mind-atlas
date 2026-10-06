@@ -2359,7 +2359,14 @@ export default function App() {
       />
       {galaxyOpen ? (
         <Suspense fallback={null}>
-          <GalaxyView theme={theme} lowQuality={renderQuality !== "high"} hostedSession={hostedSession} onClose={() => setGalaxyOpen(false)} />
+          <GalaxyView
+            theme={theme}
+            lowQuality={renderQuality !== "high"}
+            hostedSession={hostedSession}
+            onClose={() => setGalaxyOpen(false)}
+            onOpenCloudFile={cloudNotebooksAvailable ? (entry) => requestCloudLoad(entry, { closeCloudDialog: false, closeStartSpace: false }) : undefined}
+            currentCloudKey={currentCloudNotebook ? currentCloudNotebook.id || currentCloudNotebook.name : null}
+          />
         </Suspense>
       ) : null}
       {onboarding.showRootPulse ? <div className="onboarding-center-pulse" aria-hidden="true" /> : null}

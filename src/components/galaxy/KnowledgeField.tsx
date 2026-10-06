@@ -255,6 +255,8 @@ interface FieldProps {
   rings: boolean;
   lowQuality: boolean;
   reducedMotion: boolean;
+  /** Spaces that are separate files: their rivers are thin and quiet, a hint of kinship. */
+  faint?: Set<string>;
 }
 
 function useShared(reducedMotion: boolean) {
@@ -329,7 +331,7 @@ function Territories({ map, spaceColors, shared }: FieldProps & { shared: Shared
   return <primitive object={mesh} />;
 }
 
-function Rivers({ data, map, spaceColors, reducedMotion }: FieldProps) {
+function Rivers({ data, map, spaceColors, reducedMotion, faint }: FieldProps) {
   const uniforms = useMemo(() => ({ uOpacity: { value: 0 }, uTime: { value: 0 }, uReduced: { value: Number(reducedMotion) } }), [reducedMotion]);
   const mesh = useMemo(() => {
     const max = Math.max(1, ...data.rivers.map(r => r.weight));
@@ -342,7 +344,9 @@ function Rivers({ data, map, spaceColors, reducedMotion }: FieldProps) {
       const bend = (seeded(`${river.a}|${river.b}`) - .5) * .35;
       const cx = (a[0] + b[0]) / 2 - dy * bend, cy = (a[1] + b[1]) / 2 + dx * bend;
       const colorA = new Color(spaceColors.get(river.a) ?? '#8fa6c8'), colorB = new Color(spaceColors.get(river.b) ?? '#8fa6c8');
-      const halfWidth = meanRadius * (.035 + .11 * Math.sqrt(river.weight / max));
+      const between = Boolean(faint?.has(river.a) || faint?.has(river.b));
+      const strength = between ? .42 : 1;
+      const halfWidth = meanRadius * (.035 + .11 * Math.sqrt(river.weight / max)) * (between ? .55 : 1);
       const base = positions.length / 3;
       for (let step = 0; step <= steps; step++) {
         const t = step / steps, u = 1 - t;
@@ -356,7 +360,7 @@ function Rivers({ data, map, spaceColors, reducedMotion }: FieldProps) {
         for (const side of [-1, 1]) {
           positions.push(x + nx * width * side, y + ny * width * side, -1.5);
           colors.push(color.r, color.g, color.b);
-          rivers.push(side, t);
+          rivers.push(side, t, strength);
         }
         if (step < steps) { const i = base + step * 2; indices.push(i, i + 1, i + 2, i + 1, i + 3, i + 2); }
       }
@@ -364,13 +368,13 @@ function Rivers({ data, map, spaceColors, reducedMotion }: FieldProps) {
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
     geometry.setAttribute('color', new BufferAttribute(new Float32Array(colors), 3));
-    geometry.setAttribute('aRiver', new BufferAttribute(new Float32Array(rivers), 2));
+    geometry.setAttribute('aRiver', new BufferAttribute(new Float32Array(rivers), 3));
     geometry.setIndex(indices);
     const result = new Mesh(geometry, new ShaderMaterial({ vertexShader: RIVER_VERTEX, fragmentShader: RIVER_FRAGMENT, uniforms, transparent: true, depthWrite: false, depthTest: false, side: DoubleSide, blending: AdditiveBlending }));
     result.frustumCulled = false;
     result.renderOrder = -5;
     return result;
-  }, [data, map, spaceColors, uniforms]);
+  }, [data, map, spaceColors, uniforms, faint]);
   useFrame(({ clock }) => {
     // Rivers belong to the far view: they rise as spaces shrink on screen.
     const meanRadius = [...map.clusters.values()].reduce((s, c) => s + c.radius, 0) / Math.max(1, map.clusters.size);

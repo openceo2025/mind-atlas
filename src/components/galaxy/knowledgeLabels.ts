@@ -31,6 +31,9 @@ export interface LabelFrame {
   activeSpaceId: string | null;
   hereLabel: string;
   untitled: string;
+  /** Spaces that are cloud files, named with a small file badge. */
+  cloudSpaces: Set<string>;
+  cloudLabel: string;
   /** Keys a question lit up, in reveal order. */
   marked: Set<string> | null;
   relationMarks: { a: number; b: number; curve: number; text: string; color: string }[];
@@ -181,11 +184,12 @@ export class KnowledgeLabels {
       const { x, y, r } = candidate;
       const title = truncate(node.node.title || frame.untitled, tier <= 1 ? 22 : 26);
       const here = tier === 0 && node.spaceId === frame.activeSpaceId;
+      const file = tier === 0 && frame.cloudSpaces.has(node.spaceId);
       const signal = tier <= 1 && frame.rings ? frame.signals.get(node.key) : undefined;
       const bars = Boolean(signal && (signal.progress !== null || signal.risk !== null));
       const textWidth = this.width(title, tier) + (tier >= 1 ? 14 : 4);
-      const h = LINE_HEIGHT[tier] + (bars ? 8 : 0) + (here ? 17 : 0);
-      const w = Math.max(textWidth, bars ? 72 : 0, here ? 92 : 0) + 8;
+      const h = LINE_HEIGHT[tier] + (bars ? 8 : 0) + (here || file ? 17 : 0);
+      const w = Math.max(textWidth, bars ? 72 : 0, here ? 92 : 0, file ? 104 : 0) + 8;
       const gap = 6;
       const options: Box[] = tier === 0
         ? [{ x: x - w / 2, y: y + r + 4, w, h }, { x: x + r + gap, y: y - h / 2, w, h }, { x: x - w / 2, y: y - r - h - 4, w, h }, { x: x - r - gap - w, y: y - h / 2, w, h }]
@@ -198,13 +202,14 @@ export class KnowledgeLabels {
       shown++;
       const pooled = this.element(node.key);
       const quality = tier === 0 ? frame.quality.get(node.spaceId) ?? null : null;
-      const signature = `${title}|${tier}|${here}|${node.node.status}|${bars ? `${signal!.progress}|${signal!.risk}|${quality}` : ''}`;
+      const signature = `${title}|${tier}|${here}|${file}|${node.node.status}|${bars ? `${signal!.progress}|${signal!.risk}|${quality}` : ''}`;
       if (pooled.signature !== signature) {
         pooled.signature = signature;
         pooled.element.className = `kg-label t${tier} s-${node.node.status}`;
         pooled.element.style.setProperty('--kg-color', node.node.color || '#86cfff');
         pooled.element.innerHTML = [
           here ? `<span class="kg-here">${escapeHtml(frame.hereLabel)}</span>` : '',
+          file ? `<span class="kg-here kg-file">${escapeHtml(frame.cloudLabel)}</span>` : '',
           `<span class="kg-row">${tier >= 1 ? '<i class="kg-glyph"></i>' : ''}<span class="kg-title">${escapeHtml(title)}</span></span>`,
           bars ? barsHtml(signal!.progress, quality, signal!.risk) : '',
         ].join('');

@@ -1,4 +1,4 @@
-import { ArrowDownRight, ChevronRight, Crosshair, Minus, Plus, Search, X } from 'lucide-react';
+import { ArrowDownRight, ChevronRight, Cloud, Crosshair, Minus, Plus, Search, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useMindAtlasLocale } from '../../i18n/I18nProvider';
 import { getStatusLabel } from '../../utils/status';
@@ -7,6 +7,7 @@ import { isKnowledgeDemo } from '../../galaxy/knowledgeDemo';
 import { projectKnowledge } from '../../galaxy/knowledgeGraph';
 import { focusKnowledge, useKnowledgeRuntime } from '../../galaxy/knowledgeRuntime';
 import { useGalaxyStore } from '../../galaxy/galaxyStore';
+import { isCloudSpaceId, useCloudGalaxy } from '../../galaxy/cloudGalaxy';
 import type { SpaceView } from '../../galaxy/galaxySummary';
 import { KnowledgeCascade } from './KnowledgeCascade';
 import { knowledgeHubSignals, knowledgeMetrics } from '../../galaxy/knowledgePresentation';
@@ -46,6 +47,12 @@ export function KnowledgePanel({ views, onEnter, onManagement }: { views: SpaceV
     sendKnowledgeCamera({ kind: 'fly', target: knowledgeFrame.target, distance: knowledgeDistanceForLevel(target, map.unit, knowledgeFrame.height, knowledgeFrame.fov) });
   };
   const percent = (value: number | null | undefined) => (typeof value === 'number' ? `${Math.round(value * 100)}%` : '—');
+  const cloudFiles = useCloudGalaxy(s => s.files);
+  const cloudCurrent = useCloudGalaxy(s => s.currentKey);
+  const cloudPending = cloudFiles.filter(file => file.key !== cloudCurrent && (file.status === 'pending' || file.status === 'loading')).length;
+  const cloudTotal = cloudFiles.filter(file => file.key !== cloudCurrent).length;
+  const selectedFile = selected && isCloudSpaceId(selected.spaceId) ? cloudFiles.find(file => file.spaceId === selected.spaceId) : undefined;
+  const nodeCount = (spaceId: string) => graph.nodes.reduce((count, n) => count + Number(n.spaceId === spaceId), 0);
 
   return <>
     <section className="knowledge-heading" data-kg-chrome>
@@ -70,6 +77,20 @@ export function KnowledgePanel({ views, onEnter, onManagement }: { views: SpaceV
           <ChevronRight size={14} />
         </button>;
       })}
+      {cloudFiles.length > 0 && <>
+        <h4 className="knowledge-spaces-heading"><Cloud size={12} />{m.cloudFiles}{cloudPending > 0 && <small>{m.cloudLoading.replace('{done}', String(cloudTotal - cloudPending)).replace('{total}', String(cloudTotal))}</small>}</h4>
+        {cloudFiles.map(file => {
+          const current = file.key === cloudCurrent;
+          // The current file is the active space; selecting it goes there.
+          const key = current ? rootKeys.get(galaxy?.activeSpaceId ?? '') : rootKeys.get(file.spaceId);
+          const state = current ? m.cloudCurrent : file.status === 'ready' ? `${nodeCount(file.spaceId)} ${m.nodes}` : file.status === 'too-large' ? m.cloudTooLarge : file.status === 'error' ? m.cloudError : m.cloudFetching;
+          return <button key={file.key} type="button" className={`is-cloud${selected?.spaceId === file.spaceId ? ' is-selected' : ''}${key ? '' : ' is-waiting'}`} disabled={!key} onClick={() => key && focusKnowledge(key, 'space')}>
+            <i style={{ background: file.color }} />
+            <span>{file.title}<small>{state}</small></span>
+            <ChevronRight size={14} />
+          </button>;
+        })}
+      </>}
     </aside>
     {(selected || projection.active || inspected) && <section className="knowledge-detail" aria-label={m.related} data-kg-chrome>
       {inspected && <article className="knowledge-relation-detail"><header><small>{m.relationDetail}</small><button type="button" aria-label={m.close} onClick={() => useKnowledgeRuntime.setState({ relation: null })}><X size={14} /></button></header>
@@ -77,7 +98,7 @@ export function KnowledgePanel({ views, onEnter, onManagement }: { views: SpaceV
         <small>{m[inspected.source]}{inspected.source === 'ai' ? ` · ${inspected.model} · ${Math.round(inspected.confidence * 100)}%` : ''}</small><blockquote>{sourceExcerpt(inspected.evidence)}</blockquote>
       </article>}
       {selected ? <>
-        <header><small>{view?.space.title}{selected.depth > 0 ? ` / ${getStatusLabel(selected.node.status)}` : ''}</small><button type="button" aria-label={m.close} onClick={() => useKnowledgeRuntime.setState({ selected: null, relation: null })}><X size={17} /></button></header>
+        <header><small>{selectedFile ? <><Cloud size={11} /> {selectedFile.title}</> : view?.space.title}{selected.depth > 0 ? ` / ${getStatusLabel(selected.node.status)}` : ''}</small><button type="button" aria-label={m.close} onClick={() => useKnowledgeRuntime.setState({ selected: null, relation: null })}><X size={17} /></button></header>
         <h2>{selected.node.title || m.untitled}</h2>
         {signal && signal.descendants > 0 ? <div className="knowledge-signal-bars">
           <span><small>{m.progress}</small><b className="p"><i style={{ width: percent(signal.progress) }} /></b><em>{percent(signal.progress)}</em></span>
@@ -88,8 +109,9 @@ export function KnowledgePanel({ views, onEnter, onManagement }: { views: SpaceV
         {(selected.node.summary || selected.node.body) && <p className="knowledge-body">{selected.node.summary || selected.node.body}</p>}
         <div className="knowledge-detail-actions">
           <button type="button" onClick={() => focusKnowledge(selected.key, selected.depth === 0 ? 'space' : selected.depth === 1 ? 'branch' : 'note')}><Crosshair size={15} />{m.explore}</button>
-          <button type="button" onClick={() => onEnter(selected.spaceId, selected.node.id)}><ArrowDownRight size={15} />{m.open}</button>
+          <button type="button" onClick={() => onEnter(selected.spaceId, selected.node.id)}><ArrowDownRight size={15} />{selectedFile ? m.cloudOpen : m.open}</button>
         </div>
+        {selectedFile && <p className="knowledge-cloud-hint">{m.cloudFileHint}</p>}
         {(projection.active || anchor) && <KnowledgeCascade graph={graph} roots={projection.active ? [...projection.seeds] : [anchor ?? selected.key]} edges={projection.active ? projection.edges : undefined} onFocus={key => focusKnowledge(key, 'keep', true)} locale={locale} />}
         {view && selected.depth === 0 && <button type="button" className="knowledge-management" onClick={() => onManagement(view.space.id)}>
           <span>{m.management}<ChevronRight size={14} /></span>

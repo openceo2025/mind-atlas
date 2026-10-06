@@ -192,6 +192,8 @@ export function buildKnowledgeMap(
   originSpaceId: string,
   previousAnchors?: Map<string, Vec2>,
   aspect = 1.6,
+  /** Extra clearance around a space; cloud files use it to sit apart as galaxies of their own. */
+  separation?: (spaceId: string, radius: number) => number,
 ): KnowledgeMap {
   const bySpace = new Map<string, KnowledgeNode[]>();
   for (const n of graph.nodes) {
@@ -224,7 +226,7 @@ export function buildKnowledgeMap(
     const kept = previousAnchors?.get(id);
     if (kept && id !== origin) { anchors.set(id, [...kept]); fixed.add(id); }
   }
-  const radiusOf = (id: string) => layouts.get(id)!.radius + gap / 2;
+  const radiusOf = (id: string) => layouts.get(id)!.radius + gap / 2 + (separation?.(id, layouts.get(id)!.radius) ?? 0);
   const free = ids.filter(id => !anchors.has(id)).sort((a, b) => (bySpace.get(b)!.length - bySpace.get(a)!.length) || a.localeCompare(b));
   free.forEach((id, index) => {
     const spread = (radiusOf(origin) + radiusOf(id)) * Math.sqrt(index + 1) * .92;

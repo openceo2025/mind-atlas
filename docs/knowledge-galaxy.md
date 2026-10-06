@@ -90,6 +90,36 @@ progress-ring toggle and legend, the minimap (click or drag to move), zoom
 buttons, and the cascading relation pane, whose hover lights the path on the
 map and whose selection moves the camera.
 
+## Cloud files as galaxies
+
+Every file in the "Cloud load" list is shown in the galaxy as a galaxy of its
+own (`src/galaxy/cloudGalaxy.ts`). The list is read when the galaxy opens;
+each file's tree is fetched in the background, three at a time, and kept in
+memory for the page session only — nothing extra is stored on the device, and
+another account's files are dropped on account change. Hosted mode reads the
+signed-in account's files (signed out: nothing is requested); local developer
+mode reads the bridge's cloud directory, taking only the note tree from each
+package. Files are placed well apart from the spaces and from each other; the
+words they share appear as thin, quiet rivers between them, and their notes
+carry a smaller node budget so the active space is never squeezed. Board-game
+records are drawn but never linked by shared words. The file the current
+notebook was loaded from is not repeated: it is the active space.
+
+Selecting a file and choosing "Open this file" flies down to it and loads it
+exactly like "Cloud load", including the unsaved-changes check for a loaded
+cloud file; a chosen note is focused once the file has loaded.
+
+## Card spaces in the universe
+
+A node whose planet has a card space inside (it was long-pressed into Mind
+Atlas Cards) carries a small deck of cards circling it like a moon, passing
+behind the planet on the far side, and a card badge with the number of cards
+beside its name (`src/planet/CardMoon.tsx`, `cardPresence.ts`). Counts come
+from the card app's storage on this device (read-only; its database is never
+created by the universe) and, when signed in, from the account's card spaces in
+the cloud. They refresh on start, on focus and after rising back out of a card
+space. Hosted mode only, like the card space itself.
+
 ## Relations and maintenance
 
 The graph is a derived index above the notebook trees: real parent links,
@@ -124,5 +154,9 @@ http://127.0.0.1:5173/?aboutDemo=research&knowledgeDemo=1&locale=ja
   map labels with progress bars, minimap, level ladder, ring toggle, cascade
   navigation, relation evidence, question projection, return, cross-space entry
   and background classification with a mocked judge.
+- `npm run verify:galaxy-cloud`: public mode against a mocked service — card
+  badge with the cloud count, four cloud files as galaxies, opening one from
+  the galaxy and seeing it marked as open, desktop and phone; signed out, no
+  cloud request.
 - `npm run verify:galaxy`, `npm run verify:ui`, `npm run verify:hosted-service`,
   `npm run verify:hosted-public-ui`, `npm run verify:hosted-dist`.

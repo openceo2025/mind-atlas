@@ -93,6 +93,12 @@ export async function saveHostedCloudNotebook(
   return await readHostedJson<CloudNotebookSaveResult>(response);
 }
 
+/** The signed-in account's card spaces (Mind Atlas Cards): which planets have one, and how many cards. */
+export async function listHostedCardSpaces(): Promise<Array<{ planetId?: string; cardCount: number; updatedAt?: string }>> {
+  const response = await hostedFetch("/api/spaces");
+  return (await readHostedJson<{ spaces: Array<{ planetId?: string; cardCount: number; updatedAt?: string }> }>(response)).spaces ?? [];
+}
+
 export async function loadHostedCloudNotebook(id: string): Promise<CloudNotebookLoadResult> {
   const response = await hostedFetch(`/api/cloud/notebooks/${encodeURIComponent(id)}`);
   return await readHostedJson<CloudNotebookLoadResult>(response);

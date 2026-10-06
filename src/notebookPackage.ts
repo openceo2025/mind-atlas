@@ -106,6 +106,19 @@ export function createNotebookJsonPackage(root: AtlasNode): NotebookPackageResul
   return createJsonPackageResult(manifest, countNotebookAttachments(notebook));
 }
 
+/**
+ * Only the note tree of a package, without unpacking its attachments — for
+ * views that show a file's structure (the galaxy) rather than open it.
+ */
+export async function readNotebookPackageTree(file: File): Promise<AtlasNode> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (looksLikeJson(bytes)) return parsePackageManifest(strFromU8(bytes)).notebook;
+  const entries = unzipSync(bytes, { filter: (entry) => entry.name === "manifest.json" });
+  const manifestBytes = entries["manifest.json"];
+  if (!manifestBytes) throw new Error("manifest.json is missing from the Mind Atlas package.");
+  return parsePackageManifest(strFromU8(manifestBytes)).notebook;
+}
+
 export async function importNotebookPackage(file: File) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (looksLikeJson(bytes)) {

@@ -298,3 +298,19 @@
   .kg-label.t1 { font-size: 12px; }
   .kg-title { max-width: 150px; }
 }
+
+/* Cloud files: separate galaxies, listed under the spaces. */
+.knowledge-spaces-heading {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 14px 2px 6px; font-size: 10.5px; font-weight: 500;
+  letter-spacing: .06em; color: var(--k-muted);
+}
+.knowledge-spaces-heading small { flex-basis: 100%; font-size: 9.5px; letter-spacing: 0; color: #6f8598; }
+.knowledge-spaces button.is-cloud { background: rgba(5, 12, 20, .5); border-style: dashed; border-color: rgba(148, 188, 208, .14); }
+.knowledge-spaces button.is-cloud.is-selected { border-color: rgba(141, 245, 207, .38); }
+.knowledge-spaces button.is-waiting { opacity: .55; cursor: default; }
+.knowledge-cloud-hint { margin: -6px 0 12px; font-size: 10px !important; line-height: 1.6 !important; }
+.kg-here.kg-file { color: #cfe0ff; border-style: dashed; border-color: rgba(190, 210, 255, .35); background: rgba(14, 22, 40, .6); }
+@media (max-width: 699px) {
+  .knowledge-spaces-heading { margin: 0 4px; align-self: center; white-space: nowrap; }
+  .knowledge-spaces-heading small { display: none; }
+}

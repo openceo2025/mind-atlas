@@ -330,12 +330,14 @@ void main() {
 
 export const RIVER_VERTEX = /* glsl */ `
 attribute vec3 color;
-attribute vec2 aRiver; // across (-1..1), along (0..1)
+attribute vec3 aRiver; // across (-1..1), along (0..1), strength
 varying vec3 vColor;
 varying vec2 vRiver;
+varying float vStrength;
 void main() {
   vColor = color;
-  vRiver = aRiver;
+  vRiver = aRiver.xy;
+  vStrength = aRiver.z;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
@@ -346,13 +348,14 @@ uniform float uTime;
 uniform float uReduced;
 varying vec3 vColor;
 varying vec2 vRiver;
+varying float vStrength;
 void main() {
   float across = abs(vRiver.x);
   float body = 1.0 - across * across;
   float core = 1.0 - smoothstep(0.0, 0.32, across);
   float current = 0.78 + 0.22 * sin((vRiver.y * 9.0 - uTime * 0.28 * (1.0 - uReduced)) * 6.28318);
   float ends = smoothstep(0.0, 0.1, vRiver.y) * (1.0 - smoothstep(0.9, 1.0, vRiver.y));
-  float a = uOpacity * (body * 0.5 + core * 0.5) * current * ends;
+  float a = uOpacity * (body * 0.5 + core * 0.5) * current * ends * vStrength;
   gl_FragColor = vec4(mix(vColor, vec3(1.0), core * 0.3), a);
 }
 `;

@@ -85,4 +85,26 @@ for (const [id, anchor] of map.anchors) assert.deepEqual(again.anchors.get(id), 
 const framed = frameBounds(map.bounds, { width: 1440, height: 900, fov: 45 }, { left: 236, right: 36, top: 128, bottom: 96 });
 const wpp = (2 * framed.distance * Math.tan(Math.PI / 8)) / 900;
 assert.ok((map.bounds.maxX - map.bounds.minX) / wpp <= 1440 - 236 - 36 + 1 && (map.bounds.maxY - map.bounds.minY) / wpp <= 900 - 128 - 96 + 1, 'The overview fits the free part of the screen');
-console.log('Knowledge graph: scoped IDs, stale-source retraction, cycles, deletion, inference provenance/retraction, import, question intents, progress rings and map layout passed.');
+// Cloud files: their own node budget, board-game move trees never tie files
+// together by shared words, and each file sits apart as a galaxy of its own.
+const wide = (id: string, title: string, count: number) => leafy(id, title, 'waiting', Array.from({ length: count }, (_, i) => leafy(`${id}-${i}`, `${title} shared evidence research ${i}`, 'waiting')));
+const budgetGraph = buildKnowledgeGraph([
+  { space: { id: 'home', dependsOn: [] }, root: wide('home-root', 'Home', 120) },
+  { space: { id: 'cloud:f1', dependsOn: [] }, root: wide('f1-root', 'File', 120), nodeBudget: 30 },
+] as unknown as SpaceView[]);
+assert.equal(budgetGraph.nodes.filter(n => n.spaceId === 'cloud:f1').length, 30, 'A cloud file keeps to its node budget');
+assert.equal(budgetGraph.nodes.filter(n => n.spaceId === 'home').length, 121, 'The active space is not squeezed by cloud files');
+const board = { ...wide('board-root', 'Game', 8), notebookMode: 'shogi' } as unknown as AtlasNode;
+const boardGraph = buildKnowledgeGraph([
+  { space: { id: 'home', dependsOn: [] }, root: wide('home-root', 'Home', 8) },
+  { space: { id: 'cloud:game', dependsOn: [] }, root: board },
+] as unknown as SpaceView[]);
+assert.ok(!boardGraph.relations.some(r => r.source === 'candidate' && [r.from, r.to].some(key => JSON.parse(key)[0] === 'cloud:game')), 'Board-game files are not linked by shared words');
+const fileViews = ['home', 'cloud:a', 'cloud:b'].map(id => ({ space: { id, dependsOn: [] }, root: wide(`${id}-root`, id, 6) })) as unknown as SpaceView[];
+const fileGraph = buildKnowledgeGraph(fileViews);
+const fileNative = new Map<string, Map<string, Vec3>>(fileViews.map(view => [view.space.id, new Map<string, Vec3>(fileGraph.nodes.filter(n => n.spaceId === view.space.id).map((n, i) => [n.node.id, [Math.cos(i) * 60 * n.depth, Math.sin(i) * 60 * n.depth, -340 * n.depth] as Vec3]))]));
+const apart = buildKnowledgeMap(fileGraph, fileNative, 'home', undefined, 1.6, (id, radius) => (id.startsWith('cloud:') ? Math.max(260, radius * .9) : 0));
+const together = buildKnowledgeMap(fileGraph, fileNative, 'home');
+const gapTo = (m: typeof apart, id: string) => { const a = m.clusters.get('home')!, b = m.clusters.get(id)!; return Math.hypot(a.center[0] - b.center[0], a.center[1] - b.center[1]) - a.radius - b.radius; };
+assert.ok(gapTo(apart, 'cloud:a') > gapTo(together, 'cloud:a') + 200, 'Cloud files sit apart as galaxies of their own');
+console.log('Knowledge graph: scoped IDs, stale-source retraction, cycles, deletion, inference provenance/retraction, import, question intents, progress rings, map layout and cloud files passed.');

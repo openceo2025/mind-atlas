@@ -12,6 +12,7 @@ import { Quaternion, Vector3, type PerspectiveCamera } from 'three';
 import { deriveAtlasLayoutFrame, type AtlasLayoutMode } from '../../layout/atlasLayout';
 import { useAtlasStore } from '../../store/atlasStore';
 import { useGalaxyStore } from '../../galaxy/galaxyStore';
+import { isCloudSpaceId, placeholderRoot, useCloudGalaxy } from '../../galaxy/cloudGalaxy';
 import { KNOWLEDGE_CAMERA_HANDOFF, focusKnowledge, useKnowledgeRuntime } from '../../galaxy/knowledgeRuntime';
 import { projectKnowledge } from '../../galaxy/knowledgeGraph';
 import { buildKnowledgeMap, frameBounds, type Vec2, type Vec3 } from '../../galaxy/knowledgeMap';
@@ -75,6 +76,10 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
   const inactive = useGalaxyStore(s => s.inactiveRoots);
   const root = useAtlasStore(s => s.atlasRoot);
   const nativeSelected = useAtlasStore(s => s.selectedNodeId);
+  const cloudFiles = useCloudGalaxy(s => s.files);
+  const cloudCurrent = useCloudGalaxy(s => s.currentKey);
+  /** Cloud files on the map: fetched, or too large to fetch (then a single named star). */
+  const cloudShown = useMemo(() => cloudFiles.filter(file => file.key !== cloudCurrent && (file.status === 'ready' || file.status === 'too-large')), [cloudFiles, cloudCurrent]);
   const { camera, size, gl } = useThree();
   const perspective = camera as PerspectiveCamera;
   const reducedMotion = useMemo(() => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches, []);
@@ -97,20 +102,31 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
       });
       result.set(space.id, frame.positions as Map<string, Vec3>);
     }
+    for (const file of cloudShown) {
+      const tree = file.root ?? placeholderRoot(file);
+      const frame = deriveAtlasLayoutFrame(tree, 'phyllotaxis', undefined, { focusNodeId: tree.id, viewport: 'desktop', viewportWidth: size.width, viewportHeight: size.height });
+      result.set(file.spaceId, frame.positions as Map<string, Vec3>);
+    }
     return result;
     // The layout follows the notes; the viewport is read once per visit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, galaxy?.spaces, galaxy?.activeSpaceId, inactive, root, nativeSelected, layoutMode]);
+  }, [open, galaxy?.spaces, galaxy?.activeSpaceId, inactive, root, nativeSelected, layoutMode, cloudShown]);
 
   const map = useMemo(() => {
     if (!open || !visit.current) return null;
-    const built = buildKnowledgeMap(graph, native, visit.current.origin, visit.current.anchors, visit.current.aspect);
+    // Each cloud file is a galaxy of its own: well apart from the spaces and from each other.
+    const built = buildKnowledgeMap(graph, native, visit.current.origin, visit.current.anchors, visit.current.aspect,
+      (spaceId, radius) => (isCloudSpaceId(spaceId) ? Math.max(260, radius * .9) : 0));
     visit.current.anchors = built.anchors;
     return built;
   }, [open, graph, native]);
   const signals = useMemo(() => (open ? knowledgeHubSignals(graph) : new Map()), [open, graph]);
   const data = useMemo(() => (map ? buildFieldData(graph, map) : null), [graph, map]);
-  const spaceColors = useMemo(() => new Map((galaxy?.spaces ?? []).map(space => [space.id, space.color])), [galaxy?.spaces]);
+  const spaceColors = useMemo(() => new Map([
+    ...(galaxy?.spaces ?? []).map(space => [space.id, space.color] as const),
+    ...cloudShown.map(file => [file.spaceId, file.color] as const),
+  ]), [galaxy?.spaces, cloudShown]);
+  const cloudSpaces = useMemo(() => new Set(cloudShown.map(file => file.spaceId)), [cloudShown]);
   // The judged quality of each space (0..1), shown as the middle bar under its name.
   const quality = useMemo(() => new Map((galaxy?.spaces ?? []).map(space => {
     const level = galaxy?.judgments[space.id]?.answers?.quality?.level;
@@ -655,6 +671,7 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
       data: current, camera: perspective, width: size.width, height: size.height, pixelScale, unit: map.unit,
       clusterRadius, signals, quality, rings, selected: state.selected, hovered: state.hovered,
       activeSpaceId: visit.current?.origin ?? galaxyState?.activeSpaceId ?? null, hereLabel: copy.here, untitled: copy.untitled,
+      cloudSpaces, cloudLabel: copy.cloudFile,
       marked, relationMarks, chrome: chrome.current.rects, fade: smooth(.35, .9, knowledgePresence.blend), now,
     });
   });
@@ -708,6 +725,6 @@ export function KnowledgeScene({ layoutMode, lowQuality }: { layoutMode: AtlasLa
   return <KnowledgeField
     data={data} map={map} graph={graph} signals={signals} spaceColors={spaceColors} focus={focus}
     selectedIndex={selected ? data.index.get(selected) ?? null : null}
-    rings={rings} lowQuality={lowQuality} reducedMotion={reducedMotion}
+    rings={rings} lowQuality={lowQuality} reducedMotion={reducedMotion} faint={cloudSpaces}
   />;
 }
