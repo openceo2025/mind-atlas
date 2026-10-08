@@ -10318,3 +10318,26 @@ button:disabled,
 .app-shell[data-theme="light"] .board-mobile-node-body::placeholder {
   color: #7d8b99;
 }
+
+/* The way back to an OpenCEO office that opened this tab (local mode only). */
+.openceo-return-button {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: calc(env(safe-area-inset-left, 0px) + 12px);
+  z-index: 60;
+  padding: 8px 14px;
+  border: 1px solid rgba(242, 193, 78, 0.7);
+  border-radius: 999px;
+  background: rgba(11, 10, 16, 0.86);
+  color: #f2c14e;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.openceo-return-button:hover,
+.openceo-return-button:focus-visible {
+  background: #f2c14e;
+  color: #0b0a10;
+  outline: none;
+}

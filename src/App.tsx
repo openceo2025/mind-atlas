@@ -72,6 +72,7 @@ import { createNewShogiRecord } from "./features/shogi/shogiRecord";
 import { createNewChessRecord } from "./features/chess/chessRecord";
 import { createNewGoRecord } from "./features/go/goRecord";
 import { extractSupportedShogiSourceUrl } from "./features/shogi/shogiSource";
+import { readOpenCeoReturn, returnToOffice } from "./openceoReturn";
 
 const GalaxyView = lazy(() => import("./components/galaxy/GalaxyView").then((module) => ({ default: module.GalaxyView })));
 
@@ -242,6 +243,18 @@ export default function App() {
   const analyticsTutorialStartedRef = useRef(false);
   const explicitSaveRunningRef = useRef(false);
   const publicServiceMode = isHostedServiceMode();
+  // The way back to an OpenCEO office that opened this tab. Local developer
+  // mode only; the hosted service never offers it.
+  const [openCeoReturn] = useState<string | null>(() => {
+    if (publicServiceMode || typeof window === "undefined") return null;
+    let storage: Storage | null = null;
+    try {
+      storage = window.sessionStorage;
+    } catch {
+      storage = null;
+    }
+    return readOpenCeoReturn(window.location.search, storage);
+  });
   useEffect(() => {
     if (!publicServiceMode || aboutDemoConfig) return;
     let active = true;
@@ -2336,6 +2349,16 @@ export default function App() {
       onDragLeave={handleImportDragLeave}
       onDrop={handleImportDrop}
     >
+      {openCeoReturn ? (
+        <button
+          type="button"
+          className="openceo-return-button"
+          aria-label={t("openceo.backToOfficeLabel")}
+          onClick={() => returnToOffice(openCeoReturn)}
+        >
+          {t("openceo.backToOffice")}
+        </button>
+      ) : null}
       <UniverseCanvas
         theme={theme}
         vrPanEnabled={vrModeEnabled}

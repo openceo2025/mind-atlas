@@ -422,6 +422,8 @@ const coreSourceMessages = {
   "dialog.packageJsonOnly": "Created a JSON-only Mind Atlas package. Notebook text is preserved, but attachment files are not embedded.",
   "dialog.packageMissingAttachments": "{count, plural, one {# attachment} other {# attachments}} could not be included because this browser session only has their metadata.",
   "node.untitled": "Untitled",
+  "openceo.backToOffice": "Back to the office",
+  "openceo.backToOfficeLabel": "Return to the OpenCEO office this Mind Atlas was opened from",
 } as const;
 
 type CoreMessageId = keyof typeof coreSourceMessages;
@@ -829,6 +831,8 @@ const coreJapaneseMessages: Partial<Record<CoreMessageId, string>> = {
   "dialog.packageJsonOnly": "JSONのみのMind Atlasパッケージを作成しました。ノートのテキストは保存されますが、添付ファイルは含まれません。",
   "dialog.packageMissingAttachments": "このブラウザセッションにはメタデータしかないため、添付ファイル{count}件を含められませんでした。",
   "node.untitled": "ここに入力",
+  "openceo.backToOffice": "オフィスに戻る",
+  "openceo.backToOfficeLabel": "この Mind Atlas を開いた OpenCEO のオフィスに戻る",
 };
 
 const searchJapaneseMessages: Partial<Record<keyof typeof coreSourceMessages, string>> = {

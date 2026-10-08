@@ -38,6 +38,7 @@ import {
 } from "./agent-runtime/claude-auth-recovery.mjs";
 import { formatClaudePlanLimitError, isRejectedClaudePlanAllowance } from "./agent-runtime/claude-adapter.mjs";
 import { codexReasoningSummary } from "./agent-runtime/codex-adapter.mjs";
+import { acceptedReturnUrl, readOpenCeoReturn, returnUrlFromSearch } from "../src/openceoReturn.ts";
 import { AgentRunStore } from "./agent-runtime/run-journal.mjs";
 import { AgentRuntimeManager } from "./agent-runtime/runtime-manager.mjs";
 import {
@@ -1461,6 +1462,25 @@ async function verifyRunStreamLifecycle(client) {
     "a Codex run whose Windows sandbox fails is never rerun without the sandbox",
     !/sandbox: "danger-full-access",\s*fullAccessApproved: true,\s*sandboxFallbackFrom/.test(bridgeSource)
       && /not retrying without the sandbox/.test(bridgeSource),
+  );
+
+  section("The way back to an OpenCEO office");
+  check("an office on this machine is accepted", acceptedReturnUrl("http://localhost:3000/") === "http://localhost:3000/");
+  check("another site is refused", acceptedReturnUrl("https://example.com/") === null);
+  check("a script URL is refused", acceptedReturnUrl("javascript:alert(1)") === null);
+  check("only a link from OpenCEO counts", returnUrlFromSearch("?return=http%3A%2F%2Flocalhost%3A3000%2F") === null);
+  check(
+    "a link from OpenCEO names the office",
+    returnUrlFromSearch("?from=openceo&return=http%3A%2F%2F127.0.0.1%3A3000%2F") === "http://127.0.0.1:3000/",
+  );
+  const kept = new Map();
+  const storage = { getItem: (key) => kept.get(key) ?? null, setItem: (key, value) => kept.set(key, value) };
+  readOpenCeoReturn("?from=openceo&return=http%3A%2F%2Flocalhost%3A3000%2F", storage);
+  check("the office survives a reload in the same tab", readOpenCeoReturn("", storage) === "http://localhost:3000/");
+  const appSource = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
+  check(
+    "the hosted public service never offers the way back",
+    /useState<string \| null>\(\(\) => \{\s*if \(publicServiceMode \|\| typeof window === "undefined"\) return null;/.test(appSource),
   );
 }
 
