@@ -37,6 +37,7 @@ import {
   isClaudeOAuthAuthenticationError,
 } from "./agent-runtime/claude-auth-recovery.mjs";
 import { formatClaudePlanLimitError, isRejectedClaudePlanAllowance } from "./agent-runtime/claude-adapter.mjs";
+import { codexReasoningSummary } from "./agent-runtime/codex-adapter.mjs";
 import { AgentRunStore } from "./agent-runtime/run-journal.mjs";
 import { AgentRuntimeManager } from "./agent-runtime/runtime-manager.mjs";
 import {
@@ -1422,6 +1423,13 @@ async function verifyRunStreamLifecycle(client) {
   check("a running run's stream stays open", live.response.ended === false);
   check("a running run keeps a live subscription", liveListeners.length > 0, liveListeners.length);
 
+  // A command or tool finishing also says "completed". It is not the run's
+  // end: closing on it cut live streams in the middle of runs (2026-10-07).
+  for (const listener of [...liveListeners]) listener({ kind: "command_completed", sequence: 2, status: "completed" });
+  for (const listener of [...liveListeners]) listener({ kind: "tool_completed", sequence: 3, status: "completed" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  check("a finished command does not close a running run's stream", live.response.ended === false, live.response.chunks.join(""));
+
   // The run finishes while this connection is open.
   for (const listener of [...liveListeners]) listener({ kind: "lifecycle", sequence: 4, status: "completed", final: true });
   const closedInTime = await waitFor(async () => live.response.ended === true, 2000);
@@ -1441,6 +1449,19 @@ async function verifyRunStreamLifecycle(client) {
       && /deliveredEvent \|\| Date\.now\(\) - openedAt >= HEALTHY_STREAM_MS\) attempt = 0;/.test(client),
   );
   check("a closed subscription never schedules another retry", !/handlers\.onError[\s\S]{0,80}\n\s*scheduleRetry\(\);/.test(client));
+
+  section("Codex reasoning summaries and the Windows sandbox");
+  check("Codex is asked for reasoning summaries by default", codexReasoningSummary({}) === "auto");
+  check("a known summary setting is honoured", codexReasoningSummary({ MIND_ATLAS_CODEX_REASONING_SUMMARY: "Concise" }) === "concise");
+  check("an unknown summary setting falls back to auto", codexReasoningSummary({ MIND_ATLAS_CODEX_REASONING_SUMMARY: "everything" }) === "auto");
+  const adapterSource = await readFile(new URL("./agent-runtime/codex-adapter.mjs", import.meta.url), "utf8");
+  check("turn/start carries the summary setting", /request\("turn\/start", \{[\s\S]{0,600}summary: codexReasoningSummary\(\)/.test(adapterSource));
+  const bridgeSource = await readFile(new URL("./mind-atlas-bridge.mjs", import.meta.url), "utf8");
+  check(
+    "a Codex run whose Windows sandbox fails is never rerun without the sandbox",
+    !/sandbox: "danger-full-access",\s*fullAccessApproved: true,\s*sandboxFallbackFrom/.test(bridgeSource)
+      && /not retrying without the sandbox/.test(bridgeSource),
+  );
 }
 
 async function waitFor(predicate, timeoutMs) {

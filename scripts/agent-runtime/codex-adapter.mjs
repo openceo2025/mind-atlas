@@ -215,6 +215,11 @@ export class CodexAdapter {
       input,
       ...(request.effort ? { effort: request.effort } : {}),
       ...(request.model ? { model: request.model } : {}),
+      // Without this the app-server sent every reasoning item with an empty
+      // summary, so nothing showed what the run was thinking. The values are
+      // the app-server's ReasoningSummary (codex-cli 0.159.2, checked
+      // 2026-10-08).
+      summary: codexReasoningSummary(),
     });
     session.currentTurnId = String(turn?.turn?.id ?? "");
     return {
@@ -301,6 +306,17 @@ export class CodexAdapter {
     this.connection?.close();
     this.connection = null;
   }
+}
+
+const CODEX_REASONING_SUMMARIES = new Set(["auto", "concise", "detailed", "none"]);
+
+/**
+ * How much of its reasoning Codex summarises. `auto` unless
+ * MIND_ATLAS_CODEX_REASONING_SUMMARY names another value the app-server knows.
+ */
+export function codexReasoningSummary(env = process.env) {
+  const chosen = String(env.MIND_ATLAS_CODEX_REASONING_SUMMARY ?? "").trim().toLowerCase();
+  return CODEX_REASONING_SUMMARIES.has(chosen) ? chosen : "auto";
 }
 
 function toCodexUserInput(entry) {

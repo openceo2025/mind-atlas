@@ -3281,26 +3281,25 @@ async function saveClaudeResponseLog(logPath, response) {
 async function runCodex(prompt, settings) {
   assertExistingWorkspace(settings.workspace, "Codex");
   const result = await runCodexOnce(prompt, settings);
-  if (!shouldRetryWindowsSandboxSetupFailure(result, settings)) {
+  if (!isWindowsSandboxSetupFailure(result, settings)) {
     return {
       ...result,
       effectiveSandbox: settings.sandbox,
     };
   }
 
-  console.warn(`[bridge] Codex Windows sandbox failed to initialize for ${settings.workspace}; retrying with policy-preserving full access.`);
-  const fallbackSettings = {
-    ...settings,
-    sandbox: "danger-full-access",
-    fullAccessApproved: true,
-    sandboxFallbackFrom: settings.sandbox,
-  };
-  const fallbackResult = await runCodexOnce(buildWindowsSandboxFallbackPrompt(prompt, settings.sandbox), fallbackSettings);
+  // The run is not repeated without the sandbox. A sandbox that fails to start
+  // is a reason to stop, never a reason to drop the boundary the person chose:
+  // a prompt that asks the model to behave is not a sandbox.
+  console.warn(`[bridge] Codex Windows sandbox failed to initialize for ${settings.workspace}; not retrying without the sandbox.`);
   return {
-    ...fallbackResult,
-    requestedSandbox: settings.sandbox,
-    effectiveSandbox: "danger-full-access",
-    sandboxFallbackFrom: settings.sandbox,
+    ...result,
+    effectiveSandbox: settings.sandbox,
+    sandboxSetupFailed: true,
+    lastMessage: [
+      result.lastMessage,
+      `Codex could not start its Windows sandbox (${settings.sandbox}), so the run stopped. Mind Atlas does not rerun it without the sandbox.`,
+    ].filter(Boolean).join("\n\n"),
   };
 }
 
@@ -3380,25 +3379,10 @@ async function runCodexOnce(prompt, settings) {
   return { ...result, lastMessage, events, usage: extractCodexUsage(result.stdout), codexThreadId, codexLogPath };
 }
 
-function shouldRetryWindowsSandboxSetupFailure(result, settings) {
+function isWindowsSandboxSetupFailure(result, settings) {
   if (process.platform !== "win32" || codexUseWsl || settings.sandbox === "danger-full-access") return false;
   const text = `${result.lastMessage}\n${result.stderr}\n${result.stdout}`.toLowerCase();
   return text.includes("windows sandbox: spawn setup refresh");
-}
-
-function buildWindowsSandboxFallbackPrompt(prompt, requestedSandbox) {
-  const policy = requestedSandbox === "read-only"
-    ? "This remains a read-only run. Do not create, edit, delete, move, rename, or format any file."
-    : "This remains a workspace-write run. Only modify files inside the configured workspace, and do not write outside it.";
-  return [
-    "Mind Atlas Windows sandbox recovery notice:",
-    `The requested sandbox policy is ${requestedSandbox}, but the Codex Windows sandbox failed to initialize with "windows sandbox: spawn setup refresh".`,
-    "This retry runs without the broken OS sandbox only so shell commands and file reads can work.",
-    policy,
-    "Do not treat this recovery as permission to broaden the task or access unrelated locations.",
-    "",
-    prompt,
-  ].join("\n");
 }
 
 function extractCodexThreadId(events) {

@@ -292,7 +292,10 @@ async function streamRunEvents(request, response, manager, runId, url) {
   // A live run finishes while this connection is open. Deliver the terminal
   // event, then close instead of heart-beating forever.
   stopOnTerminal = manager.subscribe(runId, (event) => {
-    if (!isTerminalStatus(event?.status)) return;
+    // Only the run's own lifecycle ends the run. A finished command or tool
+    // also carries status "completed", and closing on it cut a live stream
+    // in the middle of a run that went on to answer.
+    if (event?.kind !== "lifecycle" || !isTerminalStatus(event?.status)) return;
     const timer = setTimeout(() => {
       if (closed) return;
       try {
