@@ -26,6 +26,8 @@ import {
   modelDisplayName,
 } from "./model-catalog.mjs";
 import { AtlasToolService } from "./agent-runtime/atlas-tool-service.mjs";
+import { AtlasLink, createAtlasLinkRoutes } from "./agent-runtime/atlas-link.mjs";
+import { ATLAS_WRITE_TOOL_NAMES } from "./agent-runtime/atlas-write-tools.mjs";
 import { EvidenceStore, planEvidenceTransport, renderEvidenceReferenceBlock } from "./agent-runtime/evidence-store.mjs";
 import { checkAgentWorkspace } from "./agent-runtime/workspace-policy.mjs";
 import { createAgentRuntimeRoutes } from "./agent-runtime/bridge-routes.mjs";
@@ -84,6 +86,7 @@ async function main() {
     await verifyFakeProviderRun(workDir);
     await verifyOwnershipAndHandoff(workDir);
     await verifyAtlasTools();
+    await verifyAtlasLink(workDir);
     await verifyContextAccounting();
     await verifyMarkdownSafety();
     await verifyEvidence(workDir);
@@ -734,11 +737,151 @@ async function verifyAtlasTools() {
   check("unknown node id is a typed error", missing.isError === true, missing);
 
   const unknown = await service.call("delete_node", {});
-  check("write tools do not exist in the first release", unknown.isError === true, unknown);
+  check("the read service itself never writes", unknown.isError === true, unknown);
 
   const empty = new AtlasToolService(null);
   const emptyResult = await empty.call("search_nodes", { query: "x" });
   check("missing snapshot degrades safely", emptyResult.isError === true, emptyResult);
+}
+
+async function verifyAtlasLink(workDir) {
+  section("Mind Atlas link: the open notebook's copy and agents' writes");
+  const { createServer } = await import("node:http");
+  const { spawn } = await import("node:child_process");
+  const dir = join(workDir, "atlas-link");
+  const link = new AtlasLink({ dir });
+
+  check("there is no copy before a browser sends one", (await link.getCopy()) === null);
+  await link.setCopy({
+    title: "Owner",
+    root: {
+      id: "root",
+      title: "Owner",
+      body: "",
+      children: [{ id: "veg", title: "野菜カード", body: "Card game project", children: [] }],
+    },
+  });
+  check("the copy is kept on disk", (await new AtlasLink({ dir }).getCopy())?.root?.children?.[0]?.id === "veg");
+
+  const refused = await link.enqueue({ token: "made-up", tool: "add_child_nodes", args: {} }, 0);
+  check("a write without a run's token is refused", refused.error === "unknown_run", refused);
+  const token = link.issueToken({ runId: "run-1", provider: "codex", label: "アオイ" });
+  const unknownTool = await link.enqueue({ token, tool: "reset_notebook", args: {} }, 0);
+  check("only the listed write tools can be queued", unknownTool.error === "unknown_tool", unknownTool);
+
+  const queued = await link.enqueue({ token, tool: "set_node_status", args: { nodeId: "veg", status: "running" } }, 0);
+  check("a write waits while no browser has applied it", queued.op?.status === "pending", queued);
+  check("the write knows which run and agent made it", queued.op?.runId === "run-1" && queued.op?.label === "アオイ", queued.op);
+  const reloaded = new AtlasLink({ dir });
+  const survived = await reloaded.pending();
+  check("a queued write survives a bridge restart", survived.length === 1 && survived[0].tool === "set_node_status", survived);
+  await reloaded.complete(survived[0].id, { ok: true, text: "Status set." });
+  check("an applied write leaves the queue", (await reloaded.pending()).length === 0);
+
+  // End to end: the real MCP server process, the link's HTTP routes, and a
+  // pretend browser that applies what is queued.
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    void handle(request, response, url).then((handled) => {
+      if (!handled) {
+        response.writeHead(404);
+        response.end();
+      }
+    });
+  });
+  const handle = createAtlasLinkRoutes({
+    link,
+    isAllowedOrigin: (origin) => origin === "http://127.0.0.1:5173",
+    readJsonBody: (request) =>
+      new Promise((resolve) => {
+        let text = "";
+        request.on("data", (chunk) => { text += chunk; });
+        request.on("end", () => resolve(text ? JSON.parse(text) : {}));
+      }),
+    sendJson: (response, status, payload) => {
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(payload));
+    },
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = setInterval(async () => {
+    for (const op of await link.pending()) {
+      await link.complete(op.id, { ok: true, text: `Created 1 child node(s).`, data: { nodeIds: ["new-card"] } });
+    }
+  }, 50);
+  const mcp = spawn(process.execPath, [join("scripts", "agent-runtime", "atlas-mcp-server.mjs")], {
+    env: { ...process.env, MIND_ATLAS_BRIDGE_ORIGIN: origin, MIND_ATLAS_RUN_TOKEN: token },
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  const answers = new Map();
+  let buffer = "";
+  mcp.stdout.setEncoding("utf8");
+  mcp.stdout.on("data", (chunk) => {
+    buffer += chunk;
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const message = JSON.parse(line);
+      answers.get(message.id)?.(message);
+    }
+  });
+  let nextId = 1;
+  const ask = (method, params) =>
+    new Promise((resolve) => {
+      const id = nextId++;
+      answers.set(id, resolve);
+      mcp.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    });
+  try {
+    await ask("initialize", {});
+    const listed = await ask("tools/list", {});
+    const names = (listed.result?.tools ?? []).map((tool) => tool.name);
+    check("a run with a token is given every write tool", ATLAS_WRITE_TOOL_NAMES.every((name) => names.includes(name)), names);
+    check("and the read tools", names.includes("search_nodes") && names.includes("get_atlas_outline"), names);
+    const found = await ask("tools/call", { name: "search_nodes", arguments: { query: "野菜" } });
+    check("the read tools read the open notebook's copy", /veg/.test(found.result?.content?.[0]?.text ?? ""), found.result);
+    const wrote = await ask("tools/call", {
+      name: "add_child_nodes",
+      arguments: { parentId: "veg", nodes: [{ title: "調べたこと", body: "ルールの案" }] },
+    });
+    const text = wrote.result?.content?.[0]?.text ?? "";
+    check("a write is applied by the open browser and answered", wrote.result?.isError === false && /new-card/.test(text), wrote.result);
+    const copyFromPage = await fetch(`${origin}/api/atlas-link/copy`, { headers: { Origin: "http://127.0.0.1:5173" } });
+    check("a browser page cannot read the copy back", copyFromPage.status === 403, copyFromPage.status);
+    const writeFromPage = await fetch(`${origin}/api/atlas-link/ops`, {
+      method: "POST",
+      headers: { Origin: "http://127.0.0.1:5173", "Content-Type": "application/json", "x-mind-atlas-run-token": token },
+      body: JSON.stringify({ tool: "delete_node", args: { nodeId: "veg" } }),
+    });
+    check("a browser page cannot queue a write", writeFromPage.status === 403, writeFromPage.status);
+    const elsewhere = await fetch(`${origin}/api/atlas-link/ops/pending`, { headers: { Origin: "https://example.com" } });
+    check("another site cannot see queued writes", elsewhere.status === 403, elsewhere.status);
+  } finally {
+    clearInterval(browser);
+    mcp.kill();
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  const noLink = spawn(process.execPath, [join("scripts", "agent-runtime", "atlas-mcp-server.mjs")], {
+    env: { ...process.env, MIND_ATLAS_BRIDGE_ORIGIN: "", MIND_ATLAS_RUN_TOKEN: "" },
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  const listedWithout = await new Promise((resolve) => {
+    let text = "";
+    noLink.stdout.setEncoding("utf8");
+    noLink.stdout.on("data", (chunk) => {
+      text += chunk;
+      const line = text.split("\n").find((one) => one.includes('"id":2'));
+      if (line) resolve(JSON.parse(line));
+    });
+    noLink.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
+    noLink.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })}\n`);
+  });
+  noLink.kill();
+  const withoutNames = (listedWithout.result?.tools ?? []).map((tool) => tool.name);
+  check("a run without a token gets no write tools", !withoutNames.some((name) => ATLAS_WRITE_TOOL_NAMES.includes(name)), withoutNames);
 }
 
 async function verifyContextAccounting() {
@@ -1313,7 +1456,7 @@ async function verifyModeSafety() {
   check(
     "all Claude execution routes apply the fixed web-tool policy",
     /appendClaudeDefaultWebToolArgs\(args\)/.test(localBridge) &&
-      /appendClaudeDefaultWebToolArgs\(args\)/.test(await readRepoFile("scripts/agent-runtime/claude-adapter.mjs")),
+      /appendClaudeDefaultWebToolArgs\(args[,)]/.test(await readRepoFile("scripts/agent-runtime/claude-adapter.mjs")),
   );
   check(
     "Codex app-server and exec fallback force live web search",

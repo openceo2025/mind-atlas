@@ -73,6 +73,7 @@ import { createNewChessRecord } from "./features/chess/chessRecord";
 import { createNewGoRecord } from "./features/go/goRecord";
 import { extractSupportedShogiSourceUrl } from "./features/shogi/shogiSource";
 import { readOpenCeoReturn, returnToOffice } from "./openceoReturn";
+import { startAtlasLink } from "./agentRuntime/atlasLink";
 
 const GalaxyView = lazy(() => import("./components/galaxy/GalaxyView").then((module) => ({ default: module.GalaxyView })));
 
@@ -1028,6 +1029,13 @@ export default function App() {
       console.error("Attachment preview restore failed", error);
     });
   }, [restoreAttachmentPreviews]);
+
+  // Local-only: agents read this notebook and write to it through the bridge
+  // (agentRuntime/atlasLink.ts). Never in hosted mode.
+  useEffect(() => {
+    if (publicServiceMode || aboutDemoConfig) return;
+    return startAtlasLink();
+  }, [aboutDemoConfig, publicServiceMode]);
 
   useEffect(() => {
     if (publicServiceMode || aboutDemoConfig) return;

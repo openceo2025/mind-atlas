@@ -12,6 +12,7 @@ import { Readable } from "node:stream";
 // Local-only agent runtime. These modules must never be imported by
 // `server/mind-atlas-service.mjs`; `npm run verify:hosted-service` asserts it.
 import { createAgentRuntimeRoutes } from "./agent-runtime/bridge-routes.mjs";
+import { AtlasLink, createAtlasLinkRoutes } from "./agent-runtime/atlas-link.mjs";
 import {
   createClaudeAuthRecovery,
   isClaudeOAuthAuthenticationError,
@@ -278,12 +279,23 @@ const agentRunStore = createAgentRunStore({
   replayLimit: readPositiveIntEnv("MIND_ATLAS_AGENT_SSE_REPLAY_LIMIT", 5000),
 });
 
+// The open notebook's copy and agents' queued writes (atlas-link.mjs). Agents'
+// MCP servers reach the bridge on loopback whatever host it listens on.
+const atlasLink = new AtlasLink({ dir: agentRuntimeDir });
+const atlasLinkOrigin = `${bridgeProtocol === "https" ? "https" : "http"}://127.0.0.1:${port}`;
+
 const agentRuntimeManager = createAgentRuntimeManager({
   store: agentRunStore,
   clientInfo: { name: "mind_atlas", title: "Mind Atlas", version: "0.1.1" },
   codexRoutePreference: codexRuntimePreference,
   claudeRoutePreference: claudeRuntimePreference,
-  atlasMcp: { enabled: agentAtlasMcpEnabled, serverScript: atlasMcpServerScript },
+  atlasMcp: {
+    enabled: agentAtlasMcpEnabled,
+    serverScript: atlasMcpServerScript,
+    link: atlasLink,
+    bridgeOrigin: atlasLinkOrigin,
+    httpsCa: bridgeProtocol === "https" ? process.env.MIND_ATLAS_HTTPS_CA ?? "" : "",
+  },
   codex: {
     enabled: !codexDisabled,
     workspace: normalizeProcessCwd(codexWorkspace),
@@ -315,6 +327,12 @@ const agentHandoffCoordinator = createHandoffCoordinator({
   codexCommand: () => (codexUseWsl ? { command: "wsl", args: [codexBin] } : { command: codexBin, args: [] }),
   claudeCommand: (args) => buildClaudeCommand(args),
   probeCodexDeepLink: () => hasCodexDeepLinkHandler(),
+});
+
+const handleAtlasLinkRequest = createAtlasLinkRoutes({
+  link: atlasLink,
+  isAllowedOrigin: (origin) => isBridgeOriginAllowed(origin),
+  sendJson: (response, status, payload) => sendJson(response, status, payload),
 });
 
 const handleAgentRuntimeRequest = createAgentRuntimeRoutes({
@@ -440,6 +458,7 @@ const server = createBridgeServer(async (request, response) => {
       return;
     }
 
+    if (await handleAtlasLinkRequest(request, response, url)) return;
     if (await handleAgentRuntimeRequest(request, response, url)) return;
     if (request.method === "GET" && url.pathname === "/health") {
       sendJson(response, 200, {

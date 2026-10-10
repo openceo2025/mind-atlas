@@ -116,7 +116,7 @@ export class AtlasToolService {
 
   async call(name, args = {}) {
     if (!this.root) {
-      return { isError: true, content: "No Mind Atlas notebook snapshot is attached to this run." };
+      return { isError: true, content: "No Mind Atlas notebook is available yet. The owner needs to open Mind Atlas in a browser on this PC." };
     }
     switch (name) {
       case "search_nodes":
@@ -285,7 +285,9 @@ function sanitizeNode(node) {
     provider: String(node.provider ?? ""),
     runMode: String(node.runMode ?? ""),
     author: String(node.author ?? ""),
-    attachmentCount: Array.isArray(node.attachments) ? node.attachments.length : 0,
+    attachmentCount: Array.isArray(node.attachments)
+      ? node.attachments.length
+      : Number.isInteger(node.attachmentCount) ? node.attachmentCount : 0,
     children: Array.isArray(node.children) ? node.children.map(sanitizeNode).filter(Boolean) : [],
   };
 }

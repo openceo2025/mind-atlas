@@ -371,19 +371,44 @@ Three separate metrics, never merged:
    Claude Code usage must not be presented as a guaranteed clone of a consumer
    app's gauge.
 
-### Read-only Atlas tools
+### Atlas tools: reading and writing the open notebook
 
-When `MIND_ATLAS_ATLAS_MCP` is not `false`, a Claude run receives an additive
-`--mcp-config` pointing at `scripts/agent-runtime/atlas-mcp-server.mjs` with a
-run-scoped sanitized notebook snapshot. The user's own MCP servers are kept
-(`--strict-mcp-config` is deliberately not used). Tools:
-`search_nodes`, `semantic_search_nodes`, `get_node`, `get_branch`,
-`get_children`, `get_atlas_outline`. All are read-only, and
-`semantic_search_nodes` reports `scoringMode: "lexical+ngram"` with
-`degraded: true` because no embedding backend is configured - it never claims
-to be vector search. The matcher is the same pure implementation used by the
-human Ctrl+F search. Codex is not auto-configured with this server because that
-would require mutating provider configuration.
+When `MIND_ATLAS_ATLAS_MCP` is not `false`, every Claude and Codex run gets the
+Mind Atlas MCP server (`scripts/agent-runtime/atlas-mcp-server.mjs`). Claude
+receives it through an additive `--mcp-config` (`--strict-mcp-config` is
+deliberately not used) with `mcp__mind_atlas` added to `--allowedTools`; Codex
+receives it through the thread's own `config.mcp_servers`, so neither
+provider's global configuration is changed.
+
+The notebook lives in the browser that has Mind Atlas open (IndexedDB), and
+that browser stays the only thing that changes it. The link between them is
+`scripts/agent-runtime/atlas-link.mjs` and `src/agentRuntime/atlasLink.ts`:
+
+- Reading: the open browser posts a sanitized copy of the notebook to
+  `POST /api/atlas-link/copy` whenever it changes (text, status and shape;
+  never attachment data). The read tools (`search_nodes`,
+  `semantic_search_nodes`, `get_node`, `get_branch`, `get_children`,
+  `get_atlas_outline`) read that copy, falling back to a run-scoped snapshot
+  sent with the request. `semantic_search_nodes` reports
+  `scoringMode: "lexical+ngram"` with `degraded: true` because no embedding
+  backend is configured - it never claims to be vector search. The copy can be
+  read only without an Origin, i.e. by a process on this machine.
+- Writing: `add_child_nodes`, `update_node_text`, `set_node_status`,
+  `delete_node`, `move_nodes` and `bulk_update_nodes` queue an operation at
+  `POST /api/atlas-link/ops` with the run's token (issued per run, never from a
+  page). The open browser polls `GET /api/atlas-link/ops/pending`, applies each
+  operation with the same store actions a person uses, so undo covers it, and
+  reports the result to `POST /api/atlas-link/ops/:id`, which answers the
+  waiting tool call. With no browser open the operation waits on disk under
+  `server-data/agent-runtime/atlas-ops/`, and the agent is told so.
+- Cards an agent creates are marked `author: "ai"` and tagged with the
+  agent's name (`agentLabel` on the run request, falling back to its title).
+  Every write is listed in the AI Partner log.
+- No write needs approval, deletes and moves included: the owner decided this
+  for agents working through OpenCEO (OpenCEO ADR 0059). The Voice Partner's
+  own rules are unchanged.
+- One Mind Atlas tab is assumed. Two open tabs (or browsers) would both send
+  copies and both apply writes.
 
 ### Evidence and multimodal input
 

@@ -318,6 +318,9 @@ function normalizeRunRequest(body) {
     workspaceMode: body?.workspaceMode === "worktree" ? "worktree" : "shared",
     prompt: boundText(String(body?.prompt ?? ""), 400_000),
     title: boundText(String(body?.title ?? ""), 300),
+    // Who is working, as the caller names them (an OpenCEO employee's name).
+    // Agents' Mind Atlas cards carry it.
+    agentLabel: boundText(String(body?.agentLabel ?? ""), 80),
     model: String(body?.model ?? ""),
     effort: String(body?.effort ?? ""),
     sandboxMode: String(body?.sandboxMode ?? ""),

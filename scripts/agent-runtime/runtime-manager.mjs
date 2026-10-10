@@ -271,19 +271,22 @@ export class AgentRuntimeManager {
     this.sinks.set(handle.runId, sink);
     await handle.setStatus("starting");
 
-    const mcpConfigPath = await this.#prepareAtlasTools(handle, effectiveRequest);
-    if (mcpConfigPath) {
+    const atlasTools = await this.#prepareAtlasTools(handle, effectiveRequest);
+    const mcpConfigPath = atlasTools?.configPath ?? "";
+    if (atlasTools) {
       await handle.append({
         kind: "diagnostic",
         code: "atlas_tools_attached",
-        message: "Read-only Mind Atlas retrieval tools are attached to this run.",
+        message: atlasTools.writes
+          ? "Mind Atlas tools are attached to this run: reading the open notebook and writing to it."
+          : "Read-only Mind Atlas retrieval tools are attached to this run.",
       });
     }
 
     // Evidence transport is decided from the runtime's own capabilities and
     // reported per item, so the UI can never imply a file was seen when only
     // its path was sent.
-    let providerRequest = { ...effectiveRequest, mcpConfigPath };
+    let providerRequest = { ...effectiveRequest, mcpConfigPath, atlasMcpServer: atlasTools?.server ?? null };
     if (request.evidence?.length) {
       const capabilities = adapter
         ? await (provider === "claude"
@@ -337,37 +340,61 @@ export class AgentRuntimeManager {
   }
 
   /**
-   * Write the run-scoped Atlas snapshot and an additive MCP config. Only the
-   * sanitized notebook reaches the child process; no bridge internals and no
-   * credentials are shared. Codex is not auto-configured here because that
-   * would require mutating provider configuration; see docs/ai-bridge.md.
+   * Attach the Mind Atlas MCP server to a Claude or Codex run.
+   *
+   * The server reads the notebook copy the open browser keeps at the bridge,
+   * and, with this run's token, queues writes for that browser to apply
+   * (`atlas-link.mjs`). A run-scoped snapshot sent with the request is still
+   * written as the fallback for reading. Claude gets an additive
+   * `--mcp-config`; Codex gets the same server through the thread's own
+   * `config`, so neither provider's global configuration is changed.
+   * No credentials and no bridge internals reach the child process beyond the
+   * bridge address and the run token.
    */
   async #prepareAtlasTools(handle, request) {
-    if (!this.atlasMcp?.enabled) return "";
-    if (handle.manifest.provider !== "claude") return "";
-    const snapshot = request.atlasSnapshot;
-    if (!snapshot || typeof snapshot !== "object") return "";
+    if (!this.atlasMcp?.enabled) return null;
+    const provider = handle.manifest.provider;
+    if (provider !== "claude" && provider !== "codex") return null;
     try {
       const dir = this.store.runDir(handle.runId);
-      const snapshotPath = join(dir, "atlas-snapshot.json");
-      await writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
-      const configPath = join(dir, "mcp-config.json");
-      await writeFile(configPath, JSON.stringify({
-        mcpServers: {
-          mind_atlas: {
-            command: this.atlasMcp.nodeExecPath ?? process.execPath,
-            args: [this.atlasMcp.serverScript, snapshotPath],
-          },
-        },
-      }, null, 2), "utf8");
-      return configPath;
+      const args = [this.atlasMcp.serverScript];
+      const snapshot = request.atlasSnapshot;
+      if (snapshot && typeof snapshot === "object") {
+        const snapshotPath = join(dir, "atlas-snapshot.json");
+        await writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
+        args.push(snapshotPath);
+      }
+      const link = this.atlasMcp.link ?? null;
+      const origin = this.atlasMcp.bridgeOrigin ?? "";
+      const env = {};
+      if (link && origin) {
+        env.MIND_ATLAS_BRIDGE_ORIGIN = origin;
+        env.MIND_ATLAS_RUN_TOKEN = link.issueToken({
+          runId: handle.runId,
+          provider,
+          label: String(request.agentLabel || request.title || handle.manifest.title || "").slice(0, 80),
+        });
+        if (this.atlasMcp.httpsCa) env.MIND_ATLAS_HTTPS_CA = this.atlasMcp.httpsCa;
+      }
+      if (args.length === 1 && !env.MIND_ATLAS_BRIDGE_ORIGIN) return null;
+      const server = {
+        command: this.atlasMcp.nodeExecPath ?? process.execPath,
+        args,
+        ...(Object.keys(env).length ? { env } : {}),
+      };
+      let configPath = "";
+      if (provider === "claude") {
+        configPath = join(dir, "mcp-config.json");
+        await writeFile(configPath, JSON.stringify({ mcpServers: { mind_atlas: server } }, null, 2), "utf8");
+      }
+      return { configPath, server, writes: Boolean(env.MIND_ATLAS_RUN_TOKEN) };
     } catch (error) {
       await handle.append({
         kind: "warning",
         code: "atlas_tools_failed",
-        message: `Mind Atlas retrieval tools could not be attached: ${String(error?.message ?? error).slice(0, 300)}`,
+        message: `Mind Atlas tools could not be attached: ${String(error?.message ?? error).slice(0, 300)}`,
       });
-      return "";
+      return null;
     }
   }
 

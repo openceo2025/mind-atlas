@@ -229,6 +229,9 @@ type ChildNodeDraft = {
   title?: string;
   body?: string;
   summary?: string;
+  /** Who wrote it. Agents' cards are marked "ai" (agentRuntime/atlasLink.ts). */
+  author?: AtlasNode["author"];
+  tags?: string[];
 };
 
 type AgentApprovalNodeInput = AgentApprovalRequest & {
@@ -1506,6 +1509,8 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         title: node.title?.trim() ?? "",
         body: node.body?.trim() ?? "",
         summary: node.summary?.trim() ?? "",
+        author: node.author,
+        tags: node.tags,
       }))
       .filter((node) => node.title || node.body || node.summary);
     if (!drafts.length) return [];
@@ -1525,7 +1530,12 @@ export const useAtlasStore = create<AtlasStore>((set, get) => ({
         codexLogPath: inheritedCodexLogPath,
         usedNodeIds,
       });
-      return draft.summary ? { ...child, summary: draft.summary } : child;
+      return {
+        ...child,
+        ...(draft.summary ? { summary: draft.summary } : {}),
+        ...(draft.author ? { author: draft.author } : {}),
+        ...(draft.tags?.length ? { tags: [...new Set([...child.tags, ...draft.tags])] } : {}),
+      };
     });
     const ids = children.map((child) => child.id);
 

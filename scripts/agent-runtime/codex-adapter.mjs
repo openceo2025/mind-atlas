@@ -157,6 +157,21 @@ export class CodexAdapter {
       sandbox: request.sandboxMode || "workspace-write",
       approvalPolicy: request.approvalPolicy || "on-request",
       ...(request.model ? { model: request.model } : {}),
+      // The Mind Atlas tools, for this thread only: Codex's own config.toml is
+      // never changed (runtime-manager.mjs #prepareAtlasTools).
+      ...(request.atlasMcpServer
+        ? {
+            config: {
+              mcp_servers: {
+                mind_atlas: {
+                  command: request.atlasMcpServer.command,
+                  args: request.atlasMcpServer.args,
+                  ...(request.atlasMcpServer.env ? { env: request.atlasMcpServer.env } : {}),
+                },
+              },
+            },
+          }
+        : {}),
     };
 
     let thread = null;

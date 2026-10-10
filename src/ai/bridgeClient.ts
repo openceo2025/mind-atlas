@@ -139,6 +139,43 @@ export async function recoverCodexRun(payload: CodexRunRecoveryRequest): Promise
   return await readJsonResponse<CodexRunRecoveryResult>(response);
 }
 
+/** Local-only: the notebook as it is now, for agents to read (atlas-link.mjs). */
+export async function sendAtlasCopy(payload: { title: string; root: unknown }): Promise<void> {
+  const response = await fetchBridge("/api/atlas-link/copy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  await readJsonResponse<{ updatedAt: string }>(response);
+}
+
+export interface AtlasLinkOperation {
+  id: string;
+  tool: string;
+  args: Record<string, unknown>;
+  runId: string;
+  provider: string;
+  label: string;
+  createdAt: string;
+}
+
+/** Local-only: writes agents queued for this browser to apply. */
+export async function getAtlasLinkOperations(): Promise<AtlasLinkOperation[]> {
+  const response = await fetchBridgeGet("/api/atlas-link/ops/pending");
+  const body = await readJsonResponse<{ ops?: AtlasLinkOperation[] }>(response);
+  return Array.isArray(body.ops) ? body.ops : [];
+}
+
+/** Local-only: what became of one queued write. */
+export async function completeAtlasLinkOperation(id: string, result: { ok: boolean; text: string; data?: unknown }): Promise<void> {
+  const response = await fetchBridge(`/api/atlas-link/ops/${encodeURIComponent(id)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(result),
+  });
+  await readJsonResponse<unknown>(response);
+}
+
 export async function getAgentRunInbox(): Promise<AgentRunInboxResult> {
   const response = await fetchBridgeGet("/api/agent-runs/inbox");
   return await readJsonResponse<AgentRunInboxResult>(response);

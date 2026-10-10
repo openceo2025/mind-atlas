@@ -18,7 +18,7 @@
 import { spawn } from "node:child_process";
 
 import { isClaudeOAuthAuthenticationError } from "./claude-auth-recovery.mjs";
-import { appendClaudeDefaultWebToolArgs } from "./claude-cli-policy.mjs";
+import { appendClaudeDefaultWebToolArgs, CLAUDE_ATLAS_TOOLS } from "./claude-cli-policy.mjs";
 import { boundText, reduceCapabilities } from "./types.mjs";
 
 const FILE_WRITE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit", "ApplyPatch"]);
@@ -235,7 +235,7 @@ export class ClaudeAdapter {
       "--permission-prompt-tool",
       "stdio",
     ];
-    appendClaudeDefaultWebToolArgs(args);
+    appendClaudeDefaultWebToolArgs(args, request.mcpConfigPath ? [CLAUDE_ATLAS_TOOLS] : []);
     const settings = request.claudeSettings ?? {};
     // Additive per-run MCP config. The user's own global MCP servers stay
     // available because `--strict-mcp-config` is deliberately not used.
