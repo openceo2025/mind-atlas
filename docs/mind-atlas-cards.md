@@ -65,8 +65,15 @@ iframe で分かれているので、二つのアプリが互いを壊さない�
 | ホスト | サービス | 内容 |
 | --- | --- | --- |
 | mind-atlas.org | `mind-atlas`（:8788、`/opt/mind-atlas`） | `/` に宇宙（`dist/`）、`/card/` にカード（`dist-spatial/`） |
-| card.mind-atlas.org | `mind-atlas-card`（:8789、`/opt/mind-atlas-card`） | `/` と `/card/` にカード |
-| beta.mind-atlas.org | 同上（旧 nginx サイトが :8789 へ流す） | カード。端末内のスペースを新しい場所へ移す案内を出す |
+| card.mind-atlas.org | なし（廃止） | すべて `https://mind-atlas.org/` へ 301 |
+| beta.mind-atlas.org | なし（廃止） | すべて `https://mind-atlas.org/` へ 301 |
+
+2026-10-10 に card / beta のサブドメインを廃止した。VPS の nginx サイト
+`mind-atlas-card` / `mind-atlas-beta` は、証明書を残したまま（certbot が nginx 経由で更新を続ける）
+全リクエストを `https://mind-atlas.org/` へ 301 で返すだけの設定になっている。旧設定は
+`/root/nginx-retired-subdomains-20261010232902/` にある。`mind-atlas-card` サービス（:8789）は
+どこからも参照されなくなったが、データを残すため止めていない。下の「card.mind-atlas.org のデプロイ」は
+nginx の既存サイトを上書きしないので、再実行してもリダイレクトは保たれる。
 
 旧 β の共有リンク `/s/<token>` は、どのホストでも `/card/s/<token>` へ転送する。
 
