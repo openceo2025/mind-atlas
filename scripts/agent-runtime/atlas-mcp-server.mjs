@@ -153,7 +153,7 @@ async function handleLine(line) {
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "mind-atlas-atlas-tools", version: "2.0.0" },
         instructions: canWrite
-          ? "The owner's Mind Atlas notebook. Use get_atlas_outline to orient, search_nodes or semantic_search_nodes to find the project card a request belongs to, and get_node / get_branch / get_children for exact content. Record what you find, decide and do as cards under that project card with add_child_nodes, keep card status current with set_node_status, and tidy with update_node_text, move_nodes, bulk_update_nodes or delete_node. Never assume a node exists without retrieving it."
+          ? "The owner's Mind Atlas notebook: the local one open on this PC, not the public mind-atlas.org service. Work with Mind Atlas only through these tools; do not use mind-atlas.org, SSH, or Mind Atlas deployment or operations skills unless the owner asks. Use get_atlas_outline to orient, search_nodes or semantic_search_nodes to find the project card a request belongs to, and get_node / get_branch / get_children for exact content. Record what you find, decide and do as cards under that project card with add_child_nodes, keep card status current with set_node_status, and tidy with update_node_text, move_nodes, bulk_update_nodes or delete_node. Never assume a node exists without retrieving it."
           : "Read-only Mind Atlas notebook retrieval. Use get_atlas_outline to orient, search_nodes for exact text, semantic_search_nodes for relevance ranking, then get_node / get_branch / get_children for exact content. Never assume a node exists without retrieving it.",
       },
     });

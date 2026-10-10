@@ -27,6 +27,7 @@ import {
 } from "./model-catalog.mjs";
 import { AtlasToolService } from "./agent-runtime/atlas-tool-service.mjs";
 import { AtlasLink, createAtlasLinkRoutes } from "./agent-runtime/atlas-link.mjs";
+import { createClaudeLoginRelay } from "./agent-runtime/claude-login-relay.mjs";
 import { ATLAS_WRITE_TOOL_NAMES } from "./agent-runtime/atlas-write-tools.mjs";
 import { EvidenceStore, planEvidenceTransport, renderEvidenceReferenceBlock } from "./agent-runtime/evidence-store.mjs";
 import { checkAgentWorkspace } from "./agent-runtime/workspace-policy.mjs";
@@ -87,6 +88,7 @@ async function main() {
     await verifyOwnershipAndHandoff(workDir);
     await verifyAtlasTools();
     await verifyAtlasLink(workDir);
+    await verifyClaudeLoginRelay();
     await verifyContextAccounting();
     await verifyMarkdownSafety();
     await verifyEvidence(workDir);
@@ -882,6 +884,70 @@ async function verifyAtlasLink(workDir) {
   noLink.kill();
   const withoutNames = (listedWithout.result?.tools ?? []).map((tool) => tool.name);
   check("a run without a token gets no write tools", !withoutNames.some((name) => ATLAS_WRITE_TOOL_NAMES.includes(name)), withoutNames);
+}
+
+async function verifyClaudeLoginRelay() {
+  section("Claude Code Pro login relayed through the bridge");
+  const { PassThrough } = await import("node:stream");
+  let stamp = "before";
+  let written = "";
+  const fakeClaude = () => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.stdin = new PassThrough();
+    child.kill = () => child.emit("close", 1);
+    child.stdin.on("data", (chunk) => {
+      written += String(chunk);
+      // The real command stores a credential once it accepts the code.
+      if (String(chunk).trim() === "good-code") {
+        stamp = "after";
+        setTimeout(() => child.emit("close", 0), 5);
+      }
+    });
+    setTimeout(() => {
+      child.stdout.write("Opening browser to sign in…\nIf the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=y\nPaste code here if prompted > ");
+    }, 5);
+    return child;
+  };
+  let succeeded = 0;
+  const relay = createClaudeLoginRelay({
+    spawnProcess: fakeClaude,
+    readCredentialStamp: () => stamp,
+    onSuccess: () => {
+      succeeded += 1;
+    },
+  });
+  const started = await relay.start();
+  check("a login hands out the sign-in URL", started.status === "waiting" && /oauth\/authorize\?code=true/.test(started.url), started);
+  const again = await relay.start();
+  check("a second start returns the login already waiting", again.id === started.id, again);
+  const blank = await relay.submitCode(started.id, "  ");
+  check("an empty code is not sent", blank.status === "waiting" && written === "", blank);
+  const done = await relay.submitCode(started.id, " good-code ");
+  check("the code goes to the command and the login completes", done.status === "done" && written === "good-code\n" && succeeded === 1, { done, written });
+  check("an unknown login is not found", (await relay.submitCode("00000000-0000-4000-8000-000000000000", "x")) === null);
+
+  stamp = "before";
+  const quiet = createClaudeLoginRelay({
+    spawnProcess: () => {
+      const child = new EventEmitter();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.stdin = new PassThrough();
+      child.kill = () => child.emit("close", 1);
+      setTimeout(() => {
+        child.stdout.write("visit: https://claude.com/cai/oauth/authorize?code=true\n");
+        setTimeout(() => child.emit("close", 0), 5);
+      }, 5);
+      return child;
+    },
+    readCredentialStamp: () => stamp,
+  });
+  const closed = await quiet.start();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const after = quiet.status(closed.id);
+  check("a login that stored no credential is not a login", after.status === "failed", after);
 }
 
 async function verifyContextAccounting() {

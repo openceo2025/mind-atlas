@@ -13,9 +13,11 @@ import { Readable } from "node:stream";
 // `server/mind-atlas-service.mjs`; `npm run verify:hosted-service` asserts it.
 import { createAgentRuntimeRoutes } from "./agent-runtime/bridge-routes.mjs";
 import { AtlasLink, createAtlasLinkRoutes } from "./agent-runtime/atlas-link.mjs";
+import { createClaudeLoginRelay, createClaudeLoginRoutes } from "./agent-runtime/claude-login-relay.mjs";
 import {
   createClaudeAuthRecovery,
   isClaudeOAuthAuthenticationError,
+  readClaudeCredentialStamp,
 } from "./agent-runtime/claude-auth-recovery.mjs";
 import { appendClaudeDefaultWebToolArgs } from "./agent-runtime/claude-cli-policy.mjs";
 import { createEvidenceStore } from "./agent-runtime/evidence-store.mjs";
@@ -329,6 +331,35 @@ const agentHandoffCoordinator = createHandoffCoordinator({
   probeCodexDeepLink: () => hasCodexDeepLinkHandler(),
 });
 
+function claudeCredentialsUpdatedAt() {
+  const stamp = readClaudeCredentialStamp();
+  const mtime = Number(stamp.split(":")[1]);
+  return Number.isFinite(mtime) && mtime > 0 ? new Date(mtime).toISOString() : "";
+}
+
+// Claude Code Pro sign-in relayed through the bridge, so OpenCEO can wake a
+// signed-out employee from a phone (claude-login-relay.mjs).
+const claudeLoginRelay = createClaudeLoginRelay({
+  buildCommand: (args) => buildClaudeCommand(args),
+  buildEnv: () => buildClaudeEnv(normalizeClaudeSettings({ authMode: "subscription" }, "", null)),
+  onSuccess: () => {
+    claudeSubscriptionAuthCache = null;
+  },
+});
+const handleClaudeLoginRequest = createClaudeLoginRoutes({
+  relay: claudeLoginRelay,
+  readStatus: async () => ({
+    ...(await readClaudeSubscriptionAuthStatus({ authMode: "subscription", workspace: claudeWorkspace })),
+    // When the stored login last changed, so a caller can tell a failure from
+    // before a fresh sign-in (made here or in a terminal) from one after it.
+    credentialsUpdatedAt: claudeCredentialsUpdatedAt(),
+  }),
+  isAllowedOrigin: (origin) => isBridgeOriginAllowed(origin),
+  readJsonBody: (request) => readJson(request),
+  sendJson: (response, status, payload) => sendJson(response, status, payload),
+  workspace: normalizeProcessCwd(claudeWorkspace),
+});
+
 const handleAtlasLinkRequest = createAtlasLinkRoutes({
   link: atlasLink,
   isAllowedOrigin: (origin) => isBridgeOriginAllowed(origin),
@@ -458,6 +489,7 @@ const server = createBridgeServer(async (request, response) => {
       return;
     }
 
+    if (await handleClaudeLoginRequest(request, response, url)) return;
     if (await handleAtlasLinkRequest(request, response, url)) return;
     if (await handleAgentRuntimeRequest(request, response, url)) return;
     if (request.method === "GET" && url.pathname === "/health") {
