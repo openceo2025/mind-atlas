@@ -5,7 +5,16 @@ process.env.DATABASE_URL ||= "postgres://analytics-test:analytics-test@127.0.0.1
 process.env.MIND_ATLAS_ANALYTICS_HMAC_KEY ||= "analytics-test-key-with-at-least-thirty-two-characters";
 
 const { AnalyticsValidationError, hmacIdentifier, normalizeClientAnalyticsBatch, sanitizeProperties } = await import("../server/analytics.mjs");
-const { classifyDimensions, dailyVisitorHash, isTrackedPublicPage } = await import("../server/traffic-analytics.mjs");
+const { classifyDimensions, dailyVisitorHash, isTrackedPublicPage, scannerAddresses } = await import("../server/traffic-analytics.mjs");
+
+const pathSweep = (count) => new Set(Array.from({ length: count }, (_, index) => `/page-${index}`));
+assert.deepEqual([...scannerAddresses(new Map([
+  ["normal-reader", { paths: pathSweep(40), probeHits: 0, rateLimited: 3 }],
+  ["boundary-reader", { paths: pathSweep(150), probeHits: 0, rateLimited: 19 }],
+  ["path-scanner", { paths: pathSweep(151), probeHits: 0, rateLimited: 0 }],
+  ["credential-probe", { paths: pathSweep(2), probeHits: 1, rateLimited: 0 }],
+  ["rate-scanner", { paths: pathSweep(2), probeHits: 0, rateLimited: 20 }],
+]))], ["path-scanner", "credential-probe", "rate-scanner"], "scanner evidence must exclude ordinary browsing and include disguised probes");
 
 const batch = normalizeClientAnalyticsBatch({
   actorId: "actor_0123456789abcdef0123456789abcdef",

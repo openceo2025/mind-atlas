@@ -23,6 +23,24 @@ const docs = read("docs/vps-service.md");
 const stagingDocs = read("docs/staging-service.md");
 const stagingLocalEnv = read("deploy/staging/env.service.local.example");
 const analyticsReport = read("server/analytics-report.mjs");
+const { createBuiltinModelPrices, estimateTokenCostMicroUsd, mergeModelPrices, resolveExactModelPrice } = await import("../server/model-pricing.mjs");
+
+const builtinModelPrices = createBuiltinModelPrices();
+assert.deepEqual(builtinModelPrices["openai:gpt-6.1-sol"], {
+  inputUsdPer1M: 2,
+  outputUsdPer1M: 10,
+});
+assert.deepEqual(builtinModelPrices["anthropic:claude-haiku-5-5"], {
+  inputUsdPer1M: 0.1,
+  outputUsdPer1M: 0.5,
+  longContext: { aboveInputTokens: 100_000, inputUsdPer1M: 0.5, outputUsdPer1M: 2.5 },
+});
+const haikuPrice = resolveExactModelPrice(builtinModelPrices, "anthropic", "claude-haiku-5-5-20261007");
+assert.equal(estimateTokenCostMicroUsd(haikuPrice, 100_000, 2_000), 11_000, "100K input keeps the short-context tier");
+assert.equal(estimateTokenCostMicroUsd(haikuPrice, 100_002, 2_000), 55_001, "above 100K, both input and output use the long-context tier");
+assert.equal(estimateTokenCostMicroUsd(builtinModelPrices["openai:gpt-6.1-sol"], 100_002, 2_000), 220_004);
+const overridePrice = resolveExactModelPrice(mergeModelPrices({ "anthropic:claude-haiku-5-5": { inputUsdPer1M: 1, outputUsdPer1M: 2 } }), "anthropic", "claude-haiku-5-5");
+assert.equal(estimateTokenCostMicroUsd(overridePrice, 100_002, 2_000), 104_002, "explicit flat-rate overrides remain authoritative");
 
 for (const filePath of [
   "server/mind-atlas-service.mjs",

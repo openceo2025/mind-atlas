@@ -207,6 +207,7 @@
   "menu.renderQuality.high": "높음",
   "menu.renderQuality.low": "낮음",
   "menu.restore": "기록에서 복원",
+  "menu.more": "더 보기",
   "menu.searchNodes": "모든 노드 검색",
   "menu.searchNodes.detail": "제목과 본문 / Ctrl+F",
   "menu.source": "소스 코드 및 라이선스",

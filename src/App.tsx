@@ -222,6 +222,7 @@ export default function App() {
     if (isPageRuntimeActive()) setPageActive(true);
   }, []);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [boardMenuMoreOpen, setBoardMenuMoreOpen] = useState(false);
   const globalMenuRef = useRef<HTMLDivElement | null>(null);
   const universeShareTargetRef = useRef<HTMLElement | null>(null);
   const [voiceLogOpen, setVoiceLogOpen] = useState(false);
@@ -378,6 +379,9 @@ export default function App() {
   const boardGameLabel = t(
     notebookMode === "chess" ? "board.game.chess" : notebookMode === "go" ? "board.game.go" : "board.game.shogi",
   );
+  useEffect(() => {
+    if (!menuOpen || !isBoardGameMode) setBoardMenuMoreOpen(false);
+  }, [isBoardGameMode, menuOpen]);
   /**
    * Shogi arrived through its own landing page, so its overview link goes back
    * there rather than to the general Mind Atlas page. Chess and Go have no such
@@ -2555,31 +2559,9 @@ export default function App() {
                     <span>
                       {t("menu.cloudSave")}
                       <small>{cloudStatus || t("menu.cloudSave.detail")}</small>
-                    </span>
-                  </button>
-                ) : null}
-                <button type="button" onClick={handleOpenRestoreHistory}>
-                  <History size={15} />
-                  <span>
-                    {t("menu.restore")}
-                    <small>{notebookHistoryStatusLabel(notebookPersistenceStatus, notebookSnapshots.length, durableNotebookStorage, notebookPersistenceError)}</small>
-                  </span>
-                </button>
-                <label>
-                  <Upload size={15} />
-                  <span>
-                    {t("menu.import")}
-                    <small>{importAcceptSummary}</small>
-                  </span>
-                  <input type="file" accept={publicServiceMode ? HOSTED_IMPORT_ACCEPT_TYPES : IMPORT_ACCEPT_TYPES} onChange={handleImport} />
-                </label>
-                <button type="button" onClick={handleExportBoardRecord}>
-                  <Download size={15} />
-                  <span>
-                    {t("board.exportRecord")}
-                    <small>.{boardRecordFormat?.extension}</small>
-                  </span>
-                </button>
+                      </span>
+                    </button>
+                  ) : null}
               </div>
             ) : (
             <div className="context-menu-section" aria-label={t("menu.files.label")}>
@@ -2675,7 +2657,7 @@ export default function App() {
               </button>
             </div>
             )}
-            <div className="context-menu-section" aria-label={t("menu.background")}>
+            {!isBoardGameMode ? <div className="context-menu-section" aria-label={t("menu.background")}>
               <span className="context-menu-section-title">{t("menu.background")}</span>
               <div className="theme-choice-row">
                 <button
@@ -2695,7 +2677,7 @@ export default function App() {
                   <Sun size={15} /> {t("menu.background.white")}
                 </button>
               </div>
-            </div>
+            </div> : null}
             {!isBoardGameMode ? (
             <div className="context-menu-section" aria-label={t("menu.mode")}>
               <span className="context-menu-section-title">{t("menu.mode")}</span>
@@ -2774,7 +2756,7 @@ export default function App() {
               </span>
             </button>
             ) : null}
-            <div className="context-menu-section language-menu-section" aria-label={t("language.section")}>
+            {!isBoardGameMode ? <div className="context-menu-section language-menu-section" aria-label={t("language.section")}>
               <span className="context-menu-section-title"><Languages size={14} /> {t("language.section")}</span>
               <label className="language-select-label">
                 <span>{t("language.current")}</span>
@@ -2789,8 +2771,8 @@ export default function App() {
                   ))}
                 </select>
               </label>
-            </div>
-            <div className="context-menu-section" aria-label={t("menu.renderQuality")}>
+            </div> : null}
+            {!isBoardGameMode ? <div className="context-menu-section" aria-label={t("menu.renderQuality")}>
               <span className="context-menu-section-title">{t("menu.renderQuality")}</span>
               <div className="theme-choice-row">
                 <button
@@ -2810,7 +2792,7 @@ export default function App() {
                   {t("menu.renderQuality.low")}
                 </button>
               </div>
-            </div>
+            </div> : null}
             {!isBoardGameMode ? (
             <div className="context-menu-section" aria-label={t("menu.mobileSettings")}>
               <span className="context-menu-section-title">{t("menu.mobileSettings")}</span>
@@ -2843,14 +2825,14 @@ export default function App() {
               </button>
             </div>
             ) : null}
-            <a className="context-menu-link" href={aboutLinkHref} aria-label={formatAppMessage("ui.app.mindAtlasOverviewAndAi.b1eb8a4")}>
+            {!isBoardGameMode ? <a className="context-menu-link" href={aboutLinkHref} aria-label={formatAppMessage("ui.app.mindAtlasOverviewAndAi.b1eb8a4")}>
               <Info size={15} />
               <span>
                 {aboutLinkLabel}
                 <small>{aboutLinkDetail}</small>
               </span>
-            </a>
-            <a
+            </a> : null}
+            {!isBoardGameMode ? <a
               className="context-menu-link legal-notice-link"
               href={MIND_ATLAS_SOURCE_URL}
               target="_blank"
@@ -2862,7 +2844,58 @@ export default function App() {
                 {t("menu.source")}
                 <small>{t("menu.source.detail")}</small>
               </span>
-            </a>
+            </a> : null}
+            {isBoardGameMode ? (
+              boardMenuMoreOpen ? (
+                <>
+                  <div className="context-menu-section" aria-label={t("menu.files.label")}>
+                    <span className="context-menu-section-title">{t("menu.files")}</span>
+                    <button type="button" onClick={handleOpenRestoreHistory}>
+                      <History size={15} />
+                      <span>
+                        {t("menu.restore")}
+                        <small>{notebookHistoryStatusLabel(notebookPersistenceStatus, notebookSnapshots.length, durableNotebookStorage, notebookPersistenceError)}</small>
+                      </span>
+                    </button>
+                    <label>
+                      <Upload size={15} />
+                      <span>
+                        {t("menu.import")}
+                        <small>{importAcceptSummary}</small>
+                      </span>
+                      <input type="file" accept={publicServiceMode ? HOSTED_IMPORT_ACCEPT_TYPES : IMPORT_ACCEPT_TYPES} onChange={handleImport} />
+                    </label>
+                    <button type="button" onClick={handleExportBoardRecord}>
+                      <Download size={15} />
+                      <span>
+                        {t("board.exportRecord")}
+                        <small>.{boardRecordFormat?.extension}</small>
+                      </span>
+                    </button>
+                  </div>
+                  <GlobalMenuAdvancedSections
+                    theme={theme}
+                    onThemeChange={setTheme}
+                    localePreference={localePreference}
+                    onLocaleChange={setLocalePreference}
+                    renderQuality={renderQuality}
+                    onRenderQualityChange={handleRenderQualityChange}
+                    aboutLinkHref={aboutLinkHref}
+                    aboutLinkLabel={aboutLinkLabel}
+                    aboutLinkDetail={aboutLinkDetail}
+                  />
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="context-menu-more-button"
+                  onClick={() => setBoardMenuMoreOpen(true)}
+                  aria-expanded={false}
+                >
+                  <MoreHorizontal size={15} /> {t("menu.more")}
+                </button>
+              )
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -3113,6 +3146,113 @@ export default function App() {
         />
       ) : null}
     </main>
+  );
+}
+
+function GlobalMenuAdvancedSections({
+  theme,
+  onThemeChange,
+  localePreference,
+  onLocaleChange,
+  renderQuality,
+  onRenderQualityChange,
+  aboutLinkHref,
+  aboutLinkLabel,
+  aboutLinkDetail,
+}: {
+  theme: AtlasTheme;
+  onThemeChange: (theme: AtlasTheme) => void;
+  localePreference: LocalePreference;
+  onLocaleChange: (locale: LocalePreference) => void;
+  renderQuality: RenderQuality;
+  onRenderQualityChange: (quality: RenderQuality) => void;
+  aboutLinkHref: string;
+  aboutLinkLabel: string;
+  aboutLinkDetail: string;
+}) {
+  const t = useMessage();
+
+  return (
+    <>
+      <div className="context-menu-section" aria-label={t("menu.background")}>
+        <span className="context-menu-section-title">{t("menu.background")}</span>
+        <div className="theme-choice-row">
+          <button
+            className={theme === "dark" ? "is-active" : ""}
+            type="button"
+            onClick={() => onThemeChange("dark")}
+            aria-pressed={theme === "dark"}
+          >
+            <Moon size={15} /> {t("menu.background.black")}
+          </button>
+          <button
+            className={theme === "light" ? "is-active" : ""}
+            type="button"
+            onClick={() => onThemeChange("light")}
+            aria-pressed={theme === "light"}
+          >
+            <Sun size={15} /> {t("menu.background.white")}
+          </button>
+        </div>
+      </div>
+      <div className="context-menu-section language-menu-section" aria-label={t("language.section")}>
+        <span className="context-menu-section-title"><Languages size={14} /> {t("language.section")}</span>
+        <label className="language-select-label">
+          <span>{t("language.current")}</span>
+          <select
+            value={localePreference}
+            onChange={(event) => onLocaleChange(event.target.value as LocalePreference)}
+            aria-label={t("language.current")}
+          >
+            <option value="auto">{t("common.auto")}</option>
+            {AVAILABLE_LOCALES.map((availableLocale) => (
+              <option key={availableLocale} value={availableLocale}>{LOCALE_LABELS[availableLocale]}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="context-menu-section" aria-label={t("menu.renderQuality")}>
+        <span className="context-menu-section-title">{t("menu.renderQuality")}</span>
+        <div className="theme-choice-row">
+          <button
+            className={renderQuality === "high" ? "is-active" : ""}
+            type="button"
+            onClick={() => onRenderQualityChange("high")}
+            aria-pressed={renderQuality === "high"}
+          >
+            {t("menu.renderQuality.high")}
+          </button>
+          <button
+            className={renderQuality === "low" ? "is-active" : ""}
+            type="button"
+            onClick={() => onRenderQualityChange("low")}
+            aria-pressed={renderQuality === "low"}
+          >
+            {t("menu.renderQuality.low")}
+          </button>
+        </div>
+      </div>
+      <a className="context-menu-link" href={aboutLinkHref} aria-label={formatAppMessage("ui.app.mindAtlasOverviewAndAi.b1eb8a4")}>
+        <Info size={15} />
+        <span>
+          {aboutLinkLabel}
+          <small>{aboutLinkDetail}</small>
+        </span>
+      </a>
+      <a
+        className="context-menu-link legal-notice-link"
+        href={MIND_ATLAS_SOURCE_URL}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={formatAppMessage("ui.app.sourceCodeAndLicense.ba82518")}
+      >
+        <Github size={15} />
+        <span>
+          {t("menu.source")}
+          <small>{t("menu.source.detail")}</small>
+        </span>
+      </a>
+    </>
   );
 }
 

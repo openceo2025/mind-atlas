@@ -9,11 +9,35 @@ import { replaceTrafficDaily } from "./service-db.mjs";
 const BOT_PATTERN = /bot|crawler|spider|slurp|headless|lighthouse|preview|facebookexternalhit|twitterbot|discordbot|curl|wget/i;
 const ASSET_PATTERN = /\.(?:js|css|map|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|mp4|webm|json)$/i;
 
+// BOT_PATTERN only catches crawlers that identify themselves. Vulnerability
+// scanners claim to be browsers, so their hits on "/" were landing in human page
+// views and inflating the traffic numbers the growth report reads. They give
+// themselves away by behaviour instead: they sweep hundreds of unrelated paths,
+// probe for credential files no browser would ever request, and trip the nginx
+// rate limiter repeatedly. Any one of those is enough to reclassify every
+// request from that address for the day as bot traffic -- it is still counted in
+// bot_pv, just kept out of the human numbers.
+//
+// The thresholds are deliberately far from anything a person can reach. Someone
+// clicking through every locale's about/privacy/terms page tops out around 40
+// distinct paths, and observed scanners swept 191 to 1239, so 150 sits in the
+// empty gap between them. A first load of the app can trip the rate limiter a
+// few times, never twenty.
+const PROBE_PATTERN = /(?:^|\/)\.(?:env|git|aws|azure|ssh|svn|npmrc)(?:$|[/.])|\/@fs\/|\/wp-(?:admin|login|content|includes)\//i;
+const SCANNER_DISTINCT_PATHS = 150;
+const SCANNER_RATE_LIMITED = 20;
+
 export async function aggregateNginxTraffic({ day = yesterdayUtc(), logDir = "/var/log/nginx", logPrefix = "mind-atlas-analytics.log" } = {}) {
   const analyticsKey = getEnv("MIND_ATLAS_ANALYTICS_HMAC_KEY");
   if (!analyticsKey) throw new Error("MIND_ATLAS_ANALYTICS_HMAC_KEY is required for traffic aggregation");
   const files = await findLogFiles(logDir, logPrefix);
   const groups = new Map();
+  // Scanner evidence has to be gathered from every request, including the ones
+  // isTrackedPublicPage discards -- the probe paths that expose a scanner are
+  // exactly the paths that are not tracked pages. So collect the day's tracked
+  // entries first, then classify once the whole day's behaviour is known.
+  const behaviour = new Map();
+  const trackedEntries = [];
   for (const file of files) {
     const text = await readMaybeGzip(file);
     for (const line of text.split(/\r?\n/)) {
@@ -26,27 +50,32 @@ export async function aggregateNginxTraffic({ day = yesterdayUtc(), logDir = "/v
       }
       if (String(entry.time ?? "").slice(0, 10) !== day) continue;
       const uri = safeString(entry.uri, 400);
+      noteScannerEvidence(behaviour, safeString(entry.ip, 80), uri, Number(entry.status ?? 0));
       if (!isTrackedPublicPage(uri)) continue;
-      const isBot = BOT_PATTERN.test(safeString(entry.user_agent, 600));
-      const isAdmin = entry.admin === "1" || entry.admin === 1;
-      const dimensions = classifyDimensions(entry, uri);
-      const visitor = dailyVisitorHash(analyticsKey, day, entry.ip, entry.user_agent);
-      addEntry(groups, { ...dimensions, visitor, entry, isBot, isAdmin });
-      addEntry(groups, {
-        pageGroup: "__all__",
-        landingPage: "__all__",
-        referrerHost: "",
-        utmSource: "",
-        utmMedium: "",
-        utmCampaign: "",
-        locale: "all",
-        deviceClass: "all",
-        visitor,
-        entry,
-        isBot,
-        isAdmin,
-      });
+      trackedEntries.push({ entry, uri });
     }
+  }
+  const scanners = scannerAddresses(behaviour);
+  for (const { entry, uri } of trackedEntries) {
+    const isBot = BOT_PATTERN.test(safeString(entry.user_agent, 600)) || scanners.has(safeString(entry.ip, 80));
+    const isAdmin = entry.admin === "1" || entry.admin === 1;
+    const dimensions = classifyDimensions(entry, uri);
+    const visitor = dailyVisitorHash(analyticsKey, day, entry.ip, entry.user_agent);
+    addEntry(groups, { ...dimensions, visitor, entry, isBot, isAdmin });
+    addEntry(groups, {
+      pageGroup: "__all__",
+      landingPage: "__all__",
+      referrerHost: "",
+      utmSource: "",
+      utmMedium: "",
+      utmCampaign: "",
+      locale: "all",
+      deviceClass: "all",
+      visitor,
+      entry,
+      isBot,
+      isAdmin,
+    });
   }
   const rows = [...groups.values()].map((row) => ({
     ...row,
@@ -54,7 +83,39 @@ export async function aggregateNginxTraffic({ day = yesterdayUtc(), logDir = "/v
     visitors: undefined,
   }));
   await replaceTrafficDaily(day, rows);
-  return { day, files: files.length, rows: rows.length, pageViews: rows.find((row) => row.pageGroup === "__all__")?.pv ?? 0 };
+  return {
+    day,
+    files: files.length,
+    rows: rows.length,
+    pageViews: rows.find((row) => row.pageGroup === "__all__")?.pv ?? 0,
+    scanners: scanners.size,
+  };
+}
+
+function noteScannerEvidence(behaviour, ip, uri, status) {
+  if (!ip) return;
+  let row = behaviour.get(ip);
+  if (!row) {
+    row = { paths: new Set(), probeHits: 0, rateLimited: 0 };
+    behaviour.set(ip, row);
+  }
+  if (PROBE_PATTERN.test(uri)) row.probeHits += 1;
+  if (status === 503) row.rateLimited += 1;
+  // Assets are excluded because one genuine page load pulls dozens of them, and
+  // the set stops growing past the threshold: all we need to know is whether the
+  // address crossed it, not how far.
+  if (!ASSET_PATTERN.test(uri) && row.paths.size <= SCANNER_DISTINCT_PATHS) row.paths.add(uri);
+}
+
+export function scannerAddresses(behaviour) {
+  const scanners = new Set();
+  for (const [ip, row] of behaviour) {
+    const looksLikeScanner = row.probeHits > 0
+      || row.paths.size > SCANNER_DISTINCT_PATHS
+      || row.rateLimited >= SCANNER_RATE_LIMITED;
+    if (looksLikeScanner) scanners.add(ip);
+  }
+  return scanners;
 }
 
 export function dailyVisitorHash(key, day, ip, userAgent) {

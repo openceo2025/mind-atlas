@@ -295,6 +295,16 @@ fallback. `allow-default` falls back to `MIND_ATLAS_DEFAULT_INPUT_USD_PER_1M` an
 `MIND_ATLAS_DEFAULT_OUTPUT_USD_PER_1M` for unknown prices, which is convenient
 for local development but unsafe for paid traffic.
 
+Claude Haiku 5.5 uses USD 0.10 / 0.50 per 1M input / output tokens for
+requests with at most 100,000 input tokens. Above that threshold the whole
+request uses USD 0.50 / 2.50, including its output. Credit reservations and
+settlement both select this tier from the input token count. Dated model IDs
+inherit the same tiers. An explicit flat-rate JSON override replaces both
+tiers; to configure a tiered override, include a `longContext` object with
+`aboveInputTokens`, `inputUsdPer1M`, and `outputUsdPer1M`. Rates were checked
+against https://platform.claude.com/docs/en/models/haiku-5-5/overview on
+2026-10-10.
+
 Provider model lists are refreshed in the background every
 `MIND_ATLAS_PROVIDER_MODEL_REFRESH_MS` milliseconds. For example, when
 Anthropic's model API starts returning Claude Fable 5, the public selector will

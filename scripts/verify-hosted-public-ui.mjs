@@ -736,6 +736,7 @@ async function verifyHostedBoardImport(browser) {
         throw new Error(`Hosted ${fixture.name} exposed the multimedia attachment control.`);
       }
       await verifyHostedBoardAiSurface(page, fixture.mode);
+      await verifyHostedBoardMenu(page, fixture.extension);
       if (fixture.mode === "shogi") {
         await verifyHostedShogiAnalysis(page);
         await verifyHostedShogiMergeFeedback(page, fixture.content);
@@ -744,6 +745,30 @@ async function verifyHostedBoardImport(browser) {
       await context.close();
     }
   }
+}
+
+// Expanding board settings must retain the hosted import and agent boundaries.
+async function verifyHostedBoardMenu(page, extension) {
+  await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
+  const menu = page.locator(".global-context-menu");
+  await menu.waitFor({ state: "visible" });
+  if (await menu.locator('input[type="file"], .language-menu-section').count()) {
+    throw new Error("Hosted board menus must initially keep advanced controls collapsed.");
+  }
+  await menu.getByRole("button", { name: "さらに表示", exact: true }).click();
+  await menu.locator(".language-menu-section").waitFor({ state: "visible" });
+  const accept = await menu.locator('input[type="file"]').getAttribute("accept");
+  if (!accept?.includes(extension) || /\.png|\.pdf|image\//i.test(accept)) {
+    throw new Error(`Expanded hosted board menu exposed the wrong import formats: ${accept}`);
+  }
+  if (/Codex|Claude Code|OpenClaw|LM Studio/.test(await menu.textContent())) {
+    throw new Error("Expanded hosted board menu exposed local agent controls.");
+  }
+  await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
+  await menu.waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
+  await menu.locator(".context-menu-more-button").waitFor({ state: "visible" });
+  await page.getByRole("button", { name: "Mind Atlasメニューを開く" }).click();
 }
 
 /**

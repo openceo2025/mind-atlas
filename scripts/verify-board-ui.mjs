@@ -89,6 +89,7 @@ async function importFixture(page, mode) {
 
 async function importRecord(page, name, content, viewer) {
   await page.getByLabel(/Open atlas menu|Mind Atlasメニューを開く/).click();
+  await expandBoardMenu(page);
   const extension = name.slice(name.lastIndexOf("."));
   const input = page.locator(`input[type="file"][accept*="${extension}"]`);
   await input.setInputFiles({ name, mimeType: "text/plain", buffer: Buffer.from(content) });
@@ -100,6 +101,7 @@ async function verifyBoardExport(page, mode) {
   const extension = fixture.name.slice(fixture.name.lastIndexOf("."));
   const format = extension.slice(1).toUpperCase();
   await page.getByLabel(/Open atlas menu|Mind Atlasメニューを開く/).click();
+  await expandBoardMenu(page);
   // The control names the file it writes in its detail line rather than in its
   // label, so the label is now just "Export".
   const exportButton = page.getByRole("button", { name: new RegExp(`(?:^Export|エクスポート)\\s*\\${extension}`, "i") });
@@ -409,6 +411,7 @@ async function verifyLightThemeContrast() {
   try {
     await importRecord(page, "contrast.kif", fixtures.shogi.content, ".shogi-viewer");
     await page.getByLabel(/Open atlas menu|Mind Atlasメニューを開く/).click();
+    await expandBoardMenu(page);
     await page.getByRole("button", { name: "白", exact: true }).click();
     await page.waitForTimeout(400);
     await page.keyboard.press("Escape");
@@ -1649,7 +1652,26 @@ async function assertBoardMenuIsSimplified(page) {
   for (const fragment of ["全ノードを検索", "AI Partner", "Realtime", "音声設定", "チュートリアル", "モバイル設定"]) {
     if (text.includes(fragment)) throw new Error(`The board menu still offers ${fragment}.`);
   }
-  await page.keyboard.press("Escape");
+  if (await menu.locator('input[type="file"], .language-menu-section').count()) {
+    throw new Error("The initial board menu must keep import and language controls behind Show more.");
+  }
+  await expandBoardMenu(page);
+  await menu.locator('input[type="file"]').waitFor({ state: "attached" });
+  await menu.locator(".language-menu-section").waitFor({ state: "visible" });
+  // Use the menu toggle: Escape belongs to universe navigation when focus
+  // leaves the removed Show more button after expansion.
+  await page.getByLabel(/Open atlas menu|Mind Atlasメニューを開く/).click();
+  await menu.waitFor({ state: "hidden" });
+  await page.getByLabel(/Open atlas menu|Mind Atlasメニューを開く/).click();
+  await menu.locator(".context-menu-more-button").waitFor({ state: "visible" });
+  await page.getByLabel(/Open atlas menu|Mind Atlasメニューを開く/).click();
+}
+
+async function expandBoardMenu(page) {
+  const menu = page.locator(".global-context-menu");
+  await menu.waitFor({ state: "visible" });
+  const more = menu.locator(".context-menu-more-button");
+  if (await more.count()) await more.click();
 }
 
 async function expectTexts(locator, expected, label) {

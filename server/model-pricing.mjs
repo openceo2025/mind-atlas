@@ -2,9 +2,11 @@
 // A model the provider lists is offered only when it has a price here or in
 // MIND_ATLAS_MODEL_PRICES_JSON (which overrides these entries).
 //
-// Sources, checked 2026-09-30:
+// Sources, checked 2026-10-10:
 //   OpenAI    https://developers.openai.com/api/docs/pricing
 //   Anthropic https://platform.claude.com/docs/en/about-claude/pricing
+//              Claude Haiku 5.5 short-context rates are used below (<=100K input tokens);
+//              its input/output rates increase to $0.50/$2.50 per MTok above 100K.
 //   DeepSeek  https://api-docs.deepseek.com/quick_start/pricing (peak-hour rates, the higher of the two)
 
 export function mergeModelPrices(overrides = {}, now = new Date()) {
@@ -66,6 +68,11 @@ export function createBuiltinModelPrices(_now = new Date()) {
     "anthropic:claude-sonnet-5": price(2, 10),
     "anthropic:claude-sonnet-4-6": price(3, 15),
     "anthropic:claude-sonnet-4-5": price(3, 15),
+    // Official short-context tier (<=100K input tokens); long-context tier is $0.50/$2.50.
+    "anthropic:claude-haiku-5-5": {
+      ...price(0.1, 0.5),
+      longContext: { aboveInputTokens: 100_000, ...price(0.5, 2.5) },
+    },
     "anthropic:claude-haiku-4-5": price(1, 5),
     "anthropic:claude-haiku-3-5": price(0.8, 4),
 
@@ -84,6 +91,19 @@ export function createBuiltinModelPrices(_now = new Date()) {
 
 export function hasModelPrice(modelPrices, providerId, model) {
   return Boolean(resolveExactModelPrice(modelPrices, providerId, model));
+}
+
+// A long-context tier applies to the whole request, including output, rather
+// than only the input tokens above the threshold. Explicit price overrides
+// without a longContext field keep their configured flat rate.
+export function priceForInputTokens(modelPrice, inputTokens) {
+  const tier = modelPrice.longContext;
+  return tier && inputTokens > tier.aboveInputTokens ? tier : modelPrice;
+}
+
+export function estimateTokenCostMicroUsd(modelPrice, inputTokens, outputTokens) {
+  const tier = priceForInputTokens(modelPrice, inputTokens);
+  return Math.max(1, Math.ceil(inputTokens * Number(tier.inputUsdPer1M) + outputTokens * Number(tier.outputUsdPer1M)));
 }
 
 // Model ids follow a size ladder; a new model usually joins one of these rungs.
@@ -198,6 +218,7 @@ const ANTHROPIC_PRICE_PREFIXES = [
     "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
+    "claude-haiku-5-5",
     "claude-haiku-4-5",
     "claude-haiku-3-5",
 ].sort((a, b) => b.length - a.length);

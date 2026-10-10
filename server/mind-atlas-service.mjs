@@ -39,7 +39,7 @@ import {
   deleteSession,
 } from "./service-db.mjs";
 import { getEnv, parseJsonEnv, parseListEnv, readIntEnv, serviceRootDir } from "./service-config.mjs";
-import { estimateModelPrice, mergeModelPrices, modelGeneration, resolveExactModelPrice } from "./model-pricing.mjs";
+import { estimateModelPrice, estimateTokenCostMicroUsd, mergeModelPrices, modelGeneration, priceForInputTokens, resolveExactModelPrice } from "./model-pricing.mjs";
 import { stripePatchFromStripeSubscription } from "./stripe-subscription.mjs";
 import {
   AnalyticsValidationError,
@@ -2613,7 +2613,7 @@ function fitOutputTokensToRequestCap(providerId, model, payload, limit) {
   if (limit <= maxOutputTokens || !(maxRequestEstimateMicroUsd > 0)) return limit;
   const inputTokens = Math.max(1, Math.ceil(estimateChatInputChars(payload) / chatReserveCharsPerToken));
   const inputCost = estimateCostMicroUsd(providerId, model, inputTokens, 0);
-  const perMillionOutput = estimateCostMicroUsd(providerId, model, 0, 1_000_000);
+  const perMillionOutput = Number(priceForInputTokens(resolveModelPrice(providerId, model), inputTokens).outputUsdPer1M) * 1_000_000;
   if (!(perMillionOutput > 0)) return limit;
   const affordable = Math.floor(((maxRequestEstimateMicroUsd - inputCost) / perMillionOutput) * 1_000_000);
   return Math.max(maxOutputTokens, Math.min(limit, affordable));
@@ -2737,10 +2737,7 @@ async function meterReservedUsage({ user, subscription, requestId, provider, mod
 }
 
 function estimateCostMicroUsd(providerId, model, inputTokens, outputTokens) {
-  const price = resolveModelPrice(providerId, model);
-  const inputRate = Number(price.inputUsdPer1M);
-  const outputRate = Number(price.outputUsdPer1M);
-  return Math.max(1, Math.ceil(((inputTokens * inputRate) + (outputTokens * outputRate)) / 1_000_000 * 1_000_000));
+  return estimateTokenCostMicroUsd(resolveModelPrice(providerId, model), inputTokens, outputTokens);
 }
 
 /**
@@ -2751,7 +2748,7 @@ function estimateCostMicroUsd(providerId, model, inputTokens, outputTokens) {
 function resolveModelPriceEntry(providerId, model) {
   const exactPrice = resolveExactModelPrice(modelPrices, providerId, model);
   if (exactPrice) {
-    return { inputUsdPer1M: Number(exactPrice.inputUsdPer1M), outputUsdPer1M: Number(exactPrice.outputUsdPer1M), estimated: false };
+    return { ...exactPrice, inputUsdPer1M: Number(exactPrice.inputUsdPer1M), outputUsdPer1M: Number(exactPrice.outputUsdPer1M), estimated: false };
   }
   const estimate = estimateModelPrice(modelPrices, providerId, model);
   if (estimate) {
@@ -2775,6 +2772,7 @@ function resolveModelPrice(providerId, model) {
   return {
     inputUsdPer1M: Number(price.inputUsdPer1M ?? defaultInputUsdPer1m),
     outputUsdPer1M: Number(price.outputUsdPer1M ?? defaultOutputUsdPer1m),
+    longContext: price.longContext,
     estimated: price.estimated === true,
   };
 }

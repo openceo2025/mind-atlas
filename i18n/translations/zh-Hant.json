@@ -207,6 +207,7 @@
   "menu.renderQuality.high": "高",
   "menu.renderQuality.low": "低",
   "menu.restore": "從歷史記錄還原",
+  "menu.more": "顯示更多",
   "menu.searchNodes": "搜尋所有節點",
   "menu.searchNodes.detail": "標題和內文 / Ctrl+F",
   "menu.source": "原始碼與授權",

@@ -207,6 +207,7 @@
   "menu.renderQuality.high": "高",
   "menu.renderQuality.low": "低",
   "menu.restore": "履歴から復元",
+  "menu.more": "さらに表示",
   "menu.searchNodes": "全ノードを検索",
   "menu.searchNodes.detail": "タイトルと本文 / Ctrl+F",
   "menu.source": "ソースコードと法的情報",

@@ -207,6 +207,7 @@
   "menu.renderQuality.high": "Alta",
   "menu.renderQuality.low": "Baja",
   "menu.restore": "Restaurar del historial",
+  "menu.more": "Mostrar más",
   "menu.searchNodes": "Buscar en todos los nodos",
   "menu.searchNodes.detail": "Títulos y contenido / Ctrl+F",
   "menu.source": "Código fuente y licencia",
