@@ -157,6 +157,7 @@ export class CodexAdapter {
       sandbox: request.sandboxMode || "workspace-write",
       approvalPolicy: request.approvalPolicy || "on-request",
       ...(request.model ? { model: request.model } : {}),
+      ...(request.instructions ? { developerInstructions: request.instructions } : {}),
       // The Mind Atlas tools, for this thread only: Codex's own config.toml is
       // never changed (runtime-manager.mjs #prepareAtlasTools).
       ...codexMcpConfig(request),
@@ -358,6 +359,8 @@ class CodexRunSession {
     this.changedFiles = new Set();
     /** @type {Map<string, { serverRequestId: number, kind: string }>} */
     this.openApprovals = new Map();
+    /** Diffs of file changes that have started, by item id, for approvals. */
+    this.pendingChanges = new Map();
     /** @type {Map<string, { serverRequestId: number }>} */
     this.openQuestions = new Map();
   }
@@ -486,7 +489,12 @@ class CodexRunSession {
         }
         return;
       case "fileChange":
+        if (phase === "started") {
+          // What the change will be, so an approval can show it before it lands.
+          this.pendingChanges.set(String(item.id ?? ""), approvalChanges(item.changes));
+        }
         if (phase === "completed") {
+          this.pendingChanges.delete(String(item.id ?? ""));
           const changes = (item.changes ?? []).map((change) => {
             const counts = countDiffLines(change?.diff);
             return {
@@ -602,6 +610,8 @@ class CodexRunSession {
         itemId: params.itemId,
         reason: String(params.reason ?? ""),
         grantRoot: String(params.grantRoot ?? ""),
+        // The files and the diff, bounded, so whoever approves sees what lands.
+        changes: this.pendingChanges.get(String(params.itemId ?? "")) ?? [],
         choices: [
           { id: "accept", label: "Approve once" },
           { id: "acceptForSession", label: "Approve for this session" },
@@ -711,4 +721,19 @@ export function codexMcpConfig(request) {
     };
   }
   return Object.keys(servers).length ? { config: { mcp_servers: servers } } : {};
+}
+
+/** A file change as an approval shows it: each path and its diff, bounded. */
+export function approvalChanges(changes) {
+  let budget = 12_000;
+  return (Array.isArray(changes) ? changes : []).slice(0, 20).map((change) => {
+    const diff = String(change?.diff ?? "");
+    const shown = diff.slice(0, Math.max(0, budget));
+    budget -= shown.length;
+    return {
+      path: String(change?.path ?? change?.file ?? ""),
+      kind: String(change?.kind?.type ?? change?.kind ?? change?.type ?? ""),
+      diff: shown.length < diff.length ? `${shown}\n…(省略)` : shown,
+    };
+  });
 }

@@ -39,8 +39,8 @@ import {
   createClaudeAuthRecovery,
   isClaudeOAuthAuthenticationError,
 } from "./agent-runtime/claude-auth-recovery.mjs";
-import { formatClaudePlanLimitError, isRejectedClaudePlanAllowance } from "./agent-runtime/claude-adapter.mjs";
-import { codexMcpConfig, codexReasoningSummary } from "./agent-runtime/codex-adapter.mjs";
+import { claudeApprovalChanges, formatClaudePlanLimitError, isRejectedClaudePlanAllowance } from "./agent-runtime/claude-adapter.mjs";
+import { approvalChanges, codexMcpConfig, codexReasoningSummary } from "./agent-runtime/codex-adapter.mjs";
 import { acceptedReturnUrl, readOpenCeoReturn, returnUrlFromSearch } from "../src/openceoReturn.ts";
 import { AgentRunStore } from "./agent-runtime/run-journal.mjs";
 import { AgentRuntimeManager } from "./agent-runtime/runtime-manager.mjs";
@@ -972,6 +972,18 @@ async function verifyExtraMcpServers() {
       /extraMcpServers: trusted \? normalizeExtraMcpServers\(body\?\.extraMcpServers\) : \[\]/.test(routes),
   );
   check("an extra server cannot take the Mind Atlas server's name", /name === "mind_atlas"/.test(routes));
+  check("a run request carries instructions", /instructions: boundText\(String\(body\?\.instructions/.test(routes));
+
+  section("What an approval shows");
+  const write = claudeApprovalChanges("Write", { file_path: "C:/p/a.md", content: "hello" });
+  check("a Claude Write shows the file and its content", write[0]?.path === "C:/p/a.md" && write[0]?.diff === "hello", write);
+  const editing = claudeApprovalChanges("Edit", { file_path: "a.ts", old_string: "x", new_string: "y" });
+  check("a Claude Edit shows what goes and what comes", editing[0]?.diff === "- x\n+ y", editing);
+  check("a Claude Bash approval has no file change", claudeApprovalChanges("Bash", { command: "ls" }).length === 0);
+  const codex = approvalChanges([{ path: "src/a.ts", kind: { type: "update" }, diff: "@@ -1 +1 @@\n-a\n+b" }]);
+  check("a Codex file change shows each path and its diff", codex[0]?.path === "src/a.ts" && codex[0]?.kind === "update" && /\+b/.test(codex[0]?.diff), codex);
+  const long = approvalChanges([{ path: "big.txt", diff: "x".repeat(20_000) }]);
+  check("a long diff is cut and says so", long[0]?.diff.length < 12_100 && /省略/.test(long[0]?.diff), long[0]?.diff.length);
 }
 
 async function verifyContextAccounting() {

@@ -323,6 +323,10 @@ function normalizeRunRequest(body, { trusted = false } = {}) {
     workspaceMode: body?.workspaceMode === "worktree" ? "worktree" : "shared",
     prompt: boundText(String(body?.prompt ?? ""), 400_000),
     title: boundText(String(body?.title ?? ""), 300),
+    // More instructions for this run: Codex's developer instructions, Claude's
+    // appended system prompt. How a caller gives an agent its role without
+    // writing files into the workspace it works in.
+    instructions: boundText(String(body?.instructions ?? ""), 60_000),
     // Who is working, as the caller names them (an OpenCEO employee's name).
     // Agents' Mind Atlas cards carry it.
     agentLabel: boundText(String(body?.agentLabel ?? ""), 80),

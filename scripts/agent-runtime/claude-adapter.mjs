@@ -253,6 +253,7 @@ export class ClaudeAdapter {
     if (settings.authMode === "subscription" && settings.model) args.push("--model", settings.model);
     if (settings.reasoningEffort && settings.reasoningEffort !== "default") args.push("--effort", settings.reasoningEffort);
     if (settings.permissionMode && settings.permissionMode !== "default") args.push("--permission-mode", settings.permissionMode);
+    if (request.instructions) args.push("--append-system-prompt", boundText(String(request.instructions), 60_000));
     let sessionAction = mode;
     if ((mode === "resume" || mode === "fork") && request.session?.sessionId) {
       args.push("--resume", request.session.sessionId);
@@ -517,7 +518,9 @@ class ClaudeRunProcess {
       category: approvalCategoryForTool(toolName),
       toolName,
       reason: boundText(String(request.description ?? "Permission is required for this tool."), 4000),
-      command: toolName === "Bash" ? boundText(String(input.command ?? ""), 4000) : "",
+      command: toolName === "Bash" || toolName === "PowerShell" ? boundText(String(input.command ?? ""), 4000) : "",
+      // The file and what would be written, bounded, so whoever approves sees it.
+      changes: claudeApprovalChanges(toolName, input),
       cwd: this.workspace,
       grantRoot: boundText(String(request.blocked_path ?? ""), 1000),
       choices: [
@@ -932,4 +935,23 @@ function runOnce(spec, env, cwd, timeoutMs) {
 function withMcpToolTimeout(env, extraMcpServers) {
   const longest = Math.max(0, ...(Array.isArray(extraMcpServers) ? extraMcpServers : []).map((one) => Number(one?.toolTimeoutSec) || 0));
   return longest > 0 ? { ...env, MCP_TOOL_TIMEOUT: String(longest * 1000) } : env;
+}
+
+/** What an edit tool would write, as an approval shows it. Bounded. */
+export function claudeApprovalChanges(toolName, input) {
+  const path = String(input?.file_path ?? input?.notebook_path ?? "");
+  const bound = (text) => {
+    const value = String(text ?? "");
+    return value.length > 12_000 ? `${value.slice(0, 12_000)}\n…(省略)` : value;
+  };
+  if (toolName === "Write") return [{ path, kind: "write", diff: bound(input?.content) }];
+  if (toolName === "Edit") {
+    return [{ path, kind: "edit", diff: bound(`- ${String(input?.old_string ?? "")}\n+ ${String(input?.new_string ?? "")}`) }];
+  }
+  if (toolName === "MultiEdit") {
+    const edits = Array.isArray(input?.edits) ? input.edits : [];
+    return [{ path, kind: "edit", diff: bound(edits.map((one) => `- ${String(one?.old_string ?? "")}\n+ ${String(one?.new_string ?? "")}`).join("\n\n")) }];
+  }
+  if (toolName === "NotebookEdit") return [{ path, kind: "notebook", diff: bound(input?.new_source) }];
+  return [];
 }
