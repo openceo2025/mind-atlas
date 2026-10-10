@@ -94,7 +94,12 @@ export function createAgentRuntimeRoutes(context) {
         sendJson(response, 400, { error: workspaceCheck.detail ?? "Workspace is not allowed." });
         return true;
       }
-      const run = await manager.startRun(normalizeRunRequest(body));
+      // Extra MCP servers start local processes, so only a caller on this
+      // machine without an Origin (OpenCEO's server) may give them; a page may
+      // not, even an allowed one.
+      const run = await manager.startRun(
+        normalizeRunRequest(body, { trusted: !String(request.headers.origin ?? "") }),
+      );
       sendJson(response, run ? 200 : 500, run ?? { error: "Run could not be created." });
       return true;
     }
@@ -307,7 +312,7 @@ async function streamRunEvents(request, response, manager, runId, url) {
   });
 }
 
-function normalizeRunRequest(body) {
+function normalizeRunRequest(body, { trusted = false } = {}) {
   const provider = body?.provider === "claude" ? "claude" : "codex";
   return {
     provider,
@@ -343,9 +348,39 @@ function normalizeRunRequest(body) {
       }))
       : [],
     git: body?.git && typeof body.git === "object" ? body.git : null,
+    extraMcpServers: trusted ? normalizeExtraMcpServers(body?.extraMcpServers) : [],
     // Sanitized run-scoped notebook snapshot for the read-only Atlas tools.
     atlasSnapshot: body?.atlasSnapshot && typeof body.atlasSnapshot === "object" ? body.atlasSnapshot : null,
   };
+}
+
+/**
+ * Up to three extra stdio MCP servers a trusted caller attaches to one run,
+ * such as OpenCEO's colleague tools. The name becomes the tool prefix, so it
+ * may not take the Mind Atlas server's.
+ */
+function normalizeExtraMcpServers(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .slice(0, 3)
+    .map((raw) => {
+      const name = String(raw?.name ?? "");
+      const command = String(raw?.command ?? "");
+      if (!/^[a-z][a-z0-9_]{0,30}$/.test(name) || name === "mind_atlas" || !command) return null;
+      const env = {};
+      for (const [key, val] of Object.entries(raw?.env && typeof raw.env === "object" ? raw.env : {})) {
+        if (/^[A-Z][A-Z0-9_]{0,60}$/.test(key)) env[key] = String(val ?? "").slice(0, 2000);
+      }
+      const timeout = Number(raw?.toolTimeoutSec);
+      return {
+        name,
+        command,
+        args: Array.isArray(raw?.args) ? raw.args.slice(0, 20).map((one) => String(one ?? "")) : [],
+        env,
+        toolTimeoutSec: Number.isInteger(timeout) && timeout > 0 && timeout <= 3600 ? timeout : 0,
+      };
+    })
+    .filter(Boolean);
 }
 
 function sendControlResult(response, result) {

@@ -286,7 +286,12 @@ export class AgentRuntimeManager {
     // Evidence transport is decided from the runtime's own capabilities and
     // reported per item, so the UI can never imply a file was seen when only
     // its path was sent.
-    let providerRequest = { ...effectiveRequest, mcpConfigPath, atlasMcpServer: atlasTools?.server ?? null };
+    let providerRequest = {
+      ...effectiveRequest,
+      mcpConfigPath,
+      atlasMcpServer: atlasTools?.server ?? null,
+      extraMcpServers: atlasTools?.extra ?? [],
+    };
     if (request.evidence?.length) {
       const capabilities = adapter
         ? await (provider === "claude"
@@ -352,9 +357,13 @@ export class AgentRuntimeManager {
    * bridge address and the run token.
    */
   async #prepareAtlasTools(handle, request) {
-    if (!this.atlasMcp?.enabled) return null;
     const provider = handle.manifest.provider;
     if (provider !== "claude" && provider !== "codex") return null;
+    const extra = Array.isArray(request.extraMcpServers) ? request.extraMcpServers : [];
+    if (!this.atlasMcp?.enabled) {
+      if (!extra.length) return null;
+      return await this.#writeMcpConfig(handle, provider, null, extra, false);
+    }
     try {
       const dir = this.store.runDir(handle.runId);
       const args = [this.atlasMcp.serverScript];
@@ -376,18 +385,15 @@ export class AgentRuntimeManager {
         });
         if (this.atlasMcp.httpsCa) env.MIND_ATLAS_HTTPS_CA = this.atlasMcp.httpsCa;
       }
-      if (args.length === 1 && !env.MIND_ATLAS_BRIDGE_ORIGIN) return null;
-      const server = {
-        command: this.atlasMcp.nodeExecPath ?? process.execPath,
-        args,
-        ...(Object.keys(env).length ? { env } : {}),
-      };
-      let configPath = "";
-      if (provider === "claude") {
-        configPath = join(dir, "mcp-config.json");
-        await writeFile(configPath, JSON.stringify({ mcpServers: { mind_atlas: server } }, null, 2), "utf8");
-      }
-      return { configPath, server, writes: Boolean(env.MIND_ATLAS_RUN_TOKEN) };
+      const server = args.length === 1 && !env.MIND_ATLAS_BRIDGE_ORIGIN
+        ? null
+        : {
+            command: this.atlasMcp.nodeExecPath ?? process.execPath,
+            args,
+            ...(Object.keys(env).length ? { env } : {}),
+          };
+      if (!server && !extra.length) return null;
+      return await this.#writeMcpConfig(handle, provider, server, extra, Boolean(env.MIND_ATLAS_RUN_TOKEN));
     } catch (error) {
       await handle.append({
         kind: "warning",
@@ -396,6 +402,21 @@ export class AgentRuntimeManager {
       });
       return null;
     }
+  }
+
+  /** Claude reads its servers from a file; Codex gets them in its thread config. */
+  async #writeMcpConfig(handle, provider, server, extra, writes) {
+    let configPath = "";
+    if (provider === "claude") {
+      const servers = {};
+      if (server) servers.mind_atlas = server;
+      for (const one of extra) {
+        servers[one.name] = { command: one.command, args: one.args, ...(Object.keys(one.env).length ? { env: one.env } : {}) };
+      }
+      configPath = join(this.store.runDir(handle.runId), "mcp-config.json");
+      await writeFile(configPath, JSON.stringify({ mcpServers: servers }, null, 2), "utf8");
+    }
+    return { configPath, server, extra, writes };
   }
 
   async #runLegacy(request, handle, sink) {

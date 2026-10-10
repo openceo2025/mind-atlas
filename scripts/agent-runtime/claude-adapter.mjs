@@ -235,7 +235,12 @@ export class ClaudeAdapter {
       "--permission-prompt-tool",
       "stdio",
     ];
-    appendClaudeDefaultWebToolArgs(args, request.mcpConfigPath ? [CLAUDE_ATLAS_TOOLS] : []);
+    appendClaudeDefaultWebToolArgs(args, request.mcpConfigPath
+      ? [
+          ...(request.atlasMcpServer ? [CLAUDE_ATLAS_TOOLS] : []),
+          ...(Array.isArray(request.extraMcpServers) ? request.extraMcpServers.map((one) => `mcp__${one.name}`) : []),
+        ]
+      : []);
     const settings = request.claudeSettings ?? {};
     // Additive per-run MCP config. The user's own global MCP servers stay
     // available because `--strict-mcp-config` is deliberately not used.
@@ -263,7 +268,9 @@ export class ClaudeAdapter {
       sessionAction,
       requestedSessionId: request.session?.sessionId ?? "",
       workspace: request.workspace || this.options.workspace,
-      env: this.options.buildEnv(settings),
+      // A tool that waits on another agent's whole answer needs longer than
+      // Claude Code's default MCP tool timeout.
+      env: withMcpToolTimeout(this.options.buildEnv(settings), request.extraMcpServers),
       spec,
       prompt: String(request.prompt ?? ""),
       authMode: settings.authMode === "subscription" ? "subscription" : "api",
@@ -920,4 +927,9 @@ function runOnce(spec, env, cwd, timeoutMs) {
     });
     try { child.stdin.end(); } catch {}
   });
+}
+
+function withMcpToolTimeout(env, extraMcpServers) {
+  const longest = Math.max(0, ...(Array.isArray(extraMcpServers) ? extraMcpServers : []).map((one) => Number(one?.toolTimeoutSec) || 0));
+  return longest > 0 ? { ...env, MCP_TOOL_TIMEOUT: String(longest * 1000) } : env;
 }

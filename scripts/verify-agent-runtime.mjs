@@ -40,7 +40,7 @@ import {
   isClaudeOAuthAuthenticationError,
 } from "./agent-runtime/claude-auth-recovery.mjs";
 import { formatClaudePlanLimitError, isRejectedClaudePlanAllowance } from "./agent-runtime/claude-adapter.mjs";
-import { codexReasoningSummary } from "./agent-runtime/codex-adapter.mjs";
+import { codexMcpConfig, codexReasoningSummary } from "./agent-runtime/codex-adapter.mjs";
 import { acceptedReturnUrl, readOpenCeoReturn, returnUrlFromSearch } from "../src/openceoReturn.ts";
 import { AgentRunStore } from "./agent-runtime/run-journal.mjs";
 import { AgentRuntimeManager } from "./agent-runtime/runtime-manager.mjs";
@@ -89,6 +89,7 @@ async function main() {
     await verifyAtlasTools();
     await verifyAtlasLink(workDir);
     await verifyClaudeLoginRelay();
+    await verifyExtraMcpServers();
     await verifyContextAccounting();
     await verifyMarkdownSafety();
     await verifyEvidence(workDir);
@@ -948,6 +949,29 @@ async function verifyClaudeLoginRelay() {
   await new Promise((resolve) => setTimeout(resolve, 30));
   const after = quiet.status(closed.id);
   check("a login that stored no credential is not a login", after.status === "failed", after);
+}
+
+async function verifyExtraMcpServers() {
+  section("Extra MCP servers a trusted caller attaches to a run");
+  const config = codexMcpConfig({
+    atlasMcpServer: { command: "node", args: ["atlas.mjs"], env: { MIND_ATLAS_RUN_TOKEN: "t" } },
+    extraMcpServers: [{ name: "openceo", command: "node", args: ["colleague.js"], env: { OPENCEO_RUN_TOKEN: "x" }, toolTimeoutSec: 900 }],
+  });
+  check(
+    "a Codex thread gets the Mind Atlas server and the extra one, with its tool timeout",
+    config.config?.mcp_servers?.mind_atlas?.command === "node" &&
+      config.config?.mcp_servers?.openceo?.tool_timeout_sec === 900 &&
+      config.config?.mcp_servers?.openceo?.env?.OPENCEO_RUN_TOKEN === "x",
+    config,
+  );
+  check("no servers means no config", JSON.stringify(codexMcpConfig({})) === "{}");
+  const routes = await readFile(new URL("./agent-runtime/bridge-routes.mjs", import.meta.url), "utf8");
+  check(
+    "only a caller without an Origin may attach extra servers",
+    /trusted: !String\(request\.headers\.origin \?\? ""\)/.test(routes) &&
+      /extraMcpServers: trusted \? normalizeExtraMcpServers\(body\?\.extraMcpServers\) : \[\]/.test(routes),
+  );
+  check("an extra server cannot take the Mind Atlas server's name", /name === "mind_atlas"/.test(routes));
 }
 
 async function verifyContextAccounting() {

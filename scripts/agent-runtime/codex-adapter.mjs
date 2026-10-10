@@ -159,19 +159,7 @@ export class CodexAdapter {
       ...(request.model ? { model: request.model } : {}),
       // The Mind Atlas tools, for this thread only: Codex's own config.toml is
       // never changed (runtime-manager.mjs #prepareAtlasTools).
-      ...(request.atlasMcpServer
-        ? {
-            config: {
-              mcp_servers: {
-                mind_atlas: {
-                  command: request.atlasMcpServer.command,
-                  args: request.atlasMcpServer.args,
-                  ...(request.atlasMcpServer.env ? { env: request.atlasMcpServer.env } : {}),
-                },
-              },
-            },
-          }
-        : {}),
+      ...codexMcpConfig(request),
     };
 
     let thread = null;
@@ -698,4 +686,29 @@ function decodeMaybeBase64(value) {
   } catch {
     return text;
   }
+}
+
+/**
+ * The MCP servers for one thread: the Mind Atlas tools and any extra servers
+ * a trusted caller attached (OpenCEO's colleague tools). Codex's own
+ * config.toml is never changed.
+ */
+export function codexMcpConfig(request) {
+  const servers = {};
+  if (request.atlasMcpServer) {
+    servers.mind_atlas = {
+      command: request.atlasMcpServer.command,
+      args: request.atlasMcpServer.args,
+      ...(request.atlasMcpServer.env ? { env: request.atlasMcpServer.env } : {}),
+    };
+  }
+  for (const one of Array.isArray(request.extraMcpServers) ? request.extraMcpServers : []) {
+    servers[one.name] = {
+      command: one.command,
+      args: one.args,
+      ...(Object.keys(one.env ?? {}).length ? { env: one.env } : {}),
+      ...(one.toolTimeoutSec ? { tool_timeout_sec: one.toolTimeoutSec } : {}),
+    };
+  }
+  return Object.keys(servers).length ? { config: { mcp_servers: servers } } : {};
 }
