@@ -705,11 +705,17 @@ function decodeMaybeBase64(value) {
  */
 export function codexMcpConfig(request) {
   const servers = {};
+  // These servers are Mind Atlas's own and those a trusted caller attached;
+  // their tools need no per-call approval. Without this, Codex 0.162 fails
+  // every MCP call under approval policy "never" ("MCP tool call requires
+  // approval, but approval policy is never"), and asks for each one under
+  // "untrusted".
   if (request.atlasMcpServer) {
     servers.mind_atlas = {
       command: request.atlasMcpServer.command,
       args: request.atlasMcpServer.args,
       ...(request.atlasMcpServer.env ? { env: request.atlasMcpServer.env } : {}),
+      default_tools_approval_mode: "approve",
     };
   }
   for (const one of Array.isArray(request.extraMcpServers) ? request.extraMcpServers : []) {
@@ -718,6 +724,7 @@ export function codexMcpConfig(request) {
       args: one.args,
       ...(Object.keys(one.env ?? {}).length ? { env: one.env } : {}),
       ...(one.toolTimeoutSec ? { tool_timeout_sec: one.toolTimeoutSec } : {}),
+      default_tools_approval_mode: "approve",
     };
   }
   return Object.keys(servers).length ? { config: { mcp_servers: servers } } : {};

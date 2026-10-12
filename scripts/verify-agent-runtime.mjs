@@ -964,6 +964,12 @@ async function verifyExtraMcpServers() {
       config.config?.mcp_servers?.openceo?.env?.OPENCEO_RUN_TOKEN === "x",
     config,
   );
+  check(
+    "a Codex thread may call those servers' tools without asking each time",
+    config.config?.mcp_servers?.mind_atlas?.default_tools_approval_mode === "approve" &&
+      config.config?.mcp_servers?.openceo?.default_tools_approval_mode === "approve",
+    config,
+  );
   check("no servers means no config", JSON.stringify(codexMcpConfig({})) === "{}");
   const routes = await readFile(new URL("./agent-runtime/bridge-routes.mjs", import.meta.url), "utf8");
   check(
