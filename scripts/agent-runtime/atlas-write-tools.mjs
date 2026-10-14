@@ -24,6 +24,12 @@ const nodeDraft = {
 
 export const ATLAS_WRITE_TOOL_DEFINITIONS = [
   {
+    name: "save_to_cloud",
+    description:
+      "Save the whole open notebook to Mind Atlas's cloud store, so it survives the browser's own storage being cleared or another browser being used. Do it after writing a lot, or when asked.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "add_child_nodes",
     description:
       "Add one or more cards under an existing card. Use this to record what you found, decided or did, under the project card it belongs to. Take parentId from search_nodes or get_atlas_outline.",
@@ -146,7 +152,7 @@ export function describeWrite(answer) {
       queued: true,
       operationId: op.id,
       message: answer?.browserOnline
-        ? "Queued. Mind Atlas is open but has not applied it yet; it will shortly."
+        ? "Queued. Mind Atlas is open but has not applied it yet; it will shortly. Confirm later with get_node or get_children."
         : "Queued. Mind Atlas is not open in a browser right now; it will be applied when the owner opens it. Ids of new cards are not known until then.",
     },
   };

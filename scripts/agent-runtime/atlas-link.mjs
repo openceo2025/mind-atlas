@@ -28,9 +28,12 @@ export const ATLAS_WRITE_TOOLS = Object.freeze([
   "delete_node",
   "move_nodes",
   "bulk_update_nodes",
+  "save_to_cloud",
 ]);
 
 const BROWSER_SEEN_MS = 15_000;
+/** How long the browser's request for writes may wait for one to arrive. */
+const MAX_PENDING_WAIT_MS = 25_000;
 const DEFAULT_WAIT_MS = 20_000;
 const MAX_PENDING = 200;
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
@@ -47,6 +50,8 @@ export class AtlasLink {
     this.waiters = new Map();
     this.tokens = new Map();
     this.browserSeenAt = 0;
+    /** Browsers waiting for a write to arrive (long poll). */
+    this.pendingWaiters = new Set();
   }
 
   // ------------------------------------------------------------ the copy
@@ -66,6 +71,25 @@ export class AtlasLink {
     await mkdir(this.dir, { recursive: true });
     await writeAtomically(join(this.dir, "atlas-copy.json"), JSON.stringify(this.copy));
     return { updatedAt: this.copy.updatedAt };
+  }
+
+  /**
+   * What OpenCEO watches (local-only): which notebook is open, how big it is,
+   * and whether a browser has it open. No text leaves through here.
+   */
+  async status() {
+    const copy = await this.getCopy();
+    return {
+      browserOnline: this.browserOnline,
+      copy: copy
+        ? {
+            rootId: String(copy.root?.id ?? ""),
+            title: String(copy.title ?? ""),
+            nodeCount: countNodes(copy.root),
+            updatedAt: String(copy.updatedAt ?? ""),
+          }
+        : null,
+    };
   }
 
   async getCopy() {
@@ -111,7 +135,9 @@ export class AtlasLink {
   // ---------------------------------------------------------- operations
 
   get browserOnline() {
-    return this.now() - this.browserSeenAt < BROWSER_SEEN_MS;
+    // A browser waiting for writes right now is open, however long ago its
+    // last request began.
+    return this.pendingWaiters.size > 0 || this.now() - this.browserSeenAt < BROWSER_SEEN_MS;
   }
 
   /** Queues one write and waits a little for the open browser to apply it. */
@@ -135,14 +161,34 @@ export class AtlasLink {
     };
     this.ops.set(op.id, op);
     await this.#save(op);
+    // A browser waiting for writes takes this one at once.
+    for (const wake of [...this.pendingWaiters]) wake();
     const settled = await this.#wait(op.id, waitMs);
     return { op: settled ?? op, browserOnline: this.browserOnline };
   }
 
-  /** What the open browser should apply, oldest first. */
-  async pending() {
+  /**
+   * What the open browser should apply, oldest first. With `waitMs`, an empty
+   * answer waits until a write arrives (up to MAX_PENDING_WAIT_MS): a
+   * browser tab in the background has its timers slowed to once a minute,
+   * but an answer to a request it is waiting on reaches it at once.
+   */
+  async pending(waitMs = 0) {
     this.browserSeenAt = this.now();
     await this.#loadOps();
+    const wait = Math.min(Math.max(0, Number(waitMs) || 0), MAX_PENDING_WAIT_MS);
+    if (wait > 0 && ![...this.ops.values()].some((op) => op.status === "pending")) {
+      await new Promise((resolve) => {
+        const wake = () => {
+          clearTimeout(timer);
+          this.pendingWaiters.delete(wake);
+          resolve();
+        };
+        const timer = setTimeout(wake, wait);
+        this.pendingWaiters.add(wake);
+      });
+      this.browserSeenAt = this.now();
+    }
     return [...this.ops.values()]
       .filter((op) => op.status === "pending")
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -210,6 +256,12 @@ export class AtlasLink {
   }
 }
 
+function countNodes(node) {
+  if (!node || typeof node !== "object") return 0;
+  const children = Array.isArray(node.children) ? node.children : [];
+  return 1 + children.reduce((total, child) => total + countNodes(child), 0);
+}
+
 async function writeAtomically(file, text) {
   const temporary = `${file}.${randomUUID()}.tmp`;
   await writeFile(temporary, text, "utf8");
@@ -221,8 +273,9 @@ async function writeAtomically(file, text) {
  *
  * - POST /api/atlas-link/copy         browser: the notebook as it is now
  * - GET  /api/atlas-link/copy         MCP server: read it
+ * - GET  /api/atlas-link/status       OpenCEO: which notebook is open, its size
  * - POST /api/atlas-link/ops          MCP server: queue a write (run token)
- * - GET  /api/atlas-link/ops/pending  browser: writes to apply
+ * - GET  /api/atlas-link/ops/pending  browser: writes to apply (?wait=ms: until one arrives)
  * - POST /api/atlas-link/ops/:id      browser: the result of one write
  */
 export function createAtlasLinkRoutes({ link, isAllowedOrigin, readJsonBody = readJsonUpTo, sendJson }) {
@@ -238,6 +291,15 @@ export function createAtlasLinkRoutes({ link, isAllowedOrigin, readJsonBody = re
 
     if (method === "POST" && path === "/api/atlas-link/copy") {
       sendJson(response, 200, await link.setCopy(await readJsonBody(request)));
+      return true;
+    }
+    if (method === "GET" && path === "/api/atlas-link/status") {
+      // For OpenCEO on this machine; a page has no need of it.
+      if (origin) {
+        sendJson(response, 403, { error: "The notebook status is for local programs only." });
+        return true;
+      }
+      sendJson(response, 200, await link.status());
       return true;
     }
     if (method === "GET" && path === "/api/atlas-link/copy") {
@@ -269,7 +331,7 @@ export function createAtlasLinkRoutes({ link, isAllowedOrigin, readJsonBody = re
       return true;
     }
     if (method === "GET" && path === "/api/atlas-link/ops/pending") {
-      sendJson(response, 200, { ops: await link.pending() });
+      sendJson(response, 200, { ops: await link.pending(Number(url.searchParams.get("wait") ?? 0)) });
       return true;
     }
     const done = /^\/api\/atlas-link\/ops\/([0-9a-f-]{36})$/.exec(path);

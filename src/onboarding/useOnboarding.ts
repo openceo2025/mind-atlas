@@ -296,6 +296,9 @@ export function getOnboardingCurrentSpaceStep(): SpaceStepId | null {
 function loadProgress(): OnboardingProgress {
   if (isAboutDemoMode()) return completedProgress(false);
   if (typeof window === "undefined") return completedProgress(false);
+  // Opened by an OpenCEO office: the owner is at work, not trying Mind Atlas
+  // for the first time, so the tutorial stays away (OpenCEO request).
+  if (openedByOpenCeo()) return completedProgress(false);
   const raw = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
   if (raw) {
     try {
@@ -442,4 +445,14 @@ function isOnboardingEventType(value: unknown): value is OnboardingEventType {
     value === "node-drag" ||
     value === "child-node-created"
   );
+}
+
+/** Whether this tab was opened by an OpenCEO office (`?from=openceo`). */
+function openedByOpenCeo(): boolean {
+  try {
+    if (new URLSearchParams(window.location.search).get("from") === "openceo") return true;
+    return Boolean(window.sessionStorage.getItem("mind-atlas.openceo-return"));
+  } catch {
+    return false;
+  }
 }

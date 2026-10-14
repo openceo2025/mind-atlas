@@ -160,8 +160,8 @@ export interface AtlasLinkOperation {
 }
 
 /** Local-only: writes agents queued for this browser to apply. */
-export async function getAtlasLinkOperations(): Promise<AtlasLinkOperation[]> {
-  const response = await fetchBridgeGet("/api/atlas-link/ops/pending");
+export async function getAtlasLinkOperations(waitMs = 0): Promise<AtlasLinkOperation[]> {
+  const response = await fetchBridgeGet(`/api/atlas-link/ops/pending${waitMs > 0 ? `?wait=${Math.round(waitMs)}` : ""}`);
   const body = await readJsonResponse<{ ops?: AtlasLinkOperation[] }>(response);
   return Array.isArray(body.ops) ? body.ops : [];
 }

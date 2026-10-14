@@ -14,13 +14,28 @@ import type { AtlasNode, WorkStatus } from "../types";
  */
 
 const COPY_DELAY_MS = 1_500;
-const POLL_MS = 2_000;
+/** At most this often, a notebook agents wrote to is saved to the cloud store. */
+const AUTOSAVE_MS = 10 * 60_000;
+
+/** Saves the notebook to the cloud store without asking; set by the app. */
+type CloudSaver = () => Promise<string>;
+let cloudSaver: CloudSaver | null = null;
+
+/** The app hands over its own cloud save, made silent, for agents to use. */
+export function setAtlasCloudSaver(saver: CloudSaver | null): void {
+  cloudSaver = saver;
+}
+/** How long one request for writes waits at the bridge for one to arrive. */
+const WAIT_MS = 20_000;
+/** After a failed request (the bridge is down), before asking again. */
+const RETRY_MS = 2_000;
 const STATUSES: WorkStatus[] = ["running", "needs_review", "waiting", "blocked", "error", "done"];
 
 export function startAtlasLink(): () => void {
   let stopped = false;
   let copyTimer: number | null = null;
-  let applying = false;
+  let wroteSinceSave = false;
+  let lastSaveAt = Date.now();
 
   const sendCopy = () => {
     copyTimer = null;
@@ -35,30 +50,47 @@ export function startAtlasLink(): () => void {
     if (state.atlasRoot !== previous.atlasRoot) scheduleCopy();
   });
 
-  const poll = async () => {
-    if (stopped || applying) return;
-    applying = true;
-    try {
-      const ops = await getAtlasLinkOperations();
-      for (const op of ops) {
-        if (stopped) break;
-        const result = applyAtlasOperation(op);
-        await completeAtlasLinkOperation(op.id, result).catch(() => undefined);
+  // Writes are asked for with a request the bridge holds until one arrives,
+  // not on a timer: a tab in the background has its timers slowed to once a
+  // minute, and an agent's write would wait that long (OpenCEO: "queued but
+  // not applied"). An answer to a waiting request is not slowed.
+  const loop = async () => {
+    while (!stopped) {
+      try {
+        const ops = await getAtlasLinkOperations(WAIT_MS);
+        for (const op of ops) {
+          if (stopped) break;
+          const result = await applyAtlasOperation(op);
+          await completeAtlasLinkOperation(op.id, result).catch(() => undefined);
+          if (result.ok && op.tool !== "save_to_cloud") wroteSinceSave = true;
+          if (op.tool === "save_to_cloud" && result.ok) lastSaveAt = Date.now();
+        }
+        // What agents wrote is kept beyond this browser, now and then
+        // (OpenCEO: the notebook must not seem lost in another browser).
+        if (wroteSinceSave && cloudSaver && Date.now() - lastSaveAt > AUTOSAVE_MS) {
+          wroteSinceSave = false;
+          lastSaveAt = Date.now();
+          void cloudSaver().catch(() => {
+            wroteSinceSave = true;
+          });
+        }
+        // What agents read changes now, not after the copy's delay.
+        if (ops.length > 0 && !stopped) {
+          if (copyTimer !== null) window.clearTimeout(copyTimer);
+          sendCopy();
+        }
+      } catch {
+        // The bridge is not running; ask again in a moment.
+        await new Promise((resolve) => window.setTimeout(resolve, RETRY_MS));
       }
-    } catch {
-      // The bridge is not running; try again on the next tick.
-    } finally {
-      applying = false;
     }
   };
 
   sendCopy();
-  void poll();
-  const interval = window.setInterval(() => void poll(), POLL_MS);
+  void loop();
   return () => {
     stopped = true;
     unsubscribe();
-    window.clearInterval(interval);
     if (copyTimer !== null) window.clearTimeout(copyTimer);
   };
 }
@@ -86,10 +118,10 @@ export function copyOf(node: AtlasNode): Record<string, unknown> {
 type Result = { ok: boolean; text: string; data?: unknown };
 
 /** Applies one agent's write with the store, and logs it. */
-export function applyAtlasOperation(op: AtlasLinkOperation): Result {
+export async function applyAtlasOperation(op: AtlasLinkOperation): Promise<Result> {
   let result: Result;
   try {
-    result = apply(op);
+    result = op.tool === "save_to_cloud" ? await saveToCloud() : apply(op);
   } catch (error) {
     result = { ok: false, text: error instanceof Error ? error.message : "The write failed." };
   }
@@ -189,6 +221,12 @@ function apply(op: AtlasLinkOperation): Result {
     default:
       return fail(`Unknown write: ${op.tool}`);
   }
+}
+
+async function saveToCloud(): Promise<Result> {
+  if (!cloudSaver) return fail("This Mind Atlas cannot save to the cloud store.");
+  const name = await cloudSaver();
+  return ok(`Saved to the cloud store as ${name}.`, { name });
 }
 
 function textPatch(args: Record<string, unknown>) {

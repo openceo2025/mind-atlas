@@ -781,6 +781,34 @@ async function verifyAtlasLink(workDir) {
   await reloaded.complete(survived[0].id, { ok: true, text: "Status set." });
   check("an applied write leaves the queue", (await reloaded.pending()).length === 0);
 
+  // A browser waiting for writes is answered the moment one is queued, not
+  // when its next timer fires (a background tab's timers are slowed).
+  const waiting = reloaded.pending(5_000);
+  const startedAt = Date.now();
+  const sameRun = reloaded.issueToken({ runId: "run-2", provider: "claude", label: "ケイ" });
+  const write = reloaded.enqueue({ token: sameRun, tool: "set_node_status", args: { nodeId: "veg", status: "done" } }, 2_000);
+  const woken = await waiting;
+  check(
+    "a waiting browser gets a queued write at once",
+    woken.length === 1 && woken[0].tool === "set_node_status" && Date.now() - startedAt < 1_000,
+    { woken, ms: Date.now() - startedAt },
+  );
+  check("a browser that is waiting counts as open", reloaded.browserOnline === true);
+  await reloaded.complete(woken[0].id, { ok: true, text: "Status set." });
+  check("the write is reported applied, not queued", (await write).op?.status === "done");
+  const empty = await reloaded.pending(50);
+  check("a wait with nothing to apply ends empty", empty.length === 0, empty);
+
+  const status = await reloaded.status();
+  check(
+    "OpenCEO can see which notebook is open and its size, without its text",
+    status.copy?.rootId === "root" && status.copy?.nodeCount === 2 && !("root" in (status.copy ?? {})),
+    status,
+  );
+  const saveToken = reloaded.issueToken({ runId: "run-3", provider: "codex", label: "ミオ" });
+  const save = await reloaded.enqueue({ token: saveToken, tool: "save_to_cloud", args: {} }, 0);
+  check("an agent can ask the open notebook to save to the cloud store", save.op?.tool === "save_to_cloud", save);
+
   // End to end: the real MCP server process, the link's HTTP routes, and a
   // pretend browser that applies what is queued.
   const server = createServer((request, response) => {

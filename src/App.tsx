@@ -73,7 +73,7 @@ import { createNewChessRecord } from "./features/chess/chessRecord";
 import { createNewGoRecord } from "./features/go/goRecord";
 import { extractSupportedShogiSourceUrl } from "./features/shogi/shogiSource";
 import { readOpenCeoReturn, returnToOffice } from "./openceoReturn";
-import { startAtlasLink } from "./agentRuntime/atlasLink";
+import { setAtlasCloudSaver, startAtlasLink } from "./agentRuntime/atlasLink";
 
 const GalaxyView = lazy(() => import("./components/galaxy/GalaxyView").then((module) => ({ default: module.GalaxyView })));
 
@@ -1036,6 +1036,24 @@ export default function App() {
     if (publicServiceMode || aboutDemoConfig) return;
     return startAtlasLink();
   }, [aboutDemoConfig, publicServiceMode]);
+
+  // What agents (and the autosave) use to save to the cloud store: the same
+  // package as the menu's cloud save, without dialogs. Local-only.
+  useEffect(() => {
+    if (publicServiceMode || aboutDemoConfig || isBoardGameMode) {
+      setAtlasCloudSaver(null);
+      return;
+    }
+    setAtlasCloudSaver(async () => {
+      await saveNotebookNow();
+      const root = useAtlasStore.getState().atlasRoot;
+      const result = await createNotebookPackage(root, useAtlasStore.getState().attachmentPreviewUrls);
+      const saved = await saveCloudNotebookPackage(result.blob, `${datasetFileName(root.title)}.mindatlaspkg`);
+      setCloudStatus(t("status.cloud.saved", { name: saved.name }));
+      return saved.name;
+    });
+    return () => setAtlasCloudSaver(null);
+  }, [aboutDemoConfig, publicServiceMode, isBoardGameMode, saveNotebookNow, t]);
 
   useEffect(() => {
     if (publicServiceMode || aboutDemoConfig) return;
