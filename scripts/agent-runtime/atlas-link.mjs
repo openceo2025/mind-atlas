@@ -265,7 +265,18 @@ function countNodes(node) {
 async function writeAtomically(file, text) {
   const temporary = `${file}.${randomUUID()}.tmp`;
   await writeFile(temporary, text, "utf8");
-  await rename(temporary, file);
+  // Windows rejects a rename onto a file another write or read has open, for
+  // a moment (EPERM/EBUSY/EACCES): the copy is written often. Retry briefly.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await rename(temporary, file);
+      return;
+    } catch (error) {
+      const retryable = error?.code === "EPERM" || error?.code === "EBUSY" || error?.code === "EACCES";
+      if (!retryable || attempt >= 20) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10 * attempt));
+    }
+  }
 }
 
 /**
