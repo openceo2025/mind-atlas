@@ -237,9 +237,15 @@ export class AgentRunStore {
    */
   async latestUsageEvents({ provider, scope, authMode = "", limitRuns = 80 } = {}) {
     const found = new Map();
-    for (const manifest of await this.listRuns({ limit: limitRuns })) {
+    // The newest `limitRuns` runs of this provider, not of all providers:
+    // many Codex runs used to push every Claude run out of the window, and
+    // the Claude plan allowance then vanished from the usage strip.
+    let looked = 0;
+    for (const manifest of await this.listRuns({ limit: Number.MAX_SAFE_INTEGER })) {
       if (provider && manifest.provider !== provider) continue;
       if (authMode && manifest.authMode !== authMode) continue;
+      if (looked >= limitRuns) break;
+      looked += 1;
       const events = await this.readEvents(manifest.runId, 0, 10_000);
       for (let index = events.length - 1; index >= 0; index -= 1) {
         const event = events[index];

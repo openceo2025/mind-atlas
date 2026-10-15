@@ -511,6 +511,19 @@ async function verifyJournal(baseRoot) {
     authMode: "subscription",
   });
   check("a rejected allowance remains authoritative without utilization", rejectedPlan[0]?.usage?.status === "rejected", rejectedPlan);
+
+  // Many newer Codex runs must not push the Claude allowance out of sight.
+  for (let index = 0; index < 6; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await store.createRun({ provider: "codex", route: "codex-app-server", workspace: baseRoot });
+  }
+  const pastCodex = await store.latestUsageEvents({
+    provider: "claude",
+    scope: "account_plan",
+    authMode: "subscription",
+    limitRuns: 3,
+  });
+  check("the Claude allowance is found past newer runs of another provider", pastCodex[0]?.usage?.status === "rejected", pastCodex);
 }
 
 async function verifyIdempotencyAndBounds(baseRoot) {
