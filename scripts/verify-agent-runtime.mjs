@@ -882,6 +882,14 @@ async function verifySpaces(workDir) {
   check("a branch moves between two spaces not open", back.placed === "done" && back.removed === "done", back);
   check("it is in the target and not the source", (await spaces.get(project.id)).root.children.length === 1 && !(await spaces.get(nao.id)).root.children.some((one) => one.title === "移すメモ"));
   check("the open notebook is a known space", Boolean((await link.status()).openIsSpace));
+
+  // Two writes at once to the same space: both are kept.
+  await Promise.all([
+    link.enqueue({ token, tool: "add_child_nodes", args: { space: "sato", parentId: project.id, nodes: [{ title: "同時1" }] } }),
+    link.enqueue({ token, tool: "add_child_nodes", args: { space: "sato", parentId: project.id, nodes: [{ title: "同時2" }] } }),
+  ]);
+  const both = (await spaces.get(project.id)).root.children.map((one) => one.title);
+  check("two writes at once to one space are both kept", both.includes("同時1") && both.includes("同時2"), both);
 }
 
 async function verifyAtlasLatest(workDir) {

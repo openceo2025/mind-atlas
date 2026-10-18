@@ -55,6 +55,8 @@ export class AtlasLink {
     this.dir = options.dir;
     /** Spaces beside the open notebook (OpenCEO ADR 0089), when given. */
     this.spaces = options.spaces ?? null;
+    /** Writes to spaces, in order (see writeSpace). */
+    this.spaceWrites = Promise.resolve();
     this.now = options.now ?? (() => Date.now());
     this.copy = null;
     this.copyLoaded = false;
@@ -266,18 +268,27 @@ export class AtlasLink {
     return { op: settled ?? op, browserOnline: this.browserOnline };
   }
 
-  /** A write to a space no browser has open: applied to its file here. */
+  /**
+   * A write to a space no browser has open: applied to its file here, one
+   * at a time and each on the newest file, so two agents writing at once do
+   * not lose either write.
+   */
   async writeSpace(space, tool, args, run) {
-    const at = new Date(this.now()).toISOString();
-    const result =
-      tool === "save_to_cloud"
-        ? { ok: true, text: "Spaces are kept on this PC already." }
-        : applyToTree(space.root, tool, args, run.label, this.now);
-    if (result.ok && tool !== "save_to_cloud") await this.spaces.save(space.root, { acceptedAt: at });
-    return {
-      op: { id: randomUUID(), tool, status: result.ok ? "done" : "failed", result, createdAt: at },
-      browserOnline: this.browserOnline,
-    };
+    const write = this.spaceWrites.then(async () => {
+      const at = new Date(this.now()).toISOString();
+      const fresh = (await this.spaces.get(space.root.id)) ?? space;
+      const result =
+        tool === "save_to_cloud"
+          ? { ok: true, text: "Spaces are kept on this PC already." }
+          : applyToTree(fresh.root, tool, args, run.label, this.now);
+      if (result.ok && tool !== "save_to_cloud") await this.spaces.save(fresh.root, { acceptedAt: at });
+      return {
+        op: { id: randomUUID(), tool, status: result.ok ? "done" : "failed", result, createdAt: at },
+        browserOnline: this.browserOnline,
+      };
+    });
+    this.spaceWrites = write.catch(() => undefined);
+    return await write;
   }
 
   /** A space's tree as agents read it, or the open notebook's copy. */
