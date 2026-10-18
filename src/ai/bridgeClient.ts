@@ -140,13 +140,33 @@ export async function recoverCodexRun(payload: CodexRunRecoveryRequest): Promise
 }
 
 /** Local-only: the notebook as it is now, for agents to read (atlas-link.mjs). */
-export async function sendAtlasCopy(payload: { title: string; root: unknown }): Promise<void> {
+export interface AtlasCopyAnswer {
+  /** When this copy became the newest; absent when refused as older. */
+  updatedAt?: string;
+  /** This browser's notebook is older than the newest one kept. */
+  stale?: boolean;
+  latestAt?: string;
+}
+
+export async function sendAtlasCopy(payload: {
+  title: string;
+  root: unknown;
+  full?: unknown;
+  basedOn?: string;
+  force?: boolean;
+}): Promise<AtlasCopyAnswer> {
   const response = await fetchBridge("/api/atlas-link/copy", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  await readJsonResponse<{ updatedAt: string }>(response);
+  return await readJsonResponse<AtlasCopyAnswer>(response);
+}
+
+/** The newest whole notebook the bridge keeps. */
+export async function getAtlasLatest(): Promise<{ rootId: string; acceptedAt: string; root: unknown }> {
+  const response = await fetchBridgeGet("/api/atlas-link/latest");
+  return await readJsonResponse<{ rootId: string; acceptedAt: string; root: unknown }>(response);
 }
 
 export interface AtlasLinkOperation {

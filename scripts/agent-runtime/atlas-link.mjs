@@ -16,6 +16,13 @@
 //
 // Operations are kept on disk until the browser reports them, so a bridge
 // restart does not lose an agent's write.
+//
+// - Latest: with each copy the browser sends the whole notebook and the time
+//   of the copy it started from (`basedOn`). A browser whose notebook came
+//   from older storage (another tab, a restored profile) starts from an older
+//   copy than the newest one here: its copy is refused, the newest is kept,
+//   writes wait, and the browser is told so, to load the newest or to keep
+//   its own on purpose (OpenCEO: the notebook went back to an old state).
 
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
@@ -52,6 +59,11 @@ export class AtlasLink {
     this.browserSeenAt = 0;
     /** Browsers waiting for a write to arrive (long poll). */
     this.pendingWaiters = new Set();
+    /** The newest whole notebook, and when its copy was taken. */
+    this.latest = null;
+    this.latestLoaded = false;
+    /** Set while a browser with an older notebook is open. */
+    this.conflict = null;
   }
 
   // ------------------------------------------------------------ the copy
@@ -61,6 +73,17 @@ export class AtlasLink {
     if (!root || typeof root !== "object" || typeof root.id !== "string") {
       throw new Error("A notebook copy needs a root node.");
     }
+    this.browserSeenAt = this.now();
+    const latest = await this.getLatest();
+    const basedOn = String(payload?.basedOn ?? "");
+    // The same notebook as the newest (a new tab opened on it) is not older.
+    const same = payload?.full && latest && JSON.stringify(payload.full) === JSON.stringify(latest.root);
+    if (latest && latest.rootId === root.id && payload?.force !== true && !same && basedOn < latest.acceptedAt) {
+      // Older than what is here: keep the newest, and say so.
+      this.conflict = { at: new Date(this.now()).toISOString(), latestAt: latest.acceptedAt };
+      return { stale: true, latestAt: latest.acceptedAt };
+    }
+    this.conflict = null;
     this.copy = {
       title: String(payload?.title ?? root.title ?? ""),
       root,
@@ -70,7 +93,28 @@ export class AtlasLink {
     this.browserSeenAt = this.now();
     await mkdir(this.dir, { recursive: true });
     await writeAtomically(join(this.dir, "atlas-copy.json"), JSON.stringify(this.copy));
+    if (payload?.full && typeof payload.full === "object") {
+      this.latest = { rootId: root.id, acceptedAt: this.copy.updatedAt, root: payload.full };
+      await writeAtomically(join(this.dir, "atlas-latest.json"), JSON.stringify(this.latest));
+    } else if (this.latest && this.latest.rootId === root.id) {
+      this.latest = { ...this.latest, acceptedAt: this.copy.updatedAt };
+    }
+    // Writes held back during a conflict may go on now.
+    for (const wake of [...this.pendingWaiters]) wake();
     return { updatedAt: this.copy.updatedAt };
+  }
+
+  /** The newest whole notebook kept here, or null. */
+  async getLatest() {
+    if (!this.latestLoaded) {
+      this.latestLoaded = true;
+      try {
+        this.latest = JSON.parse(await readFile(join(this.dir, "atlas-latest.json"), "utf8"));
+      } catch {
+        this.latest = null;
+      }
+    }
+    return this.latest;
   }
 
   /**
@@ -81,6 +125,8 @@ export class AtlasLink {
     const copy = await this.getCopy();
     return {
       browserOnline: this.browserOnline,
+      // A browser with an older notebook is open (writes wait meanwhile).
+      ...(this.conflict ? { conflict: this.conflict } : {}),
       copy: copy
         ? {
             rootId: String(copy.root?.id ?? ""),
@@ -177,6 +223,12 @@ export class AtlasLink {
     this.browserSeenAt = this.now();
     await this.#loadOps();
     const wait = Math.min(Math.max(0, Number(waitMs) || 0), MAX_PENDING_WAIT_MS);
+    // A browser with an older notebook gets no writes: applied there, they
+    // would be lost when the newest is loaded.
+    if (this.conflict) {
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(wait, 2_000)));
+      return [];
+    }
     if (wait > 0 && ![...this.ops.values()].some((op) => op.status === "pending")) {
       await new Promise((resolve) => {
         const wake = () => {
@@ -285,6 +337,7 @@ async function writeAtomically(file, text) {
  * - POST /api/atlas-link/copy         browser: the notebook as it is now
  * - GET  /api/atlas-link/copy         MCP server: read it
  * - GET  /api/atlas-link/status       OpenCEO: which notebook is open, its size
+ * - GET  /api/atlas-link/latest       browser: the newest whole notebook kept here
  * - POST /api/atlas-link/ops          MCP server: queue a write (run token)
  * - GET  /api/atlas-link/ops/pending  browser: writes to apply (?wait=ms: until one arrives)
  * - POST /api/atlas-link/ops/:id      browser: the result of one write
@@ -302,6 +355,12 @@ export function createAtlasLinkRoutes({ link, isAllowedOrigin, readJsonBody = re
 
     if (method === "POST" && path === "/api/atlas-link/copy") {
       sendJson(response, 200, await link.setCopy(await readJsonBody(request)));
+      return true;
+    }
+    if (method === "GET" && path === "/api/atlas-link/latest") {
+      // The newest whole notebook, for a browser that found its own older.
+      const latest = await link.getLatest();
+      sendJson(response, latest ? 200 : 404, latest ?? { error: "No notebook kept yet." });
       return true;
     }
     if (method === "GET" && path === "/api/atlas-link/status") {

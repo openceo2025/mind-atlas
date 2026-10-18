@@ -73,7 +73,14 @@ import { createNewChessRecord } from "./features/chess/chessRecord";
 import { createNewGoRecord } from "./features/go/goRecord";
 import { extractSupportedShogiSourceUrl } from "./features/shogi/shogiSource";
 import { readOpenCeoReturn, returnToOffice } from "./openceoReturn";
-import { setAtlasCloudSaver, startAtlasLink } from "./agentRuntime/atlasLink";
+import {
+  keepAtlasHere,
+  loadAtlasLatest,
+  onAtlasStale,
+  setAtlasCloudSaver,
+  startAtlasLink,
+  type AtlasStale,
+} from "./agentRuntime/atlasLink";
 
 const GalaxyView = lazy(() => import("./components/galaxy/GalaxyView").then((module) => ({ default: module.GalaxyView })));
 
@@ -1035,6 +1042,15 @@ export default function App() {
   useEffect(() => {
     if (publicServiceMode || aboutDemoConfig) return;
     return startAtlasLink();
+  }, [aboutDemoConfig, publicServiceMode]);
+
+  // This browser's notebook older than the newest the bridge keeps: say so
+  // and let the person choose (the notebook once went back to an old state).
+  const [atlasStale, setAtlasStale] = useState<AtlasStale>(null);
+  const [atlasStaleError, setAtlasStaleError] = useState("");
+  useEffect(() => {
+    if (publicServiceMode || aboutDemoConfig) return;
+    return onAtlasStale(setAtlasStale);
   }, [aboutDemoConfig, publicServiceMode]);
 
   // What agents (and the autosave) use to save to the cloud store: the same
@@ -2379,6 +2395,34 @@ export default function App() {
       onDragLeave={handleImportDragLeave}
       onDrop={handleImportDrop}
     >
+      {atlasStale ? (
+        <div className="atlas-stale-banner" role="alert">
+          <div>
+            {atlasStaleError ||
+              t("atlasLink.stale.body", {
+                at: atlasStale.latestAt ? new Date(atlasStale.latestAt).toLocaleString() : "",
+              })}
+          </div>
+          <div className="atlas-stale-actions">
+            <button
+              type="button"
+              onClick={() => {
+                setAtlasStaleError("");
+                void loadAtlasLatest().catch((error: unknown) =>
+                  setAtlasStaleError(
+                    t("atlasLink.stale.failed", { error: error instanceof Error ? error.message : String(error) }),
+                  ),
+                );
+              }}
+            >
+              {t("atlasLink.stale.load")}
+            </button>
+            <button type="button" onClick={() => keepAtlasHere()}>
+              {t("atlasLink.stale.keep")}
+            </button>
+          </div>
+        </div>
+      ) : null}
       {openCeoReturn ? (
         <button
           type="button"

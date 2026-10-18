@@ -1,4 +1,4 @@
-import { completeAtlasLinkOperation, getAtlasLinkOperations, sendAtlasCopy, type AtlasLinkOperation } from "../ai/bridgeClient";
+import { completeAtlasLinkOperation, getAtlasLatest, getAtlasLinkOperations, sendAtlasCopy, type AtlasLinkOperation } from "../ai/bridgeClient";
 import { useAtlasStore } from "../store/atlasStore";
 import type { AtlasNode, WorkStatus } from "../types";
 
@@ -21,6 +21,64 @@ const AUTOSAVE_MS = 10 * 60_000;
 type CloudSaver = () => Promise<string>;
 let cloudSaver: CloudSaver | null = null;
 
+// ------------------------------------------------- an older notebook here
+
+/**
+ * Which copy of each notebook this tab started from, by root id. Per tab:
+ * two tabs of one browser share local storage, and an old tab must not pass
+ * for the one that wrote last.
+ */
+const BASE_KEY = "mind-atlas.atlas-link-base:";
+
+function readBase(rootId: string): string {
+  try {
+    return window.sessionStorage.getItem(BASE_KEY + rootId) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeBase(rootId: string, at: string): void {
+  try {
+    window.sessionStorage.setItem(BASE_KEY + rootId, at);
+  } catch {
+    // Unavailable storage: the next copy is compared again, nothing is lost.
+  }
+}
+
+/** Set while this browser's notebook is older than the newest one kept. */
+export type AtlasStale = { latestAt: string } | null;
+let stale: AtlasStale = null;
+const staleListeners = new Set<(value: AtlasStale) => void>();
+let keepThisBrowser: () => void = () => undefined;
+
+function setStale(value: AtlasStale): void {
+  if (JSON.stringify(value) === JSON.stringify(stale)) return;
+  stale = value;
+  for (const listener of staleListeners) listener(value);
+}
+
+/** Told whenever this browser's notebook is found older, or not any more. */
+export function onAtlasStale(listener: (value: AtlasStale) => void): () => void {
+  staleListeners.add(listener);
+  listener(stale);
+  return () => staleListeners.delete(listener);
+}
+
+/** Loads the newest notebook the bridge keeps, in place of this one. */
+export async function loadAtlasLatest(): Promise<void> {
+  const latest = await getAtlasLatest();
+  if (!latest?.root || typeof latest.root !== "object") throw new Error("No newer notebook is kept.");
+  writeBase(latest.rootId, latest.acceptedAt);
+  useAtlasStore.getState().importNotebook(latest.root as AtlasNode);
+  setStale(null);
+}
+
+/** Keeps this browser's notebook on purpose: it becomes the newest. */
+export function keepAtlasHere(): void {
+  keepThisBrowser();
+}
+
 /** The app hands over its own cloud save, made silent, for agents to use. */
 export function setAtlasCloudSaver(saver: CloudSaver | null): void {
   cloudSaver = saver;
@@ -37,11 +95,34 @@ export function startAtlasLink(): () => void {
   let wroteSinceSave = false;
   let lastSaveAt = Date.now();
 
-  const sendCopy = () => {
+  const sendCopy = (force = false) => {
     copyTimer = null;
-    const root = useAtlasStore.getState().atlasRoot;
-    void sendAtlasCopy({ title: root.title, root: copyOf(root) }).catch(() => undefined);
+    const state = useAtlasStore.getState();
+    const root = state.atlasRoot;
+    let full: unknown = undefined;
+    try {
+      full = JSON.parse(state.exportNotebook());
+    } catch {
+      full = undefined;
+    }
+    void sendAtlasCopy({
+      title: root.title,
+      root: copyOf(root),
+      full,
+      basedOn: readBase(root.id),
+      ...(force ? { force: true } : {}),
+    })
+      .then((answer) => {
+        if (answer.stale) {
+          setStale({ latestAt: answer.latestAt ?? "" });
+          return;
+        }
+        if (answer.updatedAt) writeBase(root.id, answer.updatedAt);
+        setStale(null);
+      })
+      .catch(() => undefined);
   };
+  keepThisBrowser = () => sendCopy(true);
   const scheduleCopy = () => {
     if (copyTimer !== null) window.clearTimeout(copyTimer);
     copyTimer = window.setTimeout(sendCopy, COPY_DELAY_MS);

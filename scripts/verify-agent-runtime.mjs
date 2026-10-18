@@ -85,6 +85,7 @@ async function main() {
     await verifyJournal(workDir);
     await verifyIdempotencyAndBounds(workDir);
     await verifyClaudePlanUsage();
+    await verifyAtlasLatest(workDir);
     await verifyRecovery(workDir);
     await verifyFakeProviderRun(workDir);
     await verifyOwnershipAndHandoff(workDir);
@@ -831,6 +832,36 @@ async function verifyAtlasTools() {
   const empty = new AtlasToolService(null);
   const emptyResult = await empty.call("search_nodes", { query: "x" });
   check("missing snapshot degrades safely", emptyResult.isError === true, emptyResult);
+}
+
+async function verifyAtlasLatest(workDir) {
+  section("Mind Atlas link: an older notebook in a browser does not win");
+  let clock = 1_000_000;
+  const dir = join(workDir, "atlas-latest");
+  const link = new AtlasLink({ dir, now: () => clock });
+  const root = (title) => ({ id: "root", title, body: "", children: [] });
+  const first = await link.setCopy({ title: "A", root: root("A"), full: root("A") });
+  check("the first copy is accepted and kept whole", Boolean(first.updatedAt) && (await link.getLatest())?.root?.title === "A", first);
+  clock += 1000;
+  const next = await link.setCopy({ title: "B", root: root("B"), full: root("B"), basedOn: first.updatedAt });
+  check("a copy from the newest one is accepted", Boolean(next.updatedAt), next);
+  clock += 1000;
+  const old = await link.setCopy({ title: "old", root: root("old"), full: root("old"), basedOn: first.updatedAt });
+  check("a copy from an older one is refused, and says so", old.stale === true && old.latestAt === next.updatedAt, old);
+  check("the newest is kept, not the older browser's", (await link.getCopy())?.title === "B" && (await link.getLatest())?.root?.title === "B");
+  check("OpenCEO is told an older notebook is open", Boolean((await link.status()).conflict));
+  const token = link.issueToken({ runId: "run-x", provider: "claude", label: "ナオ" });
+  await link.enqueue({ token, tool: "set_node_status", args: { nodeId: "root", status: "running" } }, 0);
+  check("writes wait while the older notebook is open", (await link.pending()).length === 0);
+  const unknown = await link.setCopy({ title: "fresh", root: root("fresh"), full: root("fresh") });
+  check("a browser that never synced is an older one too", unknown.stale === true, unknown);
+  const newTab = await link.setCopy({ title: "B", root: root("B"), full: root("B") });
+  check("a new tab with the same notebook as the newest is not older", Boolean(newTab.updatedAt), newTab);
+  const kept = await link.setCopy({ title: "old", root: root("old"), full: root("old"), basedOn: first.updatedAt, force: true });
+  check("keeping the browser's on purpose makes it the newest", Boolean(kept.updatedAt) && (await link.getLatest())?.root?.title === "old", kept);
+  check("and the writes go on", (await link.pending()).length === 1 && !(await link.status()).conflict);
+  const other = await link.setCopy({ title: "Other", root: { id: "other-root", title: "Other", body: "", children: [] } });
+  check("another notebook is not refused here", Boolean(other.updatedAt), other);
 }
 
 async function verifyAtlasLink(workDir) {

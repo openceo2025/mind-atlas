@@ -10320,6 +10320,38 @@ button:disabled,
 }
 
 /* The way back to an OpenCEO office that opened this tab (local mode only). */
+/* The notebook here is older than the newest the bridge keeps. */
+.atlas-stale-banner {
+  position: fixed;
+  left: 50%;
+  top: calc(env(safe-area-inset-top, 0px) + 56px);
+  transform: translateX(-50%);
+  z-index: 70;
+  width: min(560px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border: 2px solid #ffb3b3;
+  border-radius: 10px;
+  background: rgba(150, 24, 24, 0.94);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.atlas-stale-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.atlas-stale-actions button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.atlas-stale-actions button:first-child {
+  background: #ffe08a;
+  color: #0b0a10;
+}
 .openceo-return-button {
   position: fixed;
   top: calc(env(safe-area-inset-top, 0px) + 12px);
