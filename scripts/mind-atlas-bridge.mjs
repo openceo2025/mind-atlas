@@ -1107,6 +1107,7 @@ async function assertCodeModelAvailable(provider, settings, requestedModel) {
   }
 
   if (settings.authMode === "subscription") {
+    await modelCatalog.get("anthropic").catch(() => undefined);
     const subscription = buildClaudeSubscriptionModelOptions();
     if (subscription.discovery.status !== "ready") {
       throw new BridgeError(503, `Claude Code Pro model discovery failed. ${subscription.discovery.detail}`);
@@ -1709,9 +1710,12 @@ async function createOpenAiImageResponse({ prompt, model, startedAt, requestId }
 }
 
 async function createCodexOptionsResponse(refreshScope = "") {
-  if (refreshScope === "claude-api") {
-    await Promise.all([modelCatalog.get("anthropic"), modelCatalog.get("deepseek")]);
-  }
+  // The Claude lists come from the API's own model list (cached by the
+  // catalog), so it is read before answering.
+  await Promise.all([
+    modelCatalog.get("anthropic", { force: refreshScope === "claude-api" }),
+    modelCatalog.get("deepseek", { force: refreshScope === "claude-api" }),
+  ]).catch(() => undefined);
   const codexDiscovery = refreshScope === "codex" || !codexModelDiscoveryCache
     ? await getCodexModelDiscovery({ force: refreshScope === "codex" })
     : codexModelDiscoveryCache;
@@ -2269,16 +2273,16 @@ function buildClaudeApiModelOptions() {
 }
 
 function providerCodeModels(entry, providerId = "") {
-  const models = entry.source === "live" && !entry.error ? (entry.liveModels ?? []) : [];
+  const models = entry?.source === "live" && !entry.error ? (entry.liveModels ?? []) : [];
   if (providerId !== "anthropic") return models;
-  const newestByFamily = new Map();
-  for (const model of models) {
+  // Every model Anthropic's /v1/models lists, newest first, older versions
+  // included: the owner chooses from what the API actually offers, not from
+  // a list kept here. Rollout-only families stay out: listed, but not usable.
+  const usable = models.filter((model) => {
     const family = /^claude-([a-z]+)/i.exec(model)?.[1]?.toLowerCase();
-    if (!family || family === "fable" || family === "mythos") continue;
-    const current = newestByFamily.get(family);
-    if (!current || compareModelRecency(model, current) < 0) newestByFamily.set(family, model);
-  }
-  return [...newestByFamily.values()].sort(compareModelRecency);
+    return Boolean(family) && family !== "fable" && family !== "mythos";
+  });
+  return [...new Set(usable)].sort(compareModelRecency);
 }
 
 function providerCodeDiscovery(entry, label) {
@@ -2313,23 +2317,25 @@ function buildClaudeSubscriptionModelOptions() {
     detail = `Claude native model cache could not be read: ${String(error?.message ?? error).slice(0, 240)}`;
   }
   const options = [];
-  // The account default and Claude Code's own family names are always there:
-  // Claude Code resolves "opus", "sonnet" and "haiku" to the newest of each
-  // itself, so they need nothing recorded. The native cache only adds the
-  // exact versions recently seen (OpenCEO: only Opus 5.5 was offered once
-  // the cache held nothing else).
+  // The account default, then every model Anthropic's API lists right now
+  // (discovered live, as on the VPS), then any the native clients recently
+  // used that the API list does not have. Nothing is written down here
+  // (OpenCEO: only Opus 5.5 was offered when the native cache held nothing
+  // else).
   options.push({ id: "account-default", model: "", displayName: "Claude account default", resolvedModel: "", supportedReasoningEfforts: claudeReasoningEfforts, defaultReasoningEffort: "default" });
-  for (const [alias, label] of CLAUDE_FAMILY_ALIASES) {
+  const live = providerCodeModels(modelCatalog.peek("anthropic"), "anthropic");
+  for (const model of live) {
     options.push({
-      id: `alias:${alias}`,
-      model: alias,
-      resolvedModel: "",
-      displayName: label,
-      supportedReasoningEfforts: claudeReasoningEfforts,
-      defaultReasoningEffort: "default",
+      id: `api:${model}`,
+      model,
+      resolvedModel: model,
+      displayName: modelDisplayName(model),
+      supportedReasoningEfforts: effortsForModel(model, claudeReasoningEfforts),
+      defaultReasoningEffort: defaultEffortForModel(model, claudeReasoningEfforts, "default"),
     });
   }
   for (const model of models) {
+    if (live.includes(model)) continue;
     options.push({
       id: `native:${model}`,
       model,
@@ -2339,17 +2345,12 @@ function buildClaudeSubscriptionModelOptions() {
       defaultReasoningEffort: defaultEffortForModel(model, claudeReasoningEfforts, "default"),
     });
   }
-  // Ready either way: the family names work without anything recorded.
-  const discovery = discoveryPublicState({ status: "ready", source: models.length ? "native-cache" : "family-aliases", detail, checkedAtMs });
+  if (live.length) detail = `Models listed by Anthropic's API${models.length ? ", and recently used by the native Claude clients" : ""}.`;
+  const discovery = live.length || models.length
+    ? discoveryPublicState({ status: "ready", source: live.length ? "anthropic-api" : "native-cache", detail, checkedAtMs })
+    : discoveryPublicState(modelDiscoveryError("anthropic-api", detail, checkedAtMs));
   return { options, discovery };
 }
-
-/** Claude Code's family names: each means the newest model of that family. */
-const CLAUDE_FAMILY_ALIASES = [
-  ["opus", "Claude Opus (latest)"],
-  ["sonnet", "Claude Sonnet (latest)"],
-  ["haiku", "Claude Haiku (latest)"],
-];
 
 async function createCodexRunRecoveryResponse(payload) {
   const candidate = await findRecoverableCodexRun(payload);

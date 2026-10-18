@@ -1644,7 +1644,8 @@ async function verifyModeSafety() {
     !/claude-timeout-field|claudeSettings\.timeoutMs|codexSettings\.timeoutMs/.test(commandDock),
   );
   check("Claude API code options use only provider-confirmed models", /function providerCodeModels\(entry, providerId[\s\S]{0,180}entry\.liveModels/.test(localBridge));
-  check("Claude API code options exclude rollout-only families and older family versions", /family === "fable" \|\| family === "mythos"/.test(localBridge) && /newestByFamily/.test(localBridge));
+  check("Claude API code options exclude rollout-only families and keep older versions", /family !== "fable" && family !== "mythos"/.test(localBridge) && !/newestByFamily\.set\(family, model\)/.test(localBridge));
+  check("Claude plan code options list the API's models, not a list kept in the bridge", /providerCodeModels\(modelCatalog\.peek\("anthropic"\), "anthropic"\)/.test(localBridge) && !/CLAUDE_FAMILY_ALIASES/.test(localBridge));
 
   const atlasStore = await readRepoFile("src/store/atlasStore.ts");
   const claudeAuthRecovery = await readRepoFile("scripts/agent-runtime/claude-auth-recovery.mjs");
