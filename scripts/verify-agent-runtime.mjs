@@ -12,6 +12,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createClaudePlanUsage, parseClaudePlanUsage } from "./agent-runtime/claude-plan-usage.mjs";
 
 import { accountAtlasInjection, estimateTokens, remainingContext } from "../src/agentRuntime/contextAccounting.ts";
 import { createRunViewModel, reduceRunEvent } from "../src/agentRuntime/eventReducer.ts";
@@ -83,6 +84,7 @@ async function main() {
     await verifyClaudeApprovalRoundTrip(workDir);
     await verifyJournal(workDir);
     await verifyIdempotencyAndBounds(workDir);
+    await verifyClaudePlanUsage();
     await verifyRecovery(workDir);
     await verifyFakeProviderRun(workDir);
     await verifyOwnershipAndHandoff(workDir);
@@ -541,6 +543,60 @@ async function verifyJournal(baseRoot) {
   await newWindow.append({ kind: "usage_updated", usage: { scope: "account_plan", authMode: "subscription", status: "allowed", rateLimitType: "five_hour", resetsAt: 2000, utilization: null } });
   const nextWindow = await windowStore.latestUsageEvents({ provider: "claude", scope: "account_plan", authMode: "subscription" });
   check("a new window's allowed replaces the last window's percentage", nextWindow[0]?.usage?.status === "allowed" && nextWindow[0]?.usage?.resetsAt === 2000, nextWindow);
+}
+
+async function verifyClaudePlanUsage() {
+  section("Claude plan usage, as /usage reads it");
+  const parsed = parseClaudePlanUsage({
+    five_hour: { utilization: 23.5, resets_at: "2026-10-18T05:00:00Z" },
+    seven_day: { utilization: 41, resets_at: "2026-10-22T00:00:00Z" },
+    seven_day_opus: { utilization: 3 },
+  });
+  check("the 5h and weekly windows become remaining percentages", parsed.length === 2 && parsed[0].id === "claude-plan-five-hour" && parsed[0].value === 76.5 && parsed[1].value === 59, parsed);
+  check("the reset time is kept, in UTC ISO", parsed[0].resetAt === "2026-10-18T05:00:00.000Z", parsed[0]);
+  check("an answer that does not look as expected is not a guess", parseClaudePlanUsage({ five_hour: { utilization: "lots" } }).length === 0 && parseClaudePlanUsage(null).length === 0);
+
+  const secret = "sk-ant-oat-secret-token";
+  const credentials = JSON.stringify({ claudeAiOauth: { accessToken: secret, expiresAt: 2_000_000 } });
+  let calls = 0;
+  let sentAuth = "";
+  let clock = 1_000_000;
+  const usage = createClaudePlanUsage({
+    now: () => clock,
+    env: { CLAUDE_CONFIG_DIR: "C:/fake" },
+    readText: async () => credentials,
+    fetchImpl: async (_url, init) => {
+      calls += 1;
+      sentAuth = init.headers.Authorization;
+      return { ok: true, json: async () => ({ five_hour: { utilization: 10, resets_at: "2026-10-18T05:00:00Z" } }) };
+    },
+  });
+  const first = await usage.get();
+  check("the signed-in token is sent as Claude Code sends it", sentAuth === `Bearer ${secret}` && first[0]?.value === 90, first);
+  check("the token never appears in what is returned", !JSON.stringify(first).includes(secret));
+  await usage.get();
+  check("at most one request a minute", calls === 1, calls);
+  clock += 61_000;
+  await usage.get();
+  check("asked again after a minute", calls === 2, calls);
+
+  clock = 3_000_000;
+  const expired = createClaudePlanUsage({
+    now: () => clock,
+    env: { CLAUDE_CONFIG_DIR: "C:/fake" },
+    readText: async () => credentials,
+    fetchImpl: async () => {
+      throw new Error("must not be called with an expired token");
+    },
+  });
+  check("an expired token is not used, and not refreshed here", (await expired.get()).length === 0);
+  const refused = createClaudePlanUsage({
+    now: () => 1_000_000,
+    env: { CLAUDE_CONFIG_DIR: "C:/fake" },
+    readText: async () => credentials,
+    fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({}) }),
+  });
+  check("a refusal is not known, not an error", (await refused.get()).length === 0);
 }
 
 async function verifyIdempotencyAndBounds(baseRoot) {

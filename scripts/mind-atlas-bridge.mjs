@@ -33,6 +33,7 @@ import {
 import { createHandoffCoordinator } from "./agent-runtime/handoff-coordinator.mjs";
 import { createAgentRunStore } from "./agent-runtime/run-journal.mjs";
 import { createAgentRuntimeManager } from "./agent-runtime/runtime-manager.mjs";
+import { createClaudePlanUsage } from "./agent-runtime/claude-plan-usage.mjs";
 import { fetchSupportedShogiSource } from "../server/shogi-source.mjs";
 import { createGalaxyJudge } from "./galaxy-judge.mjs";
 
@@ -1917,7 +1918,13 @@ async function createProviderUsageResponse(forceRefresh = false) {
   return value;
 }
 
+const claudePlanUsage = createClaudePlanUsage();
+
 async function createClaudePlanMetrics() {
+  // The windows as Claude Code's /usage reads them, when they can be read
+  // (OpenCEO ADR 0087); otherwise what Claude Code told the runs.
+  const direct = await claudePlanUsage.get().catch(() => []);
+  if (direct.length) return direct;
   const events = await agentRuntimeManager.latestUsageEvents({
     provider: "claude",
     scope: "account_plan",
