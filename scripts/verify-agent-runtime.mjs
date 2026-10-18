@@ -13,6 +13,7 @@ import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClaudePlanUsage, parseClaudePlanUsage } from "./agent-runtime/claude-plan-usage.mjs";
+import { SpaceStore } from "./agent-runtime/spaces.mjs";
 
 import { accountAtlasInjection, estimateTokens, remainingContext } from "../src/agentRuntime/contextAccounting.ts";
 import { createRunViewModel, reduceRunEvent } from "../src/agentRuntime/eventReducer.ts";
@@ -86,6 +87,7 @@ async function main() {
     await verifyIdempotencyAndBounds(workDir);
     await verifyClaudePlanUsage();
     await verifyAtlasLatest(workDir);
+    await verifySpaces(workDir);
     await verifyRecovery(workDir);
     await verifyFakeProviderRun(workDir);
     await verifyOwnershipAndHandoff(workDir);
@@ -832,6 +834,54 @@ async function verifyAtlasTools() {
   const empty = new AtlasToolService(null);
   const emptyResult = await empty.call("search_nodes", { query: "x" });
   check("missing snapshot degrades safely", emptyResult.isError === true, emptyResult);
+}
+
+async function verifySpaces(workDir) {
+  section("Spaces: one per project or person, all readable and writable by everybody");
+  const cloud = join(workDir, "spaces-cloud");
+  const spaces = new SpaceStore({ dir: cloud });
+  const link = new AtlasLink({ dir: join(workDir, "spaces-link"), spaces });
+  const token = link.issueToken({ runId: "run-s", provider: "codex", label: "ナオ" });
+
+  // The owner's notebook, open in the browser, becomes the owner's space.
+  const owner = { id: "atlas-root", title: "openceoの開発メモ", body: "", children: [{ id: "n1", title: "移すメモ", body: "中身", status: "done", children: [{ id: "n2", title: "下の枝", body: "", children: [] }] }] };
+  await link.setCopy({ title: owner.title, root: owner, full: owner });
+  const listed = await spaces.list();
+  check("the notebook open in the browser is kept as the owner's space", listed.length === 1 && listed[0].kind === "owner" && listed[0].id === "atlas-root", listed);
+  const file = JSON.parse(await readFile(join(cloud, "space-atlas-root.mindatlaspkg"), "utf8"));
+  check("a space is a Mind Atlas package the galaxy and cloud loading read", file.format === "mindatlaspkg" && file.version === 1 && file.notebook.id === "atlas-root");
+
+  const nao = await spaces.create({ title: "ナオのスペース", kind: "employee" });
+  const project = await spaces.create({ title: "sato", kind: "project" });
+  check("spaces are made with a kind and a title", (await spaces.list()).some((one) => one.title === "ナオのスペース" && one.kind === "employee"));
+
+  // A write to a space not open in the browser is applied to its file here.
+  const added = await link.enqueue({ token, tool: "add_child_nodes", args: { space: "ナオのスペース", parentId: nao.id, nodes: [{ title: "自分のメモ" }] } });
+  check("a write to a space not open is applied here at once", added.op?.status === "done", added);
+  const read = await link.readSpace("ナオのスペース");
+  check("a space is read by title, with the write in it", read?.root?.children?.[0]?.title === "自分のメモ", read);
+  check("an unknown space is refused", (await link.enqueue({ token, tool: "add_child_nodes", args: { space: "ない", parentId: "x", nodes: [{ title: "a" }] } })).error === "unknown_space");
+
+  // Without a space, the open notebook, through the browser, as before.
+  const queued = await link.enqueue({ token, tool: "set_node_status", args: { nodeId: "n1", status: "running" } }, 0);
+  check("a write without a space goes to the browser as before", queued.op?.status === "pending", queued);
+  const ops = await link.pending();
+  await link.complete(ops[0].id, { ok: true, text: "Status set." });
+
+  // A branch moved from the owner's (open) space to a person's space.
+  const moved = await link.moveBranch({ token, nodeId: "n1", to: "ナオのスペース" });
+  check("a branch from the open notebook is written into the target space", moved.moved === true && moved.placed === "done", moved);
+  const inTarget = (await spaces.get(nao.id)).root.children.find((one) => one.title === "移すメモ");
+  check("with what is under it, and fresh ids", inTarget?.children?.[0]?.title === "下の枝" && inTarget.id !== "n1", inTarget);
+  const removal = await link.pending();
+  check("then taken out of the open notebook, through the browser", removal.some((op) => op.tool === "delete_node" && op.args.nodeId === "n1"), removal);
+  for (const op of removal) await link.complete(op.id, { ok: true, text: "Deleted." });
+
+  // Between two spaces neither open.
+  const back = await link.moveBranch({ token, nodeId: inTarget.id, from: nao.id, to: "sato" });
+  check("a branch moves between two spaces not open", back.placed === "done" && back.removed === "done", back);
+  check("it is in the target and not the source", (await spaces.get(project.id)).root.children.length === 1 && !(await spaces.get(nao.id)).root.children.some((one) => one.title === "移すメモ"));
+  check("the open notebook is a known space", Boolean((await link.status()).openIsSpace));
 }
 
 async function verifyAtlasLatest(workDir) {

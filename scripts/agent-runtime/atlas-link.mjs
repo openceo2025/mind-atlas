@@ -28,6 +28,8 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { applyToTree, findNode, readableCopy } from "./spaces.mjs";
+
 export const ATLAS_WRITE_TOOLS = Object.freeze([
   "add_child_nodes",
   "update_node_text",
@@ -36,6 +38,8 @@ export const ATLAS_WRITE_TOOLS = Object.freeze([
   "move_nodes",
   "bulk_update_nodes",
   "save_to_cloud",
+  // Internal: a branch moved in from another space (OpenCEO ADR 0089).
+  "insert_branch",
 ]);
 
 const BROWSER_SEEN_MS = 15_000;
@@ -46,9 +50,11 @@ const MAX_PENDING = 200;
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
 export class AtlasLink {
-  /** @param {{ dir: string, now?: () => number }} options */
+  /** @param {{ dir: string, now?: () => number, spaces?: import("./spaces.mjs").SpaceStore }} options */
   constructor(options) {
     this.dir = options.dir;
+    /** Spaces beside the open notebook (OpenCEO ADR 0089), when given. */
+    this.spaces = options.spaces ?? null;
     this.now = options.now ?? (() => Date.now());
     this.copy = null;
     this.copyLoaded = false;
@@ -74,7 +80,7 @@ export class AtlasLink {
       throw new Error("A notebook copy needs a root node.");
     }
     this.browserSeenAt = this.now();
-    const latest = await this.getLatest();
+    const latest = await this.latestFor(root.id);
     const basedOn = String(payload?.basedOn ?? "");
     // The same notebook as the newest (a new tab opened on it) is not older.
     const same = payload?.full && latest && JSON.stringify(payload.full) === JSON.stringify(latest.root);
@@ -96,12 +102,52 @@ export class AtlasLink {
     if (payload?.full && typeof payload.full === "object") {
       this.latest = { rootId: root.id, acceptedAt: this.copy.updatedAt, root: payload.full };
       await writeAtomically(join(this.dir, "atlas-latest.json"), JSON.stringify(this.latest));
+      // The open notebook is a space too, kept beside the others. The
+      // owner's own notebook is the owner's space.
+      if (this.spaces) {
+        const known = await this.spaces.get(root.id);
+        await this.spaces.save(payload.full, {
+          acceptedAt: this.copy.updatedAt,
+          kind: known?.kind ?? (root.id === "atlas-root" ? "owner" : "other"),
+        });
+      }
     } else if (this.latest && this.latest.rootId === root.id) {
       this.latest = { ...this.latest, acceptedAt: this.copy.updatedAt };
     }
     // Writes held back during a conflict may go on now.
     for (const wake of [...this.pendingWaiters]) wake();
     return { updatedAt: this.copy.updatedAt };
+  }
+
+  /** The newest whole copy of one notebook: its space, or the latest kept. */
+  async latestFor(rootId) {
+    if (this.spaces) {
+      const space = await this.spaces.get(rootId);
+      if (space?.acceptedAt) return { rootId, acceptedAt: space.acceptedAt, root: space.root };
+    }
+    const latest = await this.getLatest();
+    return latest && latest.rootId === rootId ? latest : null;
+  }
+
+  /** The root id of the notebook open in the browser, or "". */
+  get openRootId() {
+    return String(this.copy?.root?.id ?? "");
+  }
+
+  /**
+   * Which space a write or read means (ADR 0089): the one open in the
+   * browser when none is named or the named one is open; otherwise the
+   * named space's file. Null when no such space is known.
+   */
+  async spaceFor(name) {
+    await this.getCopy();
+    const key = String(name ?? "").trim();
+    if (!key || !this.spaces) return { open: true };
+    if (key === this.openRootId || key === String(this.copy?.title ?? "")) return { open: true };
+    const space = await this.spaces.find(key);
+    if (!space) return null;
+    if (space.root.id === this.openRootId) return { open: true };
+    return { open: false, space };
   }
 
   /** The newest whole notebook kept here, or null. */
@@ -127,6 +173,9 @@ export class AtlasLink {
       browserOnline: this.browserOnline,
       // A browser with an older notebook is open (writes wait meanwhile).
       ...(this.conflict ? { conflict: this.conflict } : {}),
+      // The open notebook is one of the spaces (ADR 0089): another space
+      // opened in the browser is a normal change, not a lost notebook.
+      ...(this.spaces && copy?.root?.id && (await this.spaces.get(copy.root.id)) ? { openIsSpace: true } : {}),
       copy: copy
         ? {
             rootId: String(copy.root?.id ?? ""),
@@ -191,6 +240,10 @@ export class AtlasLink {
     const run = this.runOf(token);
     if (!run) return { error: "unknown_run", status: 403 };
     if (!ATLAS_WRITE_TOOLS.includes(tool)) return { error: "unknown_tool", status: 400 };
+    const cleanArgs = args && typeof args === "object" && !Array.isArray(args) ? args : {};
+    const target = await this.spaceFor(cleanArgs.space);
+    if (!target) return { error: "unknown_space", status: 404 };
+    if (!target.open) return await this.writeSpace(target.space, tool, cleanArgs, run);
     await this.#loadOps();
     const pending = [...this.ops.values()].filter((op) => op.status === "pending");
     if (pending.length >= MAX_PENDING) return { error: "queue_full", status: 429 };
@@ -211,6 +264,64 @@ export class AtlasLink {
     for (const wake of [...this.pendingWaiters]) wake();
     const settled = await this.#wait(op.id, waitMs);
     return { op: settled ?? op, browserOnline: this.browserOnline };
+  }
+
+  /** A write to a space no browser has open: applied to its file here. */
+  async writeSpace(space, tool, args, run) {
+    const at = new Date(this.now()).toISOString();
+    const result =
+      tool === "save_to_cloud"
+        ? { ok: true, text: "Spaces are kept on this PC already." }
+        : applyToTree(space.root, tool, args, run.label, this.now);
+    if (result.ok && tool !== "save_to_cloud") await this.spaces.save(space.root, { acceptedAt: at });
+    return {
+      op: { id: randomUUID(), tool, status: result.ok ? "done" : "failed", result, createdAt: at },
+      browserOnline: this.browserOnline,
+    };
+  }
+
+  /** A space's tree as agents read it, or the open notebook's copy. */
+  async readSpace(name) {
+    const target = await this.spaceFor(name);
+    if (!target) return null;
+    if (target.open) return await this.getCopy();
+    return {
+      title: String(target.space.root.title ?? ""),
+      root: readableCopy(target.space.root),
+      updatedAt: target.space.acceptedAt,
+    };
+  }
+
+  /**
+   * Moves a branch from one space to another (ADR 0089): written into the
+   * target, then taken out of the source, each where that space lives (the
+   * open one through the browser, the others here).
+   */
+  async moveBranch({ token, nodeId, from, to, parentId }) {
+    const run = this.runOf(token);
+    if (!run) return { error: "unknown_run", status: 403 };
+    const source = await this.spaceFor(from);
+    const target = await this.spaceFor(to);
+    if (!source || !target) return { error: "unknown_space", status: 404 };
+    if (source.open && target.open) return { error: "same_space", status: 400 };
+    const sourceRoot = source.open ? (await this.latestFor(this.openRootId))?.root : source.space.root;
+    const branch = sourceRoot ? findNode(sourceRoot, String(nodeId ?? "")) : null;
+    if (!branch) return { error: "unknown_node", status: 404 };
+    if (branch.id === sourceRoot.id) return { error: "root", status: 400 };
+    const targetRoot = target.open ? (await this.latestFor(this.openRootId))?.root : target.space.root;
+    const into = String(parentId ?? "") || String(targetRoot?.id ?? "");
+    const copy = JSON.parse(JSON.stringify(branch));
+    const placed = target.open
+      ? await this.enqueue({ token, tool: "insert_branch", args: { parentId: into, branch: copy } })
+      : await this.writeSpace(target.space, "insert_branch", { parentId: into, branch: copy }, run);
+    if (placed.op?.status !== "done" && placed.op?.status !== "pending") {
+      return { error: placed.op?.result?.text ?? "could_not_place", status: 409 };
+    }
+    // Only once it is in the target is it taken out of the source.
+    const removed = source.open
+      ? await this.enqueue({ token, tool: "delete_node", args: { nodeId: branch.id } })
+      : await this.writeSpace(source.space, "delete_node", { nodeId: branch.id }, run);
+    return { moved: true, placed: placed.op?.status, removed: removed.op?.status };
   }
 
   /**
@@ -379,7 +490,50 @@ export function createAtlasLinkRoutes({ link, isAllowedOrigin, readJsonBody = re
         sendJson(response, 403, { error: "The notebook copy is for local agents only." });
         return true;
       }
-      sendJson(response, 200, { copy: await link.getCopy(), browserOnline: link.browserOnline });
+      const space = url.searchParams.get("space") ?? "";
+      const copy = await link.readSpace(space);
+      if (space && !copy) {
+        sendJson(response, 404, { error: `No space ${space}.` });
+        return true;
+      }
+      sendJson(response, 200, { copy, browserOnline: link.browserOnline });
+      return true;
+    }
+    if (path === "/api/atlas-link/spaces") {
+      // Spaces (ADR 0089), for local programs and agents only.
+      if (origin || !link.spaces) {
+        sendJson(response, 403, { error: "Spaces are for local programs only." });
+        return true;
+      }
+      if (method === "GET") {
+        await link.getCopy();
+        sendJson(response, 200, { spaces: await link.spaces.list(), open: link.openRootId });
+        return true;
+      }
+      if (method === "POST") {
+        const body = await readJsonBody(request);
+        try {
+          sendJson(response, 200, await link.spaces.create({ title: body?.title, kind: body?.kind }));
+        } catch (error) {
+          sendJson(response, 400, { error: String(error?.message ?? error) });
+        }
+        return true;
+      }
+    }
+    if (method === "POST" && path === "/api/atlas-link/move") {
+      if (origin) {
+        sendJson(response, 403, { error: "Moves are made by agent runs only." });
+        return true;
+      }
+      const body = await readJsonBody(request);
+      const result = await link.moveBranch({
+        token: request.headers["x-mind-atlas-run-token"],
+        nodeId: body?.nodeId,
+        from: body?.from,
+        to: body?.to,
+        parentId: body?.parentId,
+      });
+      sendJson(response, result.error ? (result.status ?? 400) : 200, result);
       return true;
     }
     if (method === "POST" && path === "/api/atlas-link/ops") {

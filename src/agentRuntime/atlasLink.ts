@@ -244,6 +244,38 @@ function apply(op: AtlasLinkOperation): Result {
       if (!ids.length) return fail("Mind Atlas could not add cards there.");
       return ok(`Created ${ids.length} card(s).`, { nodeIds: ids });
     }
+    case "insert_branch": {
+      // A branch moved in from another space (OpenCEO ADR 0089), with all
+      // that is under it.
+      const parentId = text(args.parentId);
+      if (!exists(parentId)) return fail(`No card with id ${parentId}.`);
+      if (!isRecord(args.branch)) return fail("branch is required.");
+      const place = (into: string, node: Record<string, unknown>): string => {
+        const [id] = useAtlasStore.getState().addChildNodes(
+          into,
+          [
+            {
+              title: text(node.title),
+              body: typeof node.body === "string" ? node.body : "",
+              summary: typeof node.summary === "string" ? node.summary : "",
+              author: node.author === "human" ? ("human" as const) : ("ai" as const),
+              tags: Array.isArray(node.tags) ? node.tags.map(String) : [],
+            },
+          ],
+          { focus: false },
+        );
+        if (!id) return "";
+        const status = STATUSES.find((one) => one === node.status);
+        if (status) useAtlasStore.getState().setNodeStatus(id, status);
+        for (const child of Array.isArray(node.children) ? node.children : []) {
+          if (isRecord(child)) place(id, child);
+        }
+        return id;
+      };
+      const placed = place(parentId, args.branch);
+      if (!placed) return fail("Mind Atlas could not place the branch there.");
+      return ok("Moved in.", { nodeId: placed });
+    }
     case "update_node_text": {
       const nodeId = text(args.nodeId);
       if (!exists(nodeId)) return fail(`No card with id ${nodeId}.`);

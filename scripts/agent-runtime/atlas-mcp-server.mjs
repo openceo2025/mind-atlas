@@ -38,6 +38,8 @@ if (snapshotPath) {
 }
 
 const service = new AtlasToolService(snapshot);
+/** One reader per named space (ADR 0089), each refreshed on its own. */
+const spaceReaders = new Map();
 const bridgeOrigin = process.env.MIND_ATLAS_BRIDGE_ORIGIN ?? "";
 const runToken = process.env.MIND_ATLAS_RUN_TOKEN ?? "";
 const bridgeCa = readOptional(process.env.MIND_ATLAS_HTTPS_CA ?? "");
@@ -106,13 +108,100 @@ async function refreshCopy() {
   }
 }
 
+/** The reader for a named space, refreshed at most every 2 s. */
+async function readerFor(space) {
+  let reader = spaceReaders.get(space);
+  if (!reader) {
+    reader = { service: new AtlasToolService(null), fetchedAt: 0, updatedAt: "" };
+    spaceReaders.set(space, reader);
+  }
+  if (Date.now() - reader.fetchedAt >= COPY_TTL_MS) {
+    reader.fetchedAt = Date.now();
+    const answer = await bridge("GET", `/api/atlas-link/copy?space=${encodeURIComponent(space)}`);
+    const copy = answer?.copy;
+    if (copy?.root && copy.updatedAt !== reader.updatedAt) {
+      reader.service.setSnapshot({ root: copy.root, title: copy.title });
+      reader.updatedAt = copy.updatedAt;
+    }
+  }
+  return reader.service;
+}
+
+const SPACE_TOOLS = [
+  {
+    name: "list_spaces",
+    description:
+      "List the spaces: the owner's, one per project, one per person, and any others. Everybody may read and write every space. Use a space's id or title as `space` in the other tools; leave `space` out for the one open in Mind Atlas.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "create_space",
+    description:
+      "Make a new space, e.g. for a new topic or project that does not fit an existing one. Make one when it helps; do not make many for small things.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        kind: { type: "string", enum: ["project", "employee", "other"] },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "move_to_space",
+    description:
+      "Move a branch (a card and everything under it) from one space to another: it is written into the target, then taken out of the source.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        nodeId: { type: "string", description: "The branch's card id in the source space." },
+        from: { type: "string", description: "The source space's id or title; omit for the one open in Mind Atlas." },
+        to: { type: "string", description: "The target space's id or title." },
+        parentId: { type: "string", description: "Where to put it in the target; its root when omitted." },
+      },
+      required: ["nodeId", "to"],
+    },
+  },
+];
+const SPACE_TOOL_NAMES = SPACE_TOOLS.map((tool) => tool.name);
+
+/** Every tool, each with an optional `space` to say which space it means. */
+function withSpace(tools) {
+  return tools.map((tool) => ({
+    ...tool,
+    inputSchema: {
+      ...tool.inputSchema,
+      properties: {
+        ...(tool.inputSchema?.properties ?? {}),
+        space: {
+          type: "string",
+          description: "Which space: an id or title from list_spaces. Omit for the one open in Mind Atlas.",
+        },
+      },
+    },
+  }));
+}
+
 async function callTool(name, args) {
+  if (SPACE_TOOL_NAMES.includes(name)) {
+    if (!bridgeOrigin) return { isError: true, content: "Spaces need the Mind Atlas bridge." };
+    if (name === "list_spaces") return { content: await bridge("GET", "/api/atlas-link/spaces") };
+    if (!canWrite) return { isError: true, content: "Writing to Mind Atlas is not available in this run." };
+    if (name === "create_space") return { content: await bridge("POST", "/api/atlas-link/spaces", args) };
+    const moved = await bridge("POST", "/api/atlas-link/move", args);
+    copyFetchedAt = 0;
+    spaceReaders.clear();
+    return { content: moved };
+  }
   if (ATLAS_WRITE_TOOL_NAMES.includes(name)) {
     if (!canWrite) return { isError: true, content: "Writing to Mind Atlas is not available in this run." };
     const answer = await bridge("POST", "/api/atlas-link/ops", { tool: name, args });
     copyFetchedAt = 0;
+    spaceReaders.delete(String(args?.space ?? ""));
     return describeWrite(answer);
   }
+  const space = typeof args?.space === "string" ? args.space.trim() : "";
+  if (space && bridgeOrigin) return (await readerFor(space)).call(name, args);
   await refreshCopy();
   return service.call(name, args);
 }
@@ -153,7 +242,7 @@ async function handleLine(line) {
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "mind-atlas-atlas-tools", version: "2.0.0" },
         instructions: canWrite
-          ? "The owner's Mind Atlas notebook: the local one open on this PC, not the public mind-atlas.org service. Work with Mind Atlas only through these tools; do not use mind-atlas.org, SSH, or Mind Atlas deployment or operations skills unless the owner asks. Use get_atlas_outline to orient, search_nodes or semantic_search_nodes to find the project card a request belongs to, and get_node / get_branch / get_children for exact content. Record what you find, decide and do as cards under that project card with add_child_nodes, keep card status current with set_node_status, and tidy with update_node_text, move_nodes, bulk_update_nodes or delete_node. Never assume a node exists without retrieving it."
+          ? "The owner's Mind Atlas on this PC, not the public mind-atlas.org service. Work with Mind Atlas only through these tools; do not use mind-atlas.org, SSH, or Mind Atlas deployment or operations skills unless the owner asks. There are several spaces (list_spaces): the owner's, one per project, one per person, and others. Everybody may read and write any of them; pass `space` to say which, or leave it out for the one open in Mind Atlas. Use get_atlas_outline to orient, search_nodes or semantic_search_nodes to find where a request belongs, and get_node / get_branch / get_children for exact content. Record what you find, decide and do as cards with add_child_nodes, keep card status current with set_node_status, tidy with update_node_text, move_nodes, bulk_update_nodes or delete_node, move a branch to another space with move_to_space, and make a space with create_space when one is needed. Never assume a node exists without retrieving it."
           : "Read-only Mind Atlas notebook retrieval. Use get_atlas_outline to orient, search_nodes for exact text, semantic_search_nodes for relevance ranking, then get_node / get_branch / get_children for exact content. Never assume a node exists without retrieving it.",
       },
     });
@@ -165,7 +254,13 @@ async function handleLine(line) {
     send({
       jsonrpc: "2.0",
       id,
-      result: { tools: canWrite ? [...service.listTools(), ...ATLAS_WRITE_TOOL_DEFINITIONS] : service.listTools() },
+      result: {
+        tools: canWrite
+          ? [...withSpace([...service.listTools(), ...ATLAS_WRITE_TOOL_DEFINITIONS]), ...SPACE_TOOLS]
+          : bridgeOrigin
+            ? [...withSpace(service.listTools()), SPACE_TOOLS[0]]
+            : service.listTools(),
+      },
     });
     return;
   }

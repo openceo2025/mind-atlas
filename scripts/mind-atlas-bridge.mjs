@@ -13,6 +13,7 @@ import { Readable } from "node:stream";
 // `server/mind-atlas-service.mjs`; `npm run verify:hosted-service` asserts it.
 import { createAgentRuntimeRoutes } from "./agent-runtime/bridge-routes.mjs";
 import { AtlasLink, createAtlasLinkRoutes } from "./agent-runtime/atlas-link.mjs";
+import { SpaceStore } from "./agent-runtime/spaces.mjs";
 import { createClaudeLoginRelay, createClaudeLoginRoutes } from "./agent-runtime/claude-login-relay.mjs";
 import {
   createClaudeAuthRecovery,
@@ -284,7 +285,7 @@ const agentRunStore = createAgentRunStore({
 
 // The open notebook's copy and agents' queued writes (atlas-link.mjs). Agents'
 // MCP servers reach the bridge on loopback whatever host it listens on.
-const atlasLink = new AtlasLink({ dir: agentRuntimeDir });
+const atlasLink = new AtlasLink({ dir: agentRuntimeDir, spaces: new SpaceStore({ dir: cloudNotebookDir }) });
 const atlasLinkOrigin = `${bridgeProtocol === "https" ? "https" : "http"}://127.0.0.1:${port}`;
 
 const agentRuntimeManager = createAgentRuntimeManager({
@@ -4342,8 +4343,19 @@ async function listCloudNotebooks() {
     if (!isSupportedCloudNotebookName(name)) continue;
     const filePath = join(cloudNotebookDir, name);
     const stats = await stat(filePath);
+    // A space (OpenCEO ADR 0089) is listed by its own title, so the galaxy
+    // and the cloud list show "ナオのスペース", not its file name.
+    let title = "";
+    if (name.startsWith("space-")) {
+      try {
+        title = String(JSON.parse(await readFile(filePath, "utf8"))?.notebook?.title ?? "");
+      } catch {
+        title = "";
+      }
+    }
     notebooks.push({
       name,
+      ...(title ? { title } : {}),
       size: stats.size,
       updatedAt: stats.mtime.toISOString(),
     });
