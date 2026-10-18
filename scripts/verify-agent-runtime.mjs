@@ -524,6 +524,23 @@ async function verifyJournal(baseRoot) {
     limitRuns: 3,
   });
   check("the Claude allowance is found past newer runs of another provider", pastCodex[0]?.usage?.status === "rejected", pastCodex);
+
+  // A new window's "allowed" (no share given) replaces the last window's
+  // figure: that window has ended and its percentage says nothing now.
+  const windowStore = new AgentRunStore({ baseDir: join(baseRoot, "journal-window") });
+  await windowStore.init();
+  const oldWindow = await windowStore.createRun({ provider: "claude", route: "claude-stream-json", workspace: baseRoot, authMode: "subscription" });
+  await oldWindow.append({ kind: "usage_updated", usage: { scope: "account_plan", authMode: "subscription", status: "allowed_warning", rateLimitType: "five_hour", resetsAt: 1000, utilization: 0.99 } });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const sameWindow = await windowStore.createRun({ provider: "claude", route: "claude-stream-json", workspace: baseRoot, authMode: "subscription" });
+  await sameWindow.append({ kind: "usage_updated", usage: { scope: "account_plan", authMode: "subscription", status: "allowed", rateLimitType: "five_hour", resetsAt: 1000, utilization: null } });
+  const inWindow = await windowStore.latestUsageEvents({ provider: "claude", scope: "account_plan", authMode: "subscription" });
+  check("an empty sample in the same window keeps its percentage", inWindow[0]?.usage?.utilization === 0.99, inWindow);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const newWindow = await windowStore.createRun({ provider: "claude", route: "claude-stream-json", workspace: baseRoot, authMode: "subscription" });
+  await newWindow.append({ kind: "usage_updated", usage: { scope: "account_plan", authMode: "subscription", status: "allowed", rateLimitType: "five_hour", resetsAt: 2000, utilization: null } });
+  const nextWindow = await windowStore.latestUsageEvents({ provider: "claude", scope: "account_plan", authMode: "subscription" });
+  check("a new window's allowed replaces the last window's percentage", nextWindow[0]?.usage?.status === "allowed" && nextWindow[0]?.usage?.resetsAt === 2000, nextWindow);
 }
 
 async function verifyIdempotencyAndBounds(baseRoot) {

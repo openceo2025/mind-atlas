@@ -253,12 +253,27 @@ export class AgentRunStore {
         if (event?.kind !== "usage_updated" || (scope && usage.scope !== scope)) continue;
         if (authMode && usage.authMode && usage.authMode !== authMode) continue;
         const key = String(usage.rateLimitType || usage.scope || "default");
-        // Older Claude Code builds sometimes emit an `allowed` allowance event
-        // without utilization. Do not let that empty sample hide the newest
-        // useful percentage from an earlier run. A rejected sample remains
-        // authoritative even when the provider omits utilization.
-        if (usage.scope === "account_plan" && !hasNumericUsageValue(usage.utilization) && !isRejectedUsageStatus(usage.status)) continue;
-        if (!found.has(key)) found.set(key, { ...event, manifestAuthMode: manifest.authMode });
+        // Claude Code says `allowed` without utilization until it warns. An
+        // empty sample does not hide a percentage from the same window (same
+        // reset time), but a newer window's `allowed` replaces an older
+        // window's percentage, which no longer says anything. A rejected
+        // sample remains authoritative even when the provider omits it.
+        const useful = hasNumericUsageValue(usage.utilization) || isRejectedUsageStatus(usage.status);
+        const held = found.get(key);
+        if (!held) {
+          found.set(key, { ...event, manifestAuthMode: manifest.authMode });
+          continue;
+        }
+        const heldUsage = held.usage ?? {};
+        const heldUseful = hasNumericUsageValue(heldUsage.utilization) || isRejectedUsageStatus(heldUsage.status);
+        if (
+          usage.scope === "account_plan" &&
+          !heldUseful &&
+          useful &&
+          String(usage.resetsAt ?? "") === String(heldUsage.resetsAt ?? "")
+        ) {
+          found.set(key, { ...event, manifestAuthMode: manifest.authMode });
+        }
       }
     }
     return [...found.values()].sort((left, right) => Date.parse(right.createdAt ?? 0) - Date.parse(left.createdAt ?? 0));

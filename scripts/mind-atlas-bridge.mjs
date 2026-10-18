@@ -1939,7 +1939,30 @@ async function createClaudePlanMetrics() {
 function createClaudePlanMetric(usage) {
   const rejected = isRejectedClaudeUsageStatus(usage?.status);
   const rawUtilization = numberOrUndefined(usage?.utilization);
-  if (rawUtilization === undefined && !rejected) return null;
+  if (rawUtilization === undefined && !rejected) {
+    // Claude Code tells the share used only once it warns; before that it
+    // says "allowed" and when the window resets. That is reported as it is,
+    // not as a number nobody gave (OpenCEO: the strip stayed at 100%).
+    if (String(usage?.status ?? "").toLowerCase() !== "allowed") return null;
+    const rateLimitType = String(usage?.rateLimitType || "plan");
+    return {
+      id: `claude-plan-${rateLimitType.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`,
+      vendor: "claude",
+      vendorLabel: "CLAUDE",
+      kind: "rate_limit",
+      label: formatClaudeRateLimitLabel(rateLimitType),
+      available: true,
+      status: "allowed",
+      displayValue: "OK",
+      value: null,
+      unit: "%",
+      barPercent: null,
+      resetAt: providerResetToIso(usage?.resetsAt),
+      detail: "Claude Code reports the share used only near the limit; below its warning it says allowed.",
+      source: "claude-stream",
+      defaultVisible: true,
+    };
+  }
   const usedPercent = rejected
     ? 100
     : clampNumber(rawUtilization <= 1 ? rawUtilization * 100 : rawUtilization, 0, 100);
@@ -2290,8 +2313,21 @@ function buildClaudeSubscriptionModelOptions() {
     detail = `Claude native model cache could not be read: ${String(error?.message ?? error).slice(0, 240)}`;
   }
   const options = [];
-  if (models.length) {
-    options.push({ id: "account-default", model: "", displayName: "Claude account default", resolvedModel: "", supportedReasoningEfforts: claudeReasoningEfforts, defaultReasoningEffort: "default" });
+  // The account default and Claude Code's own family names are always there:
+  // Claude Code resolves "opus", "sonnet" and "haiku" to the newest of each
+  // itself, so they need nothing recorded. The native cache only adds the
+  // exact versions recently seen (OpenCEO: only Opus 5.5 was offered once
+  // the cache held nothing else).
+  options.push({ id: "account-default", model: "", displayName: "Claude account default", resolvedModel: "", supportedReasoningEfforts: claudeReasoningEfforts, defaultReasoningEffort: "default" });
+  for (const [alias, label] of CLAUDE_FAMILY_ALIASES) {
+    options.push({
+      id: `alias:${alias}`,
+      model: alias,
+      resolvedModel: "",
+      displayName: label,
+      supportedReasoningEfforts: claudeReasoningEfforts,
+      defaultReasoningEffort: "default",
+    });
   }
   for (const model of models) {
     options.push({
@@ -2303,11 +2339,17 @@ function buildClaudeSubscriptionModelOptions() {
       defaultReasoningEffort: defaultEffortForModel(model, claudeReasoningEfforts, "default"),
     });
   }
-  const discovery = models.length
-    ? discoveryPublicState({ status: "ready", source: "native-cache", detail, checkedAtMs })
-    : discoveryPublicState(modelDiscoveryError("native-cache", detail, checkedAtMs));
+  // Ready either way: the family names work without anything recorded.
+  const discovery = discoveryPublicState({ status: "ready", source: models.length ? "native-cache" : "family-aliases", detail, checkedAtMs });
   return { options, discovery };
 }
+
+/** Claude Code's family names: each means the newest model of that family. */
+const CLAUDE_FAMILY_ALIASES = [
+  ["opus", "Claude Opus (latest)"],
+  ["sonnet", "Claude Sonnet (latest)"],
+  ["haiku", "Claude Haiku (latest)"],
+];
 
 async function createCodexRunRecoveryResponse(payload) {
   const candidate = await findRecoverableCodexRun(payload);
