@@ -24,23 +24,39 @@ const stagingDocs = read("docs/staging-service.md");
 const stagingLocalEnv = read("deploy/staging/env.service.local.example");
 const analyticsReport = read("server/analytics-report.mjs");
 const { createBuiltinModelPrices, estimateTokenCostMicroUsd, mergeModelPrices, resolveExactModelPrice } = await import("../server/model-pricing.mjs");
+const { isDeepSeekOffPeak, settleModelTokenUsage } = await import("../server/model-billing.mjs");
+const { hostedModelLifecycle } = await import("../server/model-lifecycle.mjs");
 
 const builtinModelPrices = createBuiltinModelPrices();
-assert.deepEqual(builtinModelPrices["openai:gpt-6.1-sol"], {
-  inputUsdPer1M: 2,
-  outputUsdPer1M: 10,
-});
-assert.deepEqual(builtinModelPrices["anthropic:claude-haiku-5-5"], {
-  inputUsdPer1M: 0.1,
-  outputUsdPer1M: 0.5,
-  longContext: { aboveInputTokens: 100_000, inputUsdPer1M: 0.5, outputUsdPer1M: 2.5 },
-});
+const solPrice = builtinModelPrices["openai:gpt-6.1-sol"];
+assert.equal(estimateTokenCostMicroUsd(solPrice, 272_000, 2_000), 564_000);
+assert.equal(estimateTokenCostMicroUsd(solPrice, 272_002, 2_000), 1_118_008, "OpenAI long-context rate applies to the whole request above 272K");
+assert.equal(settleModelTokenUsage(solPrice, "openai", { prompt_tokens: 10_000, prompt_tokens_details: { cached_tokens: 8_000 }, completion_tokens: 1_000 }, 0, 0).estimatedCostMicroUsd, 14_800, "OpenAI cached inputs use their published discount");
 const haikuPrice = resolveExactModelPrice(builtinModelPrices, "anthropic", "claude-haiku-5-5-20261007");
 assert.equal(estimateTokenCostMicroUsd(haikuPrice, 100_000, 2_000), 11_000, "100K input keeps the short-context tier");
 assert.equal(estimateTokenCostMicroUsd(haikuPrice, 100_002, 2_000), 55_001, "above 100K, both input and output use the long-context tier");
 assert.equal(estimateTokenCostMicroUsd(builtinModelPrices["openai:gpt-6.1-sol"], 100_002, 2_000), 220_004);
 const overridePrice = resolveExactModelPrice(mergeModelPrices({ "anthropic:claude-haiku-5-5": { inputUsdPer1M: 1, outputUsdPer1M: 2 } }), "anthropic", "claude-haiku-5-5");
 assert.equal(estimateTokenCostMicroUsd(overridePrice, 100_002, 2_000), 104_002, "explicit flat-rate overrides remain authoritative");
+assert.equal(settleModelTokenUsage(overridePrice, "anthropic", { input_tokens: 100_000, cache_read_input_tokens: 10_000, output_tokens: 2_000 }, 0, 0).estimatedCostMicroUsd, 114_000, "an override without cache rates retains its flat rate");
+const cachedHaiku = settleModelTokenUsage(haikuPrice, "anthropic", { input_tokens: 100_000, cache_read_input_tokens: 10_000, output_tokens: 2_000 }, 0, 0);
+assert.equal(cachedHaiku.inputTokens, 110_000, "Anthropic usage separates uncached and cached input");
+assert.equal(cachedHaiku.estimatedCostMicroUsd, 55_500, "cached inputs count toward the long-context threshold");
+assert.equal(settleModelTokenUsage(haikuPrice, "anthropic", { input_tokens: 100, cache_creation_input_tokens: 200, cache_creation: { ephemeral_1h_input_tokens: 100 }, output_tokens: 10 }, 0, 0).estimatedCostMicroUsd, 48, "5-minute and 1-hour cache writes have different rates");
+assert.equal(resolveExactModelPrice(builtinModelPrices, "anthropic", "claude-sonnet-5-9"), null, "an unknown future version must not inherit an older price as exact");
+assert.equal(resolveExactModelPrice(builtinModelPrices, "anthropic", "claude-sonnet-5-5").inputUsdPer1M, 2);
+for (const [at, offPeak] of [["2026-10-19T00:59:59Z", true], ["2026-10-19T01:00:00Z", false], ["2026-10-19T04:00:00Z", true], ["2026-10-19T06:00:00Z", false], ["2026-10-19T10:00:00Z", true], ["2026-10-18T02:00:00Z", true], ["2026-10-01T02:00:00Z", true]]) {
+  assert.equal(isDeepSeekOffPeak(at), offPeak, `DeepSeek tariff boundary ${at}`);
+}
+const flash = builtinModelPrices["deepseek:deepseek-flash"];
+const flashUsage = { prompt_tokens: 1_000_000, prompt_cache_hit_tokens: 800_000, completion_tokens: 100_000 };
+assert.equal(settleModelTokenUsage(flash, "deepseek", flashUsage, 0, 0, "2026-10-19T02:00:00Z").estimatedCostMicroUsd, 184_800);
+assert.equal(settleModelTokenUsage(flash, "deepseek", flashUsage, 0, 0, "2026-10-18T02:00:00Z").estimatedCostMicroUsd, 92_400);
+assert.equal(hostedModelLifecycle("deepseek", "deepseek-v4-pro").status, "active", "the Pro retirement proposal was reversed");
+assert.equal(hostedModelLifecycle("openai", "gpt-3.5-turbo-16k", "2026-10-18").status, "retired");
+assert.equal(hostedModelLifecycle("openai", "gpt-4-turbo", "2026-10-22T23:59:59Z").status, "deprecated");
+assert.equal(hostedModelLifecycle("openai", "gpt-4-turbo", "2026-10-23T00:00:00Z").status, "retired");
+assert.equal(hostedModelLifecycle("openai", "a-future-model", "2026-10-18", "2026-10-17").status, "retired", "provider shutdown metadata needs no hardcoded model entry");
 
 for (const filePath of [
   "server/mind-atlas-service.mjs",

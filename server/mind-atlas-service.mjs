@@ -40,6 +40,8 @@ import {
 } from "./service-db.mjs";
 import { getEnv, parseJsonEnv, parseListEnv, readIntEnv, serviceRootDir } from "./service-config.mjs";
 import { estimateModelPrice, estimateTokenCostMicroUsd, mergeModelPrices, modelGeneration, priceForInputTokens, resolveExactModelPrice } from "./model-pricing.mjs";
+import { modelPriceAtTime, settleModelTokenUsage } from "./model-billing.mjs";
+import { hostedModelLifecycle } from "./model-lifecycle.mjs";
 import { stripePatchFromStripeSubscription } from "./stripe-subscription.mjs";
 import {
   AnalyticsValidationError,
@@ -164,6 +166,7 @@ const openAiApiKeyUsable = isUsableServiceSecret(openAiApiKey);
 
 const providerCatalog = createProviderCatalog();
 const providerModelCache = new Map();
+const providerModelShutdowns = new Map();
 const providerModelInflight = new Map();
 const providerModelProbeCache = new Map();
 const openAiTokenParamByModel = new Map();
@@ -1720,7 +1723,12 @@ async function callOpenAiCompatibleToolTurn(provider, payload) {
     body.tools = tools;
     body.tool_choice = "auto";
   }
-  applyReasoningEffort(body, payload.reasoningEffort);
+  if (provider.id === "deepseek") {
+    body.thinking = { type: payload.reasoningEffort === "none" ? "disabled" : "enabled" };
+    if (["low", "high", "max"].includes(payload.reasoningEffort)) body.reasoning_effort = payload.reasoningEffort;
+  } else {
+    applyReasoningEffort(body, payload.reasoningEffort);
+  }
   // Remembered from an earlier refusal: with tools, this model needs "none" spelled out.
   if (tools.length && openAiToolsNeedNoEffort.has(model)) body.reasoning_effort = "none";
   const send = (requestBody) => fetch(`${provider.baseUrl}/chat/completions`, {
@@ -1898,7 +1906,7 @@ async function handleSaveAiPreference(request, response) {
   const model = stringValue(payload.model).trim();
   if (model) {
     const modelList = await getProviderModelList(provider);
-    if (!modelList.models.includes(model)) {
+    if (!modelList.models.includes(model) || modelLifecycle(provider.id, model).status === "retired") {
       throw new ServiceError(400, "model_not_enabled", `${model} is not enabled for ${provider.label}`, { provider: provider.id, model });
     }
   }
@@ -1939,17 +1947,19 @@ async function requireAiEntitlement(request, response = null, options = {}) {
 async function createChatOptionsResponse() {
   const services = await Promise.all(providerCatalog.map(async (provider) => {
     const modelList = await getProviderModelList(provider);
+    const models = modelList.models.filter((model) => modelLifecycle(provider.id, model).status !== "retired");
     return {
       id: provider.id,
       label: provider.label,
       configured: provider.configured,
-      defaultModel: modelList.defaultModel,
+      defaultModel: models.includes(modelList.defaultModel) ? modelList.defaultModel : models[0] ?? "",
       defaultReasoningEffort: provider.defaultReasoningEffort,
       supportedReasoningEfforts: modelReasoningEfforts(provider, modelList.defaultModel),
-      models: modelList.models.map((model) => ({
+      models: models.map((model) => ({
         model,
         displayName: modelDisplayName(provider, model),
         pricing: publicModelPricing(provider.id, model),
+        lifecycle: modelLifecycle(provider.id, model),
         defaultReasoningEffort: provider.defaultReasoningEffort,
         supportedReasoningEfforts: modelReasoningEfforts(provider, model),
       })),
@@ -1969,9 +1979,9 @@ async function createChatOptionsResponse() {
 function createProviderCatalog() {
   return [
     provider("openai", "OpenAI", "openai-compatible", "MIND_ATLAS_OPENAI", openAiBaseUrl, ["gpt-4.1-mini", "gpt-4.1"], ["none"], "none", openAiApiKey),
-    provider("anthropic", "Anthropic", "anthropic", "MIND_ATLAS_ANTHROPIC", "https://api.anthropic.com", ["claude-sonnet-4-5", "claude-opus-4-1"], ["default", "low", "medium", "high", "max"], "default"),
+    provider("anthropic", "Anthropic", "anthropic", "MIND_ATLAS_ANTHROPIC", "https://api.anthropic.com", ["claude-sonnet-5-5", "claude-haiku-5-5"], ["default", "low", "medium", "high", "max"], "default"),
     provider("glm", "GLM", "openai-compatible", "MIND_ATLAS_GLM", "https://open.bigmodel.cn/api/paas/v4", ["glm-4.5", "glm-4.5-air"]),
-    provider("deepseek", "DeepSeek", "openai-compatible", "MIND_ATLAS_DEEPSEEK", "https://api.deepseek.com/v1", ["deepseek-chat", "deepseek-reasoner"]),
+    provider("deepseek", "DeepSeek", "openai-compatible", "MIND_ATLAS_DEEPSEEK", "https://api.deepseek.com/v1", ["deepseek-flash", "deepseek-v4-pro"], ["default", "none", "low", "high", "max"]),
     provider("gemini", "Gemini", "openai-compatible", "MIND_ATLAS_GEMINI", "https://generativelanguage.googleapis.com/v1beta/openai", ["gemini-2.5-flash", "gemini-2.5-pro"]),
     provider("qwen", "Qwen", "openai-compatible", "MIND_ATLAS_QWEN", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", ["qwen-plus", "qwen-max"]),
     provider("composer", "Composer", "openai-compatible", "MIND_ATLAS_COMPOSER", "", ["composer"]),
@@ -2009,7 +2019,7 @@ async function resolveProviderModel(provider, requestedModel) {
   const modelList = await getProviderModelList(provider);
   const model = stringValue(requestedModel) || modelList.defaultModel;
   if (!model) throw new ServiceError(503, `${provider.label} has no enabled model`);
-  if (!modelList.models.includes(model)) {
+  if (!modelList.models.includes(model) || modelLifecycle(provider.id, model).status === "retired") {
     throw new ServiceError(400, "model_not_enabled", `${model} is not enabled for ${provider.label}`, { provider: provider.id, model });
   }
   return model;
@@ -2160,6 +2170,10 @@ async function fetchProviderModelIds(provider) {
     : bearerHeaders(provider.apiKey);
   const response = await fetchWithTimeout(url, { method: "GET", headers });
   const raw = await readUpstreamJson(response);
+  // Provider-announced dates also work for newly deprecated models without a release.
+  for (const item of Array.isArray(raw?.data) ? raw.data : []) {
+    if (item?.id && typeof item.shutdown_date === "string") providerModelShutdowns.set(`${provider.id}:${item.id}`, item.shutdown_date);
+  }
   return extractProviderModelIds(raw);
 }
 
@@ -2179,7 +2193,7 @@ function extractProviderModelIds(raw) {
 }
 
 function filterProviderModelIds(provider, models) {
-  const filtered = uniqueStrings(models).filter((model) => !isPlaceholderModel(model));
+  const filtered = uniqueStrings(models).filter((model) => !isPlaceholderModel(model) && modelLifecycle(provider.id, model).status !== "retired");
   if (provider.id === "openai") return collapseDatedSnapshots(filtered.filter(isOpenAiChatModel));
   if (provider.id === "anthropic") return filtered.filter((model) => model.toLowerCase().startsWith("claude-"));
   if (provider.id === "deepseek") return filtered.filter((model) => model.toLowerCase().startsWith("deepseek-"));
@@ -2354,6 +2368,7 @@ function localProviderModels(provider) {
 }
 
 function filterPricedProviderModels(provider, models) {
+  models = models.filter((model) => modelLifecycle(provider.id, model).status !== "retired");
   if (modelPricePolicy !== "require-model") return models;
   return models.filter((model) => Boolean(resolveModelPriceEntry(provider.id, model)));
 }
@@ -2388,11 +2403,19 @@ function providerModelDetail(provider, modelList) {
 function publicModelPricing(providerId, model) {
   const entry = resolveModelPriceEntry(providerId, model);
   if (!entry) return undefined;
+  const current = modelPriceAtTime(entry);
   return {
-    inputUsdPer1M: entry.inputUsdPer1M,
-    outputUsdPer1M: entry.outputUsdPer1M,
+    inputUsdPer1M: current.inputUsdPer1M,
+    outputUsdPer1M: current.outputUsdPer1M,
+    cachedInputUsdPer1M: current.cachedInputUsdPer1M,
+    longContext: current.longContext,
+    ...(entry.offPeak ? { peak: { inputUsdPer1M: entry.inputUsdPer1M, outputUsdPer1M: entry.outputUsdPer1M }, offPeak: entry.offPeak, currentPeriod: current === entry ? "peak" : "off-peak", holidayCalendarThroughYear: 2026 } : {}),
     estimated: entry.estimated,
   };
+}
+
+function modelLifecycle(providerId, model) {
+  return hostedModelLifecycle(providerId, model, new Date(), providerModelShutdowns.get(`${providerId}:${model}`));
 }
 
 function modelDisplayName(provider, model) {
@@ -2539,14 +2562,9 @@ function extractAnthropicToolCalls(raw) {
 }
 
 function normalizeUsage(rawUsage, providerId, model, durationMs, payload, text) {
-  const inputTokens = numberValue(rawUsage?.prompt_tokens) ?? numberValue(rawUsage?.input_tokens) ?? estimateTokens(JSON.stringify(payload?.messages ?? "") + JSON.stringify(payload?.context ?? ""));
-  const outputTokens = numberValue(rawUsage?.completion_tokens) ?? numberValue(rawUsage?.output_tokens) ?? estimateTokens(text);
-  const totalTokens = numberValue(rawUsage?.total_tokens) ?? inputTokens + outputTokens;
   return {
-    inputTokens,
-    outputTokens,
-    totalTokens,
-    estimatedCostMicroUsd: estimateCostMicroUsd(providerId, model, inputTokens, outputTokens),
+    ...settleModelTokenUsage(resolveModelPrice(providerId, model), providerId, rawUsage,
+      estimateTokens(JSON.stringify(payload?.messages ?? "") + JSON.stringify(payload?.context ?? "")), estimateTokens(text), new Date(Date.now() - durationMs)),
     durationMs,
   };
 }
@@ -2622,7 +2640,7 @@ function fitOutputTokensToRequestCap(providerId, model, payload, limit) {
 /** Models whose output tokens include hidden reasoning, so a plain answer-sized budget starves them. */
 function thinksBeforeAnswering(providerId, model) {
   const normalized = stringValue(model).toLowerCase();
-  if (providerId === "deepseek") return normalized.startsWith("deepseek-v4") || normalized.includes("reasoner");
+  if (providerId === "deepseek") return normalized === "deepseek-flash" || normalized.startsWith("deepseek-v4") || normalized.includes("reasoner");
   if (providerId === "openai") return supportsReasoningEffort(normalized);
   return false;
 }
@@ -2770,6 +2788,7 @@ function resolveModelPrice(providerId, model) {
   }
   const price = entry ?? providerPrice ?? {};
   return {
+    ...price,
     inputUsdPer1M: Number(price.inputUsdPer1M ?? defaultInputUsdPer1m),
     outputUsdPer1M: Number(price.outputUsdPer1M ?? defaultOutputUsdPer1m),
     longContext: price.longContext,

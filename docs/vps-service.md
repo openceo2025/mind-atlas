@@ -253,8 +253,8 @@ limit.
 
 Provider model lists are fetched server-side from provider APIs when
 `MIND_ATLAS_PROVIDER_MODEL_FETCH=1`. In `require-model` mode, the public model
-selector exposes only fetched models that also have exact prices in
-`MIND_ATLAS_MODEL_PRICES_JSON`. The values below are fallback model lists and
+selector exposes fetched, requestable models with a built-in, override, or
+explicitly labelled estimated price. The values below are fallback model lists and
 base URL overrides for providers whose model-list endpoint is unavailable or
 intentionally disabled:
 
@@ -265,7 +265,7 @@ MIND_ATLAS_ANTHROPIC_MODELS=claude-fable-5,claude-haiku-4-5-20251001,claude-opus
 MIND_ATLAS_GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 MIND_ATLAS_GLM_MODELS=glm-4.5,glm-4.5-air
 MIND_ATLAS_DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-MIND_ATLAS_DEEPSEEK_MODELS=deepseek-v4-flash,deepseek-v4-pro
+MIND_ATLAS_DEEPSEEK_MODELS=deepseek-flash,deepseek-v4-pro
 # DeepSeek also accepts MIND_ATLAS_DEEPSEEK_AUTH_TOKEN, DEEPSEEK_API_KEY, and
 # MIND_ATLAS_CLAUDE_DEEPSEEK_AUTH_TOKEN as key fallbacks.
 MIND_ATLAS_GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
@@ -288,8 +288,9 @@ The service has a built-in conservative price catalog for the core OpenAI,
 Anthropic, and DeepSeek families. `MIND_ATLAS_MODEL_PRICES_JSON` is an override
 for corrections or newly launched models. With
 `MIND_ATLAS_MODEL_PRICE_POLICY=require-model`, every exposed Chat model must
-resolve to a built-in or override `provider:model` price; otherwise the model is
-not exposed and requests for it are rejected.
+resolve to a built-in, override, or labelled estimate; otherwise the model is
+not exposed and requests for it are rejected. Unknown Claude version numbers
+never inherit an older version's price as an exact match.
 `require-provider` allows exact model prices or a provider-level `provider:*`
 fallback. `allow-default` falls back to `MIND_ATLAS_DEFAULT_INPUT_USD_PER_1M` and
 `MIND_ATLAS_DEFAULT_OUTPUT_USD_PER_1M` for unknown prices, which is convenient
@@ -309,7 +310,7 @@ Provider model lists are refreshed in the background every
 `MIND_ATLAS_PROVIDER_MODEL_REFRESH_MS` milliseconds. For example, when
 Anthropic's model API starts returning Claude Fable 5, the public selector will
 show it after the next refresh because `claude-fable-5` has a built-in
-USD 10 / 50 per 1M token price entry. Unpriced fetched models remain hidden.
+USD 10 / 50 per 1M token price entry. Models without any resolvable price remain hidden.
 For Anthropic Fable/Mythos models, the service also sends a tiny Messages API
 probe before exposing the model, because Anthropic can list these models before
 the current account is allowed to use them.
@@ -319,6 +320,22 @@ Current core-provider price sources:
 - OpenAI API pricing: https://platform.openai.com/docs/pricing
 - Anthropic Claude pricing: https://docs.anthropic.com/en/docs/about-claude/pricing
 - DeepSeek Models & Pricing: https://api-docs.deepseek.com/quick_start/pricing
+
+The [2026-10-18 hosted model audit](hosted-model-audit-2026-10-18.md) records
+the offered catalogue, Standard rates, provider lifecycle notices, and the
+revised DeepSeek V4 Pro continuation notice. Retired IDs are filtered from live,
+configured, fallback and cached public lists and rejected at execution time.
+Upcoming shutdowns remain selectable until the official UTC date. OpenAI
+`shutdown_date` model metadata supplements the recorded alias dates.
+
+Credit reservations use undiscounted ceilings. Settlement applies OpenAI and
+Anthropic cache-read rates and Anthropic cache-write durations to reported
+usage; absent cache data earns no discount. OpenAI 272K long-context tiers and
+Haiku 5.5's 100K tier apply to all input and output in the request. DeepSeek
+settlement uses peak/off-peak rates at request start, including weekends and
+the verified 2026 Chinese public holiday calendar. Extend that calendar when
+the next annual schedule is published. The public pricing response exposes
+current rates, peak/off-peak rates, long-context tiers, and lifecycle dates.
 
 `MIND_ATLAS_SERVICE_MAX_REQUEST_ESTIMATE_MICRO_USD` is an operator safety
 limit. It prevents one oversized Chat request from consuming too much of the
