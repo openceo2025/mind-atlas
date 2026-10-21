@@ -177,7 +177,14 @@ export class AtlasLink {
       ...(this.conflict ? { conflict: this.conflict } : {}),
       // The open notebook is one of the spaces (ADR 0089): another space
       // opened in the browser is a normal change, not a lost notebook.
-      ...(this.spaces && copy?.root?.id && (await this.spaces.get(copy.root.id)) ? { openIsSpace: true } : {}),
+      ...(this.spaces && copy?.root?.id && (await this.spaces.get(copy.root.id))
+        ? {
+            openIsSpace: true,
+            // With no browser, writes go to the space's file (OpenCEO 10/21):
+            // the tab need not stay open.
+            writesWithoutBrowser: true,
+          }
+        : {}),
       copy: copy
         ? {
             rootId: String(copy.root?.id ?? ""),
@@ -248,6 +255,15 @@ export class AtlasLink {
     if (!target.open) return await this.writeSpace(target.space, tool, cleanArgs, run);
     await this.#loadOps();
     const pending = [...this.ops.values()].filter((op) => op.status === "pending");
+    // No browser has the open notebook now (closed, or a tab the browser put
+    // to sleep): its space is written here, like any other, and the browser
+    // takes the newer notebook when it is back (OpenCEO 10/21). Not while
+    // writes wait for a browser, which would then apply them out of order,
+    // nor while an older notebook is open somewhere.
+    if (!this.browserOnline && !this.conflict && pending.length === 0 && this.spaces && this.openRootId) {
+      const space = await this.spaces.get(this.openRootId);
+      if (space) return await this.writeSpace(space, tool, cleanArgs, run);
+    }
     if (pending.length >= MAX_PENDING) return { error: "queue_full", status: 429 };
     const op = {
       id: randomUUID(),
@@ -281,7 +297,10 @@ export class AtlasLink {
         tool === "save_to_cloud"
           ? { ok: true, text: "Spaces are kept on this PC already." }
           : applyToTree(fresh.root, tool, args, run.label, this.now);
-      if (result.ok && tool !== "save_to_cloud") await this.spaces.save(fresh.root, { acceptedAt: at });
+      if (result.ok && tool !== "save_to_cloud") {
+        await this.spaces.save(fresh.root, { acceptedAt: at });
+        if (fresh.root.id === this.openRootId) await this.#keepOpenWritten(fresh.root, at);
+      }
       return {
         op: { id: randomUUID(), tool, status: result.ok ? "done" : "failed", result, createdAt: at },
         browserOnline: this.browserOnline,
@@ -289,6 +308,28 @@ export class AtlasLink {
     });
     this.spaceWrites = write.catch(() => undefined);
     return await write;
+  }
+
+  /**
+   * The open notebook, written here while no browser had it: the newest kept
+   * (what a returning browser loads) and the copy agents read.
+   */
+  async #keepOpenWritten(root, at) {
+    await mkdir(this.dir, { recursive: true });
+    this.latest = { rootId: root.id, acceptedAt: at, root };
+    this.latestLoaded = true;
+    await writeAtomically(join(this.dir, "atlas-latest.json"), JSON.stringify(this.latest));
+    this.copy = { title: String(root.title ?? this.copy?.title ?? ""), root: readableCopy(root), updatedAt: at };
+    this.copyLoaded = true;
+    await writeAtomically(join(this.dir, "atlas-copy.json"), JSON.stringify(this.copy));
+  }
+
+  /** When the newest copy of the open notebook was kept, for the browser. */
+  async latestStamp() {
+    await this.getCopy();
+    const rootId = this.openRootId;
+    const latest = rootId ? await this.latestFor(rootId) : null;
+    return latest ? { rootId, acceptedAt: String(latest.acceptedAt ?? "") } : null;
   }
 
   /** A space's tree as agents read it, or the open notebook's copy. */
@@ -566,7 +607,10 @@ export function createAtlasLinkRoutes({ link, isAllowedOrigin, readJsonBody = re
       return true;
     }
     if (method === "GET" && path === "/api/atlas-link/ops/pending") {
-      sendJson(response, 200, { ops: await link.pending(Number(url.searchParams.get("wait") ?? 0)) });
+      const ops = await link.pending(Number(url.searchParams.get("wait") ?? 0));
+      // When the newest notebook was kept: a browser that slept while it was
+      // written here sees it is behind and takes it.
+      sendJson(response, 200, { ops, latest: await link.latestStamp() });
       return true;
     }
     const done = /^\/api\/atlas-link\/ops\/([0-9a-f-]{36})$/.exec(path);

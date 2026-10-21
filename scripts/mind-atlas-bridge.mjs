@@ -3,7 +3,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1919,7 +1919,47 @@ async function createProviderUsageResponse(forceRefresh = false) {
   return value;
 }
 
-const claudePlanUsage = createClaudePlanUsage();
+const claudePlanUsage = createClaudePlanUsage({ refreshLogin: refreshClaudeLogin });
+
+/**
+ * Lets Claude Code run once, on the plan, so that it refreshes its own login
+ * (OpenCEO 10/21). The smallest run there is: the smallest model, no tools,
+ * no MCP servers, no skills, nothing kept, in an empty folder. Its answer is
+ * not read; only Claude Code's own credentials change.
+ */
+async function refreshClaudeLogin() {
+  const folder = await mkdtemp(join(tmpdir(), "mind-atlas-claude-login-"));
+  try {
+    const spec = buildClaudeCommand([
+      "-p",
+      "Reply with OK.",
+      "--model",
+      "haiku",
+      "--tools",
+      "",
+      "--strict-mcp-config",
+      "--disable-slash-commands",
+      "--no-session-persistence",
+      "--output-format",
+      "json",
+    ]);
+    await new Promise((resolveRun) => {
+      const child = spawn(spec.command, spec.args, {
+        cwd: folder,
+        env: buildClaudeEnv({ authMode: "subscription" }),
+        windowsHide: true,
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+      const timer = setTimeout(() => {
+        try { child.kill(); } catch {}
+      }, 90_000);
+      child.on("error", () => { clearTimeout(timer); resolveRun(); });
+      child.on("close", () => { clearTimeout(timer); resolveRun(); });
+    });
+  } finally {
+    await rm(folder, { recursive: true, force: true }).catch(() => {});
+  }
+}
 
 async function createClaudePlanMetrics() {
   // The windows as Claude Code's /usage reads them, when they can be read
@@ -1933,7 +1973,8 @@ async function createClaudePlanMetrics() {
   }).catch(() => []);
   const metrics = events
     .map((event) => createClaudePlanMetric(event?.usage ?? {}))
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((metric) => stalePlanMetric(metric));
   if (metrics.length) return metrics;
   return [
     createUnavailableProviderMetric(
@@ -1950,7 +1991,10 @@ async function createClaudePlanMetrics() {
 
 function createClaudePlanMetric(usage) {
   const rejected = isRejectedClaudeUsageStatus(usage?.status);
-  const rawUtilization = numberOrUndefined(usage?.utilization);
+  // An absent share is absent, not 0% used: Number(null) is 0, and the strip
+  // showed 100% while the plan was nearly gone (OpenCEO 10/21).
+  const given = usage?.utilization;
+  const rawUtilization = given === null || given === undefined || given === "" ? undefined : numberOrUndefined(given);
   if (rawUtilization === undefined && !rejected) {
     // Claude Code tells the share used only once it warns; before that it
     // says "allowed" and when the window resets. That is reported as it is,
@@ -1995,6 +2039,24 @@ function createClaudePlanMetric(usage) {
     detail: `Claude Code subscription/SDK allowance remaining; status ${String(usage?.status || "unknown")}`,
     source: "claude-stream",
     defaultVisible: true,
+  };
+}
+
+/**
+ * What Claude Code said of a window that has since reset says nothing of the
+ * window now (OpenCEO 10/21: 2% shown a day after the week started over).
+ */
+function stalePlanMetric(metric, now = Date.now()) {
+  const reset = Date.parse(String(metric?.resetAt ?? ""));
+  if (!Number.isFinite(reset) || reset > now) return metric;
+  return {
+    ...metric,
+    available: false,
+    status: "unknown",
+    displayValue: "?",
+    value: null,
+    barPercent: null,
+    detail: "This window has reset since Claude Code last reported it; not known until it reports again.",
   };
 }
 

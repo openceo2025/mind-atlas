@@ -1,4 +1,4 @@
-import { completeAtlasLinkOperation, getAtlasLatest, getAtlasLinkOperations, sendAtlasCopy, type AtlasLinkOperation } from "../ai/bridgeClient";
+import { completeAtlasLinkOperation, getAtlasLatest, getAtlasLinkPending, sendAtlasCopy, type AtlasLinkOperation } from "../ai/bridgeClient";
 import { useAtlasStore } from "../store/atlasStore";
 import type { AtlasNode, WorkStatus } from "../types";
 
@@ -44,6 +44,45 @@ function writeBase(rootId: string, at: string): void {
   } catch {
     // Unavailable storage: the next copy is compared again, nothing is lost.
   }
+}
+
+/**
+ * What this tab's notebook was when the bridge last took it, by root id: a
+ * notebook nobody changed here since may take the newer one by itself.
+ */
+const PRINT_KEY = "mind-atlas.atlas-link-print:";
+
+/** A short fingerprint of what agents see of a notebook. */
+function fingerprint(root: AtlasNode): string {
+  const text = JSON.stringify(copyOf(root));
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `${text.length}:${hash.toString(16)}`;
+}
+
+function readPrint(rootId: string): string {
+  try {
+    return window.sessionStorage.getItem(PRINT_KEY + rootId) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writePrint(rootId: string, print: string): void {
+  try {
+    window.sessionStorage.setItem(PRINT_KEY + rootId, print);
+  } catch {
+    // Unavailable storage: the owner is asked instead, nothing is lost.
+  }
+}
+
+/** Nothing changed here since the bridge last took this notebook. */
+function unchangedHere(root: AtlasNode): boolean {
+  const print = readPrint(root.id);
+  return print !== "" && print === fingerprint(root);
 }
 
 /** Set while this browser's notebook is older than the newest one kept. */
@@ -105,6 +144,7 @@ export function startAtlasLink(): () => void {
     } catch {
       full = undefined;
     }
+    const print = fingerprint(root);
     void sendAtlasCopy({
       title: root.title,
       root: copyOf(root),
@@ -112,12 +152,21 @@ export function startAtlasLink(): () => void {
       basedOn: readBase(root.id),
       ...(force ? { force: true } : {}),
     })
-      .then((answer) => {
+      .then(async (answer) => {
         if (answer.stale) {
+          // Written at the bridge while this tab slept, and nothing changed
+          // here since: take the newer one without asking (OpenCEO 10/21).
+          if (!force && unchangedHere(root)) {
+            await loadAtlasLatest().catch(() => setStale({ latestAt: answer.latestAt ?? "" }));
+            return;
+          }
           setStale({ latestAt: answer.latestAt ?? "" });
           return;
         }
-        if (answer.updatedAt) writeBase(root.id, answer.updatedAt);
+        if (answer.updatedAt) {
+          writeBase(root.id, answer.updatedAt);
+          writePrint(root.id, print);
+        }
         setStale(null);
       })
       .catch(() => undefined);
@@ -138,7 +187,16 @@ export function startAtlasLink(): () => void {
   const loop = async () => {
     while (!stopped) {
       try {
-        const ops = await getAtlasLinkOperations(WAIT_MS);
+        const { ops, latest } = await getAtlasLinkPending(WAIT_MS);
+        // The bridge wrote the notebook while this tab was closed or asleep.
+        // Nothing changed here: take it. Something did: the copy says so and
+        // the owner chooses.
+        const open = useAtlasStore.getState().atlasRoot;
+        const base = readBase(open.id);
+        if (!stopped && latest && latest.rootId === open.id && base && latest.acceptedAt > base && stale === null) {
+          if (unchangedHere(open)) await loadAtlasLatest().catch(() => undefined);
+          else sendCopy();
+        }
         for (const op of ops) {
           if (stopped) break;
           const result = await applyAtlasOperation(op);

@@ -480,7 +480,7 @@ class ClaudeRunProcess {
           isUsingOverage: Boolean(info.isUsingOverage),
           overageStatus: String(info.overageStatus ?? ""),
           overageDisabledReason: String(info.overageDisabledReason ?? ""),
-          utilization: Number.isFinite(Number(info.utilization)) ? Number(info.utilization) : null,
+          utilization: info.utilization !== null && info.utilization !== undefined && info.utilization !== "" && Number.isFinite(Number(info.utilization)) ? Number(info.utilization) : null,
         },
       });
       if (planLimitError) {

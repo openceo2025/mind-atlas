@@ -600,6 +600,56 @@ async function verifyClaudePlanUsage() {
     fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({}) }),
   });
   check("a refusal is not known, not an error", (await refused.get()).length === 0);
+
+  // A lapsed login: Claude Code itself runs once and refreshes it (10/21).
+  let stored = credentials;
+  let refreshes = 0;
+  clock = 3_000_000;
+  const lapsed = createClaudePlanUsage({
+    now: () => clock,
+    env: { CLAUDE_CONFIG_DIR: "C:/fake" },
+    readText: async () => stored,
+    refreshLogin: async () => {
+      refreshes += 1;
+      stored = JSON.stringify({ claudeAiOauth: { accessToken: secret, expiresAt: 9_000_000_000 } });
+    },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ five_hour: { utilization: 70, resets_at: "2026-10-21T19:00:00Z" } }) }),
+  });
+  const afterRefresh = await lapsed.get();
+  check("a lapsed login is refreshed by letting Claude Code run, then read", refreshes === 1 && afterRefresh[0]?.value === 30, afterRefresh);
+  stored = credentials;
+  clock += 61_000;
+  await lapsed.get();
+  check("not refreshed again within half an hour", refreshes === 1, refreshes);
+  clock += 30 * 60_000;
+  await lapsed.get();
+  check("refreshed again after half an hour", refreshes === 2, refreshes);
+  let refused401 = 0;
+  const lapsed401 = createClaudePlanUsage({
+    now: () => 1_000_000,
+    env: { CLAUDE_CONFIG_DIR: "C:/fake" },
+    readText: async () => credentials,
+    refreshLogin: async () => {
+      refused401 += 1;
+    },
+    fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({}) }),
+  });
+  await lapsed401.get();
+  check("a 401 also lets Claude Code refresh its login", refused401 === 1);
+  const noLogin = createClaudePlanUsage({
+    now: () => 1_000_000,
+    env: { CLAUDE_CONFIG_DIR: "C:/fake" },
+    readText: async () => {
+      throw new Error("no file");
+    },
+    refreshLogin: async () => {
+      throw new Error("must not run without a login");
+    },
+    fetchImpl: async () => {
+      throw new Error("must not be called");
+    },
+  });
+  check("nobody signed in: nothing is run", (await noLogin.get()).length === 0);
 }
 
 async function verifyIdempotencyAndBounds(baseRoot) {
@@ -882,6 +932,26 @@ async function verifySpaces(workDir) {
   check("a branch moves between two spaces not open", back.placed === "done" && back.removed === "done", back);
   check("it is in the target and not the source", (await spaces.get(project.id)).root.children.length === 1 && !(await spaces.get(nao.id)).root.children.some((one) => one.title === "移すメモ"));
   check("the open notebook is a known space", Boolean((await link.status()).openIsSpace));
+
+  // The tab closed or asleep: writes to the open notebook go to its space
+  // here, and a returning browser is told the newest is newer (10/21).
+  const offline = new AtlasLink({ dir: join(workDir, "spaces-offline"), spaces, now: () => clock });
+  let clock = Date.parse("2026-10-21T00:00:00Z");
+  const offToken = offline.issueToken({ runId: "run-o", provider: "claude", label: "コハル" });
+  const mine = await offline.setCopy({ title: "openceoの開発メモ", root: (await spaces.get("atlas-root")).root, full: (await spaces.get("atlas-root")).root });
+  check("the browser's copy is taken", Boolean(mine.updatedAt), mine);
+  check("the status says writes need no browser", (await offline.status()).writesWithoutBrowser === true);
+  clock += 60_000;
+  check("a minute without the browser: it is not open", offline.browserOnline === false);
+  const direct = await offline.enqueue({ token: offToken, tool: "add_child_nodes", args: { parentId: "atlas-root", nodes: [{ title: "閉じている間のメモ" }] } }, 0);
+  check("a write with no browser is applied to the open notebook's space at once", direct.op?.status === "done", direct);
+  check("the space has it", (await spaces.get("atlas-root")).root.children.some((one) => one.title === "閉じている間のメモ"));
+  check("agents read it at once", (await offline.readSpace(""))?.root?.children?.some((one) => one.title === "閉じている間のメモ"));
+  const stamp = await offline.latestStamp();
+  check("a returning browser is told the newest is newer than what it had", stamp?.rootId === "atlas-root" && stamp.acceptedAt > mine.updatedAt, stamp);
+  check("the newest it loads has the write", (await offline.getLatest())?.root?.children?.some((one) => one.title === "閉じている間のメモ"));
+  const behind = await offline.setCopy({ title: "openceoの開発メモ", root: { ...owner, children: [] }, full: { ...owner, children: [] }, basedOn: mine.updatedAt });
+  check("its old notebook does not replace the newer one", behind.stale === true, behind);
 
   // Two writes at once to the same space: both are kept.
   await Promise.all([

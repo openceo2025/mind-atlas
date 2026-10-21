@@ -9,7 +9,11 @@
  * - The signed-in Claude Code's OAuth access token is read from its own
  *   credentials file. It is never written, logged, returned or refreshed
  *   here: refreshing would rotate Claude Code's own credentials. An expired
- *   token simply means "not known" until Claude Code signs in or refreshes.
+ *   token means "not known" until Claude Code refreshes it, which it does
+ *   whenever it runs. With nobody running Claude Code for hours the token
+ *   lapsed and the strip showed old numbers (OpenCEO 10/21), so the caller
+ *   may give `refreshLogin`, which lets Claude Code itself run once, at most
+ *   every half hour, and refresh its own login.
  * - The endpoint is undocumented. Any answer that does not look as expected
  *   is "not known", never a guess.
  * - At most one request a minute.
@@ -21,6 +25,7 @@ import { join } from "node:path";
 export const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const CACHE_MS = 60_000;
 const TIMEOUT_MS = 10_000;
+const REFRESH_EVERY_MS = 30 * 60_000;
 
 /** Where the signed-in Claude Code keeps its credentials. */
 export function claudeCredentialsPath(env = process.env) {
@@ -65,22 +70,48 @@ export function parseClaudePlanUsage(body) {
 }
 
 /** Reads the usage windows now and then; [] when they cannot be known. */
-export function createClaudePlanUsage({ fetchImpl = globalThis.fetch, readText = readFile, now = Date.now, env = process.env } = {}) {
+export function createClaudePlanUsage({
+  fetchImpl = globalThis.fetch,
+  readText = readFile,
+  now = Date.now,
+  env = process.env,
+  refreshLogin = null,
+} = {}) {
   let cached = { at: 0, value: [] };
   let inFlight = null;
+  let refreshedAt = -Infinity;
 
   async function read() {
+    const first = await readOnce();
+    if (!first.lapsed || typeof refreshLogin !== "function" || now() - refreshedAt < REFRESH_EVERY_MS) {
+      return first.windows;
+    }
+    refreshedAt = now();
+    try {
+      await refreshLogin();
+    } catch {
+      return first.windows;
+    }
+    return (await readOnce()).windows;
+  }
+
+  /** The windows, and whether a lapsed login is why there are none. */
+  async function readOnce() {
     let token = "";
+    let lapsed = false;
     try {
       const raw = JSON.parse(await readText(claudeCredentialsPath(env), "utf8"));
       const oauth = raw?.claudeAiOauth ?? {};
       if (typeof oauth.accessToken === "string") token = oauth.accessToken;
       // Expired: Claude Code refreshes it when it next runs; not done here.
-      if (Number(oauth.expiresAt) && Number(oauth.expiresAt) <= now()) token = "";
+      if (token && Number(oauth.expiresAt) && Number(oauth.expiresAt) <= now()) {
+        token = "";
+        lapsed = true;
+      }
     } catch {
       token = "";
     }
-    if (!token) return [];
+    if (!token) return { windows: [], lapsed };
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
@@ -92,10 +123,10 @@ export function createClaudePlanUsage({ fetchImpl = globalThis.fetch, readText =
         },
         signal: controller.signal,
       });
-      if (!response.ok) return [];
-      return parseClaudePlanUsage(await response.json());
+      if (!response.ok) return { windows: [], lapsed: response.status === 401 };
+      return { windows: parseClaudePlanUsage(await response.json()), lapsed: false };
     } catch {
-      return [];
+      return { windows: [], lapsed: false };
     } finally {
       clearTimeout(timer);
     }

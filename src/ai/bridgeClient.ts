@@ -186,6 +186,18 @@ export async function getAtlasLinkOperations(waitMs = 0): Promise<AtlasLinkOpera
   return Array.isArray(body.ops) ? body.ops : [];
 }
 
+/** Writes to apply, and when the newest notebook was kept (OpenCEO 10/21). */
+export async function getAtlasLinkPending(
+  waitMs = 0,
+): Promise<{ ops: AtlasLinkOperation[]; latest: { rootId: string; acceptedAt: string } | null }> {
+  const response = await fetchBridgeGet(`/api/atlas-link/ops/pending${waitMs > 0 ? `?wait=${Math.round(waitMs)}` : ""}`);
+  const body = await readJsonResponse<{ ops?: AtlasLinkOperation[]; latest?: { rootId?: unknown; acceptedAt?: unknown } | null }>(response);
+  const latest = body.latest && typeof body.latest.rootId === "string" && typeof body.latest.acceptedAt === "string"
+    ? { rootId: body.latest.rootId, acceptedAt: body.latest.acceptedAt }
+    : null;
+  return { ops: Array.isArray(body.ops) ? body.ops : [], latest };
+}
+
 /** Local-only: what became of one queued write. */
 export async function completeAtlasLinkOperation(id: string, result: { ok: boolean; text: string; data?: unknown }): Promise<void> {
   const response = await fetchBridge(`/api/atlas-link/ops/${encodeURIComponent(id)}`, {
