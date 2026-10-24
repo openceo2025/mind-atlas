@@ -154,13 +154,11 @@ export function startAtlasLink(): () => void {
     })
       .then(async (answer) => {
         if (answer.stale) {
-          // Written at the bridge while this tab slept, and nothing changed
-          // here since: take the newer one without asking (OpenCEO 10/21).
-          if (!force && unchangedHere(root)) {
-            await loadAtlasLatest().catch(() => setStale({ latestAt: answer.latestAt ?? "" }));
-            return;
-          }
-          setStale({ latestAt: answer.latestAt ?? "" });
+          // The bridge has a newer notebook. Take it without asking: nobody
+          // opens an older one on purpose, and nobody can tell which is
+          // which (OpenCEO 10/25). The bridge kept what was here aside first.
+          // Asked only when it cannot be loaded.
+          await loadAtlasLatest().catch(() => setStale({ latestAt: answer.latestAt ?? "" }));
           return;
         }
         if (answer.updatedAt) {
@@ -188,6 +186,11 @@ export function startAtlasLink(): () => void {
     while (!stopped) {
       try {
         const { ops, latest } = await getAtlasLinkPending(WAIT_MS);
+        // Not loaded before: try again, without anybody pressing anything.
+        if (!stopped && stale !== null) {
+          await loadAtlasLatest().catch(() => undefined);
+          continue;
+        }
         // The bridge wrote the notebook while this tab was closed or asleep.
         // Nothing changed here: take it. Something did: the copy says so and
         // the owner chooses.

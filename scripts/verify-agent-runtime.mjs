@@ -8,7 +8,7 @@
 // Usage: npm run verify:agent-runtime
 
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -952,6 +952,10 @@ async function verifySpaces(workDir) {
   check("the newest it loads has the write", (await offline.getLatest())?.root?.children?.some((one) => one.title === "閉じている間のメモ"));
   const behind = await offline.setCopy({ title: "openceoの開発メモ", root: { ...owner, children: [] }, full: { ...owner, children: [] }, basedOn: mine.updatedAt });
   check("its old notebook does not replace the newer one", behind.stale === true, behind);
+  await offline.pending();
+  const during = await offline.enqueue({ token: offToken, tool: "add_child_nodes", args: { parentId: "atlas-root", nodes: [{ title: "古いタブの間のメモ" }] } }, 0);
+  check("while that browser catches up, writes go to the space at once, not waiting", during.op?.status === "done", during);
+  check("and the newest it loads has them", (await offline.getLatest())?.root?.children?.some((one) => one.title === "古いタブの間のメモ"));
 
   // Two writes at once to the same space: both are kept.
   await Promise.all([
@@ -977,7 +981,15 @@ async function verifyAtlasLatest(workDir) {
   const old = await link.setCopy({ title: "old", root: root("old"), full: root("old"), basedOn: first.updatedAt });
   check("a copy from an older one is refused, and says so", old.stale === true && old.latestAt === next.updatedAt, old);
   check("the newest is kept, not the older browser's", (await link.getCopy())?.title === "B" && (await link.getLatest())?.root?.title === "B");
-  check("OpenCEO is told an older notebook is open", Boolean((await link.status()).conflict));
+  check("a moment behind is nothing to tell OpenCEO of: the browser loads the newest itself", !(await link.status()).conflict);
+  const keptDir = join(dir, "atlas-kept");
+  const keptFiles = await readdir(keptDir);
+  check("what the older browser had is kept aside, not lost", keptFiles.length === 1 && JSON.parse(await readFile(join(keptDir, keptFiles[0]), "utf8")).title === "old", keptFiles);
+  await link.setCopy({ title: "old", root: root("old"), full: root("old"), basedOn: first.updatedAt });
+  check("the same older notebook again is kept once", (await readdir(keptDir)).length === 1);
+  clock += 61_000;
+  await link.pending();
+  check("still behind after a minute, with the browser there: OpenCEO is told", Boolean((await link.status()).conflict));
   const token = link.issueToken({ runId: "run-x", provider: "claude", label: "ナオ" });
   await link.enqueue({ token, tool: "set_node_status", args: { nodeId: "root", status: "running" } }, 0);
   check("writes wait while the older notebook is open", (await link.pending()).length === 0);

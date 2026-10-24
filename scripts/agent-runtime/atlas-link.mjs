@@ -25,7 +25,7 @@
 //   its own on purpose (OpenCEO: the notebook went back to an old state).
 
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { applyToTree, findNode, readableCopy } from "./spaces.mjs";
@@ -43,6 +43,8 @@ export const ATLAS_WRITE_TOOLS = Object.freeze([
 ]);
 
 const BROWSER_SEEN_MS = 15_000;
+/** A browser behind for this long is said to be (it loads the newest itself). */
+const CONFLICT_TELL_MS = 60_000;
 /** How long the browser's request for writes may wait for one to arrive. */
 const MAX_PENDING_WAIT_MS = 25_000;
 const DEFAULT_WAIT_MS = 20_000;
@@ -87,9 +89,12 @@ export class AtlasLink {
     // The same notebook as the newest (a new tab opened on it) is not older.
     const same = payload?.full && latest && JSON.stringify(payload.full) === JSON.stringify(latest.root);
     if (latest && latest.rootId === root.id && payload?.force !== true && !same && basedOn < latest.acceptedAt) {
-      // Older than what is here: keep the newest, and say so.
-      this.conflict = { at: new Date(this.now()).toISOString(), latestAt: latest.acceptedAt };
-      return { stale: true, latestAt: latest.acceptedAt };
+      // Older than what is here: keep the newest. The browser loads it by
+      // itself; nobody is asked to match versions (OpenCEO 10/25). What that
+      // browser had is kept aside first, so nothing typed there is lost.
+      if (!this.conflict) this.conflict = { at: new Date(this.now()).toISOString(), latestAt: latest.acceptedAt };
+      const kept = payload?.full && typeof payload.full === "object" ? await this.#keepAside(payload.full) : "";
+      return { stale: true, latestAt: latest.acceptedAt, ...(kept ? { kept } : {}) };
     }
     this.conflict = null;
     this.copy = {
@@ -119,6 +124,37 @@ export class AtlasLink {
     // Writes held back during a conflict may go on now.
     for (const wake of [...this.pendingWaiters]) wake();
     return { updatedAt: this.copy.updatedAt };
+  }
+
+  /**
+   * A browser's older notebook, kept aside before the newest replaces it
+   * there: `atlas-kept/<root id>-<time>.json`, the newest 20 per notebook.
+   */
+  async #keepAside(full) {
+    const dir = join(this.dir, "atlas-kept");
+    await mkdir(dir, { recursive: true });
+    const id = String(full.id ?? "notebook").replace(/[^A-Za-z0-9_-]/g, "_");
+    const text = JSON.stringify(full);
+    const names = (await readdir(dir)).filter((name) => name.startsWith(`${id}-`)).sort();
+    // The same notebook kept already (a tab that keeps sending it) once only.
+    const last = names.at(-1);
+    if (last && (await readFile(join(dir, last), "utf8").catch(() => "")) === text) return last;
+    const name = `${id}-${new Date(this.now()).toISOString().replace(/[:.]/g, "-")}.json`;
+    await writeAtomically(join(dir, name), text);
+    for (const old of names.slice(0, Math.max(0, names.length + 1 - 20))) {
+      await rm(join(dir, old), { force: true }).catch(() => {});
+    }
+    return name;
+  }
+
+  /**
+   * A browser with an older notebook, still not caught up after a while.
+   * Each browser loads the newest by itself, so a moment's difference is
+   * nothing to tell anybody of; a closed one is no difference at all.
+   */
+  get lastingConflict() {
+    if (!this.conflict || !this.browserOnline) return null;
+    return this.now() - Date.parse(this.conflict.at) >= CONFLICT_TELL_MS ? this.conflict : null;
   }
 
   /** The newest whole copy of one notebook: its space, or the latest kept. */
@@ -174,7 +210,7 @@ export class AtlasLink {
     return {
       browserOnline: this.browserOnline,
       // A browser with an older notebook is open (writes wait meanwhile).
-      ...(this.conflict ? { conflict: this.conflict } : {}),
+      ...(this.lastingConflict ? { conflict: this.lastingConflict } : {}),
       // The open notebook is one of the spaces (ADR 0089): another space
       // opened in the browser is a normal change, not a lost notebook.
       ...(this.spaces && copy?.root?.id && (await this.spaces.get(copy.root.id))
@@ -260,7 +296,9 @@ export class AtlasLink {
     // takes the newer notebook when it is back (OpenCEO 10/21). Not while
     // writes wait for a browser, which would then apply them out of order,
     // nor while an older notebook is open somewhere.
-    if (!this.browserOnline && !this.conflict && pending.length === 0 && this.spaces && this.openRootId) {
+    // Likewise while the browser there has an older notebook: it loads the
+    // newest, with this write in it (OpenCEO 10/25).
+    if ((!this.browserOnline || this.conflict) && pending.length === 0 && this.spaces && this.openRootId) {
       const space = await this.spaces.get(this.openRootId);
       if (space) return await this.writeSpace(space, tool, cleanArgs, run);
     }
