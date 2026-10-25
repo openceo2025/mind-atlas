@@ -64,6 +64,7 @@
     "verify:board-record-merge": "node --experimental-strip-types scripts/verify-board-record-merge.ts",
     "verify:node-error-acknowledgement": "node --experimental-strip-types scripts/verify-node-error-acknowledgement.ts",
     "verify:ui": "node scripts/verify-ui.mjs",
+    "verify:local-cloud": "node scripts/verify-local-cloud-files.mjs && node scripts/verify-local-cloud-ui.mjs",
     "i18n:verify": "node --experimental-strip-types scripts/verify-i18n.ts && node scripts/i18n-scan-hardcoded.mjs",
     "i18n:scan": "node scripts/i18n-scan-hardcoded.mjs",
     "i18n:baseline": "node scripts/i18n-scan-hardcoded.mjs --update-baseline",

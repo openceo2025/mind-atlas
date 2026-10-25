@@ -8,6 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
+import { createLocalCloudFiles, LocalCloudFileError } from "./local-cloud-files.mjs";
 
 // Local-only agent runtime. These modules must never be imported by
 // `server/mind-atlas-service.mjs`; `npm run verify:hosted-service` asserts it.
@@ -140,6 +141,7 @@ const realtimeTranscriptionModel = process.env.MIND_ATLAS_REALTIME_TRANSCRIPTION
 const realtimeReasoningEffort = normalizeRealtimeReasoningEffort(process.env.MIND_ATLAS_REALTIME_REASONING_EFFORT ?? "low");
 const allowMockWithoutKey = process.env.MIND_ATLAS_ALLOW_MOCK_WITHOUT_KEY !== "false";
 const cloudNotebookDir = resolve(process.env.MIND_ATLAS_CLOUD_DIR ?? join(process.cwd(), "server-data", "notebooks"));
+const localCloudFiles = createLocalCloudFiles(cloudNotebookDir);
 const agentRunInboxDir = resolve(process.env.MIND_ATLAS_AGENT_RUN_INBOX_DIR ?? join(process.cwd(), "server-data", "agent-run-inbox"));
 const agentRunInboxGraceMs = readPositiveIntEnv("MIND_ATLAS_AGENT_RUN_INBOX_GRACE_MS", 5000);
 const agentRunInboxLimit = readPositiveIntEnv("MIND_ATLAS_AGENT_RUN_INBOX_LIMIT", 100);
@@ -705,6 +707,12 @@ const server = createBridgeServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/cloud/notebooks/rename") {
+      const payload = await readJson(request);
+      sendJson(response, 200, await localCloudFiles.rename(payload?.name, payload?.title));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname.startsWith("/api/cloud/notebooks/")) {
       await sendCloudNotebookPackage(url.pathname.slice("/api/cloud/notebooks/".length), response);
       return;
@@ -712,7 +720,7 @@ const server = createBridgeServer(async (request, response) => {
 
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
-    const status = error instanceof BridgeError ? error.status : 500;
+    const status = error instanceof BridgeError || error instanceof LocalCloudFileError ? error.status : 500;
     sendJson(response, status, {
       error: error instanceof Error ? error.message : "Unknown bridge error",
     });
@@ -4397,6 +4405,7 @@ async function createWebSearchResponse(payload) {
 
 async function listCloudNotebooks() {
   await mkdir(cloudNotebookDir, { recursive: true });
+  const titles = await localCloudFiles.titles();
   const entries = await readdir(cloudNotebookDir, { withFileTypes: true });
   const notebooks = [];
   for (const entry of entries) {
@@ -4417,7 +4426,7 @@ async function listCloudNotebooks() {
     }
     notebooks.push({
       name,
-      ...(title ? { title } : {}),
+      ...(titles[name] || title ? { title: titles[name] || title } : {}),
       size: stats.size,
       updatedAt: stats.mtime.toISOString(),
     });
@@ -4435,10 +4444,14 @@ async function saveCloudNotebookPackage(request) {
   const file = formData.get("package");
   if (!file || typeof file === "string") throw new BridgeError(400, "package file is required");
   const originalName = typeof file.name === "string" ? file.name : "mind-atlas.mindatlaspkg";
+  const targetName = formData.get("targetName");
+  if (typeof targetName === "string" && targetName) {
+    return localCloudFiles.overwrite(targetName, originalName, Buffer.from(await file.arrayBuffer()), formData.get("expectedUpdatedAt"));
+  }
   const safeName = createCloudNotebookFileName(originalName);
   const filePath = safeCloudNotebookPath(safeName);
   const bytes = Buffer.from(await file.arrayBuffer());
-  await writeFile(filePath, bytes);
+  await writeFile(filePath, bytes, { flag: "wx" });
   return {
     name: safeName,
     size: bytes.byteLength,

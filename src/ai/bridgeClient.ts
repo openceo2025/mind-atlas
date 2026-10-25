@@ -292,9 +292,13 @@ export async function importBridgeShogiSource(url: string): Promise<ShogiSourceI
   return await readJsonResponse<ShogiSourceImportResult>(response);
 }
 
-export async function saveCloudNotebookPackage(blob: Blob, fileName: string): Promise<CloudNotebookSaveResult> {
+export async function saveCloudNotebookPackage(blob: Blob, fileName: string, target?: { name: string; updatedAt: string }): Promise<CloudNotebookSaveResult> {
   const formData = new FormData();
   formData.set("package", blob, fileName);
+  if (target) {
+    formData.set("targetName", target.name);
+    formData.set("expectedUpdatedAt", target.updatedAt);
+  }
   const response = await fetchBridge("/api/cloud/notebooks", {
     method: "POST",
     body: formData,
@@ -305,6 +309,14 @@ export async function saveCloudNotebookPackage(blob: Blob, fileName: string): Pr
 export async function listCloudNotebookPackages(): Promise<CloudNotebookListResult> {
   const response = await fetchBridgeGet("/api/cloud/notebooks");
   return await readJsonResponse<CloudNotebookListResult>(response);
+}
+
+export async function renameLocalCloudNotebook(name: string, title: string): Promise<CloudNotebookSaveResult> {
+  const response = await fetchBridge("/api/cloud/notebooks/rename", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, title }),
+  });
+  return await readJsonResponse<CloudNotebookSaveResult>(response);
 }
 
 export async function downloadCloudNotebookPackage(name: string): Promise<Blob> {
