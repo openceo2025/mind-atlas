@@ -1020,6 +1020,16 @@ async function verifyAtlasLatest(workDir) {
   const kept = await link.setCopy({ title: "old", root: root("old"), full: root("old"), basedOn: first.updatedAt, force: true });
   check("keeping the browser's on purpose makes it the newest", Boolean(kept.updatedAt) && (await link.getLatest())?.root?.title === "old", kept);
   check("and the writes go on", (await link.pending()).length === 1 && !(await link.status()).conflict);
+  // Much less than before, from the newest: taken, and what was there kept aside.
+  const many = { id: "root", title: "many", body: "", children: [1, 2, 3, 4, 5, 6].map((n) => ({ id: `c${n}`, title: `c${n}`, body: "", children: [] })) };
+  clock += 1000;
+  const full = await link.setCopy({ title: "many", root: many, full: many, basedOn: (await link.getLatest()).acceptedAt });
+  clock += 1000;
+  const keptBefore = (await readdir(join(dir, "atlas-kept"))).length;
+  const fewer = await link.setCopy({ title: "few", root: root("few"), full: root("few"), basedOn: full.updatedAt });
+  check("a much smaller notebook from the newest is taken, nobody asked", Boolean(fewer.updatedAt) && (await link.getLatest())?.root?.title === "few", fewer);
+  const keptAfter = await readdir(join(dir, "atlas-kept"));
+  check("and what it had before is kept aside", keptAfter.length === keptBefore + 1, keptAfter);
   const other = await link.setCopy({ title: "Other", root: { id: "other-root", title: "Other", body: "", children: [] } });
   check("another notebook is not refused here", Boolean(other.updatedAt), other);
 }

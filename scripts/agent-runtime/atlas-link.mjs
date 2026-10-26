@@ -99,6 +99,13 @@ export class AtlasLink {
       return { stale: true, latestAt: latest.acceptedAt, ...(kept ? { kept } : {}) };
     }
     this.conflict = null;
+    // Much less than before (half or less of five or more cards): taken as
+    // it is, nobody asked, but what was there is kept aside first, in case
+    // it was not meant (OpenCEO 10/27).
+    if (payload?.full && typeof payload.full === "object" && latest?.root && latest.rootId === root.id) {
+      const before = countNodes(latest.root);
+      if (before >= 5 && countNodes(payload.full) < before / 2) await this.#keepAside(latest.root);
+    }
     this.copy = {
       title: String(payload?.title ?? root.title ?? ""),
       root,
