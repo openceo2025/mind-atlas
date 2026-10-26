@@ -287,7 +287,19 @@ const agentRunStore = createAgentRunStore({
 
 // The open notebook's copy and agents' queued writes (atlas-link.mjs). Agents'
 // MCP servers reach the bridge on loopback whatever host it listens on.
-const atlasLink = new AtlasLink({ dir: agentRuntimeDir, spaces: new SpaceStore({ dir: cloudNotebookDir }) });
+const atlasLink = new AtlasLink({
+  dir: agentRuntimeDir,
+  spaces: new SpaceStore({ dir: cloudNotebookDir }),
+  // save_to_cloud for a space not open (OpenCEO 10/25): the same numbered
+  // file in the cloud store as the browser's save makes.
+  saveSnapshot: async (root) => {
+    await mkdir(cloudNotebookDir, { recursive: true });
+    const name = createCloudNotebookFileName(`${String(root?.title ?? "") || "Mind Atlas"}.mindatlaspkg`);
+    const manifest = { format: "mindatlaspkg", version: 1, exportedAt: new Date().toISOString(), notebook: root, assets: [] };
+    await writeFile(safeCloudNotebookPath(name), JSON.stringify(manifest, null, 2), { flag: "wx" });
+    return name;
+  },
+});
 const atlasLinkOrigin = `${bridgeProtocol === "https" ? "https" : "http"}://127.0.0.1:${port}`;
 
 const agentRuntimeManager = createAgentRuntimeManager({

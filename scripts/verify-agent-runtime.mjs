@@ -957,6 +957,26 @@ async function verifySpaces(workDir) {
   check("while that browser catches up, writes go to the space at once, not waiting", during.op?.status === "done", during);
   check("and the newest it loads has them", (await offline.getLatest())?.root?.children?.some((one) => one.title === "古いタブの間のメモ"));
 
+  const reviewed = await link.enqueue({ token, tool: "set_node_status", args: { space: "ナオのスペース", nodeId: (await spaces.get(nao.id)).root.children[0].id, status: "needs_review" } }, 0);
+  check("a space not open takes every status the tools offer (needs_review)", reviewed.op?.status === "done", reviewed);
+
+  // save_to_cloud for a space nobody has open: a copy in the cloud store
+  // (10/25), with no browser asked.
+  const saved = [];
+  const saving = new AtlasLink({
+    dir: join(workDir, "spaces-save"),
+    spaces,
+    saveSnapshot: async (root) => {
+      saved.push(root);
+      return `${root.title}-001.mindatlaspkg`;
+    },
+  });
+  const saveToken = saving.issueToken({ runId: "run-save", provider: "claude", label: "ナオ" });
+  const cloudSave = await saving.enqueue({ token: saveToken, tool: "save_to_cloud", args: { space: "ナオのスペース" } }, 0);
+  check("save_to_cloud saves a space nobody has open to the cloud store", cloudSave.op?.status === "done" && saved[0]?.title === "ナオのスペース" && /ナオのスペース-001/.test(cloudSave.op.result.text), cloudSave);
+  const unsaved = await link.enqueue({ token, tool: "save_to_cloud", args: { space: "ナオのスペース" } }, 0);
+  check("a bridge that cannot save says so, not that it is saved", unsaved.op?.status === "failed", unsaved);
+
   // Two writes at once to the same space: both are kept.
   await Promise.all([
     link.enqueue({ token, tool: "add_child_nodes", args: { space: "sato", parentId: project.id, nodes: [{ title: "同時1" }] } }),

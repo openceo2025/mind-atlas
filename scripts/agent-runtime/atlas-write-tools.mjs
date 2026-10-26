@@ -26,7 +26,7 @@ export const ATLAS_WRITE_TOOL_DEFINITIONS = [
   {
     name: "save_to_cloud",
     description:
-      "Save the whole open notebook to Mind Atlas's cloud store, so it survives the browser's own storage being cleared or another browser being used. Do it after writing a lot, or when asked.",
+      "Save a whole space to Mind Atlas's cloud store as a dated copy: the one open in Mind Atlas, or the one named by `space`, whether or not anybody has it open. Do it after writing a lot, or when asked.",
     inputSchema: { type: "object", properties: {} },
   },
   {

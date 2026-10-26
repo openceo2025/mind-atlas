@@ -57,6 +57,8 @@ export class AtlasLink {
     this.dir = options.dir;
     /** Spaces beside the open notebook (OpenCEO ADR 0089), when given. */
     this.spaces = options.spaces ?? null;
+    /** Saves a space's tree as a new file in the cloud store; its name. */
+    this.saveSnapshot = options.saveSnapshot ?? null;
     /** Writes to spaces, in order (see writeSpace). */
     this.spaceWrites = Promise.resolve();
     this.now = options.now ?? (() => Date.now());
@@ -333,7 +335,7 @@ export class AtlasLink {
       const fresh = (await this.spaces.get(space.root.id)) ?? space;
       const result =
         tool === "save_to_cloud"
-          ? { ok: true, text: "Spaces are kept on this PC already." }
+          ? await this.#saveSnapshot(fresh.root)
           : applyToTree(fresh.root, tool, args, run.label, this.now);
       if (result.ok && tool !== "save_to_cloud") {
         await this.spaces.save(fresh.root, { acceptedAt: at });
@@ -346,6 +348,24 @@ export class AtlasLink {
     });
     this.spaceWrites = write.catch(() => undefined);
     return await write;
+  }
+
+  /**
+   * save_to_cloud for a space no browser has open (OpenCEO 10/25): a saved
+   * copy in the cloud store, as the browser makes for the open one, so
+   * nobody has to open the space for it. The space's own file is always
+   * current; this is the dated copy to go back to.
+   */
+  async #saveSnapshot(root) {
+    if (typeof this.saveSnapshot !== "function") {
+      return { ok: false, text: "This bridge cannot save a space to the cloud store." };
+    }
+    try {
+      const name = await this.saveSnapshot(root);
+      return { ok: true, text: `Saved to the cloud store as ${name}.`, data: { name } };
+    } catch (error) {
+      return { ok: false, text: `Could not save to the cloud store: ${String(error?.message ?? error).slice(0, 200)}` };
+    }
   }
 
   /**

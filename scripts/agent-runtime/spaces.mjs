@@ -17,7 +17,8 @@ import { join } from "node:path";
 
 const FILE = /^space-([A-Za-z0-9_-]{1,120})\.mindatlaspkg$/;
 export const SPACE_KINDS = Object.freeze(["owner", "project", "employee", "other"]);
-const STATUSES = ["waiting", "running", "done", "failed"];
+// As the browser and the tools have them (atlas-write-tools.mjs).
+const STATUSES = ["running", "needs_review", "waiting", "blocked", "error", "done"];
 
 /** The file a space with this root id is kept in. */
 export function spaceFileName(rootId) {
